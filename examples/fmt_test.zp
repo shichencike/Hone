@@ -1,0 +1,4 @@
+x=10;y:int=20;if(x>5){print("大");}else{print("小");}
+// 注释
+fn fib(n){if(n<=1){return n;}return fib(n-1)+fib(n-2);}
+s="  hi  ";print(str_trim(s));

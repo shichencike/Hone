@@ -1,0 +1,10 @@
+// 远程模块：供 import 测试下载（python -m http.server 提供）
+fn module_double(x : int) -> int {
+    return x * 2;
+}
+
+fn module_add(a : int, b : int) -> int {
+    return a + b;
+}
+
+print("模块已加载");

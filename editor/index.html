@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zap 可视化编辑器</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 10px 16px; background: #181825; border-bottom: 1px solid #313244; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 16px; color: #89b4fa; }
+  header span { font-size: 12px; color: #6c7086; }
+  .btn { background: #45475a; border: none; color: #cdd6f4; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .btn:hover { background: #585b70; }
+  .btn.primary { background: #89b4fa; color: #1e1e2e; font-weight: 600; }
+  .btn.primary:hover { background: #a6c8ff; }
+  main { flex: 1; display: flex; overflow: hidden; }
+  section { display: flex; flex-direction: column; }
+  section h2 { font-size: 13px; color: #a6adc8; padding: 10px 14px; border-bottom: 1px solid #313244; }
+  #palette { width: 200px; border-right: 1px solid #313244; }
+  #palette-list { padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+  .palette-item { background: #313244; border: 1px solid #45475a; border-radius: 6px; padding: 8px 10px; font-size: 13px; cursor: grab; user-select: none; }
+  .palette-item:hover { background: #45475a; }
+  .palette-item small { display: block; color: #6c7086; font-size: 11px; margin-top: 2px; }
+  #canvas { flex: 1; overflow-y: auto; padding: 14px; }
+  #canvas.hover { outline: 2px dashed #89b4fa; outline-offset: -4px; }
+  .empty-tip { color: #6c7086; font-size: 13px; text-align: center; margin-top: 60px; line-height: 1.8; }
+  .block { background: #313244; border: 1px solid #45475a; border-left: 4px solid #89b4fa; border-radius: 6px; margin: 6px 0; padding: 6px 8px; font-size: 13px; }
+  .block[data-type="if"], .block[data-type="while"] { border-left-color: #f9e2af; }
+  .block[data-type="fn"] { border-left-color: #a6e3a1; }
+  .block[data-type="comment"] { border-left-color: #6c7086; }
+  .block.dragging { opacity: 0.4; }
+  .block-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .block-head .kw { color: #f38ba8; font-weight: 600; }
+  .block-head .txt { color: #a6e3a1; font-style: italic; }
+  .block input { background: #1e1e2e; border: 1px solid #45475a; color: #cdd6f4; border-radius: 4px; padding: 3px 6px; font-size: 13px; width: 110px; font-family: Consolas, monospace; }
+  .block input.f-wide { width: 220px; }
+  .del { background: none; border: none; color: #f38ba8; cursor: pointer; font-size: 14px; padding: 0 4px; margin-left: auto; }
+  .del:hover { color: #ff6b6b; }
+  .slot { border: 1px dashed #45475a; border-radius: 4px; margin: 6px 0 2px 18px; padding: 4px; min-height: 26px; }
+  .slot.slot-else { border-style: dotted; border-color: #585b70; }
+  .slot.dragover { border-color: #89b4fa; background: rgba(137, 180, 250, 0.08); }
+  #preview { width: 380px; border-left: 1px solid #313244; }
+  #preview-bar { padding: 8px 14px; display: flex; gap: 8px; border-bottom: 1px solid #313244; }
+  #code { flex: 1; background: #11111b; border: none; color: #a6e3a1; font-family: Consolas, "Courier New", monospace; font-size: 12.5px; line-height: 1.6; padding: 12px 14px; white-space: pre; overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>⚡ Zap 可视化编辑器</h1>
+  <span>拖拽代码块生成 .zp 代码 · 方案 A（独立网页）</span>
+  <div style="flex:1"></div>
+  <button class="btn" id="btn-clear">清空画布</button>
+  <button class="btn" id="btn-copy">复制代码</button>
+  <button class="btn primary" id="btn-download">下载 .zp</button>
+</header>
+<main>
+  <section id="palette">
+    <h2>代码块面板</h2>
+    <div id="palette-list"></div>
+  </section>
+  <section id="canvas">
+    <h2>画布（拖入代码块，if/while/函数内可继续拖入）</h2>
+    <div id="canvas-body">
+      <div class="empty-tip">从左侧拖拽代码块到这里开始编程<br>嵌套块（if / while / 函数）内部有虚线槽位，可继续拖入子块</div>
+    </div>
+  </section>
+  <section id="preview">
+    <h2>生成的代码</h2>
+    <div id="preview-bar">
+      <button class="btn" id="btn-copy2">复制</button>
+      <button class="btn" id="btn-download2">下载</button>
+      <span id="status" style="font-size:12px;color:#6c7086"></span>
+    </div>
+    <pre id="code"></pre>
+  </section>
+</main>
+<script>
+// ---------- 代码块模板 ----------
+const TEMPLATES = [
+  { type: "var", label: "变量声明", hint: "x = 10; 自动推导类型", build: () => makeSimple("var", "变量", "x", "10") },
+  { type: "assign", label: "赋值", hint: "x = 表达式;", build: () => makeSimple("assign", "赋值", "x", "x + 1") },
+  { type: "print", label: "输出 print", hint: "print(值);", build: () => makeSimple("print", "输出", "hello", '"Hello Zap!"') },
+  { type: "if", label: "条件 if / else", hint: "条件必须是 bool", build: () => makeNested("if") },
+  { type: "while", label: "循环 while", hint: "条件必须是 bool", build: () => makeNested("while") },
+  { type: "fn", label: "函数定义", hint: "fn 名称(参数) { ... }", build: () => makeNested("fn") },
+  { type: "return", label: "返回 return", hint: "return 表达式;", build: () => makeSimple("return", "返回", "0", "x") },
+  { type: "comment", label: "注释", hint: "// 说明文字", build: () => makeSimple("comment", "注释", "说明", "这是注释") },
+];
+let blockSeq = 0;
+
+function makeSimple(type, label, name, value) {
+  const d = document.createElement("div");
+  d.className = "block";
+  d.dataset.type = type;
+  d.draggable = true;
+  d.id = "b" + (++blockSeq);
+  const head = document.createElement("div");
+  head.className = "block-head";
+  if (type === "comment") {
+    head.innerHTML = `<span class="txt">//</span><input class="f-wide" data-field="text" value="${esc(value)}">`;
+  } else if (type === "print") {
+    head.innerHTML = `<span class="kw">print(</span><input data-field="expr" value="${esc(value)}"><span class="kw">)</span>`;
+  } else if (type === "return") {
+    head.innerHTML = `<span class="kw">return</span><input data-field="expr" value="${esc(value)}">`;
+  } else {
+    head.innerHTML = `<span class="kw">${label}</span><input data-field="name" value="${esc(name)}"><span class="kw">=</span><input data-field="expr" value="${esc(value)}">`;
+  }
+  const del = document.createElement("button");
+  del.className = "del"; del.textContent = "×"; del.title = "删除";
+  head.appendChild(del);
+  d.appendChild(head);
+  return d;
+}
+
+function makeNested(type) {
+  const d = document.createElement("div");
+  d.className = "block";
+  d.dataset.type = type;
+  d.draggable = true;
+  d.id = "b" + (++blockSeq);
+  const head = document.createElement("div");
+  head.className = "block-head";
+  if (type === "if") {
+    head.innerHTML = `<span class="kw">if (</span><input class="f-wide" data-field="cond" value="x &gt; 5"><span class="kw">) {</span>`;
+  } else if (type === "while") {
+    head.innerHTML = `<span class="kw">while (</span><input class="f-wide" data-field="cond" value="i &lt; 10"><span class="kw">) {</span>`;
+  } else {
+    head.innerHTML = `<span class="kw">fn</span><input data-field="name" value="main"><span class="kw">(</span><input data-field="params" value=""><span class="kw">) {</span>`;
+  }
+  const del = document.createElement("button");
+  del.className = "del"; del.textContent = "×"; del.title = "删除";
+  head.appendChild(del);
+  d.appendChild(head);
+
+  const slot = document.createElement("div");
+  slot.className = "slot";
+  slot.dataset.role = "body";
+  d.appendChild(slot);
+
+  if (type === "if") {
+    const elseHead = document.createElement("div");
+    elseHead.className = "block-head";
+    elseHead.innerHTML = `<span class="kw">} else {</span>`;
+    d.appendChild(elseHead);
+    const elseSlot = document.createElement("div");
+    elseSlot.className = "slot slot-else";
+    elseSlot.dataset.role = "else";
+    d.appendChild(elseSlot);
+    const close = document.createElement("div");
+    close.className = "block-head";
+    close.innerHTML = `<span class="kw">}</span>`;
+    d.appendChild(close);
+  } else {
+    const close = document.createElement("div");
+    close.className = "block-head";
+    close.innerHTML = `<span class="kw">}</span>`;
+    d.appendChild(close);
+  }
+  return d;
+}
+
+function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+// ---------- 面板 ----------
+const paletteList = document.getElementById("palette-list");
+TEMPLATES.forEach(t => {
+  const item = document.createElement("div");
+  item.className = "palette-item";
+  item.draggable = true;
+  item.dataset.type = t.type;
+  item.innerHTML = `${t.label}<small>${t.hint}</small>`;
+  item.addEventListener("dragstart", e => {
+    e.dataTransfer.setData("text/plain", "palette:" + t.type);
+    e.dataTransfer.effectAllowed = "copy";
+  });
+  paletteList.appendChild(item);
+});
+
+// ---------- 拖拽与画布 ----------
+const canvasBody = document.getElementById("canvas-body");
+const canvas = document.getElementById("canvas");
+
+function setupDrop(zone) {
+  zone.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; zone.classList.add("dragover"); });
+  zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
+  zone.addEventListener("drop", e => {
+    e.preventDefault();
+    zone.classList.remove("dragover");
+    const data = e.dataTransfer.getData("text/plain") || "";
+    if (data.startsWith("palette:")) {
+      const type = data.slice(8);
+      const tpl = TEMPLATES.find(t => t.type === type);
+      if (tpl) zone.appendChild(tpl.build());
+    } else if (data.startsWith("move:")) {
+      const el = document.getElementById(data.slice(5));
+      if (el && el !== zone && !zone.contains(el)) zone.appendChild(el);
+    }
+    update();
+  });
+}
+setupDrop(canvasBody);
+
+// 画布内块也可拖动（移动到其他槽位）
+document.addEventListener("dragstart", e => {
+  const b = e.target.closest ? e.target.closest(".block") : null;
+  if (b && b.dataset.type) {
+    e.dataTransfer.setData("text/plain", "move:" + b.id);
+    e.dataTransfer.effectAllowed = "move";
+    b.classList.add("dragging");
+  }
+});
+document.addEventListener("dragend", e => {
+  const b = e.target.closest ? e.target.closest(".block") : null;
+  if (b) b.classList.remove("dragging");
+});
+document.querySelectorAll(".slot").forEach(setupDrop);
+
+// 删除按钮（事件委托）
+document.addEventListener("click", e => {
+  if (e.target.classList && e.target.classList.contains("del")) {
+    e.target.closest(".block").remove();
+    update();
+  }
+});
+
+// 输入实时更新
+document.addEventListener("input", update);
+
+// ---------- 代码生成 ----------
+function childrenHTML(slot) {
+  const blocks = [...slot.children].filter(c => c.classList.contains("block"));
+  return blocks.map(b => genBlock(b, 0)).join("\n");
+}
+
+function genBlock(block, indent) {
+  const tab = "\t".repeat(indent);
+  const type = block.dataset.type;
+  const val = f => { const i = block.querySelector(`input[data-field="${f}"]`); return i ? i.value : ""; };
+  const bodySlot = block.querySelector('.slot[data-role="body"]');
+  const elseSlot = block.querySelector('.slot[data-role="else"]');
+  const body = bodySlot ? childrenHTML(bodySlot) : "";
+  const elseBody = elseSlot ? childrenHTML(elseSlot) : "";
+  const inner = body ? body.split("\n").map(l => "\t" + l).join("\n") : "";
+  const innerElse = elseBody ? elseBody.split("\n").map(l => "\t" + l).join("\n") : "";
+
+  switch (type) {
+    case "var":
+    case "assign":
+      return `${tab}${val("name") || "x"} = ${val("expr")};`;
+    case "print":
+      return `${tab}print(${val("expr")});`;
+    case "return":
+      return `${tab}return ${val("expr")};`;
+    case "comment":
+      return `${tab}// ${val("text")}`;
+    case "while":
+      return body
+        ? `${tab}while (${val("cond")}) {\n${inner}\n${tab}}`
+        : `${tab}while (${val("cond")}) { }`;
+    case "if":
+      if (!body && !elseBody) return `${tab}if (${val("cond")}) { }`;
+      if (!elseBody) return `${tab}if (${val("cond")}) {\n${inner}\n${tab}}`;
+      return `${tab}if (${val("cond")}) {\n${inner}\n${tab}} else {\n${innerElse}\n${tab}}`;
+    case "fn":
+      return `${tab}fn ${val("name") || "main"}(${val("params")}) {\n${inner}\n${tab}}`;
+    default:
+      return "";
+  }
+}
+
+function update() {
+  const blocks = [...canvasBody.children].filter(c => c.classList.contains("block"));
+  const code = blocks.map(b => genBlock(b, 0)).join("\n\n");
+  document.getElementById("code").textContent = code;
+  const tip = canvasBody.querySelector(".empty-tip");
+  if (tip) tip.style.display = blocks.length ? "none" : "";
+}
+
+// ---------- 顶部按钮 ----------
+document.getElementById("btn-clear").addEventListener("click", () => {
+  if (!confirm("清空画布？")) return;
+  canvasBody.querySelectorAll(".block").forEach(b => b.remove());
+  update();
+});
+function copyCode() {
+  const code = document.getElementById("code").textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    const st = document.getElementById("status");
+    st.textContent = "已复制 ✓";
+    setTimeout(() => st.textContent = "", 1500);
+  });
+}
+document.getElementById("btn-copy").addEventListener("click", copyCode);
+document.getElementById("btn-copy2").addEventListener("click", copyCode);
+function downloadCode() {
+  const code = document.getElementById("code").textContent;
+  const blob = new Blob([code], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "program.zp";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+document.getElementById("btn-download").addEventListener("click", downloadCode);
+document.getElementById("btn-download2").addEventListener("click", downloadCode);
+
+// 初始示例：fib 函数
+(function initDemo() {
+  const fn = makeNested("fn");
+  fn.querySelector('input[data-field="name"]').value = "fib";
+  fn.querySelector('input[data-field="params"]').value = "n";
+  const ifB = makeNested("if");
+  ifB.querySelector('input[data-field="cond"]').value = "n <= 1";
+  const ret1 = makeSimple("return", "返回", "0", "n");
+  ifB.querySelector('.slot[data-role="body"]').appendChild(ret1);
+  fn.querySelector('.slot[data-role="body"]').appendChild(ifB);
+  const ret2 = makeSimple("return", "返回", "0", "fib(n - 1) + fib(n - 2)");
+  fn.querySelector('.slot[data-role="body"]').appendChild(ret2);
+  canvasBody.appendChild(fn);
+  const pr = makeSimple("print", "输出", "r", "fib(10)");
+  canvasBody.appendChild(pr);
+  update();
+})();
+</script>
+</body>
+</html>

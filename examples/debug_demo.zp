@@ -1,0 +1,7 @@
+// zap debug 模式：breakpoint 触发时打印变量快照
+x = 10;
+name = "Zap";
+flag = true;
+breakpoint;
+print(x);
+print("继续执行");

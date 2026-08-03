@@ -1,0 +1,6 @@
+// 参数数量不匹配：报 error[Z011]
+fn add(a, b) {
+    return a + b;
+}
+
+print(add(1));

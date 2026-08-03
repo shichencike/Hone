@@ -1,0 +1,38 @@
+// 控制流：if / while
+i = 0;
+sum = 0;
+while (i < 10) {
+    sum = sum + i;
+    i = i + 1;
+}
+print(sum);  // 45
+
+if (sum > 40) {
+    print("sum 大于 40");
+} else {
+    print("sum 不大于 40");
+}
+
+// else if 链
+score = 85;
+if (score >= 90) {
+    print("A");
+} else if (score >= 80) {
+    print("B");
+} else if (score >= 70) {
+    print("C");
+} else {
+    print("D");
+}
+
+// 逻辑运算
+flag = true;
+if (i == 10 && sum == 45) {
+    print("条件全部成立");
+}
+if (flag || false) {
+    print("或运算成立");
+}
+if (!flag) {
+    print("不会打印");
+}

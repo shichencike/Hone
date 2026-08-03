@@ -1,0 +1,16 @@
+// 字符串处理
+s = "  hello world  ";
+print(str_trim(s));              // hello world
+print(str_contains(s, "world")); // true
+print(str_replace(s, "world", "Zap")); //   hello Zap  
+print(len("hello"));             // 5
+
+// 字符串拼接
+name = "Zap";
+print("Welcome to " + name + "!");
+
+// 类型转换
+print(to_str(25));         // 25
+print(to_int("42"));       // 42
+print(to_int(3.99));       // 3
+print(to_float("2.718"));  // 2.718

@@ -1,0 +1,24 @@
+// 变量与类型
+x = 10;          // 自动推导为 int
+y : int = 20;    // 显式类型（Rust/TS 风格）
+int z = 30;      // 显式类型（C 风格）
+print(x + y + z);   // 60
+
+f = 3.14;        // 自动推导为 float
+print(to_str(f)); // 3.14
+
+b = true;
+s = "Zap";
+print(type_of(x));   // int
+print(type_of(f));   // float
+print(type_of(b));   // bool
+print(type_of(s));   // str
+
+// 整数与浮点运算
+a = 7 / 2;
+print(a);          // 3（整数除法）
+g = 7.0 / 2.0;
+print(g);          // 3.5
+
+// 类型锁定：x 已被锁定为 int，赋 str 会报 error[Z001]
+// x = "Zap";

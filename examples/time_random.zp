@@ -1,0 +1,12 @@
+// 时间与随机
+t = time.now();
+print(t);
+print(time.format(t, "YYYY-MM-DD HH:mm:SS"));
+
+r = random.int(1, 100);
+print("随机数: " + to_str(r));
+
+print("随机小数: " + to_str(random.float()));
+
+time.sleep(0.5);
+print("已等待 0.5 秒");

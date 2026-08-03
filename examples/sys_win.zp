@@ -1,0 +1,13 @@
+// sys 模块 Windows API 测试（注册表/剪贴板/屏幕尺寸/提示音）
+size = sys.get_screen_size();
+print("屏幕尺寸: " + size);
+
+sys.clipboard_set("Zap 剪贴板测试");
+print("已写入剪贴板");
+
+sys.reg_write("HKCU\\Software\\ZapTest\\Config", "hello zap");
+val = sys.reg_read("HKCU\\Software\\ZapTest\\Config");
+print("注册表读取: " + val);
+
+sys.beep(800, 50);
+print("beep 完成");

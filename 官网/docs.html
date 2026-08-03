@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zap 文档 - 完整手册</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <span class="logo">⚡ Zap</span>
+  <nav>
+    <a href="index.html">首页</a>
+    <a href="docs.html" class="active">文档</a>
+    <a href="examples.html">示例</a>
+  </nav>
+  <span class="ver">v0.1.0</span>
+</header>
+
+<main>
+  <h2><span class="hash">#</span>Zap 语言手册</h2>
+
+  <div class="toc">
+    <ol>
+      <li><a href="#syntax">语法风格</a></li>
+      <li><a href="#vars">变量与类型系统</a></li>
+      <li><a href="#control">控制流</a></li>
+      <li><a href="#fn">函数定义</a></li>
+      <li><a href="#builtins">内置函数与模块</a></li>
+      <li><a href="#integ">导入与外部集成</a></li>
+      <li><a href="#tools">工具链</a></li>
+      <li><a href="#errors">错误报告与错误码</a></li>
+      <li><a href="#principles">设计原则</a></li>
+    </ol>
+  </div>
+
+  <section id="syntax">
+    <h2><span class="hash">#</span>语法风格</h2>
+    <table>
+      <tr><th>项目</th><th>约定</th></tr>
+      <tr><td>文件扩展名</td><td><code>.zp</code></td></tr>
+      <tr><td>语句结束符</td><td><code>;</code> 分号</td></tr>
+      <tr><td>代码块</td><td><code>{ }</code> 大括号</td></tr>
+      <tr><td>缩进</td><td>强制 Tab（<code>zap fmt</code> 统一）</td></tr>
+      <tr><td>注释</td><td><code>// 单行</code> 与 <code>/* 多行 */</code></td></tr>
+      <tr><td>命名空间</td><td>点号访问：<code>time.now()</code>、<code>sys.msgbox()</code></td></tr>
+    </table>
+  </section>
+
+  <section id="vars">
+    <h2><span class="hash">#</span>变量与类型系统</h2>
+    <p>静态强类型：类型一经推导或显式声明即锁定，禁止隐式转换。</p>
+<pre><code>x = <span class="n">10</span>;              <span class="c">// 自动推导为 int</span>
+f = <span class="n">3.14</span>;            <span class="c">// 自动推导为 float</span>
+y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">// 显式类型（Rust/TS 风格）</span>
+<span class="k">int</span> z = <span class="n">30</span>;      <span class="c">// 显式类型（C 风格）</span>
+x = <span class="s">"Zap"</span>;          <span class="c">// error[Z001]: 期望 int，得到 str</span></code></pre>
+    <table>
+      <tr><th>类型</th><th>说明</th><th>字面量示例</th></tr>
+      <tr><td><code>int</code></td><td>64 位有符号整数</td><td><code>0, 42, -1</code></td></tr>
+      <tr><td><code>float</code></td><td>64 位双精度（IEEE 754）</td><td><code>3.14, .2, 2.0</code></td></tr>
+      <tr><td><code>bool</code></td><td>布尔值</td><td><code>true, false</code></td></tr>
+      <tr><td><code>str</code></td><td>UTF-8 字符串</td><td><code>"hello"</code>（支持 \n \t \\ \"）</td></tr>
+    </table>
+  </section>
+
+  <section id="control">
+    <h2><span class="hash">#</span>控制流</h2>
+    <p>条件表达式必须显式返回 bool，禁止隐式转换（<code>if (1)</code> 视为非法）。</p>
+<pre><code><span class="k">if</span> (x &gt; <span class="n">5</span>) {
+    <span class="f">print</span>(<span class="s">"大"</span>);
+} <span class="k">else if</span> (x &gt; <span class="n">0</span>) {
+    <span class="f">print</span>(<span class="s">"小"</span>);
+} <span class="k">else</span> {
+    <span class="f">print</span>(<span class="s">"非正"</span>);
+}
+
+i = <span class="n">0</span>;
+<span class="k">while</span> (i &lt; <span class="n">10</span>) {
+    i = i + <span class="n">1</span>;
+}</code></pre>
+  </section>
+
+  <section id="fn">
+    <h2><span class="hash">#</span>函数定义</h2>
+<pre><code><span class="k">fn</span> <span class="f">add</span>(a : <span class="k">int</span>, b : <span class="k">int</span>) -&gt; <span class="k">int</span> {
+    <span class="k">return</span> a + b;
+}
+
+<span class="c">// 参数类型可由调用上下文推导（推荐复杂场景显式声明）</span>
+<span class="k">fn</span> <span class="f">greet</span>(name) {
+    <span class="f">print</span>(<span class="s">"你好, "</span> + name);
+}</code></pre>
+    <ul>
+      <li>函数返回类型由 return 推导，也可用 <code>fn f() -&gt; type</code> 声明</li>
+      <li>无返回值时调用作为表达式得到 null 占位</li>
+      <li>所有函数扁平化存在于全局符号表（不支持 <code>::</code> 路径）</li>
+    </ul>
+  </section>
+
+  <section id="builtins">
+    <h2><span class="hash">#</span>内置函数与模块</h2>
+    <p>全部开箱即用，无需导入：</p>
+    <table>
+      <tr><th>类别</th><th>函数</th></tr>
+      <tr><td>基础</td><td><code>print</code> <code>len</code> <code>type_of</code> <code>read_file</code> <code>write_file</code> <code>file_exists</code></td></tr>
+      <tr><td>字符串</td><td><code>str_contains</code> <code>str_replace</code> <code>str_trim</code></td></tr>
+      <tr><td>数学</td><td><code>abs</code> <code>max</code> <code>min</code></td></tr>
+      <tr><td>类型转换</td><td><code>to_str</code> <code>to_int</code> <code>to_float</code></td></tr>
+      <tr><td>时间</td><td><code>time.now</code> <code>time.sleep</code> <code>time.format</code></td></tr>
+      <tr><td>随机</td><td><code>random.int</code> <code>random.float</code></td></tr>
+      <tr><td>网络 / JSON</td><td><code>http_get</code> <code>http_post</code> <code>json_parse</code> <code>json_stringify</code></td></tr>
+      <tr><td>系统（跨平台）</td><td><code>sys.run</code> <code>sys.get_env</code></td></tr>
+      <tr><td>系统（Windows API）</td><td><code>sys.msgbox</code> <code>sys.beep</code> <code>sys.clipboard_set</code> <code>sys.get_screen_size</code> <code>sys.reg_read</code> <code>sys.reg_write</code></td></tr>
+    </table>
+  </section>
+
+  <section id="integ">
+    <h2><span class="hash">#</span>导入与外部集成</h2>
+<pre><code><span class="c">// import：远程模块下载并缓存到 ~/.zap/cache/</span>
+<span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.zp"</span>;
+<span class="f">print</span>(<span class="f">module_add</span>(<span class="n">20</span>, <span class="n">22</span>));
+
+<span class="c">// load：动态库加载（C ABI，int64 参数/返回值）</span>
+<span class="k">load</span> <span class="s">"path/to/zap_lib.dll"</span> <span class="k">as</span> m;
+<span class="f">print</span>(m.<span class="f">lib_add</span>(<span class="n">1</span>, <span class="n">2</span>));
+
+<span class="c">// load lazy：懒加载，首次调用时才加载</span>
+<span class="k">load</span> <span class="k">lazy</span> <span class="s">"path/to/zap_lib.dll"</span> <span class="k">as</span> lm;
+
+<span class="c">// alias：函数别名</span>
+<span class="k">alias</span> <span class="f">greet</span> <span class="k">as</span> <span class="f">hi</span>;</code></pre>
+  </section>
+
+  <section id="tools">
+    <h2><span class="hash">#</span>工具链</h2>
+    <table>
+      <tr><th>命令</th><th>说明</th></tr>
+      <tr><td><code>zap run &lt;script.zp&gt;</code></td><td>执行脚本（默认命令）</td></tr>
+      <tr><td><code>zap debug &lt;script.zp&gt;</code></td><td>断点调试：breakpoint 打印变量快照，等待 Enter 继续</td></tr>
+      <tr><td><code>zap fmt [-w] &lt;file.zp&gt;</code></td><td>代码格式化（Tab 缩进、运算符空格、大括号位置）</td></tr>
+      <tr><td><code>zap build --dll &lt;file.zp&gt;</code></td><td>打包 C ABI 动态库；类型映射 int→int64_t、float→double、bool→bool、str→const char*；需系统 C 编译器</td></tr>
+      <tr><td><code>zap get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存到 ~/.zap/cache/（也支持扫描脚本 import 批量预下载）</td></tr>
+      <tr><td><code>zap upgrade [-w] &lt;file.zp&gt;</code></td><td>按映射表自动迁移旧版本语法</td></tr>
+      <tr><td><code>zap lsp</code></td><td>语言服务器（补全/诊断/hover，LSP over stdio）</td></tr>
+    </table>
+  </section>
+
+  <section id="errors">
+    <h2><span class="hash">#</span>错误报告与错误码</h2>
+<pre><code>error[Z001]: type mismatch: variable `x` is locked to `int`, got `str`
+  --&gt; err.zp:3:1
+3 | x = <span class="s">"Zap"</span>;
+  | ^
+help: Zap types are locked after inference; no implicit conversion is allowed</code></pre>
+    <table>
+      <tr><th>错误码</th><th>含义</th></tr>
+      <tr><td>Z001</td><td>类型冲突（期望 X，得到 Y）</td></tr>
+      <tr><td>Z002</td><td>未定义的变量或函数</td></tr>
+      <tr><td>Z003</td><td>无法自动推导类型，请添加显式类型</td></tr>
+      <tr><td>Z004</td><td>运算符重载歧义</td></tr>
+      <tr><td>Z005</td><td>语法错误</td></tr>
+      <tr><td>Z006 / Z007</td><td>字符串转整数 / 浮点数失败</td></tr>
+      <tr><td>Z008</td><td>条件表达式必须是 bool</td></tr>
+      <tr><td>Z009 / Z010</td><td>除零 / 整数溢出</td></tr>
+      <tr><td>Z011 / Z012</td><td>参数数量不匹配 / 递归过深</td></tr>
+      <tr><td>Z200 / Z300</td><td>网络请求失败 / 系统调用失败</td></tr>
+      <tr><td>Z404</td><td>文件或库不存在</td></tr>
+      <tr><td>Z999</td><td>尚未实现</td></tr>
+    </table>
+  </section>
+
+  <section id="principles">
+    <h2><span class="hash">#</span>设计原则</h2>
+    <ul>
+      <li><strong>不自举</strong>：Zap 不用于开发自己的编译器，保持设计与实现的灵活性</li>
+      <li><strong>不背兼容包袱</strong>：旧版本永久可用，新版本自由演化（提供 upgrade 迁移工具）</li>
+      <li><strong>无前缀声明</strong>：变量不需要 let / var / const</li>
+      <li><strong>静态强类型</strong>：类型锁定，不隐式转换，报错精准</li>
+      <li><strong>单文件分发</strong>：下载 → 解压 → 运行，零配置；多版本共存互不干扰</li>
+    </ul>
+  </section>
+</main>
+
+<footer>
+  Zap v0.1.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
+</footer>
+</body>
+</html>

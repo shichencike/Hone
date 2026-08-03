@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zap 示例 - 期望运行效果</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <span class="logo">⚡ Zap</span>
+  <nav>
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="examples.html" class="active">示例</a>
+  </nav>
+  <span class="ver">v0.1.0</span>
+</header>
+
+<main>
+  <h2><span class="hash">#</span>示例代码</h2>
+  <p>以下示例均可在 <code class="inline">examples/</code> 目录中找到，用 <code class="inline">zap run &lt;file.zp&gt;</code> 运行。</p>
+
+  <div class="example">
+    <div class="title">1. Hello World</div>
+    <div class="note">第一个 Zap 程序</div>
+<pre><code><span class="c">// 这是 Zap 的第一个示例</span>
+<span class="f">print</span>(<span class="s">"Hello Zap!"</span>);</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">2. 变量与类型</div>
+    <div class="note">自动推导、显式类型、类型锁定（期望输出：60 / 3.14 / int / 3）</div>
+<pre><code>x = <span class="n">10</span>;            <span class="c">// 自动推导为 int</span>
+y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">// 显式类型（Rust/TS 风格）</span>
+<span class="k">int</span> z = <span class="n">30</span>;      <span class="c">// 显式类型（C 风格）</span>
+<span class="f">print</span>(x + y + z);   <span class="c">// 60</span>
+
+f = <span class="n">3.14</span>;
+<span class="f">print</span>(<span class="f">to_str</span>(f));  <span class="c">// 3.14</span>
+<span class="f">print</span>(<span class="f">type_of</span>(x)); <span class="c">// int</span>
+
+a = <span class="n">7</span> / <span class="n">2</span>;
+<span class="f">print</span>(a);           <span class="c">// 3（整数除法）</span>
+<span class="c">// x = "Zap";  // error[Z001]：类型锁定</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">3. 递归函数：斐波那契</div>
+    <div class="note">参数类型可由调用上下文推导（期望输出：55）</div>
+<pre><code><span class="k">fn</span> <span class="f">fib</span>(n) {
+    <span class="k">if</span> (n &lt;= <span class="n">1</span>) {
+        <span class="k">return</span> n;
+    }
+    <span class="k">return</span> <span class="f">fib</span>(n - <span class="n">1</span>) + <span class="f">fib</span>(n - <span class="n">2</span>);
+}
+
+<span class="f">print</span>(<span class="f">fib</span>(<span class="n">10</span>));  <span class="c">// 55</span>
+
+<span class="k">fn</span> <span class="f">add</span>(a : <span class="k">int</span>, b : <span class="k">int</span>) -&gt; <span class="k">int</span> {
+    <span class="k">return</span> a + b;
+}
+<span class="f">print</span>(<span class="f">add</span>(<span class="n">20</span>, <span class="n">22</span>));  <span class="c">// 42</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">4. 控制流：if / while</div>
+    <div class="note">条件必须是 bool；支持 else if 链（期望输出：45 / B）</div>
+<pre><code>i = <span class="n">0</span>; sum = <span class="n">0</span>;
+<span class="k">while</span> (i &lt; <span class="n">10</span>) {
+    sum = sum + i;
+    i = i + <span class="n">1</span>;
+}
+<span class="f">print</span>(sum);  <span class="c">// 45</span>
+
+score = <span class="n">85</span>;
+<span class="k">if</span> (score &gt;= <span class="n">90</span>) {
+    <span class="f">print</span>(<span class="s">"A"</span>);
+} <span class="k">else if</span> (score &gt;= <span class="n">80</span>) {
+    <span class="f">print</span>(<span class="s">"B"</span>);   <span class="c">// 输出 B</span>
+} <span class="k">else</span> {
+    <span class="f">print</span>(<span class="s">"C"</span>);
+}</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">5. go 多线程</div>
+    <div class="note">每次 go 启动独立线程，不共享变量；子线程崩溃不影响主线程</div>
+<pre><code><span class="k">fn</span> <span class="f">task</span>(id) {
+    i = <span class="n">0</span>;
+    <span class="k">while</span> (i &lt; <span class="n">100000</span>) { i = i + <span class="n">1</span>; }
+    <span class="f">print</span>(<span class="s">"任务 "</span> + <span class="f">to_str</span>(id) + <span class="s">" 完成"</span>);
+}
+
+<span class="k">go</span> <span class="f">task</span>(<span class="n">1</span>);
+<span class="k">go</span> <span class="f">task</span>(<span class="n">2</span>);
+<span class="k">go</span> <span class="f">task</span>(<span class="n">3</span>);
+<span class="f">print</span>(<span class="s">"主线程继续执行"</span>);</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">6. 时间与随机</div>
+    <div class="note">时间格式化（UTC）与闭区间随机数</div>
+<pre><code>t = <span class="f">time.now</span>();
+<span class="f">print</span>(<span class="f">time.format</span>(t, <span class="s">"YYYY-MM-DD HH:mm:SS"</span>));
+
+r = <span class="f">random.int</span>(<span class="n">1</span>, <span class="n">100</span>);   <span class="c">// 闭区间 [1, 100]</span>
+<span class="f">print</span>(<span class="s">"随机数: "</span> + <span class="f">to_str</span>(r));
+<span class="f">print</span>(<span class="s">"随机小数: "</span> + <span class="f">to_str</span>(<span class="f">random.float</span>()));
+
+<span class="f">time.sleep</span>(<span class="n">0.5</span>);  <span class="c">// 暂停 0.5 秒</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">7. JSON 解析与序列化</div>
+    <div class="note">标量值自动映射为 int / float / bool / str</div>
+<pre><code>n = <span class="f">json_parse</span>(<span class="s">"42"</span>);
+<span class="f">print</span>(<span class="f">type_of</span>(n));          <span class="c">// int</span>
+
+f = <span class="f">json_parse</span>(<span class="s">"3.14"</span>);
+<span class="f">print</span>(f);                     <span class="c">// 3.14</span>
+
+b = <span class="f">json_parse</span>(<span class="s">"true"</span>);
+<span class="f">print</span>(b);                     <span class="c">// true</span>
+
+<span class="f">print</span>(<span class="f">json_stringify</span>(<span class="n">100</span>));  <span class="c">// 100</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">8. DLL 打包</div>
+    <div class="note">@export 标记导出，zap build --dll 生成 C ABI 动态库（可在 C / Python / Rust 中调用）</div>
+<pre><code><span class="c">// math.zp</span>
+<span class="k">fn</span> <span class="f">add</span>(a : <span class="k">int</span>, b : <span class="k">int</span>) -&gt; <span class="k">int</span> { <span class="k">return</span> a + b; }
+<span class="k">fn</span> <span class="f">avg</span>(a : <span class="k">float</span>, b : <span class="k">float</span>) -&gt; <span class="k">float</span> { <span class="k">return</span> (a + b) / <span class="n">2.0</span>; }
+<span class="k">fn</span> <span class="f">greet</span>(name : <span class="k">str</span>) -&gt; <span class="k">str</span> { <span class="k">return</span> <span class="s">"你好, "</span> + name + <span class="s">"!"</span>; }
+
+<span class="k">@export</span> <span class="f">add</span>;
+<span class="k">@export</span> <span class="f">avg</span>;
+<span class="k">@export</span> <span class="f">greet</span>;</code></pre>
+    <p>生成的 C ABI：<code class="inline">int64_t add(int64_t, int64_t)</code>、<code class="inline">double avg(double, double)</code>、<code class="inline">const char* greet(const char*)</code>。</p>
+  </div>
+
+  <div class="example">
+    <div class="title">9. 断点调试</div>
+    <div class="note">zap debug 模式下 breakpoint 打印所有变量的类型与值快照</div>
+<pre><code>x = <span class="n">10</span>;
+name = <span class="s">"Zap"</span>;
+flag = <span class="k">true</span>;
+<span class="k">breakpoint</span>;   <span class="c">// [Zap Debug] 断点触发 -&gt; debug.zp:4 + 变量快照</span>
+<span class="f">print</span>(x);</code></pre>
+  </div>
+</main>
+
+<footer>
+  Zap v0.1.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
+</footer>
+</body>
+</html>

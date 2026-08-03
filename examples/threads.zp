@@ -1,0 +1,15 @@
+// go 多线程：每个 go 启动独立线程，不共享变量
+fn task(id) {
+    i = 0;
+    while (i < 100000) {
+        i = i + 1;
+    }
+    print("任务 " + to_str(id) + " 完成");
+}
+
+go task(1);
+go task(2);
+go task(3);
+print("主线程继续执行");
+time.sleep(0.5);
+print("主线程结束");

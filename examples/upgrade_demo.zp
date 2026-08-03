@@ -1,0 +1,3 @@
+print(time::now());
+@native add;
+print(":: 在字符串里不受影响？否——演示版全文替换");

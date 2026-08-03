@@ -1,0 +1,5 @@
+// sys 模块（跨平台子集）
+print("PATH 长度: " + to_str(len(sys.get_env("PATH"))));
+
+out = sys.run("echo zap test");
+print("命令输出: " + out);

@@ -1,0 +1,10 @@
+# Rust 构建产物（所有层级）
+target/
+
+# 敏感凭据（切勿提交）
+token.txt
+ftp.txt
+
+# build --dll 生成的临时 C 源码
+*.c
+!tests/zap_lib/src/*.c

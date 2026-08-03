@@ -1,0 +1,15 @@
+// load 动态库测试：加载 Rust cdylib（C ABI，全 int64 约定）
+load "tests/zap_lib/target/release/zap_lib.dll" as m;
+
+print(m.lib_add(1, 2));   // 3
+print(m.lib_mul(3, 4));   // 12
+print(m.lib_fact(5));     // 120
+print(m.lib_echo(42));    // 42
+
+// alias 别名：给用户函数起新名字
+fn greet(name) {
+    print("你好 " + name);
+}
+
+alias greet as hi;
+hi("Zap");
