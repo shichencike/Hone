@@ -155,8 +155,9 @@ help: Zap types are locked after inference; no implicit conversion is allowed
 - 🚧 阶段 3（基本完成）：`import` 远程模块 ✅、`load lazy` 懒加载 ✅、
   `use` / `alias` ✅、可视化编辑器 ✅（editor/index.html）、`zap get` ✅、
   `zap upgrade` ✅、`zap lsp` ✅
-- 🚧 阶段 4（部分完成）：官网 ✅（`官网/` 目录，浏览器打开 index.html）、
-  `--dll` float/str/bool 类型映射 ✅；GitHub 开源与独立托管待做
+- 🚧 阶段 4（部分完成）：官网 ✅（已部署至 InfinityFree 虚拟主机 `ftpupload.net/htdocs`，
+  源文件在 `官网/` 目录，FTP 上传验证通过；访问域名请在 InfinityFree 控制面板查看）、
+  `--dll` float/str/bool 类型映射 ✅、GitHub 首次提交 ✅；独立域名与推广待做
 
 ## 许可证
 
