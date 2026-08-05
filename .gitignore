@@ -5,6 +5,9 @@ target/
 token.txt
 ftp.txt
 
+# 设计规范文档
+zap[.][.]md
+
 # build --dll 生成的临时 C 源码
 *.c
 !tests/zap_lib/src/*.c
