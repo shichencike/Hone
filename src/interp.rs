@@ -133,14 +133,16 @@ impl Interp {
     fn collect_fns(&mut self, stmts: &[Stmt]) -> Result<(), ZError> {
         for stmt in stmts {
             match stmt {
-                Stmt::FnDef { name, params, body, .. } => {
-                    self.fns.insert(
-                        name.clone(),
-                        FnDef {
-                            params: params.clone(),
-                            body: body.clone(),
-                        },
-                    );
+                Stmt::FnDef { name, params, body, tmp, .. } => {
+                    if !tmp {
+                        self.fns.insert(
+                            name.clone(),
+                            FnDef {
+                                params: params.clone(),
+                                body: body.clone(),
+                            },
+                        );
+                    }
                 }
                 Stmt::Block { stmts, .. } => self.collect_fns(stmts)?,
                 Stmt::If { then_branch, else_branch, .. } => {
@@ -255,7 +257,7 @@ impl Interp {
                 Ok(Flow::Normal)
             }
             Stmt::Export { .. } => Ok(Flow::Normal), // 仅 zap build --dll 使用
-            Stmt::Import { name, url, span } => self.exec_import(name, url, *span),
+            Stmt::Import { name, url, alias, span } => self.exec_import(name, url, alias.as_deref(), *span),
             Stmt::Load { lazy, path, alias, span } => self.exec_load(*lazy, path, alias.as_deref(), *span),
             Stmt::Use { namespace, .. } => {
                 // 命名空间导入：内置函数已全局可用，namespace 仅作声明记录
@@ -267,6 +269,13 @@ impl Interp {
                 Ok(Flow::Normal)
             }
             Stmt::Go { callee, args, span } => self.exec_go(env, callee, args, *span),
+            Stmt::DebugPrint { expr, span: _ } => {
+                if self.debug {
+                    let v = self.eval_expr(env, expr)?;
+                    println!("[debug] {}", v.display());
+                }
+                Ok(Flow::Normal)
+            }
         }
     }
 
@@ -332,7 +341,7 @@ impl Interp {
 
     // ---------- import 远程模块 ----------
 
-    fn exec_import(&mut self, name: &str, url: &str, span: Span) -> Result<Flow, ZError> {
+    fn exec_import(&mut self, name: &str, url: &str, alias: Option<&str>, span: Span) -> Result<Flow, ZError> {
         let code = self.fetch_module(name, url, span)?;
         let file = format!("{}.zp", name);
         let program = parser::Parser::parse(&file, &code).map_err(|e| {
@@ -343,12 +352,64 @@ impl Interp {
                 Some("check the module source"),
             )
         })?;
-        // 收集模块函数（与全局合并；重名时后者覆盖）
-        self.collect_fns(&program.stmts)?;
+        // 收集模块函数（以别名前缀注册，或保持原名）
+        let prefix = alias.unwrap_or(name);
+        for stmt in &program.stmts {
+            self.collect_fns_with_prefix(stmt, name, prefix)?;
+        }
         // 执行模块顶层语句（独立作用域）
         let mut menv = Env::new();
         self.exec_stmts(&mut menv, &program.stmts)?;
         Ok(Flow::Normal)
+    }
+
+    fn collect_fns_with_prefix(&mut self, stmt: &Stmt, mod_name: &str, prefix: &str) -> Result<(), ZError> {
+        match stmt {
+            Stmt::FnDef { name, params, body, tmp, .. } => {
+                if !tmp {
+                    // 若提供了别名，将函数名中的模块名前缀替换为别名前缀
+                    let new_name = if prefix != mod_name {
+                        let old_prefix = format!("{}_", mod_name);
+                        if name.starts_with(&old_prefix) {
+                            name.replacen(&old_prefix, &format!("{}_", prefix), 1)
+                        } else {
+                            name.clone()
+                        }
+                    } else {
+                        name.clone()
+                    };
+                    self.fns.insert(
+                        new_name,
+                        FnDef {
+                            params: params.clone(),
+                            body: body.clone(),
+                        },
+                    );
+                }
+            }
+            Stmt::Block { stmts, .. } => {
+                for s in stmts {
+                    self.collect_fns_with_prefix(s, mod_name, prefix)?;
+                }
+            }
+            Stmt::If { then_branch, else_branch, .. } => {
+                for s in then_branch {
+                    self.collect_fns_with_prefix(s, mod_name, prefix)?;
+                }
+                if let Some(eb) = else_branch {
+                    for s in eb {
+                        self.collect_fns_with_prefix(s, mod_name, prefix)?;
+                    }
+                }
+            }
+            Stmt::While { body, .. } => {
+                for s in body {
+                    self.collect_fns_with_prefix(s, mod_name, prefix)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     /// 获取模块源码：缓存 ~/.zap/cache/<name>.zp 优先，否则从 URL 下载并写入缓存。

@@ -69,6 +69,7 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
                         Some("run `zap --help` for usage"),
                     )
                 })?;
+            builtins::init_args(&args[2..]);
             run_file(path, false)
         }
         "debug" => {
@@ -81,6 +82,7 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
                         Some("run `zap --help` for usage"),
                     )
                 })?;
+            builtins::init_args(&args[2..]);
             run_file(path, true)
         }
         "fmt" => cmd_fmt(&args[1..]),
@@ -88,7 +90,11 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
         "get" => cmd_get(&args[1..]),
         "upgrade" => upgrade::cmd_upgrade(&args[1..]),
         "lsp" => lsp::run_lsp(),
-        other if other.ends_with(".zp") => run_file(other, false),
+        "poop" => cmd_poop(&args[1..]),
+        other if other.ends_with(".zp") => {
+            builtins::init_args(&args[1..]);
+            run_file(other, false)
+        }
         other => Err(ZError::plain(
             codes::SYNTAX,
             format!("unknown command `{}`", other),
@@ -391,4 +397,97 @@ fn cmd_fmt(args: &[String]) -> Result<(), ZError> {
         }
     }
     Ok(())
+}
+
+/// zap poop <file.zp>：屎山检测
+fn cmd_poop(args: &[String]) -> Result<(), ZError> {
+    let path = args.get(0).ok_or_else(|| {
+        ZError::plain(
+            codes::SYNTAX,
+            "missing file: `zap poop <file.zp>`",
+            Some("pass a .zp file to analyze, e.g. `zap poop mycode.zp`"),
+        )
+    })?;
+    let code = std::fs::read_to_string(path).map_err(|e| {
+        ZError::plain(codes::NOT_FOUND, format!("cannot read `{}`: {}", path, e), Some("check the path"))
+    })?;
+    let (max_depth, complexity) = analyze_poop(&code);
+    println!("💩 屎山检测报告 💩");
+    println!("  if 嵌套深度: {}", max_depth);
+    println!("  圈复杂度:   {}", complexity);
+    if max_depth >= 5 || complexity >= 15 {
+        println!("  评级: 💩💩💩 危机！这是屎山！");
+        if max_depth >= 5 {
+            println!("  建议: 减少 if 嵌套，使用 return early 或模式匹配");
+        } else {
+            println!("  建议: 拆分函数，降低单函数复杂度");
+        }
+    } else if max_depth >= 3 || complexity >= 8 {
+        println!("  评级: 💩💩 注意，代码需要重构");
+    } else {
+        println!("  评级: ✅ 代码质量良好，继续保持！");
+    }
+    Ok(())
+}
+
+/// 分析源码中的 if 嵌套深度和圈复杂度
+fn analyze_poop(code: &str) -> (usize, usize) {
+    let mut max_depth = 0usize;
+    let mut cur_depth = 0usize;
+    let mut complexity = 1usize;
+    let mut in_string = false;
+    let mut prev_c = ' ';
+    let chars: Vec<char> = code.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let c = chars[i];
+
+        if c == '"' && prev_c != '\\' {
+            in_string = !in_string;
+            prev_c = c;
+            i += 1;
+            continue;
+        }
+        if in_string {
+            prev_c = c;
+            i += 1;
+            continue;
+        }
+
+        if c == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
+            while i < chars.len() && chars[i] != '\n' { i += 1; }
+            continue;
+        }
+        if c == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
+            i += 2;
+            while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') { i += 1; }
+            i += 2;
+            continue;
+        }
+
+        if c.is_ascii_alphabetic() || c == '_' {
+            let start = i;
+            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') { i += 1; }
+            let word: String = chars[start..i].iter().collect();
+            match word.as_str() {
+                "if" | "else if" | "for" | "while" | "case" | "catch" | "&&" | "||" => complexity += 1,
+                _ => {}
+            }
+            if word == "if" {
+                cur_depth += 1;
+                if cur_depth > max_depth { max_depth = cur_depth; }
+            }
+            continue;
+        }
+
+        if c == '}' {
+            cur_depth = cur_depth.saturating_sub(1);
+        }
+
+        prev_c = c;
+        i += 1;
+    }
+
+    (max_depth, complexity)
 }

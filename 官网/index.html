@@ -35,8 +35,8 @@
       <div class="card"><h4>🧰 极简无前缀</h4><p>变量不需要 let / var / const：<code class="inline">x = 10;</code> 自动推导类型，零冗余。</p></div>
       <div class="card"><h4>🔒 静态强类型</h4><p>类型一经推导即锁定，禁止隐式转换，报错精准（error[Z001] 格式 + 行列定位 + 修复建议）。</p></div>
       <div class="card"><h4>📦 单文件分发</h4><p>下载 → 解压 → 运行，零配置。跨 Windows / Linux / macOS / Android（Termux）。</p></div>
-      <div class="card"><h4>🛠 内置工具箱</h4><p>文件、HTTP、JSON、时间、随机、字符串、数学、系统 API（Windows 消息框/剪贴板/注册表）开箱即用。</p></div>
-      <div class="card"><h4>⚡ 多线程与调试</h4><p><code class="inline">go task(1);</code> 一行启动线程；<code class="inline">breakpoint;</code> 断点打印变量快照。</p></div>
+      <div class="card"><h4>🛠 内置工具箱</h4><p>文件、HTTP、JSON、时间、随机、字符串、数学、系统 API 开箱即用。<br>新增：日志、路径、参数解析、环境变量、键值存储、正则、哈希。</p></div>
+      <div class="card"><h4>⚡ 多线程与调试</h4><p><code class="inline">go task(1);</code> 一行启动线程；<code class="inline">breakpoint;</code> 断点；<code class="inline">debug_print</code> 调试输出；<code class="inline">tmp fn</code> 临时函数开发时自动忽略。</p></div>
       <div class="card"><h4>🔌 可嵌入可扩展</h4><p>@export 打包 C ABI 动态库（DLL/SO/DYLIB）、load 动态库调用、import 远程模块、LSP 语言服务器。</p></div>
     </div>
   </section>
@@ -68,6 +68,7 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
       <tr><td><code>zap get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存</td></tr>
       <tr><td><code>zap upgrade [-w] &lt;file.zp&gt;</code></td><td>按映射表迁移旧版本语法</td></tr>
       <tr><td><code>zap lsp</code></td><td>语言服务器（补全/诊断/hover）</td></tr>
+	      <tr><td><code>zap poop &lt;file.zp&gt;</code></td><td>屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
     </table>
   </section>
 
@@ -77,7 +78,8 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
       <li>✅ <strong>阶段 1</strong>：核心执行器（词法 / 解析 / AST / 解释器 / 静态类型检查）</li>
       <li>✅ <strong>阶段 2</strong>：fmt、debug、go 多线程、sys Windows API、build --dll（int/float/bool/str）</li>
       <li>✅ <strong>阶段 3</strong>：import 远程模块、load lazy、use / alias、zap get、upgrade、lsp、可视化编辑器</li>
-      <li>🚧 <strong>阶段 4</strong>：GitHub 开源、独立官网、教程视频、简历整合</li>
+             <li>✅ <strong>阶段 4</strong>：GitHub 开源、独立官网、--dll 全类型映射、zap poop 屎山检测</li>
+             <li>🚧 <strong>阶段 5</strong>：内置函数扩展（log/path/args/env/db/regex/crypto）、tmp fn、debug_print、import as</li>
     </ul>
     <p>可视化编辑器：浏览器打开 <code class="inline">editor/index.html</code>，拖拽代码块即可生成 .zp 代码。</p>
   </section>

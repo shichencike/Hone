@@ -27,6 +27,7 @@ pub enum Tok {
     Alias,
     As,
     From,
+    Tmp,
     // 类型关键字
     TInt,
     TFloat,
@@ -85,6 +86,7 @@ impl Tok {
             Tok::Alias => "`alias`".into(),
             Tok::As => "`as`".into(),
             Tok::From => "`from`".into(),
+            Tok::Tmp => "`tmp`".into(),
             Tok::TInt => "type `int`".into(),
             Tok::TFloat => "type `float`".into(),
             Tok::TBool => "type `bool`".into(),
@@ -283,6 +285,7 @@ impl Lexer {
                 "alias" => Tok::Alias,
                 "as" => Tok::As,
                 "from" => Tok::From,
+                "tmp" => Tok::Tmp,
                 "int" => Tok::TInt,
                 "float" => Tok::TFloat,
                 "bool" => Tok::TBool,

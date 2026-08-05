@@ -48,6 +48,12 @@ pub enum Stmt {
         ret: Option<TyName>,
         body: Vec<Stmt>,
         span: Span,
+        tmp: bool, // 临时函数，编译自动忽略
+    },
+    /// debug_print(expr);  调试输出，非调试模式自动忽略
+    DebugPrint {
+        expr: Box<Expr>,
+        span: Span,
     },
     ExprStmt {
         expr: Expr,
@@ -61,10 +67,11 @@ pub enum Stmt {
         name: String,
         span: Span,
     },
-    /// import "模块名" from "URL";  远程模块下载并缓存
+    /// import "模块名" from "URL" [as 别名];  远程模块下载并缓存
     Import {
         name: String,
         url: String,
+        alias: Option<String>,
         span: Span,
     },
     /// load ["lazy"] "路径" [as 别名];  动态库加载

@@ -138,16 +138,18 @@ impl Codegen {
     fn collect_fns(&mut self, stmts: &[Stmt]) -> Result<(), ZError> {
         for stmt in stmts {
             match stmt {
-                Stmt::FnDef { name, params, ret, body, .. } => {
-                    self.fns.insert(
-                        name.clone(),
-                        CFn {
-                            name: name.clone(),
-                            params: params.clone(),
-                            ret: *ret,
-                            body: body.clone(),
-                        },
-                    );
+                Stmt::FnDef { name, params, ret, body, tmp, .. } => {
+                    if !tmp {
+                        self.fns.insert(
+                            name.clone(),
+                            CFn {
+                                name: name.clone(),
+                                params: params.clone(),
+                                ret: *ret,
+                                body: body.clone(),
+                            },
+                        );
+                    }
                 }
                 Stmt::Block { stmts, .. } => self.collect_fns(stmts)?,
                 Stmt::If { then_branch, else_branch, .. } => {
@@ -734,6 +736,7 @@ impl Codegen {
                 }
             }
             Stmt::FnDef { .. } => Ok(()), // 已收集
+            Stmt::DebugPrint { .. } | Stmt::Breakpoint { .. } => Ok(()), // 调试/临时语句不生成 C 代码
             other => Err(self.zerr(
                 codes::NOT_IMPLEMENTED,
                 format!("cannot translate `{:?}` to C in v0.1.0", other),
@@ -924,6 +927,7 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Load { span, .. }
         | Stmt::Use { span, .. }
         | Stmt::Alias { span, .. }
-        | Stmt::Go { span, .. } => *span,
+        | Stmt::Go { span, .. }
+        | Stmt::DebugPrint { span, .. } => *span,
     }
 }

@@ -100,7 +100,9 @@ impl Parser {
         match self.peek() {
             Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr => self.parse_decl_c(),
             Tok::Ident(_) => {
-                if self.peek2() == &Tok::Colon {
+                if self.peek2() == &Tok::LParen && self.peek() == &Tok::Ident("debug_print".to_string()) {
+                    self.parse_debug_print()
+                } else if self.peek2() == &Tok::Colon {
                     self.parse_decl_ts()
                 } else if self.peek2() == &Tok::Assign {
                     self.parse_assign()
@@ -128,6 +130,7 @@ impl Parser {
             Tok::Import => self.parse_import(),
             Tok::Alias => self.parse_alias(),
             Tok::At => self.parse_export(),
+            Tok::Tmp => self.parse_tmp_fn(),
             other => Err(self.err_here(
                 codes::SYNTAX,
                 format!("expected a statement, found {}", other.describe()),
@@ -225,6 +228,16 @@ impl Parser {
 
     fn parse_fn_def(&mut self) -> Result<Stmt, ZError> {
         self.next(); // fn
+        self.parse_fn_body(false)
+    }
+
+    fn parse_tmp_fn(&mut self) -> Result<Stmt, ZError> {
+        self.next(); // tmp
+        self.expect(&Tok::Fn, "`fn`")?;
+        self.parse_fn_body(true)
+    }
+
+    fn parse_fn_body(&mut self, tmp: bool) -> Result<Stmt, ZError> {
         let (name_tok, span) = self.next();
         let name = match name_tok {
             Tok::Ident(s) => s,
@@ -260,6 +273,20 @@ impl Parser {
             params,
             ret,
             body,
+            span,
+            tmp,
+        })
+    }
+
+    /// debug_print(expr);
+    fn parse_debug_print(&mut self) -> Result<Stmt, ZError> {
+        self.next(); // debug_print
+        let (_, span) = self.next(); // (
+        let expr = self.parse_expr()?;
+        self.expect(&Tok::RParen, "`)`")?;
+        self.expect_semi()?;
+        Ok(Stmt::DebugPrint {
+            expr: Box::new(expr),
             span,
         })
     }
@@ -483,8 +510,24 @@ impl Parser {
                 ))
             }
         };
+        let alias = if self.at(&Tok::As) {
+            self.next();
+            let (tok, _) = self.next();
+            match tok {
+                Tok::Ident(s) => Some(s),
+                other => {
+                    return Err(self.err_here(
+                        codes::SYNTAX,
+                        format!("expected an alias name after `as`, found {}", other.describe()),
+                        Some("`import` form: `import \"mod\" from \"URL\" as alias;`"),
+                    ))
+                }
+            }
+        } else {
+            None
+        };
         self.expect_semi()?;
-        Ok(Stmt::Import { name, url, span })
+        Ok(Stmt::Import { name, url, alias, span })
     }
 
     /// alias 原名 as 新名;

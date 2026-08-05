@@ -147,7 +147,77 @@ b = <span class="f">json_parse</span>(<span class="s">"true"</span>);
 name = <span class="s">"Zap"</span>;
 flag = <span class="k">true</span>;
 <span class="k">breakpoint</span>;   <span class="c">// [Zap Debug] 断点触发 -&gt; debug.zp:4 + 变量快照</span>
-<span class="f">print</span>(x);</code></pre>
+ <span class="f">print</span>(x);</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">10. 彩色日志</div>
+    <div class="note">log.info / log.warn / log.error / log.debug 彩色输出到 stderr</div>
+<pre><code><span class="k">log.info</span>(<span class="s">"程序启动完成"</span>);
+<span class="k">log.warn</span>(<span class="s">"磁盘空间不足"</span>);
+<span class="k">log.error</span>(<span class="s">"连接失败"</span>);
+<span class="k">log.debug</span>(<span class="s">"x = 42"</span>);</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">11. 路径操作</div>
+    <div class="note">path.join / path.dirname / path.basename 跨平台路径操作</div>
+<pre><code><span class="f">print</span>(<span class="f">path.join</span>(<span class="s">"data"</span>, <span class="s">"users"</span>, <span class="s">"1.json"</span>));
+<span class="f">print</span>(<span class="f">path.dirname</span>(<span class="s">"/home/user/file.txt"</span>));
+<span class="f">print</span>(<span class="f">path.basename</span>(<span class="s">"/home/user/file.txt"</span>));</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">12. 命令行参数解析</div>
+    <div class="note">args.get / args.has 解析 --port 8080 或 -v 标志</div>
+<pre><code>port = <span class="f">args.get</span>(<span class="s">"port"</span>);
+<span class="k">if</span> (<span class="f">args.has</span>(<span class="s">"v"</span>)) {
+    <span class="f">print</span>(<span class="s">"详细模式已开启"</span>);
+}</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">13. 环境变量与键值存储</div>
+    <div class="note">env.get/set 读写环境变量，db.set/get 内存键值存储</div>
+<pre><code>path = <span class="f">env.get</span>(<span class="s">"PATH"</span>);
+<span class="k">env.set</span>(<span class="s">"MY_VAR"</span>, <span class="s">"hello"</span>);
+<span class="k">db.set</span>(<span class="s">"token"</span>, <span class="s">"abc123"</span>);
+<span class="f">print</span>(<span class="f">db.get</span>(<span class="s">"token"</span>));</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">14. 正则匹配与替换</div>
+    <div class="note">regex.match / regex.replace 使用标准正则表达式</div>
+<pre><code>ok = <span class="f">regex.match</span>(<span class="s">"^\\d+$"</span>, <span class="s">"12345"</span>);
+<span class="f">print</span>(ok);  <span class="c">// true</span>
+
+result = <span class="f">regex.replace</span>(<span class="s">"world"</span>, <span class="s">"hello world"</span>, <span class="s">"Zap"</span>);
+<span class="f">print</span>(result);  <span class="c">// hello Zap</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">15. MD5 / SHA256 哈希</div>
+    <div class="note">crypto.md5 / crypto.sha256 计算十六进制哈希</div>
+<pre><code><span class="f">print</span>(<span class="f">crypto.md5</span>(<span class="s">"hello"</span>));
+<span class="f">print</span>(<span class="f">crypto.sha256</span>(<span class="s">"hello"</span>));</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">16. 临时函数与调试输出</div>
+    <div class="note">tmp fn 编译自动忽略，debug_print 仅 debug 模式生效</div>
+<pre><code><span class="k">tmp</span> <span class="k">fn</span> <span class="f">helper</span>() {
+    <span class="f">print</span>(<span class="s">"只在开发时有用"</span>);
+}
+
+x = <span class="n">42</span>;
+<span class="k">debug_print</span>(<span class="s">"当前 x = "</span> + <span class="f">to_str</span>(x));</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">17. import as 别名导入</div>
+    <div class="note">以别名导入远程模块，函数名前缀自动替换</div>
+<pre><code><span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.zp"</span> <span class="k">as</span> m;
+<span class="f">print</span>(<span class="f">m_add</span>(<span class="n">20</span>, <span class="n">22</span>));  <span class="c">// 42</span></code></pre>
   </div>
 </main>
 

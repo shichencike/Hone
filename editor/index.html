@@ -84,8 +84,73 @@ const TEMPLATES = [
   { type: "if", label: "条件 if / else", hint: "条件必须是 bool", build: () => makeNested("if") },
   { type: "while", label: "循环 while", hint: "条件必须是 bool", build: () => makeNested("while") },
   { type: "fn", label: "函数定义", hint: "fn 名称(参数) { ... }", build: () => makeNested("fn") },
+  { type: "tmpfn", label: "临时函数 tmp fn", hint: "编译自动忽略", build: () => makeNested("tmpfn") },
   { type: "return", label: "返回 return", hint: "return 表达式;", build: () => makeSimple("return", "返回", "0", "x") },
   { type: "comment", label: "注释", hint: "// 说明文字", build: () => makeSimple("comment", "注释", "说明", "这是注释") },
+  { type: "log", label: "日志 log", hint: "彩色输出", build: () => {
+      const d = makeSimple("log", "log.info", "msg", '"hello"');
+      const sel = document.createElement("select");
+      sel.className = "f-inline"; sel.dataset.field = "level";
+      ["info","warn","error","debug"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
+      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
+      return d;
+    }
+  },
+  { type: "path", label: "路径 path", hint: "join/dirname/basename", build: () => {
+      const d = makeSimple("path", "path.join", "a", '"b"');
+      const sel = document.createElement("select");
+      sel.className = "f-inline"; sel.dataset.field = "op";
+      ["join","dirname","basename"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
+      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
+      return d;
+    }
+  },
+  { type: "args", label: "参数 args", hint: "get/has 命令行参数", build: () => {
+      const d = makeSimple("args", "args.get", "key", '"port"');
+      const sel = document.createElement("select");
+      sel.className = "f-inline"; sel.dataset.field = "op";
+      ["get","has"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
+      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
+      return d;
+    }
+  },
+  { type: "env", label: "环境变量 env", hint: "get/set", build: () => {
+      const d = makeSimple("env", "env.get", "key", '"PATH"');
+      const sel = document.createElement("select");
+      sel.className = "f-inline"; sel.dataset.field = "op";
+      ["get","set"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
+      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
+      return d;
+    }
+  },
+  { type: "db", label: "键值存储 db", hint: "set/get", build: () => {
+      const d = makeSimple("db", "db.set", "key", '"val"');
+      const sel = document.createElement("select");
+      sel.className = "f-inline"; sel.dataset.field = "op";
+      ["set","get"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
+      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
+      return d;
+    }
+  },
+  { type: "regex", label: "正则 regex", hint: "match/replace", build: () => {
+      const d = makeSimple("regex", "regex.match", "pat", '"^\\d+$"');
+      const sel = document.createElement("select");
+      sel.className = "f-inline"; sel.dataset.field = "op";
+      ["match","replace"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
+      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
+      return d;
+    }
+  },
+  { type: "crypto", label: "哈希 crypto", hint: "md5/sha256", build: () => {
+      const d = makeSimple("crypto", "crypto.md5", "text", '"hello"');
+      const sel = document.createElement("select");
+      sel.className = "f-inline"; sel.dataset.field = "op";
+      ["md5","sha256"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
+      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
+      return d;
+    }
+  },
+  { type: "debug_print", label: "调试输出 debug_print", hint: "仅 debug 模式", build: () => makeSimple("debug_print", "调试输出", "msg", '"x = " + to_str(x)") },
 ];
 let blockSeq = 0;
 
@@ -254,6 +319,48 @@ function genBlock(block, indent) {
       return `${tab}return ${val("expr")};`;
     case "comment":
       return `${tab}// ${val("text")}`;
+    case "debug_print":
+      return `${tab}debug_print(${val("expr")});`;
+    case "log": {
+      const level = val("level") || "info";
+      return `${tab}log.${level}(${val("name") || '""'});`;
+    }
+    case "path": {
+      const op = val("op") || "join";
+      const a = val("name") || '""';
+      const b = val("expr") || '""';
+      if (op === "join") return `${tab}path.join(${a}, ${b});`;
+      return `${tab}path.${op}(${a});`;
+    }
+    case "args": {
+      const op = val("op") || "get";
+      return `${tab}args.${op}(${val("name") || '""'});`;
+    }
+    case "env": {
+      const op = val("op") || "get";
+      const a = val("name") || '""';
+      const b = val("expr") || '""';
+      if (op === "set") return `${tab}env.set(${a}, ${b});`;
+      return `${tab}env.get(${a});`;
+    }
+    case "db": {
+      const op = val("op") || "set";
+      const a = val("name") || '""';
+      const b = val("expr") || '""';
+      if (op === "set") return `${tab}db.set(${a}, ${b});`;
+      return `${tab}db.get(${a});`;
+    }
+    case "regex": {
+      const op = val("op") || "match";
+      const a = val("name") || '""';
+      const b = val("expr") || '""';
+      if (op === "replace") return `${tab}regex.replace(${a}, ${b}, "");`;
+      return `${tab}regex.match(${a}, ${b});`;
+    }
+    case "crypto": {
+      const op = val("op") || "md5";
+      return `${tab}crypto.${op}(${val("name") || '""'});`;
+    }
     case "while":
       return body
         ? `${tab}while (${val("cond")}) {\n${inner}\n${tab}}`
@@ -264,6 +371,8 @@ function genBlock(block, indent) {
       return `${tab}if (${val("cond")}) {\n${inner}\n${tab}} else {\n${innerElse}\n${tab}}`;
     case "fn":
       return `${tab}fn ${val("name") || "main"}(${val("params")}) {\n${inner}\n${tab}}`;
+    case "tmpfn":
+      return `${tab}tmp fn ${val("name") || "helper"}(${val("params")}) {\n${inner}\n${tab}}`;
     default:
       return "";
   }

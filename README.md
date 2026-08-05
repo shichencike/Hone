@@ -24,6 +24,7 @@ zap get <module> <url>   # 下载模块依赖并缓存到 ~/.zap/cache/
 zap get <script.zp>      # 预下载脚本中所有 import 声明的模块
 zap upgrade [-w] <file.zp> # 按映射表自动迁移旧版本语法（-w 覆盖写）
 zap lsp                  # 启动语言服务器（补全/诊断，LSP over stdio）
+zap poop <file.zp>       # 屎山检测——分析 if 嵌套深度和圈复杂度
 zap --help               # 帮助
 zap --version            # 版本
 ```
@@ -54,6 +55,12 @@ print(fib(10));    // 55
 go task(1);
 // 断点调试：zap debug 模式下打印变量快照
 breakpoint;
+
+// 临时函数（编译自动忽略，仅开发时使用）
+tmp fn helper() { print("debug"); }
+
+// 调试输出（仅 zap debug 模式生效）
+debug_print("当前 x = " + to_str(x));
 ```
 
 ## 内置功能
@@ -67,6 +74,13 @@ breakpoint;
 - 系统：`sys.run` `sys.get_env`（跨平台）
 - 系统（Windows API，其他平台报 Z999 或降级）：`sys.msgbox` `sys.beep` `sys.clipboard_set`
   `sys.get_screen_size`（返回 `"宽x高"` 字符串，因 Zap 无元组类型）`sys.reg_read` `sys.reg_write`
+- **日志**：`log.info(msg)` `log.warn(msg)` `log.error(msg)` `log.debug(msg)`（彩色输出到 stderr）
+- **路径**：`path.join(a, b, ...)` `path.dirname(p)` `path.basename(p)`（跨平台路径操作）
+- **参数**：`args.get("port")` `args.has("v")`（解析 `--port 8080` / `-v` 等命令行参数）
+- **环境变量**：`env.get("PATH")` `env.set("KEY", "val")`（读写环境变量）
+- **键值存储**：`db.set("key", "value")` `db.get("key")`（全局内存键值存储）
+- **正则**：`regex.match("^\\d+$", "123")` `regex.replace("foo", "foobar", "baz")`（正则匹配与替换）
+- **哈希**：`crypto.md5("hello")` `crypto.sha256("hello")`（MD5 / SHA256 十六进制哈希）
 
 ## 导入与外部集成
 
@@ -74,6 +88,10 @@ breakpoint;
 // import：远程模块下载并缓存到 ~/.zap/cache/（后续运行直接使用缓存）
 import "math_mod" from "http://example.com/math_mod.zp";
 print(module_add(20, 22));
+
+// import as：以别名导入，函数名前缀替换为别名
+import "math_mod" from "http://example.com/math_mod.zp" as m;
+print(m_add(20, 22));
 
 // load：动态库加载（C ABI，全 int64 参数/返回值，最多 8 参数）
 load "path/to/zap_lib.dll" as m;
@@ -146,6 +164,9 @@ help: Zap types are locked after inference; no implicit conversion is allowed
   需要系统 C 编译器（gcc/clang，可用 `CC` 环境变量指定），找不到时保留生成的 `.c` 源码并提示手动编译
 - `import` / `load` / `load lazy` / `use` / `alias` / `zap get` / `zap upgrade` / `zap lsp` 已实现
   （upgrade 按映射表迁移旧语法；lsp 提供诊断/补全/hover，冒烟测试见 `tests/lsp_smoke.py`）
+- `import "mod" from "url" as alias;` 支持以别名导入模块，函数名前缀自动替换
+- `tmp fn` 临时函数在编译时自动忽略，仅开发阶段使用
+- `debug_print(expr)` 调试输出仅在 `zap debug` 模式生效，普通模式自动跳过
 
 ## 路线图
 
@@ -158,6 +179,9 @@ help: Zap types are locked after inference; no implicit conversion is allowed
 - 🚧 阶段 4（部分完成）：官网 ✅（已部署至 InfinityFree 虚拟主机 `ftpupload.net/htdocs`，
   源文件在 `官网/` 目录，FTP 上传验证通过；访问域名请在 InfinityFree 控制面板查看）、
   `--dll` float/str/bool 类型映射 ✅、GitHub 首次提交 ✅；独立域名与推广待做
+- 🚧 阶段 5（新增）：内置函数扩展（log/path/args/env/db/regex/crypto）✅、
+  `tmp fn` 临时函数 ✅、`debug_print` 调试输出 ✅、`import as` 别名 ✅、
+  `zap poop` 屎山检测 ✅
 
 ## 许可证
 

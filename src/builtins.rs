@@ -3,14 +3,56 @@
 // 失败统一按 error[Zxxx] 格式报告。
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use once_cell::sync::Lazy;
+
+use sha2::digest::Digest;
 
 use crate::error::codes;
 use crate::error::ZError;
 use crate::interp::Value;
 use crate::lexer::Span;
+
+/// 全局键值存储（db.set / db.get）
+static KV_STORE: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// 命令行参数（args.get / args.has），由 main.rs 初始化
+static CLI_ARGS: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// 初始化命令行参数解析（由 main.rs 调用）
+pub fn init_args(args: &[String]) {
+    let mut map = CLI_ARGS.lock().unwrap();
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        if a.starts_with("--") {
+            let key = a.trim_start_matches("--").to_string();
+            if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                map.insert(key, args[i + 1].clone());
+                i += 2;
+            } else {
+                map.insert(key, "true".to_string());
+                i += 1;
+            }
+        } else if a.starts_with('-') && a.len() == 2 {
+            let key = a.trim_start_matches('-').to_string();
+            if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                map.insert(key, args[i + 1].clone());
+                i += 2;
+            } else {
+                map.insert(key, "true".to_string());
+                i += 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
 
 fn err(code: &'static str, msg: impl Into<String>, span: Span, file: &str, src: &str, help: Option<impl Into<String>>) -> ZError {
     ZError::new(code, msg, file, src, span.line, span.col, span.len.max(1), help)
@@ -112,6 +154,23 @@ pub fn is_builtin(name: &str) -> bool {
             | "sys.get_screen_size"
             | "sys.reg_read"
             | "sys.reg_write"
+            | "log.info"
+            | "log.warn"
+            | "log.error"
+            | "log.debug"
+            | "path.join"
+            | "path.dirname"
+            | "path.basename"
+            | "args.get"
+            | "args.has"
+            | "env.get"
+            | "env.set"
+            | "db.set"
+            | "db.get"
+            | "regex.match"
+            | "regex.replace"
+            | "crypto.md5"
+            | "crypto.sha256"
     )
 }
 
@@ -382,6 +441,119 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         // Windows API 封装的 sys.* 函数（sysmod 模块实现）
         "sys.msgbox" | "sys.beep" | "sys.clipboard_set" | "sys.get_screen_size" | "sys.reg_read" | "sys.reg_write" => {
             crate::sysmod::call(name, &args, span, file, src)
+        }
+        // ---------- log ----------
+        "log.info" => {
+            let msg = as_str(&args[0], 0, name, span, file, src)?;
+            eprintln!("\x1b[34m[INFO]\x1b[0m {}", msg);
+            Ok(Value::Null)
+        }
+        "log.warn" => {
+            let msg = as_str(&args[0], 0, name, span, file, src)?;
+            eprintln!("\x1b[33m[WARN]\x1b[0m {}", msg);
+            Ok(Value::Null)
+        }
+        "log.error" => {
+            let msg = as_str(&args[0], 0, name, span, file, src)?;
+            eprintln!("\x1b[31m[ERROR]\x1b[0m {}", msg);
+            Ok(Value::Null)
+        }
+        "log.debug" => {
+            let msg = as_str(&args[0], 0, name, span, file, src)?;
+            eprintln!("\x1b[32m[DEBUG]\x1b[0m {}", msg);
+            Ok(Value::Null)
+        }
+        // ---------- path ----------
+        "path.join" => {
+            let mut parts: Vec<&str> = Vec::new();
+            for (i, arg) in args.iter().enumerate() {
+                let s = as_str(arg, i, name, span, file, src)?;
+                parts.push(s);
+            }
+            let p: std::path::PathBuf = parts.iter().collect();
+            Ok(Value::Str(p.to_string_lossy().to_string()))
+        }
+        "path.dirname" => {
+            let p = as_str(&args[0], 0, name, span, file, src)?;
+            let parent = std::path::Path::new(p)
+                .parent()
+                .map(|d| d.to_string_lossy().to_string())
+                .unwrap_or_else(|| ".".to_string());
+            Ok(Value::Str(parent))
+        }
+        "path.basename" => {
+            let p = as_str(&args[0], 0, name, span, file, src)?;
+            let name = std::path::Path::new(p)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "".to_string());
+            Ok(Value::Str(name))
+        }
+        // ---------- args ----------
+        "args.get" => {
+            let key = as_str(&args[0], 0, name, span, file, src)?;
+            let map = CLI_ARGS.lock().unwrap();
+            Ok(map.get(key).cloned().map(Value::Str).unwrap_or(Value::Null))
+        }
+        "args.has" => {
+            let key = as_str(&args[0], 0, name, span, file, src)?;
+            let map = CLI_ARGS.lock().unwrap();
+            Ok(Value::Bool(map.contains_key(key)))
+        }
+        // ---------- env ----------
+        "env.get" => {
+            let key = as_str(&args[0], 0, name, span, file, src)?;
+            Ok(Value::Str(std::env::var(key).unwrap_or_default()))
+        }
+        "env.set" => {
+            let key = as_str(&args[0], 0, name, span, file, src)?;
+            let val = as_str(&args[1], 1, name, span, file, src)?;
+            std::env::set_var(key, val);
+            Ok(Value::Null)
+        }
+        // ---------- db ----------
+        "db.set" => {
+            let key = as_str(&args[0], 0, name, span, file, src)?;
+            let val = as_str(&args[1], 1, name, span, file, src)?;
+            let mut store = KV_STORE.lock().unwrap();
+            store.insert(key.to_string(), val.to_string());
+            Ok(Value::Null)
+        }
+        "db.get" => {
+            let key = as_str(&args[0], 0, name, span, file, src)?;
+            let store = KV_STORE.lock().unwrap();
+            Ok(store.get(key).cloned().map(Value::Str).unwrap_or(Value::Null))
+        }
+        // ---------- regex ----------
+        "regex.match" => {
+            let pat = as_str(&args[0], 0, name, span, file, src)?;
+            let text = as_str(&args[1], 1, name, span, file, src)?;
+            let re = regex::Regex::new(pat).map_err(|e| {
+                err(codes::SYNTAX, format!("invalid regex `{}`: {}", pat, e), span, file, src, None::<&str>)
+            })?;
+            Ok(Value::Bool(re.is_match(text)))
+        }
+        "regex.replace" => {
+            let pat = as_str(&args[0], 0, name, span, file, src)?;
+            let text = as_str(&args[1], 1, name, span, file, src)?;
+            let repl = as_str(&args[2], 2, name, span, file, src)?;
+            let re = regex::Regex::new(pat).map_err(|e| {
+                err(codes::SYNTAX, format!("invalid regex `{}`: {}", pat, e), span, file, src, None::<&str>)
+            })?;
+            Ok(Value::Str(re.replace_all(text, repl).to_string()))
+        }
+        // ---------- crypto ----------
+        "crypto.md5" => {
+            let s = as_str(&args[0], 0, name, span, file, src)?;
+            let hash = md5::Md5::digest(s.as_bytes());
+            Ok(Value::Str(format!("{:x}", hash)))
+        }
+        "crypto.sha256" => {
+            let s = as_str(&args[0], 0, name, span, file, src)?;
+            let mut hasher = sha2::Sha256::new();
+            hasher.update(s.as_bytes());
+            let hash = hasher.finalize();
+            Ok(Value::Str(format!("{:x}", hash)))
         }
         _ => Err(err(
             codes::UNDEFINED,

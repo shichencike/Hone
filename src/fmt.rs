@@ -32,6 +32,7 @@ struct Item {
 const KEYWORDS: &[&str] = &[
     "fn", "if", "else", "while", "return", "true", "false", "go", "breakpoint",
     "int", "float", "bool", "str", "load", "lazy", "use", "import", "alias", "as", "from",
+    "tmp",
 ];
 
 const BIN_OPS: &[&str] = &["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||"];

@@ -144,8 +144,10 @@ impl Checker {
 
     fn register_top_stmt(&mut self, stmt: &Stmt) -> Result<(), ZError> {
         match stmt {
-            Stmt::FnDef { name, params, ret, body, span } => {
-                self.register_fn(name, params, *ret, body, *span)?;
+            Stmt::FnDef { name, params, ret, body, span, tmp } => {
+                if !tmp {
+                    self.register_fn(name, params, *ret, body, *span)?;
+                }
             }
             Stmt::Block { stmts, .. } => {
                 self.global_scopes.push(HashMap::new());
@@ -187,7 +189,7 @@ impl Checker {
     ) -> Result<(), ZError> {
         for stmt in body {
             match stmt {
-                Stmt::FnDef { name, params, ret, body, span } => {
+                Stmt::FnDef { name, params, ret, body, span, tmp: _ } => {
                     // 嵌套函数定义：扁平化注册到全局符号表
                     self.register_fn(name, params, *ret, body, *span)?;
                 }
@@ -558,6 +560,10 @@ impl Checker {
                 self.resolve_call(callee, &arg_tys, *span)?;
                 Ok(())
             }
+            Stmt::DebugPrint { expr, .. } => {
+                self.check_expr(expr)?;
+                Ok(())
+            }
         }
     }
 
@@ -674,6 +680,10 @@ impl Checker {
                     arg_tys.push(self.check_expr_in_fn(a, scopes, scope_stack, param_slots, ret_slot)?);
                 }
                 self.resolve_call(callee, &arg_tys, *span)?;
+                Ok(())
+            }
+            Stmt::DebugPrint { expr, .. } => {
+                self.check_expr_in_fn(expr, scopes, scope_stack, param_slots, ret_slot)?;
                 Ok(())
             }
         }
@@ -1508,6 +1518,77 @@ impl Checker {
                 self.expect_str(name, args, 1, span, "the value")?;
                 Ok(TyRes { ty: Ty::Void, slot: None })
             }
+            // log
+            "log.info" | "log.warn" | "log.error" | "log.debug" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the message")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            // path
+            "path.join" => {
+                if n == 0 {
+                    return Err(self.zerr(codes::ARG_COUNT, "`path.join` expects at least 1 argument", span, None::<&str>));
+                }
+                for i in 0..n {
+                    self.expect_str(name, args, i, span, "a path component")?;
+                }
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "path.dirname" | "path.basename" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the path")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            // args
+            "args.get" | "args.has" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the key")?;
+                Ok(TyRes { ty: if name == "args.has" { Ty::Bool } else { Ty::Str }, slot: None })
+            }
+            // env
+            "env.get" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the environment variable name")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "env.set" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the key")?;
+                self.expect_str(name, args, 1, span, "the value")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            // db
+            "db.set" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the key")?;
+                self.expect_str(name, args, 1, span, "the value")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            "db.get" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the key")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            // regex
+            "regex.match" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the pattern")?;
+                self.expect_str(name, args, 1, span, "the text")?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            "regex.replace" => {
+                self.arg_count(name, n, 3, span)?;
+                for i in 0..3 {
+                    self.expect_str(name, args, i, span, "a string argument")?;
+                }
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            // crypto
+            "crypto.md5" | "crypto.sha256" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the input text")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
             other => Err(self.zerr(
                 codes::UNDEFINED,
                 format!("undefined function `{}`", other),
@@ -1538,7 +1619,8 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Load { span, .. }
         | Stmt::Use { span, .. }
         | Stmt::Alias { span, .. }
-        | Stmt::Go { span, .. } => *span,
+        | Stmt::Go { span, .. }
+        | Stmt::DebugPrint { span, .. } => *span,
     }
 }
 
@@ -1589,6 +1671,23 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "sys.get_screen_size",
         "sys.reg_read",
         "sys.reg_write",
+        "log.info",
+        "log.warn",
+        "log.error",
+        "log.debug",
+        "path.join",
+        "path.dirname",
+        "path.basename",
+        "args.get",
+        "args.has",
+        "env.get",
+        "env.set",
+        "db.set",
+        "db.get",
+        "regex.match",
+        "regex.replace",
+        "crypto.md5",
+        "crypto.sha256",
     ]
     .into_iter()
     .collect()
