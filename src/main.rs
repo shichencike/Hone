@@ -3,6 +3,7 @@
 
 mod ast;
 mod builtins;
+mod bundle;
 mod checker;
 mod codegen;
 mod error;
@@ -14,6 +15,7 @@ mod parser;
 mod sysmod;
 mod upgrade;
 
+use std::collections::HashMap;
 use std::process::ExitCode;
 
 use error::codes;
@@ -36,6 +38,17 @@ fn main() -> ExitCode {
     }));
 
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // 打包模式：自身携带内嵌脚本 → 走自释放启动器（--version / 释放执行 / 清理缓存）
+    match bundle::detect() {
+        Ok(Some(info)) => return bundle::run(&info, &args),
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("{}", e);
+            return ExitCode::FAILURE;
+        }
+    }
+
     match run_cli(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -60,8 +73,9 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
             Ok(())
         }
         "run" => {
-            let path = args
-                .get(1)
+            let (opts, rest) = parse_run_args(&args[1..]);
+            let path = rest
+                .first()
                 .ok_or_else(|| {
                     ZError::plain(
                         codes::SYNTAX,
@@ -69,8 +83,14 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
                         Some("run `zap --help` for usage"),
                     )
                 })?;
-            builtins::init_args(&args[2..]);
-            run_file(path, false)
+            if opts.resume {
+                load_resume_state(path)?;
+            }
+            builtins::init_args(&rest[1..]);
+            match opts.restart {
+                Some(p) => run_with_restart(path, &p),
+                None => run_file(path, false),
+            }
         }
         "debug" => {
             let path = args
@@ -91,6 +111,29 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
         "upgrade" => upgrade::cmd_upgrade(&args[1..]),
         "lsp" => lsp::run_lsp(),
         "poop" => cmd_poop(&args[1..]),
+        "explain" => {
+            let code = args
+                .get(1)
+                .ok_or_else(|| {
+                    ZError::plain(
+                        codes::SYNTAX,
+                        "missing error code: `zap explain <code>`",
+                        Some("example: `zap explain Z201`"),
+                    )
+                })?;
+            match error::explain(code) {
+                Some(text) => {
+                    println!("error[{}]", code);
+                    println!("{}", text);
+                    Ok(())
+                }
+                None => Err(ZError::plain(
+                    codes::NOT_FOUND,
+                    format!("unknown error code `{}`", code),
+                    Some("run `zap explain` with a Zxxx code listed in the docs"),
+                )),
+            }
+        }
         other if other.ends_with(".zp") => {
             builtins::init_args(&args[1..]);
             run_file(other, false)
@@ -107,7 +150,7 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
 fn run_file(path: &str, debug: bool) -> Result<(), ZError> {
     let src = std::fs::read_to_string(path).map_err(|e| {
         ZError::plain(
-            codes::NOT_FOUND,
+            codes::FILE_NOT_FOUND,
             format!("cannot read `{}`: {}", path, e),
             Some("check the path"),
         )
@@ -118,15 +161,170 @@ fn run_file(path: &str, debug: bool) -> Result<(), ZError> {
     Ok(())
 }
 
+/// `--restart` 重启策略：最大重启次数、递增等待间隔（秒）、可重启错误码白名单（空 = 全部可重启）。
+struct RestartPolicy {
+    max: usize,
+    backoff: Vec<u64>,
+    codes: Vec<String>,
+}
+
+/// `zap run` 的运行选项：重启策略（可选）与是否恢复检查点。
+struct RunOptions {
+    restart: Option<RestartPolicy>,
+    resume: bool,
+}
+
+/// 从 `zap run` 的参数中提取运行选项。
+/// 返回 (选项, 剩余参数)；剩余参数中第一个为脚本路径，其余为脚本自身的参数（原样传递）。
+/// 已知选项 `--restart[=N]` / `--backoff=a,b,c` / `--restart-on=Zxxx` / `--resume` 被消费，
+/// 遇到第一个非选项参数即停止解析，其后内容一律视为脚本参数。
+fn parse_run_args(args: &[String]) -> (RunOptions, Vec<String>) {
+    let mut max = 3usize;
+    let mut backoff: Vec<u64> = vec![1, 3, 10];
+    let mut codes: Vec<String> = Vec::new();
+    let mut has_restart = false;
+    let mut resume = false;
+    let mut rest = Vec::new();
+    let mut parsing_opts = true;
+
+    for a in args {
+        if parsing_opts {
+            match a.as_str() {
+                "--restart" => {
+                    has_restart = true;
+                    continue;
+                }
+                "--resume" => {
+                    resume = true;
+                    continue;
+                }
+                s if s.starts_with("--restart=") => {
+                    has_restart = true;
+                    max = s["--restart=".len()..].parse().unwrap_or(3);
+                    continue;
+                }
+                s if s.starts_with("--backoff=") => {
+                    backoff = s["--backoff=".len()..]
+                        .split(',')
+                        .filter_map(|p| p.trim().parse::<u64>().ok())
+                        .collect();
+                    if backoff.is_empty() {
+                        backoff = vec![1];
+                    }
+                    continue;
+                }
+                s if s.starts_with("--restart-on=") => {
+                    codes = s["--restart-on=".len()..]
+                        .split(',')
+                        .map(|p| p.trim().to_string())
+                        .filter(|c| !c.is_empty())
+                        .collect();
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        parsing_opts = false;
+        rest.push(a.clone());
+    }
+
+    let restart = if has_restart {
+        Some(RestartPolicy { max, backoff, codes })
+    } else {
+        None
+    };
+    (RunOptions { restart, resume }, rest)
+}
+
+/// 按策略循环运行脚本：正常结束（Ok）立即返回；错误按白名单与次数上限重试，
+/// 等待间隔取 backoff 序列（第 n 次失败后等待 backoff[n]，超出取最后一项）。
+fn run_with_restart(path: &str, policy: &RestartPolicy) -> Result<(), ZError> {
+    let mut count = 0usize;
+    loop {
+        match run_file(path, false) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let retryable = policy.codes.is_empty() || policy.codes.iter().any(|c| c == e.code);
+                if !retryable || count >= policy.max {
+                    // 不可重试或已达上限：以最后一次错误退出
+                    return Err(e);
+                }
+                let delay = *policy.backoff.get(count).unwrap_or_else(|| policy.backoff.last().unwrap());
+                eprintln!(
+                    "[restart] {}: error[{}] — retry {}/{} after {}s",
+                    path,
+                    e.code,
+                    count + 1,
+                    policy.max,
+                    delay
+                );
+                std::thread::sleep(std::time::Duration::from_secs(delay));
+                count += 1;
+            }
+        }
+    }
+}
+
+/// ~/.zap/state/ 状态目录（Windows 用 USERPROFILE）。
+fn state_dir() -> std::path::PathBuf {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(home).join(".zap").join("state")
+}
+
+/// `--resume`：恢复 db 检查点并启用自动落盘。
+/// 状态文件按脚本路径哈希命名（同一脚本稳定定位）；文件内容携带脚本内容哈希，
+/// 脚本变更后检查点自动失效（视为无检查点，不报错）。
+fn load_resume_state(path: &str) -> Result<(), ZError> {
+    use sha2::{Digest, Sha256};
+
+    let src = std::fs::read_to_string(path).map_err(|e| {
+        ZError::plain(
+            codes::FILE_NOT_FOUND,
+            format!("cannot read `{}`: {}", path, e),
+            Some("check the path"),
+        )
+    })?;
+    let content_hash = format!("{:x}", Sha256::digest(src.as_bytes()));
+    let path_hash = format!("{:x}", Sha256::digest(path.as_bytes()));
+    let dir = state_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let state_file = dir.join(format!("{}.json", &path_hash[..16]));
+
+    // 读取并校验检查点；缺失 / 损坏 / 脚本已变更 → 空状态
+    let kv: HashMap<String, String> = match std::fs::read_to_string(&state_file) {
+        Ok(text) => match serde_json::from_str::<serde_json::Value>(&text) {
+            Ok(v) if v.get("script").and_then(|s| s.as_str()) == Some(content_hash.as_str()) => {
+                v.get("kv")
+                    .and_then(|k| serde_json::from_value::<HashMap<String, String>>(k.clone()).ok())
+                    .unwrap_or_default()
+            }
+            _ => HashMap::new(),
+        },
+        Err(_) => HashMap::new(),
+    };
+
+    builtins::load_state(kv);
+    builtins::enable_persist(state_file, content_hash);
+    Ok(())
+}
+
 fn print_help() {
     println!("Zap v{} - 轻量级、跨平台、可嵌入的脚本语言", VERSION);
     println!();
     println!("用法:");
     println!("  zap <script.zp>         执行 Zap 脚本（默认命令）");
     println!("  zap run <script.zp>     执行 Zap 脚本");
+    println!("       --restart[=N]       失败自动重启（N 为最大次数，默认 3；仅对可恢复错误）");
+    println!("       --backoff=a,b,c     重启间隔递增序列（秒，默认 1,3,10）");
+    println!("       --restart-on=Zxxx   只对指定错误码重启（逗号分隔；省略则全部可重启）");
+    println!("       --resume            恢复上次 db 检查点（脚本变更后自动失效）");
+    println!("  zap explain <code>       查看错误码解释（如 `zap explain Z201`）");
     println!("  zap debug <script.zp>   断点调试模式（breakpoint 关键字生效）");
     println!("  zap fmt [-w] <file.zp>  代码格式化（统一 Tab 缩进、运算符空格、大括号位置；-w 覆盖写）");
     println!("  zap build --dll <file.zp> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
+    println!("  zap build --exe <file.zp> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
     println!("  zap get <module> <url>  下载模块依赖并缓存到 ~/.zap/cache/");
     println!("  zap get <script.zp>     预下载脚本中所有 import 声明的模块");
     println!("  zap upgrade [-w] <file.zp> 按映射表自动迁移旧版本语法（-w 覆盖写）");
@@ -137,25 +335,162 @@ fn print_help() {
     println!("可视化编辑器：浏览器打开 editor/index.html（拖拽代码块生成 .zp 代码）");
 }
 
-/// zap build --dll <script.zp>
+/// zap build --dll <script.zp> / zap build --exe <script.zp>
 fn cmd_build(args: &[String]) -> Result<(), ZError> {
-    if args.first().map(|s| s.as_str()) != Some("--dll") {
-        return Err(ZError::plain(
+    match args.first().map(|s| s.as_str()) {
+        Some("--dll") => {
+            let path = args
+                .get(1)
+                .ok_or_else(|| {
+                    ZError::plain(
+                        codes::SYNTAX,
+                        "missing script path: `zap build --dll <script.zp>`",
+                        Some("run `zap --help` for usage"),
+                    )
+                })?;
+            cmd_build_dll(path)
+        }
+        Some("--exe") => cmd_build_exe(&args[1..]),
+        _ => Err(ZError::plain(
             codes::SYNTAX,
-            "unknown build options: `zap build --dll <script.zp>`",
-            Some("only `--dll` is supported in this version"),
-        ));
+            "unknown build options: `zap build --dll <script.zp>` or `zap build --exe <script.zp>`",
+            Some("`--dll` compiles to a shared library; `--exe` bundles the script with the interpreter"),
+        )),
     }
-    let path = args
-        .get(1)
-        .ok_or_else(|| {
-            ZError::plain(
-                codes::SYNTAX,
-                "missing script path: `zap build --dll <script.zp>`",
-                Some("run `zap --help` for usage"),
-            )
-        })?;
-    cmd_build_dll(path)
+}
+
+/// zap build --exe <script.zp> [-o <out>] [--icon <ico>] [--version]
+/// 将当前 zap 运行时与脚本打包为单个自释放可执行文件（见 bundle.rs 格式）。
+fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("zap build --exe (Zap v{})", VERSION);
+        return Ok(());
+    }
+    let mut out: Option<String> = None;
+    let mut icon: Option<String> = None;
+    let mut path: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-o" => {
+                i += 1;
+                out = args.get(i).cloned();
+            }
+            "--icon" => {
+                i += 1;
+                icon = args.get(i).cloned();
+            }
+            s if s.starts_with("--out=") => out = Some(s["--out=".len()..].to_string()),
+            s if s.starts_with("--icon=") => icon = Some(s["--icon=".len()..].to_string()),
+            s if s.starts_with('-') => {
+                return Err(ZError::plain(
+                    codes::SYNTAX,
+                    format!("unknown build option `{}`", s),
+                    Some("options: `-o <out>`, `--icon <ico>`, `--version`"),
+                ));
+            }
+            s => {
+                if path.is_none() {
+                    path = Some(s.to_string());
+                } else {
+                    return Err(ZError::plain(
+                        codes::SYNTAX,
+                        "too many arguments",
+                        Some("usage: `zap build --exe <script.zp> [-o <out>]`"),
+                    ));
+                }
+            }
+        }
+        i += 1;
+    }
+    let path = path.ok_or_else(|| {
+        ZError::plain(
+            codes::SYNTAX,
+            "missing script path: `zap build --exe <script.zp>`",
+            Some("run `zap --help` for usage"),
+        )
+    })?;
+    if let Some(ic) = &icon {
+        eprintln!("[build] warning: `--icon` is not supported in this build, ignoring `{}`", ic);
+    }
+
+    // 以当前 zap 可执行文件作为内嵌运行时
+    let exe_bytes = std::fs::read(std::env::current_exe().map_err(|e| {
+        ZError::plain(
+            codes::NOT_FOUND,
+            format!("cannot locate the zap runtime: {}", e),
+            None::<&str>,
+        )
+    })?)
+    .map_err(|e| {
+        ZError::plain(
+            codes::NOT_FOUND,
+            format!("cannot read the zap runtime: {}", e),
+            None::<&str>,
+        )
+    })?;
+    let script = std::fs::read_to_string(&path).map_err(|e| {
+        ZError::plain(
+            codes::FILE_NOT_FOUND,
+            format!("cannot read `{}`: {}", path, e),
+            Some("check the path"),
+        )
+    })?;
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "script.zp".to_string());
+
+    let ver = parse_version(VERSION);
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let out_bytes = bundle::build(&exe_bytes, &script, &name, ver, timestamp);
+
+    // 默认输出名：脚本 stem + 平台可执行后缀
+    let out = match out {
+        Some(o) => o,
+        None => {
+            let stem = std::path::Path::new(&path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "app".to_string());
+            format!("{}.exe", stem)
+        }
+    };
+    std::fs::write(&out, &out_bytes).map_err(|e| {
+        ZError::plain(
+            codes::FILE_PERMISSION,
+            format!("cannot write `{}`: {}", out, e),
+            Some("check the directory permissions"),
+        )
+    })?;
+    // Unix 下补可执行权限
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o755));
+    }
+    println!(
+        "生成 {} 完成（脚本: {}, Zap v{}.{}.{}, {:.1} KB）",
+        out,
+        name,
+        ver.0,
+        ver.1,
+        ver.2,
+        out_bytes.len() as f64 / 1024.0
+    );
+    Ok(())
+}
+
+/// 解析 "x.y.z" 版本号为三元组。
+fn parse_version(v: &str) -> (u16, u16, u16) {
+    let mut parts = v.split('.');
+    let major = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let minor = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let patch = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    (major, minor, patch)
 }
 
 /// 将 .zp 脚本打包为 C ABI 动态库。进度条使用 \r 轻量显示。

@@ -1,0 +1,62 @@
+// try_catch.zp - 错误捕获与自动恢复示例
+// 运行:zap examples/try_catch.zp
+// 演示:try-catch 捕获可恢复错误、错误对象字段、throw 主动抛出与重抛、回退逻辑
+
+fn risky_div(a, b) -> int {
+    return a / b;
+}
+
+// 1. 捕获除零错误(Z009),执行回退逻辑
+// 注意:Zap 顶层块作用域,跨块共享的变量需在块前声明
+r = 0;
+try {
+    r = risky_div(10, 0);
+    print("unreachable: " + to_str(r));
+} catch e {
+    print("caught " + e.code + ": " + e.message);
+    print("  at " + e.file + ":" + to_str(e.line) + ":" + to_str(e.col));
+    print("  context: " + e.context);
+    r = -1; // 回退值
+}
+print("r = " + to_str(r));
+
+// 2. 捕获类型转换错误(Z006)
+n = 0;
+try {
+    n = to_int("not-a-number");
+    print("unreachable: " + to_str(n));
+} catch e {
+    print("caught " + e.code + ": " + e.message);
+    n = 0;
+}
+print("n = " + to_str(n));
+
+// 3. throw 字符串 → 构造 Z600 用户错误
+try {
+    throw "custom failure";
+} catch e {
+    print("throw caught " + e.code + ": " + e.message);
+}
+
+// 4. 重抛 error 值:内层捕获记录日志后再次抛出,由外层兜底
+try {
+    try {
+        throw "inner error";
+    } catch e {
+        print("inner caught: " + e.message);
+        throw e; // 重抛
+    }
+} catch e {
+    print("outer caught " + e.code + ": " + e.message);
+}
+
+// 5. 文件不存在(Z401)回退到缓存(方案中的降级场景)
+data = "";
+try {
+    data = read_file("no_such_file.txt");
+    print("data: " + data);
+} catch e {
+    print("fallback " + e.code + ": use cache");
+    data = "cached_data";
+}
+print("data = " + data);

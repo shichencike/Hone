@@ -30,6 +30,7 @@
       <li><a href="#integ">导入与外部集成</a></li>
       <li><a href="#tools">工具链</a></li>
       <li><a href="#errors">错误报告与错误码</a></li>
+      <li><a href="#try">错误处理与恢复</a></li>
       <li><a href="#principles">设计原则</a></li>
     </ol>
   </div>
@@ -156,9 +157,13 @@ i = <span class="n">0</span>;
     <table>
       <tr><th>命令</th><th>说明</th></tr>
       <tr><td><code>zap run &lt;script.zp&gt;</code></td><td>执行脚本（默认命令）</td></tr>
+      <tr><td><code>zap run --restart[=N] &lt;script.zp&gt;</code></td><td>失败自动重启；<code>--backoff=a,b,c</code> 间隔递增，<code>--restart-on=Zxxx</code> 错误码白名单</td></tr>
+      <tr><td><code>zap run --resume &lt;script.zp&gt;</code></td><td>恢复 db 检查点继续执行（db.set 自动落盘，脚本变更后检查点失效）</td></tr>
       <tr><td><code>zap debug &lt;script.zp&gt;</code></td><td>断点调试：breakpoint 打印变量快照，等待 Enter 继续</td></tr>
       <tr><td><code>zap fmt [-w] &lt;file.zp&gt;</code></td><td>代码格式化（Tab 缩进、运算符空格、大括号位置）</td></tr>
       <tr><td><code>zap build --dll &lt;file.zp&gt;</code></td><td>打包 C ABI 动态库；类型映射 int→int64_t、float→double、bool→bool、str→const char*；需系统 C 编译器</td></tr>
+      <tr><td><code>zap build --exe &lt;file.zp&gt;</code></td><td>打包独立可执行文件（解释器+脚本自释放，<code>[-o &lt;out&gt;]</code>）；打包后 <code>--version</code> 查看版本信息，<code>--keep-cache</code> 保留缓存</td></tr>
+      <tr><td><code>zap explain &lt;code&gt;</code></td><td>查看错误码解释与修复建议（如 <code>zap explain Z201</code>）</td></tr>
       <tr><td><code>zap get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存到 ~/.zap/cache/（也支持扫描脚本 import 批量预下载）</td></tr>
       <tr><td><code>zap upgrade [-w] &lt;file.zp&gt;</code></td><td>按映射表自动迁移旧版本语法</td></tr>
       <tr><td><code>zap lsp</code></td><td>语言服务器（补全/诊断/hover，LSP over stdio）</td></tr>
@@ -175,19 +180,36 @@ i = <span class="n">0</span>;
 help: Zap types are locked after inference; no implicit conversion is allowed</code></pre>
     <table>
       <tr><th>错误码</th><th>含义</th></tr>
-      <tr><td>Z001</td><td>类型冲突（期望 X，得到 Y）</td></tr>
-      <tr><td>Z002</td><td>未定义的变量或函数</td></tr>
-      <tr><td>Z003</td><td>无法自动推导类型，请添加显式类型</td></tr>
-      <tr><td>Z004</td><td>运算符重载歧义</td></tr>
-      <tr><td>Z005</td><td>语法错误</td></tr>
-      <tr><td>Z006 / Z007</td><td>字符串转整数 / 浮点数失败</td></tr>
-      <tr><td>Z008</td><td>条件表达式必须是 bool</td></tr>
-      <tr><td>Z009 / Z010</td><td>除零 / 整数溢出</td></tr>
-      <tr><td>Z011 / Z012</td><td>参数数量不匹配 / 递归过深</td></tr>
-      <tr><td>Z200 / Z300</td><td>网络请求失败 / 系统调用失败</td></tr>
-      <tr><td>Z404</td><td>文件或库不存在</td></tr>
+      <tr><td>Z001 ~ Z012</td><td>类型 / 语法 / 推导 / 运行期基础错误</td></tr>
+      <tr><td>Z101 ~ Z104</td><td>词法语法细分：非法字符 / 未闭合字符串 / 未闭合注释 / 缺少分号</td></tr>
+      <tr><td>Z200 ~ Z204</td><td>网络：请求失败 / 超时 / 连接拒绝 / DNS 失败 / 非 2xx 响应</td></tr>
+      <tr><td>Z300 ~ Z303</td><td>系统 / DLL：系统调用 / 库加载失败 / 参数校验 / 权限不足</td></tr>
+      <tr><td>Z401 ~ Z404</td><td>文件：不存在 / 权限不足 / 被占用锁定 / 通用 NOT_FOUND</td></tr>
+      <tr><td>Z600</td><td>throw 主动抛出的用户错误</td></tr>
       <tr><td>Z999</td><td>尚未实现</td></tr>
     </table>
+    <p>完整解释与修复建议：<code class="inline">zap explain Z201</code>。</p>
+  </section>
+
+  <section id="try">
+    <h2><span class="hash">#</span>错误处理与恢复</h2>
+    <p>try-catch 捕获可恢复错误（ZError 通道）；内存越界等 panic 类崩溃不进入捕获，保持原有崩溃行为。配合 <code class="inline">--restart</code> / <code class="inline">--resume</code> 实现无人值守运行。</p>
+<pre><code><span class="k">try</span> {
+    resp = <span class="f">http_get</span>(<span class="s">"http://example.com/data"</span>);
+} <span class="k">catch</span> e {
+    <span class="f">print</span>(e.code + <span class="s">": "</span> + e.message);  <span class="c">// 字段: code/message/file/line/col/context</span>
+    resp = <span class="f">db.get</span>(<span class="s">"cached"</span>);        <span class="c">// 降级回退</span>
+}
+
+<span class="k">throw</span> <span class="s">"用户错误"</span>;   <span class="c">// 主动抛出 → error[Z600]</span>
+<span class="k">throw</span> e;             <span class="c">// 重抛已捕获的 error 值</span></code></pre>
+    <table>
+      <tr><th>机制</th><th>说明</th></tr>
+      <tr><td><code>--restart[=N]</code></td><td>脚本失败自动重拉（默认最多 3 次）；<code>--backoff=a,b,c</code> 重启间隔递增（默认 1,3,10 秒）；<code>--restart-on=Z200,Z401</code> 只对白名单错误码重启，确定性错误直接退出</td></tr>
+      <tr><td><code>--resume</code></td><td>恢复上次 db 检查点；<code>db.set</code> 自动落盘 <code>~/.zap/state/</code>，崩溃不丢检查点，脚本内容变更后检查点自动失效</td></tr>
+      <tr><td>错误对象字段</td><td><code>e.code</code> / <code>e.message</code> / <code>e.file</code> / <code>e.context</code>（str）；<code>e.line</code> / <code>e.col</code>（int）</td></tr>
+    </table>
+    <p>注意：Zap 为块作用域，try/catch 块内赋值的变量在块外不可见，跨块共享的变量需在块前声明。示例见 <code class="inline">examples/try_catch.zp</code>、<code class="inline">examples/restart_demo.zp</code>、<code class="inline">examples/resume_demo.zp</code>。</p>
   </section>
 
   <section id="principles">

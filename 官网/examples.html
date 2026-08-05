@@ -219,6 +219,52 @@ x = <span class="n">42</span>;
 <pre><code><span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.zp"</span> <span class="k">as</span> m;
 <span class="f">print</span>(<span class="f">m_add</span>(<span class="n">20</span>, <span class="n">22</span>));  <span class="c">// 42</span></code></pre>
   </div>
+
+  <div class="example">
+    <div class="title">18. try-catch 错误捕获与恢复</div>
+    <div class="note">捕获可恢复错误并降级回退；throw 主动抛出；错误对象字段 e.code / e.message / e.line</div>
+<pre><code>r = <span class="n">0</span>;
+<span class="k">try</span> {
+    r = <span class="n">10</span> / <span class="n">0</span>;              <span class="c">// error[Z009] 除零</span>
+} <span class="k">catch</span> e {
+    <span class="f">print</span>(<span class="s">"caught "</span> + e.code + <span class="s">": "</span> + e.message);
+    r = -<span class="n">1</span>;                  <span class="c">// 回退值</span>
+}
+<span class="f">print</span>(r);                   <span class="c">// -1</span>
+
+<span class="k">throw</span> <span class="s">"自定义错误"</span>;        <span class="c">// error[Z600]</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">19. 自动重启与检查点恢复</div>
+    <div class="note">--restart 失败自动重拉（名刀机制）；--resume 从 db 检查点继续（崩溃不丢进度）</div>
+<pre><code><span class="c">// 失败自动重启(默认最多3次,间隔1s/3s/10s递增;--restart-on 错误码白名单)</span>
+zap run --restart=2 --backoff=1,1 --restart-on=Z401 app.zp
+
+<span class="c">// 检查点恢复(db.set 自动落盘 ~/.zap/state/,脚本变更后检查点自动失效)</span>
+zap run --resume app.zp
+
+<span class="c">// app.zp 中写入检查点</span>
+<span class="k">db.set</span>(<span class="s">"stage"</span>, <span class="s">"2"</span>);</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">20. build --exe 打包独立可执行文件</div>
+    <div class="note">解释器+脚本打包为单文件，双击即用；--version 查看内嵌版本信息</div>
+<pre><code><span class="c">// 打包(默认输出 app.exe,体积≈解释器+脚本)</span>
+zap build --exe app.zp [-o my_app.exe]
+
+<span class="c">// 运行:自动释放运行时到 .zap_cache,执行完毕后自动清理</span>
+./my_app.exe
+
+<span class="c">// 版本信息(内嵌 Zap 版本/构建时间/脚本名/校验和)</span>
+./my_app.exe --version
+<span class="c">// &gt; my_app.exe (Zap v0.1.0) built at 2026-08-05 17:04:54</span>
+<span class="c">// &gt; script: app.zp</span>
+
+<span class="c">// 保留缓存以加速下次启动</span>
+./my_app.exe --keep-cache</code></pre>
+  </div>
 </main>
 
 <footer>

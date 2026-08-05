@@ -115,13 +115,19 @@ mod platform {
 
     fn win_err(what: &str, span: Span, file: &str, src: &str) -> ZError {
         let code = unsafe { GetLastError() };
+        // Windows 错误码 5 = ERROR_ACCESS_DENIED，归类为权限不足
+        let (err_code, hint): (&'static str, &'static str) = if code == 5 {
+            (codes::PERMISSION, "access denied — check permissions or run with administrator rights")
+        } else {
+            (codes::SYSCALL, "check the arguments or system state")
+        };
         zerr(
-            codes::SYSCALL,
+            err_code,
             format!("{} failed (Windows error {})", what, code),
             span,
             file,
             src,
-            Some("check the arguments or system state"),
+            Some(hint),
         )
     }
 

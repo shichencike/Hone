@@ -76,8 +76,16 @@ impl Parser {
     }
 
     fn expect_semi(&mut self) -> Result<(), ZError> {
-        self.expect(&Tok::Semi, "`;`")?;
-        Ok(())
+        if self.at(&Tok::Semi) {
+            self.next();
+            Ok(())
+        } else {
+            Err(self.err_here(
+                codes::MISSING_SEMI,
+                format!("expected `;`, found {}", self.peek().describe()),
+                Some("insert `;` at the end of the statement"),
+            ))
+        }
     }
 
     // ---------- 程序 ----------
@@ -115,6 +123,8 @@ impl Parser {
             Tok::While => self.parse_while(),
             Tok::Return => self.parse_return(),
             Tok::Go => self.parse_go(),
+            Tok::Try => self.parse_try(),
+            Tok::Throw => self.parse_throw(),
             Tok::Breakpoint => {
                 let (_, span) = self.next();
                 self.expect_semi()?;
@@ -395,6 +405,47 @@ impl Parser {
         };
         self.expect_semi()?;
         Ok(Stmt::Return { value, span })
+    }
+
+    /// try { body } catch e { handler }
+    fn parse_try(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // try
+        let body = self.parse_block()?;
+        if !self.at(&Tok::Catch) {
+            return Err(self.err_here(
+                codes::SYNTAX,
+                "expected `catch` after the `try` block",
+                Some("form: `try { ... } catch e { ... }`"),
+            ));
+        }
+        self.next(); // catch
+        let (var_tok, var_span) = self.next();
+        let catch_var = match var_tok {
+            Tok::Ident(s) => s,
+            other => {
+                return Err(self.err_at(
+                    &var_span,
+                    codes::SYNTAX,
+                    format!("expected an error variable name after `catch`, found {}", other.describe()),
+                    Some("form: `catch e` where `e` is a new variable of type `error`"),
+                ))
+            }
+        };
+        let handler = self.parse_block()?;
+        Ok(Stmt::Try {
+            body,
+            catch_var,
+            handler,
+            span,
+        })
+    }
+
+    /// throw 表达式;  主动抛出 str 或 error 值
+    fn parse_throw(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // throw
+        let value = self.parse_expr()?;
+        self.expect_semi()?;
+        Ok(Stmt::Throw { value, span })
     }
 
     /// @export 函数名;
@@ -779,25 +830,35 @@ impl Parser {
                 Ok(inner)
             }
             Tok::Ident(first) => {
-                let name = self.join_dotted(first, span)?;
+                let parts = self.join_dotted_parts(first, span)?;
                 if self.at(&Tok::LParen) {
                     self.next();
                     let args = self.parse_args()?;
                     self.expect(&Tok::RParen, "`)`")?;
                     Ok(Expr::Call {
-                        callee: name,
+                        callee: parts.join("."),
                         args,
                         span,
                     })
-                } else if name.contains('.') {
-                    Err(self.err_at(
-                        &span,
-                        codes::SYNTAX,
-                        format!("`{}` must be called as a function", name),
-                        Some("module functions are used like `time.now()`"),
-                    ))
+                } else if parts.len() > 1 {
+                    // 字段访问链：e.code / a.b.c → Field(Field(a,b),c)
+                    let mut expr = Expr::Ident {
+                        name: parts[0].clone(),
+                        span,
+                    };
+                    for f in &parts[1..] {
+                        expr = Expr::Field {
+                            obj: Box::new(expr),
+                            field: f.clone(),
+                            span,
+                        };
+                    }
+                    Ok(expr)
                 } else {
-                    Ok(Expr::Ident { name, span })
+                    Ok(Expr::Ident {
+                        name: parts[0].clone(),
+                        span,
+                    })
                 }
             }
             other => Err(self.err_here(
@@ -808,22 +869,24 @@ impl Parser {
         }
     }
 
-    /// 将 "a.b.c" 合并为单个限定名。类型关键字（int/float/bool/str）在
+    /// 将 "a.b.c" 合并为单个限定名（调用场景，如 go time.now()）。
+    fn join_dotted(&mut self, first: String, span: Span) -> Result<String, ZError> {
+        Ok(self.join_dotted_parts(first, span)?.join("."))
+    }
+
+    /// 收集 "a.b.c" 的点号链各部分。类型关键字（int/float/bool/str）在
     /// 点号后视为模块成员名（如 random.int、random.float）。
-    fn join_dotted(&mut self, first: String, _span: Span) -> Result<String, ZError> {
-        let mut name = first;
+    fn join_dotted_parts(&mut self, first: String, _span: Span) -> Result<Vec<String>, ZError> {
+        let mut parts = vec![first];
         while self.at(&Tok::Dot) {
             self.next();
             let (tok, span) = self.next();
             match tok {
-                Tok::Ident(part) => {
-                    name.push('.');
-                    name.push_str(&part);
-                }
-                Tok::TInt => name.push_str(".int"),
-                Tok::TFloat => name.push_str(".float"),
-                Tok::TBool => name.push_str(".bool"),
-                Tok::TStr => name.push_str(".str"),
+                Tok::Ident(part) => parts.push(part),
+                Tok::TInt => parts.push("int".to_string()),
+                Tok::TFloat => parts.push("float".to_string()),
+                Tok::TBool => parts.push("bool".to_string()),
+                Tok::TStr => parts.push("str".to_string()),
                 other => {
                     return Err(self.err_at(
                         &span,
@@ -834,7 +897,7 @@ impl Parser {
                 }
             }
         }
-        Ok(name)
+        Ok(parts)
     }
 
     /// 解析逗号分隔的参数列表（不含括号）。

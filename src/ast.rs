@@ -98,6 +98,18 @@ pub enum Stmt {
         args: Vec<Expr>,
         span: Span,
     },
+    /// try { ... } catch e { ... }  捕获可恢复错误，e 为 error 类型绑定到 handler 作用域
+    Try {
+        body: Vec<Stmt>,
+        catch_var: String,
+        handler: Vec<Stmt>,
+        span: Span,
+    },
+    /// throw 表达式;  主动抛出错误（str 或 error 值）
+    Throw {
+        value: Expr,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +135,8 @@ pub enum Expr {
     StrLit(String, Span),
     /// 标识符；模块函数经点号合并为完整名（如 "time.now"）
     Ident { name: String, span: Span },
+    /// 字段访问：obj.field（如 e.code、e.message）
+    Field { obj: Box<Expr>, field: String, span: Span },
     Unary { op: UnOp, expr: Box<Expr>, span: Span },
     Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr>, span: Span },
     Call { callee: String, args: Vec<Expr>, span: Span },
@@ -178,6 +192,7 @@ pub fn expr_span(e: &Expr) -> Span {
         | Expr::BoolLit(_, s)
         | Expr::StrLit(_, s)
         | Expr::Ident { span: s, .. }
+        | Expr::Field { span: s, .. }
         | Expr::Call { span: s, .. }
         | Expr::Unary { span: s, .. }
         | Expr::Binary { span: s, .. } => *s,

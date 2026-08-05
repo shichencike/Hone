@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -20,6 +21,22 @@ use crate::lexer::Span;
 
 /// 全局键值存储（db.set / db.get）
 static KV_STORE: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// --resume 持久化目标：(状态文件路径, 脚本内容哈希)。启用后 db.set 自动落盘。
+static STATE_FILE: Mutex<Option<(PathBuf, String)>> = Mutex::new(None);
+
+/// 启用 db 持久化：db.set 后自动将整个 KV_STORE 连同脚本哈希写入状态文件。
+/// 由 main.rs 在 `--resume` 模式下调用。
+pub fn enable_persist(path: PathBuf, script_hash: String) {
+    *STATE_FILE.lock().unwrap() = Some((path, script_hash));
+}
+
+/// 用持久化数据覆盖 KV_STORE（`--resume` 启动时调用，先于脚本执行）。
+pub fn load_state(kv: HashMap<String, String>) {
+    let mut store = KV_STORE.lock().unwrap();
+    store.clear();
+    store.extend(kv);
+}
 
 /// 命令行参数（args.get / args.has），由 main.rs 初始化
 static CLI_ARGS: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -205,7 +222,9 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "to_str" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             match v {
-                Value::Int(_) | Value::Float(_) | Value::Bool(_) => Ok(Value::Str(v.display())),
+                Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Error(_) => {
+                    Ok(Value::Str(v.display()))
+                }
                 Value::Str(s) => Ok(Value::Str(s.clone())),
                 Value::Null => Ok(Value::Str("null".to_string())),
             }
@@ -291,13 +310,22 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "read_file" => {
             let p = as_str(&args[0], 0, name, span, file, src)?;
             std::fs::read_to_string(p).map(Value::Str).map_err(|e| {
+                // 细分文件错误：不存在 / 权限不足 / 被占用锁定 / 其他
+                let (code, hint): (&'static str, &'static str) = match e.kind() {
+                    std::io::ErrorKind::NotFound => (codes::FILE_NOT_FOUND, "the file does not exist"),
+                    std::io::ErrorKind::PermissionDenied => (codes::FILE_PERMISSION, "check file permissions"),
+                    std::io::ErrorKind::WouldBlock
+                    | std::io::ErrorKind::ResourceBusy
+                    | std::io::ErrorKind::Interrupted => (codes::FILE_LOCKED, "the file is locked by another process"),
+                    _ => (codes::NOT_FOUND, "check the path and file permissions"),
+                };
                 err(
-                    codes::NOT_FOUND,
+                    code,
                     format!("cannot read file `{}`: {}", p, e),
                     span,
                     file,
                     src,
-                    Some("check the path and file permissions"),
+                    Some(hint),
                 )
             })
         }
@@ -305,13 +333,22 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let p = as_str(&args[0], 0, name, span, file, src)?;
             let c = as_str(&args[1], 1, name, span, file, src)?;
             std::fs::write(p, c).map_err(|e| {
+                // 细分文件错误：不存在 / 权限不足 / 被占用锁定 / 其他
+                let (code, hint): (&'static str, &'static str) = match e.kind() {
+                    std::io::ErrorKind::NotFound => (codes::FILE_NOT_FOUND, "the file does not exist"),
+                    std::io::ErrorKind::PermissionDenied => (codes::FILE_PERMISSION, "check file permissions"),
+                    std::io::ErrorKind::WouldBlock
+                    | std::io::ErrorKind::ResourceBusy
+                    | std::io::ErrorKind::Interrupted => (codes::FILE_LOCKED, "the file is locked by another process"),
+                    _ => (codes::NOT_FOUND, "check the path and file permissions"),
+                };
                 err(
-                    codes::NOT_FOUND,
+                    code,
                     format!("cannot write file `{}`: {}", p, e),
                     span,
                     file,
                     src,
-                    Some("check the path and file permissions"),
+                    Some(hint),
                 )
             })?;
             Ok(Value::Null)
@@ -515,8 +552,25 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "db.set" => {
             let key = as_str(&args[0], 0, name, span, file, src)?;
             let val = as_str(&args[1], 1, name, span, file, src)?;
-            let mut store = KV_STORE.lock().unwrap();
-            store.insert(key.to_string(), val.to_string());
+            {
+                let mut store = KV_STORE.lock().unwrap();
+                store.insert(key.to_string(), val.to_string());
+            }
+            // --resume 模式下同步落盘，避免进程崩溃丢失检查点；写盘失败显式报错
+            if let Some((path, hash)) = STATE_FILE.lock().unwrap().clone() {
+                let kv = KV_STORE.lock().unwrap().clone();
+                let json = serde_json::json!({ "script": hash, "kv": kv });
+                std::fs::write(&path, json.to_string()).map_err(|e| {
+                    err(
+                        codes::FILE_PERMISSION,
+                        format!("cannot persist db state to `{}`: {}", path.display(), e),
+                        span,
+                        file,
+                        src,
+                        Some("check disk space or file permissions"),
+                    )
+                })?;
+            }
             Ok(Value::Null)
         }
         "db.get" => {
@@ -580,7 +634,7 @@ fn arg_err(name: &str, want: usize, got: usize, span: Span, file: &str, src: &st
 // ---------- time ----------
 
 /// 将 Unix 时间戳（秒）按格式串格式化（UTC）。占位符：YYYY MM DD HH mm SS。
-fn format_timestamp(secs: i64, fmt: &str) -> String {
+pub(crate) fn format_timestamp(secs: i64, fmt: &str) -> String {
     let days = secs.div_euclid(86400);
     let sod = secs.rem_euclid(86400);
     let (y, mo, d) = civil_from_days(days);
@@ -700,7 +754,18 @@ pub(crate) fn http_request(
     file: &str,
     src: &str,
 ) -> Result<String, ZError> {
-    let net_err = |m: String| err(codes::NETWORK, format!("{}: {}", url, m), span, file, src, Some("check the URL or your network connection"));
+    // 按错误类型细分网络错误：超时 / 连接拒绝 / DNS 失败 / 其他
+    let net_err = |act: &str, e: std::io::Error| {
+        let (code, hint): (&'static str, &'static str) = match e.kind() {
+            std::io::ErrorKind::TimedOut => (codes::NET_TIMEOUT, "the request timed out"),
+            std::io::ErrorKind::ConnectionRefused => (codes::NET_CONN_REFUSED, "the connection was refused"),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::AddrNotAvailable => {
+                (codes::NET_DNS, "DNS resolution failed")
+            }
+            _ => (codes::NETWORK, "check the URL or your network connection"),
+        };
+        err(code, format!("{}: {}: {}", act, url, e), span, file, src, Some(hint))
+    };
 
     let rest = match url.strip_prefix("http://") {
         Some(r) => r,
@@ -725,7 +790,7 @@ pub(crate) fn http_request(
     };
     let addr = format!("{}:{}", host, port);
 
-    let mut stream = TcpStream::connect(&addr).map_err(|e| net_err(e.to_string()))?;
+    let mut stream = TcpStream::connect(&addr).map_err(|e| net_err("connect", e))?;
     stream.set_read_timeout(Some(Duration::from_secs(15))).ok();
     stream.set_write_timeout(Some(Duration::from_secs(15))).ok();
 
@@ -748,13 +813,13 @@ pub(crate) fn http_request(
             Vec::new(),
         ),
     };
-    stream.write_all(head.as_bytes()).map_err(|e| net_err(e.to_string()))?;
+    stream.write_all(head.as_bytes()).map_err(|e| net_err("write", e))?;
     if !tail.is_empty() {
-        stream.write_all(&tail).map_err(|e| net_err(e.to_string()))?;
+        stream.write_all(&tail).map_err(|e| net_err("write", e))?;
     }
 
     let mut buf = Vec::new();
-    stream.read_to_end(&mut buf).map_err(|e| net_err(e.to_string()))?;
+    stream.read_to_end(&mut buf).map_err(|e| net_err("read", e))?;
     let text = String::from_utf8_lossy(&buf).into_owned();
 
     let (head, mut body_text) = match text.split_once("\r\n\r\n") {
@@ -771,7 +836,7 @@ pub(crate) fn http_request(
         .unwrap_or(0);
     if !(200..300).contains(&status) {
         return Err(err(
-            codes::NETWORK,
+            codes::NET_HTTP_STATUS,
             format!("{}: HTTP status {}", url, status),
             span,
             file,
@@ -858,6 +923,16 @@ fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String,
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Str(s) => serde_json::Value::String(s.clone()),
         Value::Null => serde_json::Value::Null,
+        Value::Error(_) => {
+            return Err(err(
+                codes::TYPE_MISMATCH,
+                "cannot serialize an `error` value to JSON",
+                span,
+                file,
+                src,
+                Some("convert the error to a string first, e.g. to_str(e)"),
+            ));
+        }
     };
     Ok(jv.to_string())
 }

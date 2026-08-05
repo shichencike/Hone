@@ -1,0 +1,14 @@
+// resume_demo.zp - 演示 --resume 检查点恢复(结合 db 模块与自动落盘)
+// 第一次运行:zap run --resume examples/resume_demo.zp   (阶段1 写检查点后崩溃)
+// 第二次运行:zap run --resume examples/resume_demo.zp   (恢复检查点,跳过阶段1)
+// 说明:db.set 在 --resume 模式下自动落盘到 ~/.zap/state/;
+//       脚本内容变更后检查点自动失效(不会脏恢复)。
+if (to_str(db.get("stage")) == "null") {
+    print("stage 1: 开始工作...");
+    db.set("stage", "2");       // 写入检查点(自动落盘)
+    print("stage 1 完成,检查点已保存,模拟崩溃...");
+    x = 1 / 0;                  // 除零崩溃,进程退出
+} else {
+    print("resumed: 检查点 stage = " + db.get("stage"));
+    print("stage 2: 继续执行,不再重复阶段1");
+}

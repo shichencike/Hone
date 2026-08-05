@@ -13,6 +13,30 @@ use crate::error::ZError;
 use crate::lexer::Span;
 use crate::parser;
 
+/// 错误对象（catch e 中的 e）。code 为 &'static str 以便原样重抛。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ErrorObj {
+    pub code: &'static str,
+    pub message: String,
+    pub file: String,
+    pub line: usize,
+    pub col: usize,
+    pub context: String,
+}
+
+impl ErrorObj {
+    fn from_err(e: &ZError) -> Self {
+        ErrorObj {
+            code: e.code,
+            message: e.msg.clone(),
+            file: e.file.clone(),
+            line: e.line,
+            col: e.col,
+            context: e.line_text.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Int(i64),
@@ -21,6 +45,8 @@ pub enum Value {
     Str(String),
     /// void 函数调用结果的占位值
     Null,
+    /// 错误对象（catch e 中的 e）
+    Error(ErrorObj),
 }
 
 impl Value {
@@ -31,6 +57,7 @@ impl Value {
             Value::Bool(_) => "bool",
             Value::Str(_) => "str",
             Value::Null => "null",
+            Value::Error(_) => "error",
         }
     }
 
@@ -41,6 +68,7 @@ impl Value {
             Value::Bool(b) => b.to_string(),
             Value::Str(s) => s.clone(),
             Value::Null => "null".to_string(),
+            Value::Error(e) => format!("error[{}]: {}", e.code, e.message),
         }
     }
 }
@@ -276,6 +304,53 @@ impl Interp {
                 }
                 Ok(Flow::Normal)
             }
+            Stmt::Try { body, catch_var, handler, .. } => {
+                match self.exec_block(env, body) {
+                    Ok(flow) => Ok(flow),
+                    Err(e) => {
+                        // 捕获可恢复错误：绑定错误对象后执行 handler
+                        env.scopes.push(HashMap::new());
+                        env.declare(catch_var, Value::Error(ErrorObj::from_err(&e)));
+                        let flow = self.exec_stmts(env, handler);
+                        env.scopes.pop();
+                        flow
+                    }
+                }
+            }
+            Stmt::Throw { value, span } => {
+                let v = self.eval_expr(env, value)?;
+                match v {
+                    // 抛字符串：构造一个 Z600 用户错误
+                    Value::Str(s) => Err(self.runtime_err(codes::THROW, s, *span, None::<&str>)),
+                    // 重抛 error 值：同文件保留原始定位，跨文件退化并附原始位置
+                    Value::Error(e) => {
+                        if e.file == self.file {
+                            Err(ZError::new(
+                                e.code,
+                                e.message,
+                                &self.file,
+                                &self.src,
+                                e.line,
+                                e.col,
+                                1,
+                                None::<&str>,
+                            ))
+                        } else {
+                            Err(ZError::plain(
+                                e.code,
+                                format!("{} (at {}:{}:{})", e.message, e.file, e.line, e.col),
+                                None::<&str>,
+                            ))
+                        }
+                    }
+                    other => Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("`throw` accepts a `str` or `error`, got `{}`", other.type_name()),
+                        *span,
+                        None::<&str>,
+                    )),
+                }
+            }
         }
     }
 
@@ -465,7 +540,7 @@ impl Interp {
     fn load_library(&mut self, name: &str, path: &str, span: Span) -> Result<(), ZError> {
         let lib = unsafe { libloading::Library::new(path) }.map_err(|e| {
             self.runtime_err(
-                codes::NOT_FOUND,
+                codes::DLL_LOAD,
                 format!("cannot load dynamic library `{}`: {}", path, e),
                 span,
                 Some("check the library path and architecture"),
@@ -494,7 +569,7 @@ impl Interp {
         }
         if args.len() > 8 {
             return Err(self.runtime_err(
-                codes::ARG_COUNT,
+                codes::DLL_ARG,
                 format!("`{}` takes at most 8 arguments", callee),
                 span,
                 Some("the C ABI convention supports up to 8 int64 parameters"),
@@ -582,6 +657,35 @@ impl Interp {
                     Some("declare the variable before reading it"),
                 )),
             },
+            Expr::Field { obj, field, span } => {
+                let v = self.eval_expr(env, obj)?;
+                match v {
+                    Value::Error(e) => match field.as_str() {
+                        "code" => Ok(Value::Str(e.code.to_string())),
+                        "message" => Ok(Value::Str(e.message.clone())),
+                        "file" => Ok(Value::Str(e.file.clone())),
+                        "context" => Ok(Value::Str(e.context.clone())),
+                        "line" => Ok(Value::Int(e.line as i64)),
+                        "col" => Ok(Value::Int(e.col as i64)),
+                        other => Err(self.runtime_err(
+                            codes::UNDEFINED,
+                            format!("unknown error field `{}`", other),
+                            *span,
+                            Some("error fields: code, message, file, line, col, context"),
+                        )),
+                    },
+                    other => Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!(
+                            "field access `.{}` requires an `error` value, got `{}`",
+                            field,
+                            other.type_name()
+                        ),
+                        *span,
+                        Some("only error values (catch variables) support field access"),
+                    )),
+                }
+            }
             Expr::Unary { op, expr, span } => {
                 let v = self.eval_expr(env, expr)?;
                 match op {

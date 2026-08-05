@@ -19,6 +19,9 @@ pub enum Tok {
     True,
     False,
     Go,
+    Try,
+    Catch,
+    Throw,
     Breakpoint,
     Load,
     Lazy,
@@ -78,6 +81,9 @@ impl Tok {
             Tok::True => "`true`".into(),
             Tok::False => "`false`".into(),
             Tok::Go => "`go`".into(),
+            Tok::Try => "`try`".into(),
+            Tok::Catch => "`catch`".into(),
+            Tok::Throw => "`throw`".into(),
             Tok::Breakpoint => "`breakpoint`".into(),
             Tok::Load => "`load`".into(),
             Tok::Lazy => "`lazy`".into(),
@@ -238,7 +244,7 @@ impl Lexer {
                     }
                     if !closed {
                         return Err(self.err(
-                            crate::error::codes::SYNTAX,
+                            crate::error::codes::UNTERMINATED_COMMENT,
                             "unterminated block comment",
                             2,
                             Some("close the comment with `*/`"),
@@ -277,6 +283,9 @@ impl Lexer {
                 "true" => Tok::True,
                 "false" => Tok::False,
                 "go" => Tok::Go,
+                "try" => Tok::Try,
+                "catch" => Tok::Catch,
+                "throw" => Tok::Throw,
                 "breakpoint" => Tok::Breakpoint,
                 "load" => Tok::Load,
                 "lazy" => Tok::Lazy,
@@ -441,7 +450,7 @@ impl Lexer {
             }
             _ => {
                 return Err(self.err(
-                    crate::error::codes::SYNTAX,
+                    crate::error::codes::ILLEGAL_CHAR,
                     format!("unexpected character `{}`", c),
                     1,
                     Some("check the character near this position"),
@@ -526,7 +535,7 @@ impl Lexer {
             match self.peek() {
                 None => {
                     return Err(self.err(
-                        crate::error::codes::SYNTAX,
+                        crate::error::codes::UNTERMINATED_STRING,
                         "unterminated string literal",
                         1,
                         Some("close the string with `\"`"),
@@ -534,7 +543,7 @@ impl Lexer {
                 }
                 Some('\n') => {
                     return Err(self.err(
-                        crate::error::codes::SYNTAX,
+                        crate::error::codes::UNTERMINATED_STRING,
                         "unterminated string literal (newline inside string)",
                         1,
                         Some("close the string before the newline"),
@@ -573,7 +582,7 @@ impl Lexer {
                         }
                         None => {
                             return Err(self.err(
-                                crate::error::codes::SYNTAX,
+                                crate::error::codes::UNTERMINATED_STRING,
                                 "unterminated string literal",
                                 1,
                                 Some("close the string with `\"`"),

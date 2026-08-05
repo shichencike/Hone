@@ -1,0 +1,5 @@
+// pack_args.zp - 打包 exe 参数传递验证
+// 打包:zap build --exe examples/pack_args.zp
+// 运行:myapp --name zap  →  输出 name = zap
+print("name = " + args.get("name"));
+print("has flag = " + to_str(args.has("flag")));

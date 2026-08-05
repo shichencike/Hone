@@ -22,6 +22,8 @@ pub enum Ty {
     Float,
     Bool,
     Str,
+    /// catch 绑定的错误对象类型（e.code / e.message 等）
+    Error,
     Void,
     Unknown,
 }
@@ -33,6 +35,7 @@ impl Ty {
             Ty::Float => "float",
             Ty::Bool => "bool",
             Ty::Str => "str",
+            Ty::Error => "error",
             Ty::Void => "void",
             Ty::Unknown => "unknown",
         }
@@ -166,6 +169,16 @@ impl Checker {
                 self.register_top(body)?;
                 self.global_scopes.pop();
             }
+            Stmt::Try { body, catch_var, handler, .. } => {
+                self.global_scopes.push(HashMap::new());
+                self.register_top(body)?;
+                self.global_scopes.pop();
+                // handler 作用域：catch 变量固定为 error 类型
+                self.global_scopes.push(HashMap::new());
+                self.bind_or_unify(catch_var, Some(Ty::Error), stmt_span(stmt))?;
+                self.register_top(handler)?;
+                self.global_scopes.pop();
+            }
             Stmt::VarDecl { name, .. } => {
                 self.bind_or_unify(name, None, stmt_span(stmt))?;
             }
@@ -214,6 +227,20 @@ impl Checker {
                     scopes.push(HashMap::new());
                     scope_stack.push(idx);
                     self.register_fn_body(body, scopes, scope_stack)?;
+                    scope_stack.pop();
+                }
+                Stmt::Try { body, catch_var, handler, .. } => {
+                    let idx = scopes.len();
+                    scopes.push(HashMap::new());
+                    scope_stack.push(idx);
+                    self.register_fn_body(body, scopes, scope_stack)?;
+                    scope_stack.pop();
+                    // handler 作用域：catch 变量固定为 error 类型
+                    let idx = scopes.len();
+                    scopes.push(HashMap::new());
+                    scope_stack.push(idx);
+                    self.bind_in_stack(catch_var, Some(Ty::Error), stmt_span(stmt), scopes, scope_stack)?;
+                    self.register_fn_body(handler, scopes, scope_stack)?;
                     scope_stack.pop();
                 }
                 Stmt::VarDecl { name, span, .. } => {
@@ -564,6 +591,20 @@ impl Checker {
                 self.check_expr(expr)?;
                 Ok(())
             }
+            Stmt::Try { body, catch_var, handler, span } => {
+                self.global_scopes.push(HashMap::new());
+                self.check_stmts(body)?;
+                self.global_scopes.pop();
+                self.global_scopes.push(HashMap::new());
+                self.bind_or_unify(catch_var, Some(Ty::Error), *span)?;
+                self.check_stmts(handler)?;
+                self.global_scopes.pop();
+                Ok(())
+            }
+            Stmt::Throw { value, span } => {
+                let res = self.check_expr(value)?;
+                self.check_throw_value(res, *span)
+            }
         }
     }
 
@@ -686,6 +727,27 @@ impl Checker {
                 self.check_expr_in_fn(expr, scopes, scope_stack, param_slots, ret_slot)?;
                 Ok(())
             }
+            Stmt::Try { body, catch_var, handler, span } => {
+                let idx = scopes.len();
+                scopes.push(HashMap::new());
+                scope_stack.push(idx);
+                self.check_stmts_with_scopes(body, scopes, scope_stack, param_slots, ret_slot)?;
+                scope_stack.pop();
+                scopes.pop();
+                // handler 作用域：catch 变量固定为 error 类型
+                let idx = scopes.len();
+                scopes.push(HashMap::new());
+                scope_stack.push(idx);
+                self.bind_in_stack(catch_var, Some(Ty::Error), *span, scopes, scope_stack)?;
+                self.check_stmts_with_scopes(handler, scopes, scope_stack, param_slots, ret_slot)?;
+                scope_stack.pop();
+                scopes.pop();
+                Ok(())
+            }
+            Stmt::Throw { value, span } => {
+                let res = self.check_expr_in_fn(value, scopes, scope_stack, param_slots, ret_slot)?;
+                self.check_throw_value(res, *span)
+            }
         }
     }
 
@@ -713,6 +775,10 @@ impl Checker {
                 let l = self.check_expr(lhs)?;
                 let r = self.check_expr(rhs)?;
                 self.check_binary(*op, l, r, *span)
+            }
+            Expr::Field { obj, field, span } => {
+                let res = self.check_expr(obj)?;
+                self.check_field(res, field, *span)
             }
             Expr::Unary { op, expr, span } => {
                 let res = self.check_expr(expr)?;
@@ -757,6 +823,10 @@ impl Checker {
                 let r = self.check_expr_in_fn(rhs, scopes, scope_stack, param_slots, ret_slot)?;
                 self.check_binary(*op, l, r, *span)
             }
+            Expr::Field { obj, field, span } => {
+                let res = self.check_expr_in_fn(obj, scopes, scope_stack, param_slots, ret_slot)?;
+                self.check_field(res, field, *span)
+            }
             Expr::Unary { op, expr, span } => {
                 let res = self.check_expr_in_fn(expr, scopes, scope_stack, param_slots, ret_slot)?;
                 self.check_unary(*op, res, *span)
@@ -765,6 +835,47 @@ impl Checker {
             Expr::FloatLit(..) => Ok(TyRes { ty: Ty::Float, slot: None }),
             Expr::BoolLit(..) => Ok(TyRes { ty: Ty::Bool, slot: None }),
             Expr::StrLit(..) => Ok(TyRes { ty: Ty::Str, slot: None }),
+        }
+    }
+
+    // ---------- try/throw 辅助 ----------
+
+    /// throw 的表达式必须是 str（转为用户错误）或 error（原样重抛）。
+    fn check_throw_value(&self, res: TyRes, span: Span) -> Result<(), ZError> {
+        match res.ty {
+            Ty::Str | Ty::Error | Ty::Unknown => Ok(()),
+            other => Err(self.zerr(
+                codes::TYPE_MISMATCH,
+                format!("`throw` accepts a `str` or `error`, got `{}`", other.name()),
+                span,
+                Some("throw a message string, or re-throw an `error` value"),
+            )),
+        }
+    }
+
+    /// error 类型字段访问检查：e.code / e.message / e.file / e.context → str；e.line / e.col → int。
+    fn check_field(&self, res: TyRes, field: &str, span: Span) -> Result<TyRes, ZError> {
+        if res.ty != Ty::Error && res.ty != Ty::Unknown {
+            return Err(self.zerr(
+                codes::TYPE_MISMATCH,
+                format!(
+                    "field access `.{}` requires an `error` value, got `{}`",
+                    field,
+                    res.ty.name()
+                ),
+                span,
+                Some("only error values (catch variables) support field access"),
+            ));
+        }
+        match field {
+            "code" | "message" | "file" | "context" => Ok(TyRes { ty: Ty::Str, slot: None }),
+            "line" | "col" => Ok(TyRes { ty: Ty::Int, slot: None }),
+            other => Err(self.zerr(
+                codes::UNDEFINED,
+                format!("unknown error field `{}`", other),
+                span,
+                Some("error fields: code, message, file, line, col, context"),
+            )),
         }
     }
 
@@ -1620,6 +1731,8 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Use { span, .. }
         | Stmt::Alias { span, .. }
         | Stmt::Go { span, .. }
+        | Stmt::Try { span, .. }
+        | Stmt::Throw { span, .. }
         | Stmt::DebugPrint { span, .. } => *span,
     }
 }

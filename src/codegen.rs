@@ -385,6 +385,12 @@ impl Codegen {
                     Some("declare the variable before reading it"),
                 )
             }),
+            Expr::Field { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "field access is not supported in DLL builds",
+                *span,
+                Some("field access (`e.code` etc.) works in interpreted mode only"),
+            )),
             Expr::Unary { op, expr, span } => {
                 let t = self.infer_expr_type(expr, vt, stack)?;
                 match op {
@@ -770,6 +776,12 @@ impl Codegen {
                     Some("declare the variable before reading it"),
                 )),
             },
+            Expr::Field { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "field access is not supported in DLL builds",
+                *span,
+                Some("field access (`e.code` etc.) works in interpreted mode only"),
+            )),
             Expr::Unary { op, expr, span } => {
                 let (t, s) = self.gen_expr(expr, ctx)?;
                 match op {
@@ -928,6 +940,8 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Use { span, .. }
         | Stmt::Alias { span, .. }
         | Stmt::Go { span, .. }
+        | Stmt::Try { span, .. }
+        | Stmt::Throw { span, .. }
         | Stmt::DebugPrint { span, .. } => *span,
     }
 }

@@ -1,0 +1,6 @@
+// restart_demo.zp - 演示 --restart 名刀机制(可恢复错误的自动重启)
+// 运行:zap run --restart=2 --backoff=1,1 --restart-on=Z401 examples/restart_demo.zp
+// 说明:读取不存在的文件触发 Z401(文件不存在),属于可恢复错误,
+//       白名单命中后按 backoff 间隔自动重拉;2 次后仍失败则以最后一次错误退出。
+data = read_file("missing_data.txt");
+print("ok: " + data);
