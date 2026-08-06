@@ -10,11 +10,15 @@ pub enum Tok {
     IntLit(i64),
     FloatLit(f64),
     StrLit(String),
+    /// 插值字符串 f"..."：携带已拆分的片段（文字段 / 代码段原始文本），由 parser 子解析代码段
+    FStr(Vec<FStrPart>),
     // 关键字
     Fn,
     If,
     Else,
     While,
+    For,
+    In,
     Return,
     True,
     False,
@@ -59,6 +63,8 @@ pub enum Tok {
     Dot,
     LParen,
     RParen,
+    LBracket,
+    RBracket,
     LBrace,
     RBrace,
     At,
@@ -73,10 +79,13 @@ impl Tok {
             Tok::IntLit(v) => format!("integer `{}`", v),
             Tok::FloatLit(v) => format!("float `{}`", v),
             Tok::StrLit(_) => "string literal".to_string(),
+            Tok::FStr(_) => "f-string literal".to_string(),
             Tok::Fn => "`fn`".into(),
             Tok::If => "`if`".into(),
             Tok::Else => "`else`".into(),
             Tok::While => "`while`".into(),
+            Tok::For => "`for`".into(),
+            Tok::In => "`in`".into(),
             Tok::Return => "`return`".into(),
             Tok::True => "`true`".into(),
             Tok::False => "`false`".into(),
@@ -121,10 +130,19 @@ impl Tok {
             Tok::RParen => "`)`".into(),
             Tok::LBrace => "`{`".into(),
             Tok::RBrace => "`}`".into(),
+            Tok::LBracket => "`[`".into(),
+            Tok::RBracket => "`]`".into(),
             Tok::At => "`@`".into(),
             Tok::Eof => "end of file".into(),
         }
     }
+}
+
+/// f"..." 插值字符串的片段：文字段或 {代码} 段（代码段保留原始文本，由 parser 子解析）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum FStrPart {
+    Lit(String),
+    Code(String),
 }
 
 /// 源码位置：line/col 均为 1-based，len 为 token 长度（字符数）。
@@ -279,6 +297,8 @@ impl Lexer {
                 "if" => Tok::If,
                 "else" => Tok::Else,
                 "while" => Tok::While,
+                "for" => Tok::For,
+                "in" => Tok::In,
                 "return" => Tok::Return,
                 "true" => Tok::True,
                 "false" => Tok::False,
@@ -299,7 +319,13 @@ impl Lexer {
                 "float" => Tok::TFloat,
                 "bool" => Tok::TBool,
                 "str" => Tok::TStr,
-                _ => Tok::Ident(s),
+                _ => {
+                    // 标识符恰好为 `f` 且紧跟引号 → 插值字符串 f"..."
+                    if s == "f" && self.peek() == Some('"') {
+                        return self.lex_fstring();
+                    }
+                    Tok::Ident(s)
+                }
             });
         }
 
@@ -435,6 +461,14 @@ impl Lexer {
             ')' => {
                 self.bump();
                 Tok::RParen
+            }
+            '[' => {
+                self.bump();
+                Tok::LBracket
+            }
+            ']' => {
+                self.bump();
+                Tok::RBracket
             }
             '{' => {
                 self.bump();
@@ -597,5 +631,142 @@ impl Lexer {
             }
         }
         Ok(Tok::StrLit(s))
+    }
+
+    /// 词法分析插值字符串 f"..."。调用前已消费 `f`，此处消费开头的 `"`。
+    /// 返回的片段：文字段保留原始转义（由 parser 解码），代码段保留原始文本（由 parser 子解析）。
+    /// `{{` / `}}` 为转义的字面大括号，保留双写形式由 parser 折叠为单个。
+    fn lex_fstring(&mut self) -> Result<Tok, ZError> {
+        self.bump(); // 开头的 "
+        let mut parts: Vec<FStrPart> = Vec::new();
+        let mut lit = String::new();
+        let mut code = String::new();
+        let mut depth: usize = 0; // { 嵌套深度；0 = 文字段
+        let mut in_code_str = false; // 代码段内的字符串字面量
+        loop {
+            let c = match self.peek() {
+                None => {
+                    return Err(self.err(
+                        crate::error::codes::UNTERMINATED_STRING,
+                        "unterminated f-string literal",
+                        1,
+                        Some("close the string with `\"`"),
+                    ));
+                }
+                Some(c) => c,
+            };
+            if c == '\n' {
+                return Err(self.err(
+                    crate::error::codes::UNTERMINATED_STRING,
+                    "unterminated f-string literal (newline inside string)",
+                    1,
+                    Some("close the string before the newline"),
+                ));
+            }
+            if depth == 0 {
+                // ---------- 文字段 ----------
+                match c {
+                    '"' => {
+                        self.bump();
+                        break;
+                    }
+                    '\\' => {
+                        // 保留原始转义，parser 负责解码
+                        lit.push(c);
+                        self.bump();
+                        if let Some(e) = self.peek() {
+                            lit.push(e);
+                            self.bump();
+                        }
+                    }
+                    '{' => {
+                        if self.peek2() == Some('{') {
+                            // 转义的字面大括号 `{{`
+                            lit.push_str("{{");
+                            self.bump();
+                            self.bump();
+                        } else {
+                            // 代码段开始
+                            self.bump();
+                            parts.push(FStrPart::Lit(std::mem::take(&mut lit)));
+                            code.clear();
+                            depth = 1;
+                        }
+                    }
+                    '}' => {
+                        if self.peek2() == Some('}') {
+                            // 转义的字面大括号 `}}`
+                            lit.push_str("}}");
+                            self.bump();
+                            self.bump();
+                        } else {
+                            return Err(self.err(
+                                crate::error::codes::SYNTAX,
+                                "unmatched `}` in f-string (use `}}` for a literal brace)",
+                                1,
+                                Some("escape a literal `}` as `}}`"),
+                            ));
+                        }
+                    }
+                    _ => {
+                        lit.push(c);
+                        self.bump();
+                    }
+                }
+            } else {
+                // ---------- 代码段 ----------
+                if in_code_str {
+                    match c {
+                        '\\' => {
+                            code.push(c);
+                            self.bump();
+                            if let Some(e) = self.peek() {
+                                code.push(e);
+                                self.bump();
+                            }
+                        }
+                        '"' => {
+                            in_code_str = false;
+                            code.push(c);
+                            self.bump();
+                        }
+                        _ => {
+                            code.push(c);
+                            self.bump();
+                        }
+                    }
+                    continue;
+                }
+                match c {
+                    '"' => {
+                        in_code_str = true;
+                        code.push(c);
+                        self.bump();
+                    }
+                    '{' => {
+                        depth += 1;
+                        code.push(c);
+                        self.bump();
+                    }
+                    '}' => {
+                        depth -= 1;
+                        self.bump();
+                        if depth == 0 {
+                            parts.push(FStrPart::Code(std::mem::take(&mut code)));
+                        } else {
+                            code.push('}');
+                        }
+                    }
+                    _ => {
+                        code.push(c);
+                        self.bump();
+                    }
+                }
+            }
+        }
+        if !lit.is_empty() {
+            parts.push(FStrPart::Lit(lit));
+        }
+        Ok(Tok::FStr(parts))
     }
 }

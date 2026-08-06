@@ -141,6 +141,19 @@ pub fn is_builtin(name: &str) -> bool {
         name,
         "print"
             | "len"
+            | "append"
+            | "contains"
+            | "index_of"
+            | "keys"
+            | "values"
+            | "has_key"
+            | "is_int"
+            | "is_float"
+            | "is_str"
+            | "is_bool"
+            | "is_list"
+            | "is_dict"
+            | "is_null"
             | "type_of"
             | "to_str"
             | "to_int"
@@ -157,6 +170,7 @@ pub fn is_builtin(name: &str) -> bool {
             | "time.now"
             | "time.sleep"
             | "time.format"
+            | "time.parse"
             | "random.int"
             | "random.float"
             | "http_get"
@@ -188,6 +202,7 @@ pub fn is_builtin(name: &str) -> bool {
             | "regex.replace"
             | "crypto.md5"
             | "crypto.sha256"
+            | "uuid.new"
     )
 }
 
@@ -205,19 +220,163 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             match v {
                 Value::Str(s) => Ok(Value::Int(s.len() as i64)),
+                Value::List(items) => Ok(Value::Int(items.len() as i64)),
+                Value::Dict(entries) => Ok(Value::Int(entries.len() as i64)),
                 other => Err(err(
                     codes::TYPE_MISMATCH,
-                    format!("`len` expects a string, got `{}`", other.type_name()),
+                    format!("`len` expects a string, list, or dict, got `{}`", other.type_name()),
                     span,
                     file,
                     src,
-                    Some("`len` returns the byte length of a string"),
+                    Some("`len` returns the byte length of a string, or the element count of a list/dict"),
+                )),
+            }
+        }
+        "append" => {
+            let list = args.get(0).ok_or_else(|| arg_err(name, 2, 0, span, file, src))?;
+            let val = args.get(1).ok_or_else(|| arg_err(name, 2, 1, span, file, src))?;
+            match list {
+                // 列表是值类型：返回新列表，配合 `l = append(l, x)` 使用
+                Value::List(items) => {
+                    let mut new_items = items.clone();
+                    new_items.push(val.clone());
+                    Ok(Value::List(new_items))
+                }
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`append` expects a list, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("use `l = append(l, x)` to add `x` to the tail of list `l`"),
+                )),
+            }
+        }
+        "contains" => {
+            let list = args.get(0).ok_or_else(|| arg_err(name, 2, 0, span, file, src))?;
+            let val = args.get(1).ok_or_else(|| arg_err(name, 2, 1, span, file, src))?;
+            match list {
+                Value::List(items) => Ok(Value::Bool(items.iter().any(|i| values_eq(i, val)))),
+                Value::Str(s) => match val {
+                    // 字符串包含：兼容 str_contains
+                    Value::Str(sub) => Ok(Value::Bool(s.contains(sub))),
+                    other => Err(err(
+                        codes::TYPE_MISMATCH,
+                        format!("`contains` on a string expects a string, got `{}`", other.type_name()),
+                        span,
+                        file,
+                        src,
+                        Some("pass a substring"),
+                    )),
+                },
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`contains` expects a list or string, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("pass a list or string as the first argument"),
+                )),
+            }
+        }
+        "index_of" => {
+            let list = args.get(0).ok_or_else(|| arg_err(name, 2, 0, span, file, src))?;
+            let val = args.get(1).ok_or_else(|| arg_err(name, 2, 1, span, file, src))?;
+            match list {
+                Value::List(items) => {
+                    for (i, item) in items.iter().enumerate() {
+                        if values_eq(item, val) {
+                            return Ok(Value::Int(i as i64));
+                        }
+                    }
+                    Ok(Value::Int(-1))
+                }
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`index_of` expects a list, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("pass a list as the first argument"),
+                )),
+            }
+        }
+        "keys" => {
+            let d = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            match d {
+                Value::Dict(entries) => Ok(Value::List(
+                    entries.iter().map(|(k, _)| Value::Str(k.clone())).collect(),
+                )),
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`keys` expects a dict, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("pass a dict as the argument"),
+                )),
+            }
+        }
+        "values" => {
+            let d = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            match d {
+                Value::Dict(entries) => Ok(Value::List(entries.iter().map(|(_, v)| v.clone()).collect())),
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`values` expects a dict, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("pass a dict as the argument"),
+                )),
+            }
+        }
+        "has_key" => {
+            let d = args.get(0).ok_or_else(|| arg_err(name, 2, 0, span, file, src))?;
+            let k = as_str(&args[1], 1, name, span, file, src)?;
+            match d {
+                Value::Dict(entries) => Ok(Value::Bool(entries.iter().any(|(ek, _)| ek == k))),
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`has_key` expects a dict, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("pass a dict as the first argument and a key string as the second"),
                 )),
             }
         }
         "type_of" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             Ok(Value::Str(v.type_name().to_string()))
+        }
+        "is_int" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            Ok(Value::Bool(matches!(v, Value::Int(_))))
+        }
+        "is_float" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            Ok(Value::Bool(matches!(v, Value::Float(_))))
+        }
+        "is_str" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            Ok(Value::Bool(matches!(v, Value::Str(_))))
+        }
+        "is_bool" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            Ok(Value::Bool(matches!(v, Value::Bool(_))))
+        }
+        "is_list" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            Ok(Value::Bool(matches!(v, Value::List(_))))
+        }
+        "is_dict" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            Ok(Value::Bool(matches!(v, Value::Dict(_))))
+        }
+        "is_null" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            Ok(Value::Bool(matches!(v, Value::Null)))
         }
         "to_str" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
@@ -226,6 +385,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                     Ok(Value::Str(v.display()))
                 }
                 Value::Str(s) => Ok(Value::Str(s.clone())),
+                Value::List(_) | Value::Dict(_) => Ok(Value::Str(v.display())),
                 Value::Null => Ok(Value::Str("null".to_string())),
             }
         }
@@ -437,6 +597,20 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let fmt = as_str(&args[1], 1, name, span, file, src)?;
             Ok(Value::Str(format_timestamp(ts, fmt)))
         }
+        "time.parse" => {
+            let s = as_str(&args[0], 0, name, span, file, src)?;
+            match parse_timestamp(s) {
+                Some(secs) => Ok(Value::Int(secs)),
+                None => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("cannot parse `{}` as a timestamp", s),
+                    span,
+                    file,
+                    src,
+                    Some("supported formats: `YYYY-MM-DDTHH:MM:SSZ`, `YYYY-MM-DD HH:MM:SS`, optional `+08:00` offset"),
+                )),
+            }
+        }
         "random.int" => {
             let min = as_int(&args[0], 0, name, span, file, src)?;
             let max = as_int(&args[1], 1, name, span, file, src)?;
@@ -512,8 +686,10 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         }
         "path.dirname" => {
             let p = as_str(&args[0], 0, name, span, file, src)?;
+            // Path::parent() 对无分隔符路径返回空 parent（而非 None），统一归为 "."
             let parent = std::path::Path::new(p)
                 .parent()
+                .filter(|d| !d.as_os_str().is_empty())
                 .map(|d| d.to_string_lossy().to_string())
                 .unwrap_or_else(|| ".".to_string());
             Ok(Value::Str(parent))
@@ -609,6 +785,22 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let hash = hasher.finalize();
             Ok(Value::Str(format!("{:x}", hash)))
         }
+        // ---------- uuid ----------
+        "uuid.new" => {
+            // UUID v4：128 位随机数，标记版本 4 与变体位
+            let hi = next_u64();
+            let lo = next_u64();
+            let mut b = [0u8; 16];
+            b[..8].copy_from_slice(&hi.to_be_bytes());
+            b[8..].copy_from_slice(&lo.to_be_bytes());
+            b[6] = (b[6] & 0x0f) | 0x40; // version 4
+            b[8] = (b[8] & 0x3f) | 0x80; // variant 10xx
+            let s = format!(
+                "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+                b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+            );
+            Ok(Value::Str(s))
+        }
         _ => Err(err(
             codes::UNDEFINED,
             format!("undefined function `{}`", name),
@@ -629,6 +821,27 @@ fn arg_err(name: &str, want: usize, got: usize, span: Span, file: &str, src: &st
         src,
         Some("check the function signature"),
     )
+}
+
+/// 深度值相等（列表/字典逐元素比较），供 contains / index_of 使用。
+fn values_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Int(x), Value::Int(y)) => x == y,
+        (Value::Float(x), Value::Float(y)) => x == y,
+        (Value::Bool(x), Value::Bool(y)) => x == y,
+        (Value::Str(x), Value::Str(y)) => x == y,
+        (Value::Null, Value::Null) => true,
+        (Value::List(x), Value::List(y)) => {
+            x.len() == y.len() && x.iter().zip(y.iter()).all(|(i, j)| values_eq(i, j))
+        }
+        (Value::Dict(x), Value::Dict(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .zip(y.iter())
+                    .all(|((kx, vx), (ky, vy))| kx == ky && values_eq(vx, vy))
+        }
+        _ => false,
+    }
 }
 
 // ---------- time ----------
@@ -701,6 +914,105 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
+}
+
+/// (年, 月, 日) → 自纪元起的天数。算法：Howard Hinnant's days_from_civil。
+fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (m as i64 + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+/// 解析时间戳字符串 → Unix 秒（UTC）。
+/// 支持：`YYYY-MM-DD`、`YYYY-MM-DDTHH:MM:SS`、`YYYY-MM-DD HH:MM:SS`，
+/// 可选小数秒（.fff）、可选时区（Z / +HH[:MM] / -HH[:MM]）。
+fn parse_timestamp(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    let n = b.len();
+    let digit = |c: u8| c.is_ascii_digit();
+    // 日期固定部分：YYYY-MM-DD
+    if n < 10
+        || !digit(b[0]) || !digit(b[1]) || !digit(b[2]) || !digit(b[3])
+        || b[4] != b'-'
+        || !digit(b[5]) || !digit(b[6])
+        || b[7] != b'-'
+        || !digit(b[8]) || !digit(b[9])
+    {
+        return None;
+    }
+    let y = (b[0] - b'0') as i64 * 1000 + (b[1] - b'0') as i64 * 100 + (b[2] - b'0') as i64 * 10 + (b[3] - b'0') as i64;
+    let mo = (b[5] - b'0') as i64 * 10 + (b[6] - b'0') as i64;
+    let d = (b[8] - b'0') as i64 * 10 + (b[9] - b'0') as i64;
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return None;
+    }
+    // 仅日期：2025-01-01 → 当日 00:00 UTC
+    if n == 10 {
+        return Some(days_from_civil(y, mo as u32, d as u32) * 86400);
+    }
+    // 分隔符：T 或空格
+    let sep = b[10];
+    if sep != b'T' && sep != b' ' {
+        return None;
+    }
+    let two = |i: usize| -> Option<i64> {
+        if i + 1 < n && digit(b[i]) && digit(b[i + 1]) {
+            Some((b[i] - b'0') as i64 * 10 + (b[i + 1] - b'0') as i64)
+        } else {
+            None
+        }
+    };
+    let h = two(11)?;
+    if n < 14 || b[13] != b':' {
+        return None;
+    }
+    let mi = two(14)?;
+    let mut i = 16;
+    let mut sec = 0i64;
+    if i < n && b[i] == b':' {
+        sec = two(i + 1)?;
+        i += 3;
+    }
+    if h > 23 || mi > 59 || sec > 60 {
+        return None;
+    }
+    // 可选小数秒（忽略精度）
+    if i < n && b[i] == b'.' {
+        while i < n && digit(b[i]) {
+            i += 1;
+        }
+    }
+    // 可选时区：Z / +HH[:MM] / -HH[:MM]
+    let mut offset = 0i64;
+    if i < n {
+        match b[i] {
+            b'Z' | b'z' => i += 1,
+            b'+' | b'-' => {
+                let sign = if b[i] == b'-' { -1 } else { 1 };
+                let oh = two(i + 1)?;
+                let mut om = 0i64;
+                let mut j = i + 3;
+                if j < n && b[j] == b':' {
+                    om = two(j + 1)?;
+                    j += 3;
+                }
+                if oh > 23 || om > 59 {
+                    return None;
+                }
+                offset = sign * (oh * 3600 + om * 60);
+                i = j;
+            }
+            _ => return None,
+        }
+    }
+    if i != n {
+        return None;
+    }
+    Some(days_from_civil(y, mo as u32, d as u32) * 86400 + h * 3600 + mi * 60 + sec - offset)
 }
 
 // ---------- random（xorshift64*，线程本地） ----------
@@ -903,14 +1215,20 @@ fn json_to_value(s: &str, span: Span, file: &str, src: &str) -> Result<Value, ZE
             }
         }
         serde_json::Value::String(s) => Ok(Value::Str(s)),
-        serde_json::Value::Array(_) | serde_json::Value::Object(_) => Err(err(
-            codes::NOT_IMPLEMENTED,
-            "JSON arrays and objects are not supported yet in v0.1.0",
-            span,
-            file,
-            src,
-            Some("parse the JSON into a scalar value for now"),
-        )),
+        serde_json::Value::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for it in items {
+                out.push(json_to_value(&it.to_string(), span, file, src)?);
+            }
+            Ok(Value::List(out))
+        }
+        serde_json::Value::Object(map) => {
+            let mut out = Vec::with_capacity(map.len());
+            for (k, v) in map {
+                out.push((k, json_to_value(&v.to_string(), span, file, src)?));
+            }
+            Ok(Value::Dict(out))
+        }
     }
 }
 
@@ -922,6 +1240,29 @@ fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String,
             .ok_or_else(|| err(codes::TYPE_MISMATCH, "cannot serialize NaN/infinity to JSON", span, file, src, None::<&str>))?,
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Str(s) => serde_json::Value::String(s.clone()),
+        Value::List(items) => {
+            let mut arr = Vec::with_capacity(items.len());
+            for it in items {
+                arr.push(value_to_json(it, span, file, src).and_then(|s| {
+                    serde_json::from_str(&s).map_err(|e| {
+                        err(codes::TYPE_MISMATCH, format!("cannot serialize list item: {}", e), span, file, src, None::<&str>)
+                    })
+                })?);
+            }
+            serde_json::Value::Array(arr)
+        }
+        Value::Dict(entries) => {
+            let mut map = serde_json::Map::new();
+            for (k, v) in entries {
+                let jv: serde_json::Value = value_to_json(v, span, file, src).and_then(|s| {
+                    serde_json::from_str(&s).map_err(|e| {
+                        err(codes::TYPE_MISMATCH, format!("cannot serialize dict value: {}", e), span, file, src, None::<&str>)
+                    })
+                })?;
+                map.insert(k.clone(), jv);
+            }
+            serde_json::Value::Object(map)
+        }
         Value::Null => serde_json::Value::Null,
         Value::Error(_) => {
             return Err(err(

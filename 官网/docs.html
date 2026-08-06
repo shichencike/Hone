@@ -26,6 +26,7 @@
       <li><a href="#vars">变量与类型系统</a></li>
       <li><a href="#control">控制流</a></li>
       <li><a href="#fn">函数定义</a></li>
+      <li><a href="#collections">集合与字符串插值</a></li>
       <li><a href="#builtins">内置函数与模块</a></li>
       <li><a href="#integ">导入与外部集成</a></li>
       <li><a href="#tools">工具链</a></li>
@@ -64,6 +65,8 @@ x = <span class="s">"Zap"</span>;          <span class="c">// error[Z001]: 期�
       <tr><td><code>float</code></td><td>64 位双精度（IEEE 754）</td><td><code>3.14, .2, 2.0</code></td></tr>
       <tr><td><code>bool</code></td><td>布尔值</td><td><code>true, false</code></td></tr>
       <tr><td><code>str</code></td><td>UTF-8 字符串</td><td><code>"hello"</code>（支持 \n \t \\ \"）</td></tr>
+      <tr><td><code>list</code></td><td>动态列表（元素类型不锁定）</td><td><code>[1, "a", true]</code></td></tr>
+      <tr><td><code>dict</code></td><td>动态字典（字符串键 → 任意值）</td><td><code>{"name": "zap", "ver": 1}</code></td></tr>
     </table>
   </section>
 
@@ -81,6 +84,17 @@ x = <span class="s">"Zap"</span>;          <span class="c">// error[Z001]: 期�
 i = <span class="n">0</span>;
 <span class="k">while</span> (i &lt; <span class="n">10</span>) {
     i = i + <span class="n">1</span>;
+}
+
+<span class="c">// for-in：遍历列表（单变量）或字典（键、值双变量）</span>
+nums = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>];
+<span class="k">for</span> x <span class="k">in</span> nums {
+    <span class="f">print</span>(x * x);      <span class="c">// 1 4 9</span>
+}
+
+user = {<span class="s">"name"</span>: <span class="s">"zap"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
+<span class="k">for</span> k, v <span class="k">in</span> user {
+    <span class="f">print</span>(k + <span class="s">"= "</span> + <span class="f">to_str</span>(v));
 }</code></pre>
   </section>
 
@@ -101,17 +115,46 @@ i = <span class="n">0</span>;
     </ul>
   </section>
 
+  <section id="collections">
+    <h2><span class="hash">#</span>集合与字符串插值</h2>
+    <p>列表 <code>[a, b, c]</code> 与字典 <code>{"k": v}</code> 为动态集合类型：元素类型不锁定、可混合，
+      变量本身仍遵循类型锁定规则（不能把列表赋给已锁定的标量变量）。</p>
+<pre><code>nums = [<span class="n">1</span>, <span class="s">"a"</span>, <span class="k">true</span>];          <span class="c">// 混合元素列表</span>
+user = {<span class="s">"name"</span>: <span class="s">"zap"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};   <span class="c">// 字符串键 → 任意值</span>
+
+<span class="f">print</span>(<span class="f">len</span>(nums));               <span class="c">// 3（元素个数）</span>
+<span class="f">print</span>(<span class="f">to_str</span>(user));            <span class="c">// {name: zap, ver: 1}</span>
+
+l = <span class="f">append</span>(nums, <span class="s">"x"</span>);          <span class="c">// [1, a, true, x]（返回新列表）</span>
+<span class="f">print</span>(<span class="f">contains</span>(l, <span class="s">"a"</span>));       <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">index_of</span>(l, <span class="s">"x"</span>));       <span class="c">// 3（找不到返回 -1）</span>
+
+<span class="f">print</span>(<span class="f">has_key</span>(user, <span class="s">"name"</span>));  <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">keys</span>(user)));      <span class="c">// [name, ver]</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">values</span>(user)));    <span class="c">// [zap, 1]</span></code></pre>
+    <p><strong>f-string 字符串插值</strong>：<code>f"..."</code> 内 <code>{expr}</code> 嵌入任意表达式，
+      <code>{{</code> / <code>}}</code> 转义字面大括号：</p>
+<pre><code>name = <span class="s">"zap"</span>;
+<span class="f">print</span>(<span class="s">f"你好, {name}! sum = {1 + 2}"</span>);   <span class="c">// 你好, zap! sum = 3</span>
+<span class="f">print</span>(<span class="s">f"{{{<span class="n">1</span> + <span class="n">1</span>}}}"</span>);                 <span class="c">// 字面大括号 + 表达式</span></code></pre>
+    <p><strong>类型判断</strong>：<code>is_int</code> <code>is_float</code> <code>is_str</code> <code>is_bool</code>
+      <code>is_list</code> <code>is_dict</code> <code>is_null</code>，判断运行期值类型，常用于分支处理混合集合。</p>
+  </section>
+
   <section id="builtins">
     <h2><span class="hash">#</span>内置函数与模块</h2>
     <p>全部开箱即用，无需导入：</p>
     <table>
       <tr><th>类别</th><th>函数</th></tr>
       <tr><td>基础</td><td><code>print</code> <code>len</code> <code>type_of</code> <code>read_file</code> <code>write_file</code> <code>file_exists</code></td></tr>
+      <tr><td>集合</td><td><code>append</code> <code>contains</code> <code>index_of</code> <code>keys</code> <code>values</code> <code>has_key</code></td></tr>
+      <tr><td>类型判断</td><td><code>is_int</code> <code>is_float</code> <code>is_str</code> <code>is_bool</code> <code>is_list</code> <code>is_dict</code> <code>is_null</code></td></tr>
       <tr><td>字符串</td><td><code>str_contains</code> <code>str_replace</code> <code>str_trim</code></td></tr>
       <tr><td>数学</td><td><code>abs</code> <code>max</code> <code>min</code></td></tr>
       <tr><td>类型转换</td><td><code>to_str</code> <code>to_int</code> <code>to_float</code></td></tr>
-      <tr><td>时间</td><td><code>time.now</code> <code>time.sleep</code> <code>time.format</code></td></tr>
+      <tr><td>时间</td><td><code>time.now</code> <code>time.sleep</code> <code>time.format</code> <code>time.parse</code></td></tr>
       <tr><td>随机</td><td><code>random.int</code> <code>random.float</code></td></tr>
+      <tr><td>UUID</td><td><code>uuid.new</code>（UUID v4）</td></tr>
       <tr><td>网络 / JSON</td><td><code>http_get</code> <code>http_post</code> <code>json_parse</code> <code>json_stringify</code></td></tr>
       <tr><td>系统（跨平台）</td><td><code>sys.run</code> <code>sys.get_env</code></td></tr>
       <tr><td>系统（Windows API）</td><td><code>sys.msgbox</code> <code>sys.beep</code> <code>sys.clipboard_set</code> <code>sys.get_screen_size</code> <code>sys.reg_read</code> <code>sys.reg_write</code></td></tr>

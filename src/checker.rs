@@ -169,6 +169,15 @@ impl Checker {
                 self.register_top(body)?;
                 self.global_scopes.pop();
             }
+            Stmt::ForIn { var, var2, body, span, .. } => {
+                self.global_scopes.push(HashMap::new());
+                self.bind_or_unify(var, None, *span)?;
+                if let Some(v2) = var2 {
+                    self.bind_or_unify(v2, None, *span)?;
+                }
+                self.register_top(body)?;
+                self.global_scopes.pop();
+            }
             Stmt::Try { body, catch_var, handler, .. } => {
                 self.global_scopes.push(HashMap::new());
                 self.register_top(body)?;
@@ -226,6 +235,17 @@ impl Checker {
                     let idx = scopes.len();
                     scopes.push(HashMap::new());
                     scope_stack.push(idx);
+                    self.register_fn_body(body, scopes, scope_stack)?;
+                    scope_stack.pop();
+                }
+                Stmt::ForIn { var, var2, body, span, .. } => {
+                    let idx = scopes.len();
+                    scopes.push(HashMap::new());
+                    scope_stack.push(idx);
+                    self.bind_in_stack(var, None, *span, scopes, scope_stack)?;
+                    if let Some(v2) = var2 {
+                        self.bind_in_stack(v2, None, *span, scopes, scope_stack)?;
+                    }
                     self.register_fn_body(body, scopes, scope_stack)?;
                     scope_stack.pop();
                 }
@@ -544,6 +564,19 @@ impl Checker {
                 self.global_scopes.pop();
                 Ok(())
             }
+            Stmt::ForIn { var, var2, iter, body, span } => {
+                let res = self.check_expr(iter)?;
+                // 迭代对象可为 list / dict（动态），此处仅确保表达式合法
+                let _ = res;
+                self.global_scopes.push(HashMap::new());
+                self.bind_or_unify(var, None, *span)?;
+                if let Some(v2) = var2 {
+                    self.bind_or_unify(v2, None, *span)?;
+                }
+                self.check_stmts(body)?;
+                self.global_scopes.pop();
+                Ok(())
+            }
             Stmt::Return { span, .. } => Err(self.zerr(
                 codes::SYNTAX,
                 "`return` is only allowed inside a function",
@@ -685,6 +718,21 @@ impl Checker {
                 scopes.pop();
                 Ok(())
             }
+            Stmt::ForIn { var, var2, iter, body, span } => {
+                let res = self.check_expr_in_fn(iter, scopes, scope_stack, param_slots, ret_slot)?;
+                let _ = res;
+                let idx = scopes.len();
+                scopes.push(HashMap::new());
+                scope_stack.push(idx);
+                self.bind_in_stack(var, None, *span, scopes, scope_stack)?;
+                if let Some(v2) = var2 {
+                    self.bind_in_stack(v2, None, *span, scopes, scope_stack)?;
+                }
+                self.check_stmts_with_scopes(body, scopes, scope_stack, param_slots, ret_slot)?;
+                scope_stack.pop();
+                scopes.pop();
+                Ok(())
+            }
             Stmt::Return { value, span } => {
                 self.has_return = true;
                 match value {
@@ -788,6 +836,26 @@ impl Checker {
             Expr::FloatLit(..) => Ok(TyRes { ty: Ty::Float, slot: None }),
             Expr::BoolLit(..) => Ok(TyRes { ty: Ty::Bool, slot: None }),
             Expr::StrLit(..) => Ok(TyRes { ty: Ty::Str, slot: None }),
+            Expr::ListLit(items, _) => {
+                for it in items {
+                    self.check_expr(it)?;
+                }
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::DictLit(entries, _) => {
+                for (_, v) in entries {
+                    self.check_expr(v)?;
+                }
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::FStr(segs, _) => {
+                for seg in segs {
+                    if let FStrSeg::Code(e) = seg {
+                        self.check_expr(e)?;
+                    }
+                }
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
         }
     }
 
@@ -835,6 +903,26 @@ impl Checker {
             Expr::FloatLit(..) => Ok(TyRes { ty: Ty::Float, slot: None }),
             Expr::BoolLit(..) => Ok(TyRes { ty: Ty::Bool, slot: None }),
             Expr::StrLit(..) => Ok(TyRes { ty: Ty::Str, slot: None }),
+            Expr::ListLit(items, _) => {
+                for it in items {
+                    self.check_expr_in_fn(it, scopes, scope_stack, param_slots, ret_slot)?;
+                }
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::DictLit(entries, _) => {
+                for (_, v) in entries {
+                    self.check_expr_in_fn(v, scopes, scope_stack, param_slots, ret_slot)?;
+                }
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::FStr(segs, _) => {
+                for seg in segs {
+                    if let FStrSeg::Code(e) = seg {
+                        self.check_expr_in_fn(e, scopes, scope_stack, param_slots, ret_slot)?;
+                    }
+                }
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
         }
     }
 
@@ -1444,6 +1532,32 @@ impl Checker {
                 self.arg_count(name, n, 1, span)?;
                 Ok(TyRes { ty: Ty::Int, slot: None })
             }
+            "append" => {
+                self.arg_count(name, n, 2, span)?;
+                // 列表是动态类型，返回类型未知
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            "contains" => {
+                self.arg_count(name, n, 2, span)?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            "index_of" => {
+                self.arg_count(name, n, 2, span)?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
+            "keys" | "values" => {
+                self.arg_count(name, n, 1, span)?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            "has_key" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 1, span, "the key")?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            "is_int" | "is_float" | "is_str" | "is_bool" | "is_list" | "is_dict" | "is_null" => {
+                self.arg_count(name, n, 1, span)?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
             "type_of" | "to_str" | "json_stringify" => {
                 self.arg_count(name, n, 1, span)?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
@@ -1575,6 +1689,11 @@ impl Checker {
                 self.expect_str(name, args, 1, span, "the format")?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
+            "time.parse" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the timestamp string")?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
             "random.int" => {
                 self.arg_count(name, n, 2, span)?;
                 self.expect_int(name, args, 0, span, "the minimum")?;
@@ -1700,6 +1819,11 @@ impl Checker {
                 self.expect_str(name, args, 0, span, "the input text")?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
+            // uuid
+            "uuid.new" => {
+                self.arg_count(name, n, 0, span)?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
             other => Err(self.zerr(
                 codes::UNDEFINED,
                 format!("undefined function `{}`", other),
@@ -1721,6 +1845,7 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Block { span, .. }
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
+        | Stmt::ForIn { span, .. }
         | Stmt::Return { span, .. }
         | Stmt::FnDef { span, .. }
         | Stmt::ExprStmt { span, .. }
@@ -1754,6 +1879,19 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
     [
         "print",
         "len",
+        "append",
+        "contains",
+        "index_of",
+        "keys",
+        "values",
+        "has_key",
+        "is_int",
+        "is_float",
+        "is_str",
+        "is_bool",
+        "is_list",
+        "is_dict",
+        "is_null",
         "type_of",
         "to_str",
         "to_int",
@@ -1770,6 +1908,7 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "time.now",
         "time.sleep",
         "time.format",
+        "time.parse",
         "random.int",
         "random.float",
         "http_get",
@@ -1801,6 +1940,7 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "regex.replace",
         "crypto.md5",
         "crypto.sha256",
+        "uuid.new",
     ]
     .into_iter()
     .collect()

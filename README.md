@@ -49,6 +49,23 @@ int z = 30;        // 显式类型（C 风格）
 if (x > 5) { print("大"); } else { print("小"); }
 while (i < 10) { i = i + 1; }
 
+// 集合：列表与字典字面量（动态元素类型，可混合）
+nums = [1, 2, 3];
+user = {"name": "zap", "ver": 1};
+print(len(nums));              // 3（元素个数）
+print(to_str(user));           // {name: zap, ver: 1}
+print(append(nums, 4));        // [1, 2, 3, 4]
+print(contains(nums, 2));      // true
+
+// for-in：遍历列表（单变量）或字典（键、值双变量）
+for x in nums { print(x); }
+for k, v in user { print(k + "=" + to_str(v)); }
+
+// f-string：字符串插值 f"..."，{expr} 内嵌表达式，{{ / }} 转义字面大括号
+name = "zap";
+greeting = f"你好, {name}! 1+1={1 + 1}";
+print(greeting);               // 你好, zap! 1+1=2
+
 // 函数：参数类型可由调用上下文推导
 fn fib(n) {
     if (n <= 1) { return n; }
@@ -99,10 +116,14 @@ debug_print("当前 x = " + to_str(x));
 ## 内置功能
 
 - 基础：`print` `len` `type_of` `read_file` `write_file` `file_exists`
+- 集合：`append(list, x)` `contains(list, x)` `index_of(list, x)`（找不到返回 -1）、
+  `keys(dict)` `values(dict)` `has_key(dict, k)`；`to_str` 输出 `[a, b]` / `{k: v}`
+- 类型判断：`is_int` `is_float` `is_str` `is_bool` `is_list` `is_dict` `is_null`
 - 字符串：`str_contains` `str_replace` `str_trim`
 - 数学：`abs` `max` `min`
 - 类型转换：`to_str` `to_int` `to_float`
-- 模块：`time.now` `time.sleep` `time.format`（UTC）、`random.int` `random.float`
+- 模块：`time.now` `time.sleep` `time.format`（UTC）、`time.parse`（解析
+  `YYYY-MM-DD[THH:MM:SS]` 时间戳 → Unix 秒）、`random.int` `random.float`、`uuid.new`（UUID v4）
 - 网络：`http_get` `http_post`（仅 `http://`，无 TLS）、`json_parse` `json_stringify`（标量）
 - 系统：`sys.run` `sys.get_env`（跨平台）
 - 系统（Windows API，其他平台报 Z999 或降级）：`sys.msgbox` `sys.beep` `sys.clipboard_set`
@@ -211,6 +232,9 @@ help: Zap types are locked after inference; no implicit conversion is allowed
 ## 设计约束（当前实现状态）
 
 - 静态强类型：类型一经推导即锁定，无隐式转换
+- 列表 `[a, b]` 与字典 `{"k": v}` 为动态集合类型（元素类型不锁定），可用
+  `append` / `contains` / `index_of` / `keys` / `values` / `has_key` 操作，
+  `for-in` 遍历，`f"..."` 字符串插值；变量仍不可直接赋值不同类型的标量
 - 函数扁平化存在于全局符号表（不支持嵌套作用域内的函数遮蔽，嵌套定义会被提升）
 - 强制 Tab 缩进为 `zap fmt` 的格式化规则，解析器不强制
 - 子线程崩溃仅打印错误，不影响主线程
@@ -249,6 +273,10 @@ help: Zap types are locked after inference; no implicit conversion is allowed
   `zap run --restart` / `--backoff` / `--restart-on` 自动重启 ✅、
   `zap run --resume` 检查点恢复 ✅、
   `zap build --exe` 打包独立可执行文件 ✅、`zap explain` 错误码解释 ✅
+- 🚧 阶段 6（新增）：集合类型（列表/字典字面量）✅、`for-in` 循环 ✅、
+  `f"..."` 字符串插值 ✅、`append`/`contains`/`index_of`/`keys`/`values`/`has_key` ✅、
+  `is_int`/`is_float`/`is_str`/`is_bool`/`is_list`/`is_dict`/`is_null` 类型判断 ✅、
+  `time.parse` 时间戳解析 ✅、`uuid.new` UUID v4 ✅
 
 ## 许可证
 

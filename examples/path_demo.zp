@@ -1,0 +1,12 @@
+// path_demo.zp - path.join / path.dirname / path.basename 演示
+// 期望输出：
+//   a/b/c.txt
+//   a/b
+//   c.txt
+//   .
+
+p = path.join("a", "b", "c.txt");
+print(p);                 // a/b/c.txt
+print(path.dirname(p));   // a/b
+print(path.basename(p));  // c.txt
+print(path.dirname("x")); // .（无父目录）

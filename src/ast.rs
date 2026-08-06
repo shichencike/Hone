@@ -38,6 +38,16 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// for x in expr { ... } / for k, v in dict { ... }
+    ForIn {
+        /// 循环变量（列表元素 / 字典键）
+        var: String,
+        /// 可选第二个变量（字典遍历时的值）
+        var2: Option<String>,
+        iter: Expr,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     Return {
         value: Option<Expr>,
         span: Span,
@@ -128,6 +138,12 @@ pub enum TyName {
 }
 
 #[derive(Debug, Clone)]
+pub enum FStrSeg {
+    Lit(String),
+    Code(Expr),
+}
+
+#[derive(Debug, Clone)]
 pub enum Expr {
     IntLit(i64, Span),
     FloatLit(f64, Span),
@@ -135,6 +151,12 @@ pub enum Expr {
     StrLit(String, Span),
     /// 标识符；模块函数经点号合并为完整名（如 "time.now"）
     Ident { name: String, span: Span },
+    /// 列表字面量 [a, b, c]
+    ListLit(Vec<Expr>, Span),
+    /// 字典字面量 {"key": value, ...}（键为字符串）
+    DictLit(Vec<(String, Expr)>, Span),
+    /// 插值字符串 f"..."：文字段与代码段交替（代码段已解析为表达式）
+    FStr(Vec<FStrSeg>, Span),
     /// 字段访问：obj.field（如 e.code、e.message）
     Field { obj: Box<Expr>, field: String, span: Span },
     Unary { op: UnOp, expr: Box<Expr>, span: Span },
@@ -191,6 +213,9 @@ pub fn expr_span(e: &Expr) -> Span {
         | Expr::FloatLit(_, s)
         | Expr::BoolLit(_, s)
         | Expr::StrLit(_, s)
+        | Expr::ListLit(_, s)
+        | Expr::DictLit(_, s)
+        | Expr::FStr(_, s)
         | Expr::Ident { span: s, .. }
         | Expr::Field { span: s, .. }
         | Expr::Call { span: s, .. }

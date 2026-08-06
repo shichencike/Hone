@@ -121,6 +121,7 @@ impl Parser {
             Tok::Fn => self.parse_fn_def(),
             Tok::If => self.parse_if(),
             Tok::While => self.parse_while(),
+            Tok::For => self.parse_for_in(),
             Tok::Return => self.parse_return(),
             Tok::Go => self.parse_go(),
             Tok::Try => self.parse_try(),
@@ -394,6 +395,42 @@ impl Parser {
         self.expect(&Tok::RParen, "`)`")?;
         let body = self.parse_block()?;
         Ok(Stmt::While { cond, body, span })
+    }
+
+    /// for x in expr { ... } / for k, v in dict { ... }
+    fn parse_for_in(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // for
+        let (v1_tok, _) = self.next();
+        let var = match v1_tok {
+            Tok::Ident(v) => v,
+            other => {
+                return Err(self.err_here(
+                    codes::SYNTAX,
+                    format!("expected a loop variable, found {}", other.describe()),
+                    Some("form: `for x in list { ... }`"),
+                ))
+            }
+        };
+        // 可选第二变量：for k, v in dict { ... }
+        let mut var2 = None;
+        if self.at(&Tok::Comma) {
+            self.next();
+            let (v2_tok, _) = self.next();
+            match v2_tok {
+                Tok::Ident(v) => var2 = Some(v),
+                other => {
+                    return Err(self.err_here(
+                        codes::SYNTAX,
+                        format!("expected a second loop variable, found {}", other.describe()),
+                        Some("form: `for k, v in dict { ... }`"),
+                    ))
+                }
+            }
+        }
+        self.expect(&Tok::In, "`in`")?;
+        let iter = self.parse_expr()?;
+        let body = self.parse_block()?;
+        Ok(Stmt::ForIn { var, var2, iter, body, span })
     }
 
     fn parse_return(&mut self) -> Result<Stmt, ZError> {
@@ -824,6 +861,65 @@ impl Parser {
             Tok::True => Ok(Expr::BoolLit(true, span)),
             Tok::False => Ok(Expr::BoolLit(false, span)),
             Tok::StrLit(s) => Ok(Expr::StrLit(s, span)),
+            Tok::FStr(parts) => {
+                // 插值字符串：文字段保留（折叠转义大括号 {{ → {，}} → }），代码段子解析为表达式
+                let mut segs = Vec::new();
+                for part in parts {
+                    match part {
+                        crate::lexer::FStrPart::Lit(s) => {
+                            let folded = s.replace("{{", "{").replace("}}", "}");
+                            segs.push(FStrSeg::Lit(folded));
+                        }
+                        crate::lexer::FStrPart::Code(code) => {
+                            let e = self.parse_fstr_code(&code, span)?;
+                            segs.push(FStrSeg::Code(e));
+                        }
+                    }
+                }
+                Ok(Expr::FStr(segs, span))
+            }
+            Tok::LBracket => {
+                // 列表字面量 [a, b, c]
+                let mut items = Vec::new();
+                while !self.at(&Tok::RBracket) {
+                    items.push(self.parse_expr()?);
+                    if self.at(&Tok::Comma) {
+                        self.next();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(&Tok::RBracket, "`]`")?;
+                Ok(Expr::ListLit(items, span))
+            }
+            Tok::LBrace => {
+                // 字典字面量 {"key": value, ...}（键必须为字符串字面量）
+                let mut entries = Vec::new();
+                while !self.at(&Tok::RBrace) {
+                    let (key_tok, kspan) = self.next();
+                    let key = match key_tok {
+                        Tok::StrLit(k) => k,
+                        other => {
+                            return Err(self.err_at(
+                                &kspan,
+                                codes::SYNTAX,
+                                format!("dict keys must be string literals, found {}", other.describe()),
+                                Some("form: {\"key\": value, ...}"),
+                            ))
+                        }
+                    };
+                    self.expect(&Tok::Colon, "`:`")?;
+                    let v = self.parse_expr()?;
+                    entries.push((key, v));
+                    if self.at(&Tok::Comma) {
+                        self.next();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(&Tok::RBrace, "`}`")?;
+                Ok(Expr::DictLit(entries, span))
+            }
             Tok::LParen => {
                 let inner = self.parse_expr()?;
                 self.expect(&Tok::RParen, "`)`")?;
@@ -912,5 +1008,47 @@ impl Parser {
             }
         }
         Ok(args)
+    }
+
+    /// 将 f-string 代码段 `{code}` 子解析为单个表达式。
+    /// 错误定位统一指向外层 f-string 的 span。
+    fn parse_fstr_code(&mut self, code: &str, outer: Span) -> Result<Expr, ZError> {
+        let toks = match Lexer::new(&self.file, code).tokenize() {
+            Ok(t) => t,
+            Err(e) => {
+                return Err(self.err_at(
+                    &outer,
+                    codes::SYNTAX,
+                    format!("invalid expression in f-string: {}", e.msg),
+                    Some("check the code between `{` and `}`"),
+                ))
+            }
+        };
+        let mut p = Parser {
+            file: self.file.clone(),
+            src: code.to_string(),
+            toks,
+            pos: 0,
+        };
+        let e = match p.parse_expr() {
+            Ok(e) => e,
+            Err(inner) => {
+                return Err(self.err_at(
+                    &outer,
+                    codes::SYNTAX,
+                    format!("invalid expression in f-string: {}", inner.msg),
+                    Some("check the code between `{` and `}`"),
+                ))
+            }
+        };
+        if !p.at(&Tok::Eof) {
+            return Err(self.err_at(
+                &outer,
+                codes::SYNTAX,
+                "f-string code segment must be a single expression",
+                Some("wrap compound code in parentheses, e.g. `{(a + b) * 2}`"),
+            ));
+        }
+        Ok(e)
     }
 }

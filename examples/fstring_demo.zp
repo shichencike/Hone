@@ -1,0 +1,22 @@
+// fstring_demo.zp - 字符串插值 f"..." 演示
+// 期望输出：
+//   你好, zap!
+//   sum = 6, pi = 3.14
+//   age = 18 (year 2026)
+//   list = [1, 2, 3], dict = {a: 1}
+
+name = "zap";
+greeting = f"你好, {name}!";
+print(greeting);
+
+a = 3;
+b = 2;
+print(f"sum = {a + b}, pi = {3.14}");
+
+age = 18;
+year = 2026;
+print(f"age = {age} (year {year})");
+
+l = [1, 2, 3];
+d = {"a": 1};
+print(f"list = {l}, dict = {d}");

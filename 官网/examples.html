@@ -265,6 +265,93 @@ zap build --exe app.zp [-o my_app.exe]
 <span class="c">// 保留缓存以加速下次启动</span>
 ./my_app.exe --keep-cache</code></pre>
   </div>
+  <div class="example">
+    <div class="title">21. 列表操作</div>
+    <div class="note">列表字面量、len/append/contains/index_of（期望输出：3 / [1, 2, 3, 4] / true / false / 3 / -1）</div>
+<pre><code>l = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>];
+<span class="f">print</span>(<span class="f">len</span>(l));           <span class="c">// 3</span>
+l = <span class="f">append</span>(l, <span class="n">4</span>);        <span class="c">// [1, 2, 3, 4]</span>
+<span class="f">print</span>(<span class="f">to_str</span>(l));
+<span class="f">print</span>(<span class="f">contains</span>(l, <span class="n">3</span>));   <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">contains</span>(l, <span class="n">9</span>));   <span class="c">// false</span>
+<span class="f">print</span>(<span class="f">index_of</span>(l, <span class="n">4</span>));   <span class="c">// 3</span>
+<span class="f">print</span>(<span class="f">index_of</span>(l, <span class="n">99</span>));  <span class="c">// -1</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">22. 字典操作</div>
+    <div class="note">字典字面量、has_key/keys/values/len（期望输出：{name: zap, ver: 1} / true / false / [name, ver] / [zap, 1] / 2）</div>
+<pre><code>d = {<span class="s">"name"</span>: <span class="s">"zap"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
+<span class="f">print</span>(<span class="f">to_str</span>(d));          <span class="c">// {name: zap, ver: 1}</span>
+<span class="f">print</span>(<span class="f">has_key</span>(d, <span class="s">"name"</span>)); <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">has_key</span>(d, <span class="s">"nope"</span>)); <span class="c">// false</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">keys</span>(d)));    <span class="c">// [name, ver]</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">values</span>(d)));  <span class="c">// [zap, 1]</span>
+<span class="f">print</span>(<span class="f">len</span>(d));           <span class="c">// 2（键个数）</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">23. for-in 循环</div>
+    <div class="note">遍历列表（单变量）与字典（键、值双变量）</div>
+<pre><code>sum = <span class="n">0</span>;
+<span class="k">for</span> x <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>] {
+    <span class="f">print</span>(x * x);          <span class="c">// 1 4 9</span>
+    sum = sum + x;
+}
+
+d = {<span class="s">"name"</span>: <span class="s">"zap"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
+<span class="k">for</span> k, v <span class="k">in</span> d {
+    <span class="f">print</span>(k + <span class="s">": "</span> + <span class="f">to_str</span>(v));
+}
+<span class="f">print</span>(sum);              <span class="c">// 6</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">24. f-string 字符串插值</div>
+    <div class="note">f"..." 内 {expr} 嵌入表达式，{{ / }} 转义字面大括号</div>
+<pre><code>name = <span class="s">"zap"</span>;
+<span class="f">print</span>(<span class="s">f"你好, {name}!"</span>);        <span class="c">// 你好, zap!</span>
+
+a = <span class="n">3</span>; b = <span class="n">2</span>;
+<span class="f">print</span>(<span class="s">f"sum = {a + b}, pi = {3.14}"</span>);  <span class="c">// sum = 5, pi = 3.14</span>
+
+l = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>];
+d = {<span class="s">"a"</span>: <span class="n">1</span>};
+<span class="f">print</span>(<span class="s">f"list = {l}, dict = {d}"</span>);   <span class="c">// list = [1, 2, 3], dict = {a: 1}</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">25. 类型判断</div>
+    <div class="note">is_int / is_float / is_str / is_bool / is_list / is_dict / is_null</div>
+<pre><code>a = <span class="n">42</span>; b = <span class="n">3.14</span>; s = <span class="s">"hello"</span>; l = [<span class="n">1</span>, <span class="n">2</span>];
+<span class="f">print</span>(<span class="f">is_int</span>(a));       <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">is_float</span>(a));     <span class="c">// false</span>
+<span class="f">print</span>(<span class="f">is_float</span>(b));     <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">is_str</span>(s));       <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">is_list</span>(l));      <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">is_bool</span>(<span class="k">true</span>));  <span class="c">// true</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">26. 时间戳解析</div>
+    <div class="note">time.parse 解析 YYYY-MM-DD[THH:MM:SS] → Unix 秒（UTC），配合 time.format 回显</div>
+<pre><code>t = <span class="f">time.parse</span>(<span class="s">"2025-01-01T00:00:00Z"</span>);
+<span class="f">print</span>(t);                                  <span class="c">// 1735689600</span>
+<span class="f">print</span>(<span class="f">time.format</span>(t, <span class="s">"YYYY-MM-DD HH:mm:SS"</span>));  <span class="c">// 2025-01-01 00:00:00</span>
+
+t2 = <span class="f">time.parse</span>(<span class="s">"2025-01-01 08:30:00"</span>);   <span class="c">// 空格分隔也可</span>
+<span class="f">print</span>(<span class="f">time.format</span>(t2, <span class="s">"YYYY-MM-DD HH:mm:SS"</span>));  <span class="c">// 2025-01-01 08:30:00</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">27. UUID v4 生成</div>
+    <div class="note">uuid.new 每次生成不同的 UUID v4（形如 xxxxxxxx-xxxx-4xxx-xxxx-xxxxxxxxxxxx）</div>
+<pre><code>a = <span class="f">uuid.new</span>();
+b = <span class="f">uuid.new</span>();
+<span class="f">print</span>(a);               <span class="c">// 每次运行不同</span>
+<span class="f">print</span>(b);
+<span class="f">print</span>(a != b);          <span class="c">// true</span></code></pre>
+  </div>
 </main>
 
 <footer>

@@ -43,6 +43,10 @@ pub enum Value {
     Float(f64),
     Bool(bool),
     Str(String),
+    /// 列表：[1, 2, 3]（也用于 JSON 数组）
+    List(Vec<Value>),
+    /// 字典：{"key": value}（保持插入顺序，也用于 JSON 对象）
+    Dict(Vec<(String, Value)>),
     /// void 函数调用结果的占位值
     Null,
     /// 错误对象（catch e 中的 e）
@@ -56,6 +60,8 @@ impl Value {
             Value::Float(_) => "float",
             Value::Bool(_) => "bool",
             Value::Str(_) => "str",
+            Value::List(_) => "list",
+            Value::Dict(_) => "dict",
             Value::Null => "null",
             Value::Error(_) => "error",
         }
@@ -67,6 +73,17 @@ impl Value {
             Value::Float(f) => f.to_string(),
             Value::Bool(b) => b.to_string(),
             Value::Str(s) => s.clone(),
+            Value::List(items) => {
+                let inner: Vec<String> = items.iter().map(|v| v.display()).collect();
+                format!("[{}]", inner.join(", "))
+            }
+            Value::Dict(entries) => {
+                let inner: Vec<String> = entries
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, v.display()))
+                    .collect();
+                format!("{{{}}}", inner.join(", "))
+            }
             Value::Null => "null".to_string(),
             Value::Error(e) => format!("error[{}]: {}", e.code, e.message),
         }
@@ -180,6 +197,7 @@ impl Interp {
                     }
                 }
                 Stmt::While { body, .. } => self.collect_fns(body)?,
+                Stmt::ForIn { body, .. } => self.collect_fns(body)?,
                 _ => {}
             }
         }
@@ -265,6 +283,59 @@ impl Interp {
                     }
                 }
                 Ok(Flow::Normal)
+            }
+            Stmt::ForIn { var, var2, iter, body, span } => {
+                let it = self.eval_expr(env, iter)?;
+                let is_dict = matches!(it, Value::Dict(_));
+                match it {
+                    // 列表：单变量绑定元素
+                    Value::List(items) => {
+                        if var2.is_some() {
+                            return Err(self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                "`for k, v in` requires a dict, got a list",
+                                *span,
+                                Some("iterate lists with a single variable: `for x in list`"),
+                            ));
+                        }
+                        for item in items {
+                            env.scopes.push(HashMap::new());
+                            env.declare(var, item);
+                            let flow = self.exec_stmts(env, body)?;
+                            env.scopes.pop();
+                            if let Flow::Return(v) = flow {
+                                return Ok(Flow::Return(v));
+                            }
+                        }
+                        Ok(Flow::Normal)
+                    }
+                    // 字典：var=键，var2=值（可选）
+                    Value::Dict(entries) => {
+                        for (k, v) in entries {
+                            env.scopes.push(HashMap::new());
+                            env.declare(var, Value::Str(k));
+                            if let Some(v2) = var2 {
+                                env.declare(v2, v);
+                            }
+                            let flow = self.exec_stmts(env, body)?;
+                            env.scopes.pop();
+                            if let Flow::Return(v) = flow {
+                                return Ok(Flow::Return(v));
+                            }
+                        }
+                        Ok(Flow::Normal)
+                    }
+                    other => Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!(
+                            "`for in` requires a list or dict, got `{}`{}",
+                            other.type_name(),
+                            if is_dict { "" } else { "" }
+                        ),
+                        expr_span(iter),
+                        Some("iterate a list with `for x in list` or a dict with `for k, v in dict`"),
+                    )),
+                }
             }
             Stmt::Return { value, .. } => {
                 let v = match value {
@@ -648,6 +719,33 @@ impl Interp {
             Expr::FloatLit(v, _) => Ok(Value::Float(*v)),
             Expr::BoolLit(v, _) => Ok(Value::Bool(*v)),
             Expr::StrLit(v, _) => Ok(Value::Str(v.clone())),
+            Expr::ListLit(items, _) => {
+                let mut vals = Vec::new();
+                for it in items {
+                    vals.push(self.eval_expr(env, it)?);
+                }
+                Ok(Value::List(vals))
+            }
+            Expr::DictLit(entries, _) => {
+                let mut vals = Vec::new();
+                for (k, v) in entries {
+                    vals.push((k.clone(), self.eval_expr(env, v)?));
+                }
+                Ok(Value::Dict(vals))
+            }
+            Expr::FStr(segs, _) => {
+                let mut out = String::new();
+                for seg in segs {
+                    match seg {
+                        FStrSeg::Lit(s) => out.push_str(s),
+                        FStrSeg::Code(e) => {
+                            let v = self.eval_expr(env, e)?;
+                            out.push_str(&v.display());
+                        }
+                    }
+                }
+                Ok(Value::Str(out))
+            }
             Expr::Ident { name, span } => match env.get(name) {
                 Some(v) => Ok(v.clone()),
                 None => Err(self.runtime_err(
@@ -783,6 +881,8 @@ impl Interp {
             (Value::Float(x), Value::Float(y)) => Ok(x == y),
             (Value::Bool(x), Value::Bool(y)) => Ok(x == y),
             (Value::Str(x), Value::Str(y)) => Ok(x == y),
+            (Value::List(x), Value::List(y)) => Ok(x == y),
+            (Value::Dict(x), Value::Dict(y)) => Ok(x == y),
             (Value::Null, Value::Null) => Ok(true),
             _ => Err(self.runtime_err(
                 codes::TYPE_MISMATCH,

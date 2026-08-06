@@ -391,6 +391,12 @@ impl Codegen {
                 *span,
                 Some("field access (`e.code` etc.) works in interpreted mode only"),
             )),
+            Expr::ListLit(..) | Expr::DictLit(..) | Expr::FStr(..) => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "list/dict literals and f-strings are not supported in DLL builds",
+                expr_span(e),
+                Some("these features work in interpreted mode only"),
+            )),
             Expr::Unary { op, expr, span } => {
                 let t = self.infer_expr_type(expr, vt, stack)?;
                 match op {
@@ -782,6 +788,12 @@ impl Codegen {
                 *span,
                 Some("field access (`e.code` etc.) works in interpreted mode only"),
             )),
+            Expr::ListLit(..) | Expr::DictLit(..) | Expr::FStr(..) => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "list/dict literals and f-strings are not supported in DLL builds",
+                expr_span(e),
+                Some("these features work in interpreted mode only"),
+            )),
             Expr::Unary { op, expr, span } => {
                 let (t, s) = self.gen_expr(expr, ctx)?;
                 match op {
@@ -930,6 +942,7 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Block { span, .. }
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
+        | Stmt::ForIn { span, .. }
         | Stmt::Return { span, .. }
         | Stmt::FnDef { span, .. }
         | Stmt::ExprStmt { span, .. }
