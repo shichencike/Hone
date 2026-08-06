@@ -3,7 +3,7 @@
 轻量级、跨平台、可嵌入的脚本语言。用 Rust 实现，单文件可执行程序，开箱即用。
 
 > 设计规范：`zap..md`（v1.1）
-> 当前版本：v0.1.0 —— 核心执行器（阶段 1 + 部分阶段 2 功能）
+> 当前版本：v0.1.0 —— 核心执行器（阶段 1 + 阶段 2 + 阶段 3 + 阶段 5）
 
 ## 构建
 
@@ -17,9 +17,14 @@ cargo build --release
 ```bash
 zap <script.zp>          # 执行脚本（默认命令）
 zap run <script.zp>      # 执行脚本
-zap debug <script.zp>    # 断点调试模式（breakpoint 关键字生效）
+zap debug <script.zp>    # 断点调试模式（breakpoint / debug_print 生效）
+zap run --restart[=N] <script.zp> # 崩溃自动重启（N 为最大重启次数，默认 3）；
+                         可配合 --backoff=a,b,c 递增等待间隔，--restart-on=Zxxx 限定可重启错误码
+zap run --resume <script.zp> # 恢复上次 db 检查点并启用自动落盘（脚本变更后自动失效）
 zap fmt [-w] <file.zp>   # 代码格式化（Tab 缩进/运算符空格/大括号；-w 覆盖写，支持多文件）
 zap build --dll <file.zp> # 打包 C ABI 动态库（int/float/bool/str 类型映射，需系统 C 编译器）
+zap build --exe <file.zp> # 将脚本与解释器打包为自释放独立可执行文件（[-o <out>] [--icon <ico>]）
+zap explain <code>       # 查询错误码含义（如 zap explain Z201）
 zap get <module> <url>   # 下载模块依赖并缓存到 ~/.zap/cache/
 zap get <script.zp>      # 预下载脚本中所有 import 声明的模块
 zap upgrade [-w] <file.zp> # 按映射表自动迁移旧版本语法（-w 覆盖写）
@@ -55,6 +60,34 @@ print(fib(10));    // 55
 go task(1);
 // 断点调试：zap debug 模式下打印变量快照
 breakpoint;
+
+// try/catch/throw：错误捕获与主动抛出
+// try { body } catch e { handler }；e 为 error 类型，含 code/message/file/line/col/context 字段
+// throw 字符串构造 Z600 用户错误；throw error 值重抛
+fn risky_div(a, b) -> int {
+    return a / b;
+}
+
+try {
+    risky_div(10, 0);
+} catch e {
+    print(e.code + ": " + e.message);
+    print("  at " + e.file + ":" + to_str(e.line));
+}
+
+// throw 主动抛出
+throw "custom failure";
+
+// 重抛：内层捕获后再次抛出，由外层兜底
+try {
+    try {
+        throw "inner error";
+    } catch e {
+        throw e;
+    }
+} catch e {
+    print("outer caught " + e.code);
+}
 
 // 临时函数（编译自动忽略，仅开发时使用）
 tmp fn helper() { print("debug"); }
@@ -147,10 +180,33 @@ help: Zap types are locked after inference; no implicit conversion is allowed
 | Z010 | 整数溢出 |
 | Z011 | 参数数量不匹配 |
 | Z012 | 递归过深 |
+| Z600 | 用户主动抛出（throw） |
 | Z200 | 网络请求失败 |
 | Z300 | 系统调用失败 |
 | Z404 | 文件或库不存在 |
 | Z999 | 尚未实现 |
+
+## 错误码细分
+
+| 区段 | 错误码 | 含义 |
+|------|--------|------|
+| 词法/语法 | Z101 | 非法字符 |
+| 词法/语法 | Z102 | 字符串未闭合 |
+| 词法/语法 | Z103 | 注释未闭合 |
+| 词法/语法 | Z104 | 语句缺少分号 |
+| 网络 | Z201 | 连接/请求超时 |
+| 网络 | Z202 | 连接被拒绝 |
+| 网络 | Z203 | DNS 解析失败 |
+| 网络 | Z204 | 非 2xx 响应 |
+| 系统/DLL | Z301 | DLL 加载失败 |
+| 系统/DLL | Z302 | DLL 参数校验失败 |
+| 系统/DLL | Z303 | 权限不足 |
+| 文件 | Z401 | 文件不存在 |
+| 文件 | Z402 | 文件权限不足 |
+| 文件 | Z403 | 文件被占用/锁定 |
+| 用户抛出 | Z600 | throw 语句抛出的用户错误 |
+
+使用 `zap explain <code>` 查询完整含义与修复建议。
 
 ## 设计约束（当前实现状态）
 
@@ -165,6 +221,14 @@ help: Zap types are locked after inference; no implicit conversion is allowed
 - `import` / `load` / `load lazy` / `use` / `alias` / `zap get` / `zap upgrade` / `zap lsp` 已实现
   （upgrade 按映射表迁移旧语法；lsp 提供诊断/补全/hover，冒烟测试见 `tests/lsp_smoke.py`）
 - `import "mod" from "url" as alias;` 支持以别名导入模块，函数名前缀自动替换
+- `try/catch/throw` 错误处理：捕获可恢复错误；catch 绑定的 `error` 类型变量含
+  `code`/`message`/`file`/`line`/`col`/`context` 字段；`throw str` 构造 Z600 用户错误，
+  `throw error` 重抛
+- `zap run --restart=N` / `--backoff=a,b,c` / `--restart-on=Zxxx` 自动重启策略
+  （重启仅对可重入错误生效；默认最多 3 次，间隔 1/3/10 秒）
+- `zap run --resume` 检查点恢复（`db` 自动落盘，脚本变更后自动失效）
+- `zap build --exe` 将解释器与脚本打包为自释放独立可执行文件（`[-o <out>] [--icon <ico>]`）
+- `zap explain <code>` 查询错误码含义与修复建议
 - `tmp fn` 临时函数在编译时自动忽略，仅开发阶段使用
 - `debug_print(expr)` 调试输出仅在 `zap debug` 模式生效，普通模式自动跳过
 
@@ -181,7 +245,10 @@ help: Zap types are locked after inference; no implicit conversion is allowed
   `--dll` float/str/bool 类型映射 ✅、GitHub 首次提交 ✅；独立域名与推广待做
 - 🚧 阶段 5（新增）：内置函数扩展（log/path/args/env/db/regex/crypto）✅、
   `tmp fn` 临时函数 ✅、`debug_print` 调试输出 ✅、`import as` 别名 ✅、
-  `zap poop` 屎山检测 ✅
+  `zap poop` 屎山检测 ✅、`try/catch/throw` 错误处理 ✅、
+  `zap run --restart` / `--backoff` / `--restart-on` 自动重启 ✅、
+  `zap run --resume` 检查点恢复 ✅、
+  `zap build --exe` 打包独立可执行文件 ✅、`zap explain` 错误码解释 ✅
 
 ## 许可证
 
