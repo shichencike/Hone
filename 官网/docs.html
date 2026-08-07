@@ -15,7 +15,7 @@
     <a href="examples.html">示例</a>
     <a href="install.html">安装</a>
   </nav>
-  <span class="ver">v0.2.0</span>
+  <span class="ver">v0.3.0</span>
 </header>
 
 <main>
@@ -37,6 +37,7 @@
       <li><a href="#builtins">内置函数参考</a></li>
       <li><a href="#integ">导入与外部集成</a></li>
       <li><a href="#tools">工具链</a></li>
+      <li><a href="#gui">图形界面库</a></li>
       <li><a href="#errors">错误处理</a></li>
       <li><a href="#principles">设计原则</a></li>
     </ol>
@@ -185,6 +186,7 @@ l = <span class="f">append</span>(nums, <span class="s">"x"</span>);          <s
       <tr><td>随机</td><td><code>random.int</code> <code>random.float</code></td></tr>
       <tr><td>UUID</td><td><code>uuid.new</code>（UUID v4）</td></tr>
       <tr><td>网络 / JSON</td><td><code>http_get</code> <code>http_post</code>（支持 <code>http://</code> 与 <code>https://</code>）<code>json_parse</code> <code>json_stringify</code></td></tr>
+      <tr><td>本地服务器</td><td><code>server.listen</code> <code>server.poll</code> <code>server.respond</code>（纯 std::net 实现，跨平台一致）</td></tr>
       <tr><td>系统（跨平台）</td><td><code>sys.run</code> <code>sys.get_env</code></td></tr>
       <tr><td>系统（Windows API）</td><td><code>sys.msgbox</code> <code>sys.beep</code> <code>sys.clipboard_set</code> <code>sys.get_screen_size</code> <code>sys.reg_read</code> <code>sys.reg_write</code></td></tr>
       <tr><td>日志（彩色）</td><td><code>log.info</code> <code>log.warn</code> <code>log.error</code> <code>log.debug</code></td></tr>
@@ -286,6 +288,29 @@ help: Zap types are locked after inference; no implicit conversion is allowed</c
       <li><strong>单文件分发</strong>：下载 → 解压 → 运行，零配置；多版本共存互不干扰</li>
     </ul>
   </section>
+
+  <section id="gui">
+    <h2><span class="hash">#</span>13. 图形界面库（zap_lib/gui.zp）</h2>
+    <p>纯 Zap 编写的跨平台 GUI：浏览器渲染 + 本地 HTTP 服务器双向交互（Windows / Linux / Termux 均有浏览器）。依赖 <code class="inline">server.*</code> 内置函数。</p>
+<pre><code><span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./zap_lib/gui.zp"</span>;
+
+<span class="c">// 界面事件处理：id 为控件 id，value 为用户输入值（约定函数名 on_event）</span>
+<span class="k">fn</span> <span class="f">on_event</span>(id : <span class="k">str</span>, value) -&gt; <span class="k">str</span> {
+    <span class="k">if</span> (id == <span class="s">"btn_hi"</span>) {
+        <span class="k">return</span> <span class="f">json_stringify</span>({<span class="s">"update"</span>: [[<span class="s">"lbl_out"</span>, <span class="s">"你好，Zap GUI！"</span>]]});
+    }
+    <span class="k">return</span> <span class="s">""</span>;
+}
+
+widgets = [
+    <span class="f">gui_button</span>(<span class="s">"btn_hi"</span>, <span class="s">"打招呼"</span>),
+    <span class="f">gui_input</span>(<span class="s">"txt_name"</span>, <span class="s">"姓名"</span>, <span class="s">"输入名字"</span>),
+    <span class="f">gui_label</span>(<span class="s">"lbl_out"</span>, <span class="s">"(事件输出)"</span>),
+];
+<span class="f">gui_run</span>(<span class="s">"Zap GUI 演示"</span>, widgets);  <span class="c">// 启动本地服务器并自动打开浏览器，Ctrl+C 退出</span></code></pre>
+    <p>控件：<code class="inline">gui_button</code> <code class="inline">gui_label</code> <code class="inline">gui_input</code> <code class="inline">gui_select</code> <code class="inline">gui_html</code>；<code class="inline">on_event</code> 返回值按 JSON 协议解释：<code class="inline">{"update": [[元素id, 新文本], ...]}</code> 更新元素、<code class="inline">{"alert": "消息"}</code> 弹窗、其他文本显示在页面底部状态栏。</p>
+    <p>底层 <code class="inline">server.*</code> API：<code class="inline">server.listen(port)</code> 启动后台监听（0=自动分配，返回实际端口）、<code class="inline">server.poll()</code> 取出排队请求（返回 JSON 数组）、<code class="inline">server.respond(id, body)</code> 发送响应体（HTTP 200）。事件模型为后台线程收发 + 脚本主线程轮询响应，与解释器单线程模型兼容。示例：<code class="inline">examples/gui_demo.zp</code>、<code class="inline">examples/server_demo.zp</code>。</p>
+  </section>
 </main>
 
 <script>
@@ -306,7 +331,7 @@ function searchDocs(q) {
 </script>
 
 <footer>
-  Zap v0.2.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
+  Zap v0.3.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

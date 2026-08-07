@@ -15,7 +15,7 @@
     <a href="examples.html" class="active">示例</a>
     <a href="install.html">安装</a>
   </nav>
-  <span class="ver">v0.2.0</span>
+  <span class="ver">v0.3.0</span>
 </header>
 
 <main>
@@ -384,6 +384,48 @@ zap run --resume app.zp
 <span class="c">// app.zp 中写入检查点</span>
 <span class="k">db.set</span>(<span class="s">"stage"</span>, <span class="s">"2"</span>);</code></pre>
   </div>
+
+  <h3><span class="hash">#</span>10. 图形界面与本地服务器</h3>
+
+  <div class="example">
+    <div class="title">10.1 图形界面库（浏览器渲染 + 双向交互）</div>
+    <div class="note">zap_lib/gui.zp：纯 Zap 编写的跨平台 GUI，gui_run 启动本地服务器并自动打开浏览器</div>
+<pre><code><span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./zap_lib/gui.zp"</span>;
+
+<span class="c">// 界面事件处理：id 为控件 id，value 为用户输入值（约定函数名 on_event）</span>
+<span class="k">fn</span> <span class="f">on_event</span>(id : <span class="k">str</span>, value) -&gt; <span class="k">str</span> {
+    <span class="k">if</span> (id == <span class="s">"btn_hi"</span>) {
+        <span class="k">return</span> <span class="f">json_stringify</span>({<span class="s">"update"</span>: [[<span class="s">"lbl_out"</span>, <span class="s">"你好，Zap GUI！"</span>]]});
+    }
+    <span class="k">return</span> <span class="s">""</span>;
+}
+
+widgets = [
+    <span class="f">gui_button</span>(<span class="s">"btn_hi"</span>, <span class="s">"打招呼"</span>),
+    <span class="f">gui_input</span>(<span class="s">"txt_name"</span>, <span class="s">"姓名"</span>, <span class="s">"输入名字"</span>),
+    <span class="f">gui_label</span>(<span class="s">"lbl_out"</span>, <span class="s">"(事件输出)"</span>),
+];
+<span class="f">gui_run</span>(<span class="s">"Zap GUI 演示"</span>, widgets);  <span class="c">// 浏览器自动打开，Ctrl+C 退出</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">10.2 本地 HTTP 服务器（server.* 内置函数）</div>
+    <div class="note">server.listen / server.poll / server.respond：纯 std::net 跨平台，后台线程收发、脚本主线程轮询响应</div>
+<pre><code>port = <span class="f">server.listen</span>(<span class="n">0</span>);  <span class="c">// 0 = 自动分配端口，返回实际端口</span>
+<span class="f">print</span>(<span class="s">"http://127.0.0.1:"</span> + <span class="f">to_str</span>(port) + <span class="s">"/"</span>);
+
+<span class="k">while</span> (<span class="k">true</span>) {
+    reqs = <span class="f">server.poll</span>();   <span class="c">// 取排队请求: JSON 数组 [{id,method,path,body}, ...]</span>
+    <span class="k">if</span> (reqs != <span class="s">"[]"</span>) {
+        list = <span class="f">json_parse</span>(reqs);
+        <span class="k">for</span> req <span class="k">in</span> list {
+            <span class="c">// gui_dict_get(req, "id") 取字段（Zap 无 d["k"] 索引语法）</span>
+            <span class="f">server.respond</span>(<span class="n">1</span>, <span class="s">"ok"</span>);  <span class="c">// 发送 HTTP 200 响应体</span>
+        }
+    }
+    <span class="f">time.sleep</span>(<span class="n">0.05</span>);
+}</code></pre>
+  </div>
 </main>
 
 <script>
@@ -417,7 +459,7 @@ function searchExamples(q) {
 </script>
 
 <footer>
-  Zap v0.2.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
+  Zap v0.3.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

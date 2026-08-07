@@ -15,7 +15,7 @@
     <a href="examples.html">示例</a>
     <a href="install.html">安装</a>
   </nav>
-  <span class="ver">v0.2.0</span>
+  <span class="ver">v0.3.0</span>
 </header>
 
 <main>
@@ -40,6 +40,7 @@
       <div class="card"><h4>🧩 集合类型</h4><p>列表 <code class="inline">[1, 2, 3]</code>、字典 <code class="inline">{"k": v}</code> 开箱即用：<code class="inline">for-in</code> 遍历、<code class="inline">f"..."</code> 字符串插值、append / contains / keys / values 等集合函数。</p></div>
       <div class="card"><h4>⚡ 多线程与调试</h4><p><code class="inline">go task(1);</code> 一行启动线程；<code class="inline">breakpoint;</code> 断点；<code class="inline">debug_print</code> 调试输出；<code class="inline">tmp fn</code> 临时函数开发时自动忽略。</p></div>
       <div class="card"><h4>🔌 可嵌入可扩展</h4><p>@export 打包 C ABI 动态库（DLL/SO/DYLIB）、load 动态库调用、import 远程模块、LSP 语言服务器。</p></div>
+      <div class="card"><h4>🖥 图形界面库</h4><p>纯 Zap 编写的跨平台 GUI（zap_lib/gui.zp）：浏览器渲染 + 本地 HTTP 服务器双向交互，button / label / input / select 控件开箱即用。</p></div>
     </div>
   </section>
 
@@ -81,15 +82,16 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
       <li>✅ <strong>阶段 2</strong>：fmt、debug、go 多线程、sys Windows API、build --dll（int/float/bool/str）</li>
       <li>✅ <strong>阶段 3</strong>：import 远程模块、load lazy、use / alias、zap get、upgrade、lsp、可视化编辑器</li>
              <li>✅ <strong>阶段 4</strong>：GitHub 开源、独立官网、--dll 全类型映射、zap poop 屎山检测</li>
-             <li>🚧 <strong>阶段 5</strong>：内置函数扩展（log/path/args/env/db/regex/crypto）、tmp fn、debug_print、import as、try/catch/throw、--restart/--resume、build --exe、zap explain</li>
-             <li>🚧 <strong>阶段 6</strong>：集合类型（列表/字典）、for-in 循环、f-string 插值、类型判断、time.parse、uuid.new</li>
+             <li>✅ <strong>阶段 5</strong>：内置函数扩展（log/path/args/env/db/regex/crypto）、tmp fn、debug_print、import as、try/catch/throw、--restart/--resume、build --exe、zap explain</li>
+             <li>✅ <strong>阶段 6</strong>：集合类型（列表/字典）、for-in 循环、f-string 插值、类型判断、time.parse、uuid.new</li>
+             <li>🚧 <strong>阶段 7</strong>：本地 HTTP 服务器（server.listen / server.poll / server.respond）、zap_lib 图形界面库（浏览器渲染 + 双向交互）</li>
     </ul>
     <p>可视化编辑器：浏览器打开 <code class="inline">editor/index.html</code>，拖拽代码块即可生成 .zp 代码。</p>
   </section>
 </main>
 
 <footer>
-  Zap v0.1.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
+  Zap v0.3.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

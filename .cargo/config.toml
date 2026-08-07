@@ -1,0 +1,7 @@
+# Cross-compilation linker config: pure-Rust musl targets on Windows host.
+# rust-lld (shipped with the Rust toolchain) links ELF/musl without a C toolchain.
+[target.x86_64-unknown-linux-musl]
+linker = "D:/hot/rust/lib/rustlib/x86_64-pc-windows-gnu/bin/rust-lld.exe"
+
+[target.aarch64-unknown-linux-musl]
+linker = "D:/hot/rust/lib/rustlib/x86_64-pc-windows-gnu/bin/rust-lld.exe"
