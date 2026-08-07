@@ -83,6 +83,16 @@ footer .sword { color: #f38ba8; }
 .toc a { font-size: 14px; }
 .toc li { margin: 3px 0; }
 
+/* 搜索框 */
+.search-box {
+  width: 100%; max-width: 420px; padding: 10px 14px; font-size: 14px;
+  background: #11111b; color: #cdd6f4; border: 1px solid #45475a;
+  border-radius: 8px; margin: 14px 0 6px; outline: none;
+}
+.search-box:focus { border-color: #89b4fa; }
+.search-box::placeholder { color: #6c7086; }
+.search-count { color: #6c7086; font-size: 13px; margin-bottom: 12px; }
+
 /* 示例页代码块标题 */
 .example { margin-top: 40px; }
 .example .title { font-size: 17px; color: #f9e2af; margin-bottom: 4px; }

@@ -1592,6 +1592,21 @@ impl Checker {
                 self.expect_str(name, args, 0, span, "the command")?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
+            "server.listen" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_int(name, args, 0, span, "the port number (0 = auto-assign)")?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
+            "server.poll" => {
+                self.arg_count(name, n, 0, span)?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "server.respond" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_int(name, args, 0, span, "the request id from `server.poll`")?;
+                self.expect_str(name, args, 1, span, "the response body")?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
             "file_exists" => {
                 self.arg_count(name, n, 1, span)?;
                 self.expect_str(name, args, 0, span, "the path")?;
@@ -1929,6 +1944,9 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "sys.get_screen_size",
         "sys.reg_read",
         "sys.reg_write",
+        "server.listen",
+        "server.poll",
+        "server.respond",
         "log.info",
         "log.warn",
         "log.error",

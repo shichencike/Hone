@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.3.0] - 2026-08-07
+
+### 新增
+- `server.listen(port)` / `server.poll()` / `server.respond(id, body)` 本地 HTTP 服务器内置函数：纯 std::net 实现，Windows / Linux / Termux 跨平台一致，无 C 依赖；后台线程只做 TCP 收发与请求排队，Zap 脚本在主线程轮询响应，与解释器单线程模型完全兼容
+- 图形界面库 `zap_lib/gui.zp`（纯 Zap 编写）：浏览器渲染 + 本地服务器双向交互，控件 `gui_button` / `gui_label` / `gui_input` / `gui_select` / `gui_html`，事件回调约定 `on_event(id, value)`，返回值按 JSON 协议更新页面元素
+- 新增示例 `examples/gui_demo.zp`（GUI 演示）、`examples/server_demo.zp`（server API 演示）、`examples/server_selftest.zp`（进程内自测）
+
+### 文档
+- README：新增"图形界面库"章节，内置函数表补充 server.* 说明
+
 ## [v0.2.0] - 2026-08-07
 
 ### 新增

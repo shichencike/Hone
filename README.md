@@ -125,6 +125,7 @@ debug_print("当前 x = " + to_str(x));
 - 模块：`time.now` `time.sleep` `time.format`（UTC）、`time.parse`（解析
   `YYYY-MM-DD[THH:MM:SS]` 时间戳 → Unix 秒）、`random.int` `random.float`、`uuid.new`（UUID v4）
 - 网络：`http_get` `http_post`（支持 `http://` 与 `https://`，TLS 为纯 Rust 实现、内置 Mozilla 根证书）、`json_parse` `json_stringify`（标量）
+- 本地服务器：`server.listen(port)` 启动后台监听线程（0=自动分配端口，返回实际端口）、`server.poll()` 取出排队请求（返回 JSON 数组 `[{id,method,path,body}, ...]`）、`server.respond(id, body)` 发送响应体（HTTP 200）——纯 std::net 实现，Windows / Linux / Termux 跨平台一致，无 C 依赖
 - 系统：`sys.run` `sys.get_env`（跨平台）
 - 系统（Windows API，其他平台报 Z999 或降级）：`sys.msgbox` `sys.beep` `sys.clipboard_set`
   `sys.get_screen_size`（返回 `"宽x高"` 字符串，因 Zap 无元组类型）`sys.reg_read` `sys.reg_write`
@@ -175,7 +176,34 @@ hi("Zap");
 变量/print/if/else/while/函数等代码块到画布，嵌套块内部可继续拖入子块；右侧实时生成
 Tab 缩进的 `.zp` 代码，支持复制与下载。初始自带 fib 示例。
 
-示例脚本见 `examples/` 目录（正常示例 + 错误用例 + fmt/sys/dll/load/import 用例）。
+示例脚本见 `examples/` 目录（正常示例 + 错误用例 + fmt/sys/dll/load/import 用例 + server/gui 图形界面用例）。
+
+## 图形界面库（zap_lib/gui.zp）
+
+浏览器渲染 + 本地 HTTP 服务器的双向交互 GUI，纯 Zap 编写，跨平台（Windows / Linux / Termux 均有浏览器）。
+依赖 `server.*` 内置函数（v0.3.0+）。运行示例：`zap examples/gui_demo.zp`（自动打开浏览器，Ctrl+C 退出）。
+
+```zp
+import "gui" from "./zap_lib/gui.zp";
+
+// 界面事件处理：id 为控件 id，value 为用户输入值（on_event 为约定函数名）
+fn on_event(id : str, value) -> str {
+    if (id == "btn_hi") {
+        return json_stringify({"update": [["lbl_out", "你好，Zap GUI！"]]});
+    }
+    return "";
+}
+
+widgets = [
+    gui_button("btn_hi", "打招呼"),
+    gui_label("lbl_out", "(事件输出)"),
+];
+gui_run("Zap GUI 演示", widgets);
+```
+
+- 控件：`gui_button(id, label)`、`gui_label(id, text)`、`gui_input(id, label, placeholder)`、`gui_select(id, label, options)`、`gui_html(html)`
+- `on_event` 返回值按 JSON 协议解释：`{"update": [[元素id, 新文本], ...]}` 更新元素文本、`{"alert": "消息"}` 弹窗提示、其他文本显示在页面底部状态栏
+- 底层 `server.*` API（见 `examples/server_demo.zp`）：`server.listen(port)` 启动后台监听线程（0=自动分配，返回实际端口）、`server.poll()` 取出排队请求（返回 JSON 数组）、`server.respond(id, body)` 发送响应体；后台线程只做 TCP 收发与排队，脚本在主线程轮询响应，与解释器单线程模型兼容；进程内自测：`zap examples/server_selftest.zp`
 
 ## 错误报告格式
 

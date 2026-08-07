@@ -558,8 +558,19 @@ impl Interp {
         Ok(())
     }
 
-    /// 获取模块源码：缓存 ~/.zap/cache/<name>.zp 优先，否则从 URL 下载并写入缓存。
+    /// 获取模块源码：本地路径（非 http/https 开头）直接读取；否则缓存 ~/.zap/cache/<name>.zp 优先，下载写入缓存。
     fn fetch_module(&self, name: &str, url: &str, span: Span) -> Result<String, ZError> {
+        // 本地路径模块：直接读文件，不写缓存（相对路径基于当前工作目录）
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return std::fs::read_to_string(url).map_err(|e| {
+                self.runtime_err(
+                    codes::NOT_FOUND,
+                    format!("cannot read local module `{}` at `{}`: {}", name, url, e),
+                    span,
+                    Some("check the module path; local paths are relative to the working directory"),
+                )
+            });
+        }
         let cache_file = zap_cache_dir().join(format!("{}.zp", name));
         if cache_file.exists() {
             return std::fs::read_to_string(&cache_file).map_err(|e| {

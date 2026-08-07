@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zap 安装教程</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <span class="logo">⚡ Zap</span>
+  <nav>
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="examples.html">示例</a>
+    <a href="install.html" class="active">安装</a>
+  </nav>
+  <span class="ver">v0.2.0</span>
+</header>
+
+<main>
+  <h2><span class="hash">#</span>安装教程</h2>
+  <p>Zap 是单文件可执行程序：下载 → 解压 → 运行，零依赖、零配置。选择你的平台：</p>
+
+  <div class="toc">
+    <ol>
+      <li><a href="#download">下载二进制</a></li>
+      <li><a href="#windows">Windows</a></li>
+      <li><a href="#linux">Linux</a></li>
+      <li><a href="#termux">Termux（Android）</a></li>
+      <li><a href="#build">源码构建</a></li>
+      <li><a href="#verify">验证安装</a></li>
+    </ol>
+  </div>
+
+  <section id="download">
+    <h2><span class="hash">#</span>1. 下载二进制</h2>
+    <p>从 <a href="https://github.com/shichencike/zap/releases">GitHub Releases</a> 下载对应平台的 zap 可执行文件：</p>
+    <table>
+      <tr><th>平台</th><th>文件</th><th>说明</th></tr>
+      <tr><td>Windows x86_64</td><td><code>zap-windows-x86_64.exe</code></td><td>64 位 Windows 10 / 11</td></tr>
+      <tr><td>Linux x86_64</td><td><code>zap-linux-x86_64</code></td><td>musl 静态编译，任何发行版直接运行</td></tr>
+      <tr><td>Termux（Android）</td><td><code>zap-termux-aarch64</code></td><td>Termux 终端环境（ARM64）</td></tr>
+    </table>
+    <p>Linux / Termux 版为静态编译，不依赖系统 glibc / bionic，开箱即用。</p>
+  </section>
+
+  <section id="windows">
+    <h2><span class="hash">#</span>2. Windows</h2>
+<pre><code><span class="c">// 1. 下载 zap-windows-x86_64.exe，重命名为 zap.exe</span>
+mkdir C:\zap
+copy zap-windows-x86_64.exe C:\zap\zap.exe
+
+<span class="c">// 2. 验证</span>
+C:\zap\zap.exe --version    <span class="c">// zap 0.2.0</span>
+
+<span class="c">// 3.（可选）加入 PATH，任意目录直接使用 zap 命令</span>
+setx PATH "%PATH%;C:\zap"</code></pre>
+  </section>
+
+  <section id="linux">
+    <h2><span class="hash">#</span>3. Linux</h2>
+<pre><code><span class="c">// 1. 下载并赋予执行权限</span>
+wget https://github.com/shichencike/zap/releases/download/v0.2.0/zap-linux-x86_64
+chmod +x zap-linux-x86_64
+
+<span class="c">// 2. 放入 PATH 目录</span>
+sudo mv zap-linux-x86_64 /usr/local/bin/zap
+
+<span class="c">// 3. 验证</span>
+zap --version    <span class="c">// zap 0.2.0</span></code></pre>
+  </section>
+
+  <section id="termux">
+    <h2><span class="hash">#</span>4. Termux（Android）</h2>
+<pre><code><span class="c">// 1. 安装 Termux（F-Droid 商店）并打开终端</span>
+
+<span class="c">// 2. 下载 zap-termux-aarch64</span>
+curl -L -o zap https://github.com/shichencike/zap/releases/download/v0.2.0/zap-termux-aarch64
+
+<span class="c">// 3. 赋予执行权限并放入 PATH</span>
+chmod +x zap
+mv zap $PREFIX/bin/zap
+
+<span class="c">// 4. 验证</span>
+zap --version    <span class="c">// zap 0.2.0</span></code></pre>
+  </section>
+
+  <section id="build">
+    <h2><span class="hash">#</span>5. 源码构建</h2>
+    <p>需要 Rust 工具链（rustc ≥ 1.71）。</p>
+<pre><code>git clone https://github.com/shichencike/zap.git
+cd zap
+cargo build --release
+<span class="c">// 产物: target/release/zap（Windows 为 target/release/zap.exe）</span>
+./target/release/zap --version    <span class="c">// zap 0.2.0</span></code></pre>
+  </section>
+
+  <section id="verify">
+    <h2><span class="hash">#</span>6. 验证安装</h2>
+<pre><code><span class="c">// hello.zp</span>
+<span class="f">print</span>(<span class="s">"Hello, Zap!"</span>);
+
+<span class="c">// 运行脚本</span>
+zap hello.zp    <span class="c">// Hello, Zap!</span></code></pre>
+    <p>安装完成！下一步：<a href="docs.html">阅读语言手册</a> 或 <a href="examples.html">查看示例</a>。</p>
+  </section>
+</main>
+
+<footer>
+  Zap v0.2.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
+</footer>
+</body>
+</html>

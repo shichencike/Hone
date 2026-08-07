@@ -12,6 +12,7 @@ mod interp;
 mod lexer;
 mod lsp;
 mod parser;
+mod srvmod;
 mod sysmod;
 mod upgrade;
 

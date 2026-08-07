@@ -13,23 +13,29 @@
     <a href="index.html">首页</a>
     <a href="docs.html">文档</a>
     <a href="examples.html" class="active">示例</a>
+    <a href="install.html">安装</a>
   </nav>
-  <span class="ver">v0.1.0</span>
+  <span class="ver">v0.2.0</span>
 </header>
 
 <main>
   <h2><span class="hash">#</span>示例代码</h2>
-  <p>以下示例均可在 <code class="inline">examples/</code> 目录中找到，用 <code class="inline">zap run &lt;file.zp&gt;</code> 运行。</p>
+  <p>按知识点分组，与<a href="docs.html">语言手册</a>章节对应。以下示例均可在 <code class="inline">examples/</code> 目录中找到，用 <code class="inline">zap run &lt;file.zp&gt;</code> 运行。</p>
+
+  <input type="text" id="search" class="search-box" placeholder="搜索示例…（如 http、list、f-string）" oninput="searchExamples(this.value)">
+  <div id="search-count" class="search-count"></div>
+
+  <h3><span class="hash">#</span>1. 基础</h3>
 
   <div class="example">
-    <div class="title">1. Hello World</div>
+    <div class="title">1.1 Hello World</div>
     <div class="note">第一个 Zap 程序</div>
 <pre><code><span class="c">// 这是 Zap 的第一个示例</span>
 <span class="f">print</span>(<span class="s">"Hello Zap!"</span>);</code></pre>
   </div>
 
   <div class="example">
-    <div class="title">2. 变量与类型</div>
+    <div class="title">1.2 变量与类型</div>
     <div class="note">自动推导、显式类型、类型锁定（期望输出：60 / 3.14 / int / 3）</div>
 <pre><code>x = <span class="n">10</span>;            <span class="c">// 自动推导为 int</span>
 y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">// 显式类型（Rust/TS 风格）</span>
@@ -45,26 +51,10 @@ a = <span class="n">7</span> / <span class="n">2</span>;
 <span class="c">// x = "Zap";  // error[Z001]：类型锁定</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">3. 递归函数：斐波那契</div>
-    <div class="note">参数类型可由调用上下文推导（期望输出：55）</div>
-<pre><code><span class="k">fn</span> <span class="f">fib</span>(n) {
-    <span class="k">if</span> (n &lt;= <span class="n">1</span>) {
-        <span class="k">return</span> n;
-    }
-    <span class="k">return</span> <span class="f">fib</span>(n - <span class="n">1</span>) + <span class="f">fib</span>(n - <span class="n">2</span>);
-}
-
-<span class="f">print</span>(<span class="f">fib</span>(<span class="n">10</span>));  <span class="c">// 55</span>
-
-<span class="k">fn</span> <span class="f">add</span>(a : <span class="k">int</span>, b : <span class="k">int</span>) -&gt; <span class="k">int</span> {
-    <span class="k">return</span> a + b;
-}
-<span class="f">print</span>(<span class="f">add</span>(<span class="n">20</span>, <span class="n">22</span>));  <span class="c">// 42</span></code></pre>
-  </div>
+  <h3><span class="hash">#</span>2. 控制流</h3>
 
   <div class="example">
-    <div class="title">4. 控制流：if / while</div>
+    <div class="title">2.1 if / while</div>
     <div class="note">条件必须是 bool；支持 else if 链（期望输出：45 / B）</div>
 <pre><code>i = <span class="n">0</span>; sum = <span class="n">0</span>;
 <span class="k">while</span> (i &lt; <span class="n">10</span>) {
@@ -84,214 +74,7 @@ score = <span class="n">85</span>;
   </div>
 
   <div class="example">
-    <div class="title">5. go 多线程</div>
-    <div class="note">每次 go 启动独立线程，不共享变量；子线程崩溃不影响主线程</div>
-<pre><code><span class="k">fn</span> <span class="f">task</span>(id) {
-    i = <span class="n">0</span>;
-    <span class="k">while</span> (i &lt; <span class="n">100000</span>) { i = i + <span class="n">1</span>; }
-    <span class="f">print</span>(<span class="s">"任务 "</span> + <span class="f">to_str</span>(id) + <span class="s">" 完成"</span>);
-}
-
-<span class="k">go</span> <span class="f">task</span>(<span class="n">1</span>);
-<span class="k">go</span> <span class="f">task</span>(<span class="n">2</span>);
-<span class="k">go</span> <span class="f">task</span>(<span class="n">3</span>);
-<span class="f">print</span>(<span class="s">"主线程继续执行"</span>);</code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">6. 时间与随机</div>
-    <div class="note">时间格式化（UTC）与闭区间随机数</div>
-<pre><code>t = <span class="f">time.now</span>();
-<span class="f">print</span>(<span class="f">time.format</span>(t, <span class="s">"YYYY-MM-DD HH:mm:SS"</span>));
-
-r = <span class="f">random.int</span>(<span class="n">1</span>, <span class="n">100</span>);   <span class="c">// 闭区间 [1, 100]</span>
-<span class="f">print</span>(<span class="s">"随机数: "</span> + <span class="f">to_str</span>(r));
-<span class="f">print</span>(<span class="s">"随机小数: "</span> + <span class="f">to_str</span>(<span class="f">random.float</span>()));
-
-<span class="f">time.sleep</span>(<span class="n">0.5</span>);  <span class="c">// 暂停 0.5 秒</span></code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">7. JSON 解析与序列化</div>
-    <div class="note">标量值自动映射为 int / float / bool / str</div>
-<pre><code>n = <span class="f">json_parse</span>(<span class="s">"42"</span>);
-<span class="f">print</span>(<span class="f">type_of</span>(n));          <span class="c">// int</span>
-
-f = <span class="f">json_parse</span>(<span class="s">"3.14"</span>);
-<span class="f">print</span>(f);                     <span class="c">// 3.14</span>
-
-b = <span class="f">json_parse</span>(<span class="s">"true"</span>);
-<span class="f">print</span>(b);                     <span class="c">// true</span>
-
-<span class="f">print</span>(<span class="f">json_stringify</span>(<span class="n">100</span>));  <span class="c">// 100</span></code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">8. DLL 打包</div>
-    <div class="note">@export 标记导出，zap build --dll 生成 C ABI 动态库（可在 C / Python / Rust 中调用）</div>
-<pre><code><span class="c">// math.zp</span>
-<span class="k">fn</span> <span class="f">add</span>(a : <span class="k">int</span>, b : <span class="k">int</span>) -&gt; <span class="k">int</span> { <span class="k">return</span> a + b; }
-<span class="k">fn</span> <span class="f">avg</span>(a : <span class="k">float</span>, b : <span class="k">float</span>) -&gt; <span class="k">float</span> { <span class="k">return</span> (a + b) / <span class="n">2.0</span>; }
-<span class="k">fn</span> <span class="f">greet</span>(name : <span class="k">str</span>) -&gt; <span class="k">str</span> { <span class="k">return</span> <span class="s">"你好, "</span> + name + <span class="s">"!"</span>; }
-
-<span class="k">@export</span> <span class="f">add</span>;
-<span class="k">@export</span> <span class="f">avg</span>;
-<span class="k">@export</span> <span class="f">greet</span>;</code></pre>
-    <p>生成的 C ABI：<code class="inline">int64_t add(int64_t, int64_t)</code>、<code class="inline">double avg(double, double)</code>、<code class="inline">const char* greet(const char*)</code>。</p>
-  </div>
-
-  <div class="example">
-    <div class="title">9. 断点调试</div>
-    <div class="note">zap debug 模式下 breakpoint 打印所有变量的类型与值快照</div>
-<pre><code>x = <span class="n">10</span>;
-name = <span class="s">"Zap"</span>;
-flag = <span class="k">true</span>;
-<span class="k">breakpoint</span>;   <span class="c">// [Zap Debug] 断点触发 -&gt; debug.zp:4 + 变量快照</span>
- <span class="f">print</span>(x);</code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">10. 彩色日志</div>
-    <div class="note">log.info / log.warn / log.error / log.debug 彩色输出到 stderr</div>
-<pre><code><span class="k">log.info</span>(<span class="s">"程序启动完成"</span>);
-<span class="k">log.warn</span>(<span class="s">"磁盘空间不足"</span>);
-<span class="k">log.error</span>(<span class="s">"连接失败"</span>);
-<span class="k">log.debug</span>(<span class="s">"x = 42"</span>);</code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">11. 路径操作</div>
-    <div class="note">path.join / path.dirname / path.basename 跨平台路径操作</div>
-<pre><code><span class="f">print</span>(<span class="f">path.join</span>(<span class="s">"data"</span>, <span class="s">"users"</span>, <span class="s">"1.json"</span>));
-<span class="f">print</span>(<span class="f">path.dirname</span>(<span class="s">"/home/user/file.txt"</span>));
-<span class="f">print</span>(<span class="f">path.basename</span>(<span class="s">"/home/user/file.txt"</span>));</code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">12. 命令行参数解析</div>
-    <div class="note">args.get / args.has 解析 --port 8080 或 -v 标志</div>
-<pre><code>port = <span class="f">args.get</span>(<span class="s">"port"</span>);
-<span class="k">if</span> (<span class="f">args.has</span>(<span class="s">"v"</span>)) {
-    <span class="f">print</span>(<span class="s">"详细模式已开启"</span>);
-}</code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">13. 环境变量与键值存储</div>
-    <div class="note">env.get/set 读写环境变量，db.set/get 内存键值存储</div>
-<pre><code>path = <span class="f">env.get</span>(<span class="s">"PATH"</span>);
-<span class="k">env.set</span>(<span class="s">"MY_VAR"</span>, <span class="s">"hello"</span>);
-<span class="k">db.set</span>(<span class="s">"token"</span>, <span class="s">"abc123"</span>);
-<span class="f">print</span>(<span class="f">db.get</span>(<span class="s">"token"</span>));</code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">14. 正则匹配与替换</div>
-    <div class="note">regex.match / regex.replace 使用标准正则表达式</div>
-<pre><code>ok = <span class="f">regex.match</span>(<span class="s">"^\\d+$"</span>, <span class="s">"12345"</span>);
-<span class="f">print</span>(ok);  <span class="c">// true</span>
-
-result = <span class="f">regex.replace</span>(<span class="s">"world"</span>, <span class="s">"hello world"</span>, <span class="s">"Zap"</span>);
-<span class="f">print</span>(result);  <span class="c">// hello Zap</span></code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">15. MD5 / SHA256 哈希</div>
-    <div class="note">crypto.md5 / crypto.sha256 计算十六进制哈希</div>
-<pre><code><span class="f">print</span>(<span class="f">crypto.md5</span>(<span class="s">"hello"</span>));
-<span class="f">print</span>(<span class="f">crypto.sha256</span>(<span class="s">"hello"</span>));</code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">16. 临时函数与调试输出</div>
-    <div class="note">tmp fn 编译自动忽略，debug_print 仅 debug 模式生效</div>
-<pre><code><span class="k">tmp</span> <span class="k">fn</span> <span class="f">helper</span>() {
-    <span class="f">print</span>(<span class="s">"只在开发时有用"</span>);
-}
-
-x = <span class="n">42</span>;
-<span class="k">debug_print</span>(<span class="s">"当前 x = "</span> + <span class="f">to_str</span>(x));</code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">17. import as 别名导入</div>
-    <div class="note">以别名导入远程模块，函数名前缀自动替换</div>
-<pre><code><span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.zp"</span> <span class="k">as</span> m;
-<span class="f">print</span>(<span class="f">m_add</span>(<span class="n">20</span>, <span class="n">22</span>));  <span class="c">// 42</span></code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">18. try-catch 错误捕获与恢复</div>
-    <div class="note">捕获可恢复错误并降级回退；throw 主动抛出；错误对象字段 e.code / e.message / e.line</div>
-<pre><code>r = <span class="n">0</span>;
-<span class="k">try</span> {
-    r = <span class="n">10</span> / <span class="n">0</span>;              <span class="c">// error[Z009] 除零</span>
-} <span class="k">catch</span> e {
-    <span class="f">print</span>(<span class="s">"caught "</span> + e.code + <span class="s">": "</span> + e.message);
-    r = -<span class="n">1</span>;                  <span class="c">// 回退值</span>
-}
-<span class="f">print</span>(r);                   <span class="c">// -1</span>
-
-<span class="k">throw</span> <span class="s">"自定义错误"</span>;        <span class="c">// error[Z600]</span></code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">19. 自动重启与检查点恢复</div>
-    <div class="note">--restart 失败自动重拉（名刀机制）；--resume 从 db 检查点继续（崩溃不丢进度）</div>
-<pre><code><span class="c">// 失败自动重启(默认最多3次,间隔1s/3s/10s递增;--restart-on 错误码白名单)</span>
-zap run --restart=2 --backoff=1,1 --restart-on=Z401 app.zp
-
-<span class="c">// 检查点恢复(db.set 自动落盘 ~/.zap/state/,脚本变更后检查点自动失效)</span>
-zap run --resume app.zp
-
-<span class="c">// app.zp 中写入检查点</span>
-<span class="k">db.set</span>(<span class="s">"stage"</span>, <span class="s">"2"</span>);</code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">20. build --exe 打包独立可执行文件</div>
-    <div class="note">解释器+脚本打包为单文件，双击即用；--version 查看内嵌版本信息</div>
-<pre><code><span class="c">// 打包(默认输出 app.exe,体积≈解释器+脚本)</span>
-zap build --exe app.zp [-o my_app.exe]
-
-<span class="c">// 运行:自动释放运行时到 .zap_cache,执行完毕后自动清理</span>
-./my_app.exe
-
-<span class="c">// 版本信息(内嵌 Zap 版本/构建时间/脚本名/校验和)</span>
-./my_app.exe --version
-<span class="c">// &gt; my_app.exe (Zap v0.1.0) built at 2026-08-05 17:04:54</span>
-<span class="c">// &gt; script: app.zp</span>
-
-<span class="c">// 保留缓存以加速下次启动</span>
-./my_app.exe --keep-cache</code></pre>
-  </div>
-  <div class="example">
-    <div class="title">21. 列表操作</div>
-    <div class="note">列表字面量、len/append/contains/index_of（期望输出：3 / [1, 2, 3, 4] / true / false / 3 / -1）</div>
-<pre><code>l = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>];
-<span class="f">print</span>(<span class="f">len</span>(l));           <span class="c">// 3</span>
-l = <span class="f">append</span>(l, <span class="n">4</span>);        <span class="c">// [1, 2, 3, 4]</span>
-<span class="f">print</span>(<span class="f">to_str</span>(l));
-<span class="f">print</span>(<span class="f">contains</span>(l, <span class="n">3</span>));   <span class="c">// true</span>
-<span class="f">print</span>(<span class="f">contains</span>(l, <span class="n">9</span>));   <span class="c">// false</span>
-<span class="f">print</span>(<span class="f">index_of</span>(l, <span class="n">4</span>));   <span class="c">// 3</span>
-<span class="f">print</span>(<span class="f">index_of</span>(l, <span class="n">99</span>));  <span class="c">// -1</span></code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">22. 字典操作</div>
-    <div class="note">字典字面量、has_key/keys/values/len（期望输出：{name: zap, ver: 1} / true / false / [name, ver] / [zap, 1] / 2）</div>
-<pre><code>d = {<span class="s">"name"</span>: <span class="s">"zap"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
-<span class="f">print</span>(<span class="f">to_str</span>(d));          <span class="c">// {name: zap, ver: 1}</span>
-<span class="f">print</span>(<span class="f">has_key</span>(d, <span class="s">"name"</span>)); <span class="c">// true</span>
-<span class="f">print</span>(<span class="f">has_key</span>(d, <span class="s">"nope"</span>)); <span class="c">// false</span>
-<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">keys</span>(d)));    <span class="c">// [name, ver]</span>
-<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">values</span>(d)));  <span class="c">// [zap, 1]</span>
-<span class="f">print</span>(<span class="f">len</span>(d));           <span class="c">// 2（键个数）</span></code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">23. for-in 循环</div>
+    <div class="title">2.2 for-in 循环</div>
     <div class="note">遍历列表（单变量）与字典（键、值双变量）</div>
 <pre><code>sum = <span class="n">0</span>;
 <span class="k">for</span> x <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>] {
@@ -306,8 +89,55 @@ d = {<span class="s">"name"</span>: <span class="s">"zap"</span>, <span class="s
 <span class="f">print</span>(sum);              <span class="c">// 6</span></code></pre>
   </div>
 
+  <h3><span class="hash">#</span>3. 函数</h3>
+
   <div class="example">
-    <div class="title">24. f-string 字符串插值</div>
+    <div class="title">3.1 递归函数：斐波那契</div>
+    <div class="note">参数类型可由调用上下文推导（期望输出：55 / 42）</div>
+<pre><code><span class="k">fn</span> <span class="f">fib</span>(n) {
+    <span class="k">if</span> (n &lt;= <span class="n">1</span>) {
+        <span class="k">return</span> n;
+    }
+    <span class="k">return</span> <span class="f">fib</span>(n - <span class="n">1</span>) + <span class="f">fib</span>(n - <span class="n">2</span>);
+}
+
+<span class="f">print</span>(<span class="f">fib</span>(<span class="n">10</span>));  <span class="c">// 55</span>
+
+<span class="k">fn</span> <span class="f">add</span>(a : <span class="k">int</span>, b : <span class="k">int</span>) -&gt; <span class="k">int</span> {
+    <span class="k">return</span> a + b;
+}
+<span class="f">print</span>(<span class="f">add</span>(<span class="n">20</span>, <span class="n">22</span>));  <span class="c">// 42</span></code></pre>
+  </div>
+
+  <h3><span class="hash">#</span>4. 集合与字符串</h3>
+
+  <div class="example">
+    <div class="title">4.1 列表操作</div>
+    <div class="note">列表字面量、len/append/contains/index_of（期望输出：3 / [1, 2, 3, 4] / true / false / 3 / -1）</div>
+<pre><code>l = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>];
+<span class="f">print</span>(<span class="f">len</span>(l));           <span class="c">// 3</span>
+l = <span class="f">append</span>(l, <span class="n">4</span>);        <span class="c">// [1, 2, 3, 4]</span>
+<span class="f">print</span>(<span class="f">to_str</span>(l));
+<span class="f">print</span>(<span class="f">contains</span>(l, <span class="n">3</span>));   <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">contains</span>(l, <span class="n">9</span>));   <span class="c">// false</span>
+<span class="f">print</span>(<span class="f">index_of</span>(l, <span class="n">4</span>));   <span class="c">// 3</span>
+<span class="f">print</span>(<span class="f">index_of</span>(l, <span class="n">99</span>));  <span class="c">// -1</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">4.2 字典操作</div>
+    <div class="note">字典字面量、has_key/keys/values/len（期望输出：{name: zap, ver: 1} / true / false / [name, ver] / [zap, 1] / 2）</div>
+<pre><code>d = {<span class="s">"name"</span>: <span class="s">"zap"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
+<span class="f">print</span>(<span class="f">to_str</span>(d));          <span class="c">// {name: zap, ver: 1}</span>
+<span class="f">print</span>(<span class="f">has_key</span>(d, <span class="s">"name"</span>)); <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">has_key</span>(d, <span class="s">"nope"</span>)); <span class="c">// false</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">keys</span>(d)));    <span class="c">// [name, ver]</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">values</span>(d)));  <span class="c">// [zap, 1]</span>
+<span class="f">print</span>(<span class="f">len</span>(d));           <span class="c">// 2（键个数）</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">4.3 f-string 字符串插值</div>
     <div class="note">f"..." 内 {expr} 嵌入表达式，{{ / }} 转义字面大括号</div>
 <pre><code>name = <span class="s">"zap"</span>;
 <span class="f">print</span>(<span class="s">f"你好, {name}!"</span>);        <span class="c">// 你好, zap!</span>
@@ -321,7 +151,7 @@ d = {<span class="s">"a"</span>: <span class="n">1</span>};
   </div>
 
   <div class="example">
-    <div class="title">25. 类型判断</div>
+    <div class="title">4.4 类型判断</div>
     <div class="note">is_int / is_float / is_str / is_bool / is_list / is_dict / is_null</div>
 <pre><code>a = <span class="n">42</span>; b = <span class="n">3.14</span>; s = <span class="s">"hello"</span>; l = [<span class="n">1</span>, <span class="n">2</span>];
 <span class="f">print</span>(<span class="f">is_int</span>(a));       <span class="c">// true</span>
@@ -332,8 +162,23 @@ d = {<span class="s">"a"</span>: <span class="n">1</span>};
 <span class="f">print</span>(<span class="f">is_bool</span>(<span class="k">true</span>));  <span class="c">// true</span></code></pre>
   </div>
 
+  <h3><span class="hash">#</span>5. 内置函数</h3>
+
   <div class="example">
-    <div class="title">26. 时间戳解析</div>
+    <div class="title">5.1 时间与随机</div>
+    <div class="note">时间格式化（UTC）与闭区间随机数</div>
+<pre><code>t = <span class="f">time.now</span>();
+<span class="f">print</span>(<span class="f">time.format</span>(t, <span class="s">"YYYY-MM-DD HH:mm:SS"</span>));
+
+r = <span class="f">random.int</span>(<span class="n">1</span>, <span class="n">100</span>);   <span class="c">// 闭区间 [1, 100]</span>
+<span class="f">print</span>(<span class="s">"随机数: "</span> + <span class="f">to_str</span>(r));
+<span class="f">print</span>(<span class="s">"随机小数: "</span> + <span class="f">to_str</span>(<span class="f">random.float</span>()));
+
+<span class="f">time.sleep</span>(<span class="n">0.5</span>);  <span class="c">// 暂停 0.5 秒</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">5.2 时间戳解析</div>
     <div class="note">time.parse 解析 YYYY-MM-DD[THH:MM:SS] → Unix 秒（UTC），配合 time.format 回显</div>
 <pre><code>t = <span class="f">time.parse</span>(<span class="s">"2025-01-01T00:00:00Z"</span>);
 <span class="f">print</span>(t);                                  <span class="c">// 1735689600</span>
@@ -344,7 +189,39 @@ t2 = <span class="f">time.parse</span>(<span class="s">"2025-01-01 08:30:00"</sp
   </div>
 
   <div class="example">
-    <div class="title">27. UUID v4 生成</div>
+    <div class="title">5.3 JSON 解析与序列化</div>
+    <div class="note">标量值自动映射为 int / float / bool / str</div>
+<pre><code>n = <span class="f">json_parse</span>(<span class="s">"42"</span>);
+<span class="f">print</span>(<span class="f">type_of</span>(n));          <span class="c">// int</span>
+
+f = <span class="f">json_parse</span>(<span class="s">"3.14"</span>);
+<span class="f">print</span>(f);                     <span class="c">// 3.14</span>
+
+b = <span class="f">json_parse</span>(<span class="s">"true"</span>);
+<span class="f">print</span>(b);                     <span class="c">// true</span>
+
+<span class="f">print</span>(<span class="f">json_stringify</span>(<span class="n">100</span>));  <span class="c">// 100</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">5.4 正则匹配与替换</div>
+    <div class="note">regex.match / regex.replace 使用标准正则表达式</div>
+<pre><code>ok = <span class="f">regex.match</span>(<span class="s">"^\\d+$"</span>, <span class="s">"12345"</span>);
+<span class="f">print</span>(ok);  <span class="c">// true</span>
+
+result = <span class="f">regex.replace</span>(<span class="s">"world"</span>, <span class="s">"hello world"</span>, <span class="s">"Zap"</span>);
+<span class="f">print</span>(result);  <span class="c">// hello Zap</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">5.5 MD5 / SHA256 哈希</div>
+    <div class="note">crypto.md5 / crypto.sha256 计算十六进制哈希</div>
+<pre><code><span class="f">print</span>(<span class="f">crypto.md5</span>(<span class="s">"hello"</span>));
+<span class="f">print</span>(<span class="f">crypto.sha256</span>(<span class="s">"hello"</span>));</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">5.6 UUID v4 生成</div>
     <div class="note">uuid.new 每次生成不同的 UUID v4（形如 xxxxxxxx-xxxx-4xxx-xxxx-xxxxxxxxxxxx）</div>
 <pre><code>a = <span class="f">uuid.new</span>();
 b = <span class="f">uuid.new</span>();
@@ -354,17 +231,193 @@ b = <span class="f">uuid.new</span>();
   </div>
 
   <div class="example">
-    <div class="title">28. HTTP 网络请求（http / https）</div>
+    <div class="title">5.7 路径操作</div>
+    <div class="note">path.join / path.dirname / path.basename 跨平台路径操作</div>
+<pre><code><span class="f">print</span>(<span class="f">path.join</span>(<span class="s">"data"</span>, <span class="s">"users"</span>, <span class="s">"1.json"</span>));
+<span class="f">print</span>(<span class="f">path.dirname</span>(<span class="s">"/home/user/file.txt"</span>));
+<span class="f">print</span>(<span class="f">path.basename</span>(<span class="s">"/home/user/file.txt"</span>));</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">5.8 环境变量与键值存储</div>
+    <div class="note">env.get/set 读写环境变量，db.set/get 内存键值存储</div>
+<pre><code>path = <span class="f">env.get</span>(<span class="s">"PATH"</span>);
+<span class="k">env.set</span>(<span class="s">"MY_VAR"</span>, <span class="s">"hello"</span>);
+<span class="k">db.set</span>(<span class="s">"token"</span>, <span class="s">"abc123"</span>);
+<span class="f">print</span>(<span class="f">db.get</span>(<span class="s">"token"</span>));</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">5.9 命令行参数解析</div>
+    <div class="note">args.get / args.has 解析 --port 8080 或 -v 标志</div>
+<pre><code>port = <span class="f">args.get</span>(<span class="s">"port"</span>);
+<span class="k">if</span> (<span class="f">args.has</span>(<span class="s">"v"</span>)) {
+    <span class="f">print</span>(<span class="s">"详细模式已开启"</span>);
+}</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">5.10 HTTP 网络请求（http / https）</div>
     <div class="note">http_get / http_post 支持 http:// 与 https://（TLS 为纯 Rust 实现、内置 Mozilla 根证书）</div>
 <pre><code>html = <span class="f">http_get</span>(<span class="s">"https://example.com/"</span>);
 <span class="f">print</span>(<span class="f">len</span>(html));              <span class="c">// 页面字节数</span>
 resp = <span class="f">http_post</span>(<span class="s">"http://httpbin.org/post"</span>, <span class="s">"hello"</span>);
 <span class="f">print</span>(<span class="f">str_contains</span>(resp, <span class="s">"hello"</span>));  <span class="c">// true</span></code></pre>
   </div>
+
+  <div class="example">
+    <div class="title">5.11 彩色日志</div>
+    <div class="note">log.info / log.warn / log.error / log.debug 彩色输出到 stderr</div>
+<pre><code><span class="k">log.info</span>(<span class="s">"程序启动完成"</span>);
+<span class="k">log.warn</span>(<span class="s">"磁盘空间不足"</span>);
+<span class="k">log.error</span>(<span class="s">"连接失败"</span>);
+<span class="k">log.debug</span>(<span class="s">"x = 42"</span>);</code></pre>
+  </div>
+
+  <h3><span class="hash">#</span>6. 并发</h3>
+
+  <div class="example">
+    <div class="title">6.1 go 多线程</div>
+    <div class="note">每次 go 启动独立线程，不共享变量；子线程崩溃不影响主线程</div>
+<pre><code><span class="k">fn</span> <span class="f">task</span>(id) {
+    i = <span class="n">0</span>;
+    <span class="k">while</span> (i &lt; <span class="n">100000</span>) { i = i + <span class="n">1</span>; }
+    <span class="f">print</span>(<span class="s">"任务 "</span> + <span class="f">to_str</span>(id) + <span class="s">" 完成"</span>);
+}
+
+<span class="k">go</span> <span class="f">task</span>(<span class="n">1</span>);
+<span class="k">go</span> <span class="f">task</span>(<span class="n">2</span>);
+<span class="k">go</span> <span class="f">task</span>(<span class="n">3</span>);
+<span class="f">print</span>(<span class="s">"主线程继续执行"</span>);</code></pre>
+  </div>
+
+  <h3><span class="hash">#</span>7. 导入与外部集成</h3>
+
+  <div class="example">
+    <div class="title">7.1 import as 别名导入</div>
+    <div class="note">以别名导入远程模块（URL 支持 http/https），函数名前缀自动替换</div>
+<pre><code><span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.zp"</span> <span class="k">as</span> m;
+<span class="f">print</span>(<span class="f">m_add</span>(<span class="n">20</span>, <span class="n">22</span>));  <span class="c">// 42</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">7.2 DLL 打包</div>
+    <div class="note">@export 标记导出，zap build --dll 生成 C ABI 动态库（可在 C / Python / Rust 中调用）</div>
+<pre><code><span class="c">// math.zp</span>
+<span class="k">fn</span> <span class="f">add</span>(a : <span class="k">int</span>, b : <span class="k">int</span>) -&gt; <span class="k">int</span> { <span class="k">return</span> a + b; }
+<span class="k">fn</span> <span class="f">avg</span>(a : <span class="k">float</span>, b : <span class="k">float</span>) -&gt; <span class="k">float</span> { <span class="k">return</span> (a + b) / <span class="n">2.0</span>; }
+<span class="k">fn</span> <span class="f">greet</span>(name : <span class="k">str</span>) -&gt; <span class="k">str</span> { <span class="k">return</span> <span class="s">"你好, "</span> + name + <span class="s">"!"</span>; }
+
+<span class="k">@export</span> <span class="f">add</span>;
+<span class="k">@export</span> <span class="f">avg</span>;
+<span class="k">@export</span> <span class="f">greet</span>;</code></pre>
+    <p>生成的 C ABI：<code class="inline">int64_t add(int64_t, int64_t)</code>、<code class="inline">double avg(double, double)</code>、<code class="inline">const char* greet(const char*)</code>。</p>
+  </div>
+
+  <h3><span class="hash">#</span>8. 工具链</h3>
+
+  <div class="example">
+    <div class="title">8.1 build --exe 打包独立可执行文件</div>
+    <div class="note">解释器+脚本打包为单文件，双击即用；--version 查看内嵌版本信息</div>
+<pre><code><span class="c">// 打包(默认输出 app.exe,体积≈解释器+脚本)</span>
+zap build --exe app.zp [-o my_app.exe]
+
+<span class="c">// 运行:自动释放运行时到 .zap_cache,执行完毕后自动清理</span>
+./my_app.exe
+
+<span class="c">// 版本信息(内嵌 Zap 版本/构建时间/脚本名/校验和)</span>
+./my_app.exe --version
+<span class="c">// &gt; my_app.exe (Zap v0.2.0) built at 2026-08-07 09:24:30</span>
+<span class="c">// &gt; script: app.zp</span>
+
+<span class="c">// 保留缓存以加速下次启动</span>
+./my_app.exe --keep-cache</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">8.2 断点调试</div>
+    <div class="note">zap debug 模式下 breakpoint 打印所有变量的类型与值快照</div>
+<pre><code>x = <span class="n">10</span>;
+name = <span class="s">"Zap"</span>;
+flag = <span class="k">true</span>;
+<span class="k">breakpoint</span>;   <span class="c">// [Zap Debug] 断点触发 -&gt; debug.zp:4 + 变量快照</span>
+ <span class="f">print</span>(x);</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">8.3 临时函数与调试输出</div>
+    <div class="note">tmp fn 编译自动忽略，debug_print 仅 debug 模式生效</div>
+<pre><code><span class="k">tmp</span> <span class="k">fn</span> <span class="f">helper</span>() {
+    <span class="f">print</span>(<span class="s">"只在开发时有用"</span>);
+}
+
+x = <span class="n">42</span>;
+<span class="k">debug_print</span>(<span class="s">"当前 x = "</span> + <span class="f">to_str</span>(x));</code></pre>
+  </div>
+
+  <h3><span class="hash">#</span>9. 错误处理</h3>
+
+  <div class="example">
+    <div class="title">9.1 try-catch 错误捕获与恢复</div>
+    <div class="note">捕获可恢复错误并降级回退；throw 主动抛出；错误对象字段 e.code / e.message / e.line</div>
+<pre><code>r = <span class="n">0</span>;
+<span class="k">try</span> {
+    r = <span class="n">10</span> / <span class="n">0</span>;              <span class="c">// error[Z009] 除零</span>
+} <span class="k">catch</span> e {
+    <span class="f">print</span>(<span class="s">"caught "</span> + e.code + <span class="s">": "</span> + e.message);
+    r = -<span class="n">1</span>;                  <span class="c">// 回退值</span>
+}
+<span class="f">print</span>(r);                   <span class="c">// -1</span>
+
+<span class="k">throw</span> <span class="s">"自定义错误"</span>;        <span class="c">// error[Z600]</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">9.2 自动重启与检查点恢复</div>
+    <div class="note">--restart 失败自动重拉（名刀机制）；--resume 从 db 检查点继续（崩溃不丢进度）</div>
+<pre><code><span class="c">// 失败自动重启(默认最多3次,间隔1s/3s/10s递增;--restart-on 错误码白名单)</span>
+zap run --restart=2 --backoff=1,1 --restart-on=Z401 app.zp
+
+<span class="c">// 检查点恢复(db.set 自动落盘 ~/.zap/state/,脚本变更后检查点自动失效)</span>
+zap run --resume app.zp
+
+<span class="c">// app.zp 中写入检查点</span>
+<span class="k">db.set</span>(<span class="s">"stage"</span>, <span class="s">"2"</span>);</code></pre>
+  </div>
 </main>
 
+<script>
+// 示例即时搜索：按关键词过滤示例块，并隐藏无匹配的组标题
+function searchExamples(q) {
+  q = (q || "").trim().toLowerCase();
+  var exs = document.querySelectorAll(".example");
+  var count = 0;
+  for (var i = 0; i < exs.length; i++) {
+    var show = q === "" || exs[i].textContent.toLowerCase().indexOf(q) !== -1;
+    exs[i].style.display = show ? "" : "none";
+    if (show) count++;
+  }
+  var groups = document.querySelectorAll("h3");
+  for (var j = 0; j < groups.length; j++) {
+    var g = groups[j];
+    var node = g.nextElementSibling;
+    var hasVisible = false;
+    while (node && node.tagName !== "H3") {
+      if (node.classList && node.classList.contains("example") && node.style.display !== "none") {
+        hasVisible = true;
+        break;
+      }
+      node = node.nextElementSibling;
+    }
+    g.style.display = hasVisible ? "" : "none";
+  }
+  document.getElementById("search-count").textContent =
+    q === "" ? "" : "匹配 " + count + " / " + exs.length + " 个示例";
+}
+</script>
+
 <footer>
-  Zap v0.1.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
+  Zap v0.2.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

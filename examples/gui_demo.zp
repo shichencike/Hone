@@ -1,0 +1,39 @@
+// gui_demo.zp - gui 图形界面演示（浏览器渲染 + 本地 HTTP 服务器双向交互）
+// 运行: zap examples/gui_demo.zp   （自动打开浏览器，Ctrl+C 退出）
+// 依赖: v0.3.0 新增 server.* 内置函数（server.listen / server.poll / server.respond）
+import "gui" from "./zap_lib/gui.zp";
+
+// 界面事件处理：id 为控件 id，value 为用户输入值（on_event 为 gui 库约定函数名）
+// 返回值按 JSON 协议解释，示例用 json_stringify 构造 {"update": [[id, 文本], ...]}
+fn on_event(id : str, value) -> str {
+    if (id == "btn_hi") {
+        return json_stringify({"update": [["lbl_out", "你好，Zap GUI！"]]});
+    }
+    if (id == "btn_count") {
+        // db 为全局键值存储，跨事件保存计数状态
+        n = to_int(db.get("count")) + 1;
+        db.set("count", to_str(n));
+        return json_stringify({"update": [["lbl_cnt", "点击次数: " + to_str(n)]]});
+    }
+    if (id == "txt_name") {
+        return json_stringify({"update": [["lbl_out", "你好，" + value + "！"]]});
+    }
+    if (id == "sel_color") {
+        return json_stringify({"update": [["lbl_out", "选择了: " + value]]});
+    }
+    return "";
+}
+
+// 控件列表：button / label / input / select
+widgets = [
+    gui_label("lbl_title", "Zap GUI 演示"),
+    gui_button("btn_hi", "打招呼"),
+    gui_button("btn_count", "计数器"),
+    gui_input("txt_name", "姓名", "输入你的名字"),
+    gui_select("sel_color", "颜色", ["红", "绿", "蓝"]),
+    gui_label("lbl_out", "(事件输出)"),
+    gui_label("lbl_cnt", ""),
+];
+
+db.set("count", "0");
+gui_run("Zap GUI 演示", widgets);

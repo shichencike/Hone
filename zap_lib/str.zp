@@ -1,0 +1,39 @@
+// zap_lib/str.zp - 字符串标准库（用 Zap 编写）
+// 用法: import "str" from "./zap_lib/str.zp";
+// 函数统一 str_ 前缀
+
+// 重复字符串 n 次
+fn str_repeat(s : str, n : int) -> str {
+    r = "";
+    i = 0;
+    while (i < n) {
+        r = r + s;
+        i = i + 1;
+    }
+    return r;
+}
+
+// 是否为空字符串
+fn str_empty(s : str) -> bool {
+    return len(s) == 0;
+}
+
+// 用分隔符拼接列表元素（自动 to_str）
+fn str_join(l, sep : str) -> str {
+    r = "";
+    first = true;
+    for x in l {
+        if (first) {
+            r = to_str(x);
+            first = false;
+        } else {
+            r = r + sep + to_str(x);
+        }
+    }
+    return r;
+}
+
+// 加双引号包裹（构造 JSON 字符串值）
+fn str_quote(s : str) -> str {
+    return "\"" + s + "\"";
+}

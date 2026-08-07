@@ -1,0 +1,32 @@
+// server_demo.zp - server.* 内置函数演示（本地 HTTP 服务器，纯 Rust std::net 跨平台）
+// 运行: zap examples/server_demo.zp   （Ctrl+C 退出）
+// 测试:
+//   curl http://127.0.0.1:<端口>/            → Hello from Zap 页面
+//   curl -X POST -d "hello" http://127.0.0.1:<端口>/echo  → echo: hello
+// API: server.listen(port) 启动后台监听（0=自动分配），返回实际端口；
+//      server.poll() 取出排队请求，返回 JSON 数组 [{id,method,path,body}, ...]；
+//      server.respond(id, body) 发送响应体（HTTP 200），返回是否成功
+import "gui" from "./zap_lib/gui.zp";
+
+port = server.listen(0);
+print("server listening on http://127.0.0.1:" + to_str(port) + "/  （Ctrl+C 退出）");
+while (true) {
+    reqs = server.poll();
+    if (reqs != "[]") {
+        list = json_parse(reqs);
+        for req in list {
+            rid = gui_dict_get(req, "id");
+            method = gui_dict_get(req, "method");
+            path = gui_dict_get(req, "path");
+            body = gui_dict_get(req, "body");
+            if (method == "GET" && path == "/") {
+                server.respond(rid, "<h1>Hello from Zap!</h1><p>这是 server 内置函数返回的页面</p>");
+            } else if (method == "POST" && path == "/echo") {
+                server.respond(rid, "echo: " + body);
+            } else {
+                server.respond(rid, "not found: " + path);
+            }
+        }
+    }
+    time.sleep(0.05);
+}

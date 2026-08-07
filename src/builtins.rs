@@ -185,6 +185,9 @@ pub fn is_builtin(name: &str) -> bool {
             | "sys.get_screen_size"
             | "sys.reg_read"
             | "sys.reg_write"
+            | "server.listen"
+            | "server.poll"
+            | "server.respond"
             | "log.info"
             | "log.warn"
             | "log.error"
@@ -652,6 +655,10 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         // Windows API 封装的 sys.* 函数（sysmod 模块实现）
         "sys.msgbox" | "sys.beep" | "sys.clipboard_set" | "sys.get_screen_size" | "sys.reg_read" | "sys.reg_write" => {
             crate::sysmod::call(name, &args, span, file, src)
+        }
+        // 本地 HTTP 服务器（srvmod 模块实现，纯 std::net，跨平台）
+        "server.listen" | "server.poll" | "server.respond" => {
+            crate::srvmod::call(name, &args, span, file, src)
         }
         // ---------- log ----------
         "log.info" => {
