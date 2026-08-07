@@ -14,6 +14,7 @@
     <a href="docs.html">文档</a>
     <a href="examples.html">示例</a>
     <a href="install.html" class="active">安装</a>
+    <a href="stdlib.html">标准库</a>
   </nav>
   <span class="ver">v0.3.0</span>
 </header>
@@ -52,7 +53,7 @@ mkdir C:\zap
 copy zap-windows-x86_64.exe C:\zap\zap.exe
 
 <span class="c">// 2. 验证</span>
-C:\zap\zap.exe --version    <span class="c">// zap 0.2.0</span>
+C:\zap\zap.exe --version    <span class="c">// zap 0.3.0</span>
 
 <span class="c">// 3.（可选）加入 PATH，任意目录直接使用 zap 命令</span>
 setx PATH "%PATH%;C:\zap"</code></pre>
@@ -61,14 +62,14 @@ setx PATH "%PATH%;C:\zap"</code></pre>
   <section id="linux">
     <h2><span class="hash">#</span>3. Linux</h2>
 <pre><code><span class="c">// 1. 下载并赋予执行权限</span>
-wget https://github.com/shichencike/zap/releases/download/v0.2.0/zap-linux-x86_64
+wget https://github.com/shichencike/zap/releases/download/v0.3.0/zap-linux-x86_64
 chmod +x zap-linux-x86_64
 
 <span class="c">// 2. 放入 PATH 目录</span>
 sudo mv zap-linux-x86_64 /usr/local/bin/zap
 
 <span class="c">// 3. 验证</span>
-zap --version    <span class="c">// zap 0.2.0</span></code></pre>
+zap --version    <span class="c">// zap 0.3.0</span></code></pre>
   </section>
 
   <section id="termux">
@@ -76,14 +77,14 @@ zap --version    <span class="c">// zap 0.2.0</span></code></pre>
 <pre><code><span class="c">// 1. 安装 Termux（F-Droid 商店）并打开终端</span>
 
 <span class="c">// 2. 下载 zap-termux-aarch64</span>
-curl -L -o zap https://github.com/shichencike/zap/releases/download/v0.2.0/zap-termux-aarch64
+curl -L -o zap https://github.com/shichencike/zap/releases/download/v0.3.0/zap-termux-aarch64
 
 <span class="c">// 3. 赋予执行权限并放入 PATH</span>
 chmod +x zap
 mv zap $PREFIX/bin/zap
 
 <span class="c">// 4. 验证</span>
-zap --version    <span class="c">// zap 0.2.0</span></code></pre>
+zap --version    <span class="c">// zap 0.3.0</span></code></pre>
   </section>
 
   <section id="build">
@@ -93,7 +94,7 @@ zap --version    <span class="c">// zap 0.2.0</span></code></pre>
 cd zap
 cargo build --release
 <span class="c">// 产物: target/release/zap（Windows 为 target/release/zap.exe）</span>
-./target/release/zap --version    <span class="c">// zap 0.2.0</span></code></pre>
+./target/release/zap --version    <span class="c">// zap 0.3.0</span></code></pre>
   </section>
 
   <section id="verify">
