@@ -124,7 +124,7 @@ debug_print("当前 x = " + to_str(x));
 - 类型转换：`to_str` `to_int` `to_float`
 - 模块：`time.now` `time.sleep` `time.format`（UTC）、`time.parse`（解析
   `YYYY-MM-DD[THH:MM:SS]` 时间戳 → Unix 秒）、`random.int` `random.float`、`uuid.new`（UUID v4）
-- 网络：`http_get` `http_post`（仅 `http://`，无 TLS）、`json_parse` `json_stringify`（标量）
+- 网络：`http_get` `http_post`（支持 `http://` 与 `https://`，TLS 为纯 Rust 实现、内置 Mozilla 根证书）、`json_parse` `json_stringify`（标量）
 - 系统：`sys.run` `sys.get_env`（跨平台）
 - 系统（Windows API，其他平台报 Z999 或降级）：`sys.msgbox` `sys.beep` `sys.clipboard_set`
   `sys.get_screen_size`（返回 `"宽x高"` 字符串，因 Zap 无元组类型）`sys.reg_read` `sys.reg_write`

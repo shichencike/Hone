@@ -1575,11 +1575,17 @@ impl Checker {
                 self.expect_str(name, args, 0, span, "the URL/path")?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
-            "write_file" | "http_post" => {
+            "write_file" => {
                 self.arg_count(name, n, 2, span)?;
                 self.expect_str(name, args, 0, span, "the first argument")?;
                 self.expect_str(name, args, 1, span, "the second argument")?;
                 Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            "http_post" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the URL")?;
+                self.expect_str(name, args, 1, span, "the request body")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
             }
             "sys.run" => {
                 self.arg_count(name, n, 1, span)?;

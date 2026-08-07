@@ -1055,7 +1055,26 @@ fn random_float() -> f64 {
     (next_u64() >> 11) as f64 / (1u64 << 53) as f64
 }
 
-// ---------- http（std::net 实现，仅 http://） ----------
+// ---------- http（std::net + rustls 实现，支持 http:// 与 https://） ----------
+
+/// 统一读写抽象：TcpStream 与 TlsStream 共用
+trait ReadWrite: Read + Write {}
+impl<T: Read + Write> ReadWrite for T {}
+
+/// TLS 配置：rustls + rustls-rustcrypto（纯 Rust 实现，无 C 依赖），
+/// Windows/Linux/Termux 跨平台一致，webpki-roots 内置 Mozilla 根证书
+static TLS: Lazy<Result<std::sync::Arc<rustls::ClientConfig>, String>> = Lazy::new(|| {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+        rustls_rustcrypto::provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|e| e.to_string())?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    Ok(std::sync::Arc::new(config))
+});
 
 /// 发送 HTTP 请求（interp 的 import 模块下载复用）。
 pub(crate) fn http_request(
@@ -1079,32 +1098,87 @@ pub(crate) fn http_request(
         err(code, format!("{}: {}: {}", act, url, e), span, file, src, Some(hint))
     };
 
-    let rest = match url.strip_prefix("http://") {
-        Some(r) => r,
-        None => {
-            return Err(err(
-                codes::NETWORK,
-                format!("{}: only `http://` URLs are supported (no TLS in this build)", url),
-                span,
-                file,
-                src,
-                Some("use an `http://` URL"),
-            ));
-        }
+    // 解析协议：http:// 走明文 TCP，https:// 走 TLS
+    let (use_tls, rest) = if let Some(r) = url.strip_prefix("https://") {
+        (true, r)
+    } else if let Some(r) = url.strip_prefix("http://") {
+        (false, r)
+    } else {
+        return Err(err(
+            codes::NETWORK,
+            format!("{}: URL must start with `http://` or `https://`", url),
+            span,
+            file,
+            src,
+            Some("prefix the URL with `http://` or `https://`"),
+        ));
     };
+    let default_port = if use_tls { 443 } else { 80 };
     let (host_port, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/"),
     };
     let (host, port) = match host_port.find(':') {
-        Some(i) => (&host_port[..i], host_port[i + 1..].parse::<u16>().unwrap_or(80)),
-        None => (host_port, 80),
+        Some(i) => (&host_port[..i], host_port[i + 1..].parse::<u16>().unwrap_or(default_port)),
+        None => (host_port, default_port),
     };
     let addr = format!("{}:{}", host, port);
 
-    let mut stream = TcpStream::connect(&addr).map_err(|e| net_err("connect", e))?;
-    stream.set_read_timeout(Some(Duration::from_secs(15))).ok();
-    stream.set_write_timeout(Some(Duration::from_secs(15))).ok();
+    let tcp = TcpStream::connect(&addr).map_err(|e| net_err("connect", e))?;
+    tcp.set_read_timeout(Some(Duration::from_secs(15))).ok();
+    tcp.set_write_timeout(Some(Duration::from_secs(15))).ok();
+
+    // https 时做 TLS 握手（webpki-roots 内置 Mozilla 根证书验证）
+    let mut stream: Box<dyn ReadWrite> = if use_tls {
+        let connector = match TLS.as_ref() {
+            Ok(c) => c.clone(),
+            Err(e) => {
+                return Err(err(
+                    codes::NETWORK,
+                    format!("TLS init failed: {}", e),
+                    span,
+                    file,
+                    src,
+                    None::<&str>,
+                ));
+            }
+        };
+        let server_name = match rustls::pki_types::ServerName::try_from(host.to_string()) {
+            Ok(n) => n,
+            Err(e) => {
+                return Err(err(
+                    codes::NETWORK,
+                    format!("invalid hostname `{}`: {}", host, e),
+                    span,
+                    file,
+                    src,
+                    None::<&str>,
+                ));
+            }
+        };
+        match rustls::ClientConnection::new(connector, server_name) {
+            Ok(conn) => Box::new(rustls::StreamOwned::new(conn, tcp)),
+            Err(e) => {
+                return Err(err(
+                    codes::NETWORK,
+                    format!("TLS handshake with {} failed: {}", host, e),
+                    span,
+                    file,
+                    src,
+                    Some("the server certificate may be invalid or self-signed"),
+                ));
+            }
+        }
+    } else {
+        Box::new(tcp)
+    };
+
+    // Host 头：非默认端口时带上端口
+    let host_header = if port == default_port {
+        host.to_string()
+    } else {
+        format!("{}:{}", host, port)
+    };
 
     let (head, tail) = match body {
         Some(b) => (
@@ -1112,7 +1186,7 @@ pub(crate) fn http_request(
                 "{} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: zap/0.1.0\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 method,
                 path,
-                host,
+                host_header,
                 b.len()
             ),
             b.as_bytes().to_vec(),
@@ -1120,7 +1194,7 @@ pub(crate) fn http_request(
         None => (
             format!(
                 "{} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: zap/0.1.0\r\nConnection: close\r\n\r\n",
-                method, path, host
+                method, path, host_header
             ),
             Vec::new(),
         ),

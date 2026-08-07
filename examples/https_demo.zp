@@ -1,0 +1,26 @@
+// https_demo.zp - http_get / http_post 网络请求示例（支持 http:// 与 https://）
+// 运行:zap examples/https_demo.zp
+// 演示:https GET、http POST、JSON 解析、错误捕获
+// TLS 为纯 Rust 实现（rustls + RustCrypto），内置 Mozilla 根证书，无需系统依赖
+
+// 1. https GET（自动 TLS 握手，证书验证失败会抛 Z200）
+html = http_get("https://example.com/");
+has_title = str_contains(html, "<title>");
+print(f"https GET example.com -> {len(html)} bytes, has <title>: {has_title}");
+
+// 2. http POST（body 为字符串，自动带 Content-Length）
+resp = http_post("http://httpbin.org/post", "hello zap");
+echoed = str_contains(resp, "hello zap");
+print(f"http POST httpbin.org echoed body: {echoed}");
+
+// 3. JSON 解析（标量）
+n = json_parse("42");
+print(f"json_parse -> {n} ({type_of(n)})");
+
+// 4. 错误捕获：连接被拒绝（Z202），try-catch 可做重试或降级
+try {
+    http_get("http://127.0.0.1:1/");
+    print("unreachable");
+} catch e {
+    print(f"caught {e.code}: {e.message}");
+}

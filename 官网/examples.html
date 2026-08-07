@@ -352,6 +352,15 @@ b = <span class="f">uuid.new</span>();
 <span class="f">print</span>(b);
 <span class="f">print</span>(a != b);          <span class="c">// true</span></code></pre>
   </div>
+
+  <div class="example">
+    <div class="title">28. HTTP 网络请求（http / https）</div>
+    <div class="note">http_get / http_post 支持 http:// 与 https://（TLS 为纯 Rust 实现、内置 Mozilla 根证书）</div>
+<pre><code>html = <span class="f">http_get</span>(<span class="s">"https://example.com/"</span>);
+<span class="f">print</span>(<span class="f">len</span>(html));              <span class="c">// 页面字节数</span>
+resp = <span class="f">http_post</span>(<span class="s">"http://httpbin.org/post"</span>, <span class="s">"hello"</span>);
+<span class="f">print</span>(<span class="f">str_contains</span>(resp, <span class="s">"hello"</span>));  <span class="c">// true</span></code></pre>
+  </div>
 </main>
 
 <footer>
