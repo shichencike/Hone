@@ -18,17 +18,17 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: hone-linux-x86_64
-            config: ''
+            cmd: cargo build --release --locked --target x86_64-unknown-linux-gnu
           - name: termux-aarch64
             os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             artifact: hone-termux-aarch64
-            config: "--config 'target.aarch64-unknown-linux-musl.linker=\"rust-lld\"'"
+            cmd: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: hone-windows-x86_64.exe
-            config: ''
+            cmd: cargo build --release --locked --target x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -38,10 +38,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      # .cargo/config.toml 里的 linker 是开发机本机绝对路径，CI 上改用工具链自带的 rust-lld（仅 musl 目标）
+      # Termux(musl) 目标用 zig 链接：rust-lld 在 aarch64-musl 上缺 libdl（-ldl 解析失败），
+      # zig 自带 musl libc 存根可正常链接；其余平台用原生 cargo build。
+      - name: Install zig
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        uses: goto-bus-stop/setup-zig@v2
+      - name: Install cargo-zigbuild
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: cargo install cargo-zigbuild --locked
       - name: build release
         shell: bash
-        run: cargo build --release --locked --target ${{ matrix.target }} ${{ matrix.config }}
+        run: ${{ matrix.cmd }}
       - name: copy artifact
         shell: bash
         run: |
