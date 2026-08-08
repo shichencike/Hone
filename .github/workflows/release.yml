@@ -76,15 +76,17 @@ jobs:
       - name: package assets
         run: |
           set -e
-          find dist -type f | sort
           mkdir -p dist/pkg
-          cp "dist/hone-linux-x86_64/hone-linux-x86_64" "dist/pkg/hone-linux-x86_64"
-          tar -czf "dist/pkg/hone-linux-x86_64.tar.gz" -C "dist/hone-linux-x86_64" "hone-linux-x86_64"
-          cp "dist/hone-termux-aarch64/hone-termux-aarch64" "dist/pkg/hone-termux-aarch64"
-          tar -czf "dist/pkg/hone-termux-aarch64.tar.gz" -C "dist/hone-termux-aarch64" "hone-termux-aarch64"
-          cp "dist/hone-windows-x86_64.exe/hone-windows-x86_64.exe" "dist/pkg/hone-windows-x86_64.exe"
+          # download-artifact@v4 的子目录名与产物名一致（windows 产物名带 .exe），
+          # 按 basename 复制最稳妥，不受子目录命名影响
+          find dist -type f | sort
+          find dist -type f -exec cp {} dist/pkg/ \;
+          tar -czf "dist/pkg/hone-linux-x86_64.tar.gz" -C "dist/pkg" "hone-linux-x86_64"
+          tar -czf "dist/pkg/hone-termux-aarch64.tar.gz" -C "dist/pkg" "hone-termux-aarch64"
           cp install.sh "dist/pkg/install.sh"
           cp install.ps1 "dist/pkg/install.ps1"
+          ls -la dist/pkg
+          test -f dist/pkg/hone-windows-x86_64.exe
           cd dist/pkg
           sha256sum * > checksums.txt
           cat checksums.txt
