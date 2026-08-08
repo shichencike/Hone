@@ -96,10 +96,9 @@ jobs:
           files: dist/pkg/*
           generate_release_notes: true
 
-      # 以下两步需要预先配置：新建 tap/bucket 仓库 + 仓库 Secrets 里添加 TAP_TOKEN（PAT，权限 repo）
-      # 未配置 TAP_TOKEN 时自动跳过，不影响 Releases 发布
+      # 以下两步需要预先配置：新建 tap/bucket 仓库 + 仓库 Secrets 里添加 TAP_TOKEN（PAT，权限 repo，
+      # 对 tap/bucket 仓库有 Contents 写权限）；未配置或权限不足时步骤会报错（运行变红，便于排查）
       - name: update Homebrew tap
-        if: env.TAP_TOKEN != ''
         env:
           TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
         run: |
@@ -126,7 +125,6 @@ jobs:
           git push
 
       - name: update Scoop bucket
-        if: env.TAP_TOKEN != ''
         env:
           TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
         run: |
