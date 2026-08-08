@@ -76,12 +76,13 @@ jobs:
       - name: package assets
         run: |
           set -e
+          find dist -type f | sort
           mkdir -p dist/pkg
           cp "dist/hone-linux-x86_64/hone-linux-x86_64" "dist/pkg/hone-linux-x86_64"
           tar -czf "dist/pkg/hone-linux-x86_64.tar.gz" -C "dist/hone-linux-x86_64" "hone-linux-x86_64"
           cp "dist/hone-termux-aarch64/hone-termux-aarch64" "dist/pkg/hone-termux-aarch64"
           tar -czf "dist/pkg/hone-termux-aarch64.tar.gz" -C "dist/hone-termux-aarch64" "hone-termux-aarch64"
-          cp "dist/hone-windows-x86_64/hone-windows-x86_64.exe" "dist/pkg/hone-windows-x86_64.exe"
+          cp "dist/hone-windows-x86_64.exe/hone-windows-x86_64.exe" "dist/pkg/hone-windows-x86_64.exe"
           cp install.sh "dist/pkg/install.sh"
           cp install.ps1 "dist/pkg/install.ps1"
           cd dist/pkg
