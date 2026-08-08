@@ -1,0 +1,4 @@
+// 条件必须是 bool：if (1) 报 error[H008]
+if (1) {
+    print("hi");
+}

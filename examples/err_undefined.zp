@@ -1,2 +1,0 @@
-// 未定义变量：报 error[Z002]
-print(nope);

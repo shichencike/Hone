@@ -1,4 +1,4 @@
-// upgrade.rs - zap upgrade 迁移工具
+// upgrade.rs - hone upgrade 迁移工具
 // 基于映射表自动迁移旧版本代码到新语法。
 // v0.1 内置演示规则（可扩展）：旧版 `::` 路径前缀、旧版 `@native` 导出标记。
 
@@ -39,7 +39,7 @@ pub fn upgrade(src: &str) -> (String, Vec<String>) {
     (out, report)
 }
 
-/// zap upgrade [-w] <file.zp>...：应用迁移规则；-w 覆盖写入，否则打印到 stdout。
+/// hone upgrade [-w] <file.hn>...：应用迁移规则；-w 覆盖写入，否则打印到 stdout。
 pub fn cmd_upgrade(args: &[String]) -> Result<(), ZError> {
     let mut overwrite = false;
     let mut files = Vec::new();
@@ -53,8 +53,8 @@ pub fn cmd_upgrade(args: &[String]) -> Result<(), ZError> {
     if files.is_empty() {
         return Err(ZError::plain(
             codes::SYNTAX,
-            "missing file: `zap upgrade [-w] <file.zp>...`",
-            Some("pass one or more .zp files, e.g. `zap upgrade -w *.zp`"),
+            "missing file: `hone upgrade [-w] <file.hn>...`",
+            Some("pass one or more .hn files, e.g. `hone upgrade -w *.hn`"),
         ));
     }
     for f in files {

@@ -1,10 +1,12 @@
-// interp.rs - Zap 树遍历解释器
+// interp.rs - Hone 树遍历解释器
 // 支持：作用域、用户函数（扁平化全局符号表）、go 多线程（std::thread）、
-//       breakpoint 断点快照（zap debug 模式）、递归深度限制（Z012）。
+//       breakpoint 断点快照（hone debug 模式）、递归深度限制（H012）。
 // 类型锁定由 checker 静态保证，解释器专注求值。
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::{CStr, CString};
 use std::io::{self, Write};
+use std::os::raw::c_char;
 
 use crate::ast::*;
 use crate::builtins;
@@ -51,6 +53,8 @@ pub enum Value {
     Null,
     /// 错误对象（catch e 中的 e）
     Error(ErrorObj),
+    /// FFI 指针（typed load 的 ptr 返回值，或库函数传入的不透明句柄）
+    Ptr(usize),
 }
 
 impl Value {
@@ -64,6 +68,7 @@ impl Value {
             Value::Dict(_) => "dict",
             Value::Null => "null",
             Value::Error(_) => "error",
+            Value::Ptr(_) => "ptr",
         }
     }
 
@@ -86,6 +91,7 @@ impl Value {
             }
             Value::Null => "null".to_string(),
             Value::Error(e) => format!("error[{}]: {}", e.code, e.message),
+            Value::Ptr(p) => format!("0x{:x}", p),
         }
     }
 }
@@ -148,12 +154,75 @@ pub struct Interp {
     libs: HashMap<String, libloading::Library>,
     /// 懒加载库（别名 → 路径），首次调用时加载
     lazy_libs: HashMap<String, String>,
+    /// load 签名块声明的 FFI 函数（键为完整调用名 "alias.fn"）
+    ffi_sigs: HashMap<String, FfiSig>,
     /// 函数别名（新名 → 原名）
     alias_map: HashMap<String, String>,
 }
 
 /// load 加载的 C ABI 库函数签名约定：全 int64 参数（不足补 0，x64 ABI 安全）。
-type ZapLibFn = unsafe extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64;
+type KaLibFn = unsafe extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64;
+
+/// typed FFI 调用参数：int 类（int/bool/str 指针/ptr 句柄，走整数寄存器）与 float 类（double）。
+#[derive(Clone, Copy)]
+enum CArg {
+    I(i64),
+    F(f64),
+}
+
+/// typed FFI 调用返回值。
+#[derive(Clone, Copy)]
+enum CRet {
+    I(i64),
+    F(f64),
+}
+
+#[inline]
+fn carg_i(cargs: &[CArg], i: usize) -> i64 {
+    match cargs[i] {
+        CArg::I(v) => v,
+        CArg::F(_) => unreachable!("class bit mismatch"),
+    }
+}
+
+#[inline]
+fn carg_f(cargs: &[CArg], i: usize) -> f64 {
+    match cargs[i] {
+        CArg::F(v) => v,
+        CArg::I(_) => unreachable!("class bit mismatch"),
+    }
+}
+
+/// 按参数类别（0=int 类 / 1=float 类）逐位展开二分树，叶节点用具体签名取出符号并调用。
+/// $bits 为运行时类别位掩码（第 i 位 1 表示第 i 个参数是 float）；索引列表 [$i, $rest...] 由调用方按元数给出。
+macro_rules! ffi_dispatch {
+    // 基础：所有参数位已消费，用累积的类型列表取出符号并调用
+    ([], $bits:expr, $retf:expr, $lib:expr, $name:expr, $cargs:expr, $sym_err:expr, [$($t:ty),*], [$($v:expr),*]) => {
+        if $retf {
+            let sym: libloading::Symbol<unsafe extern "C" fn($($t),*) -> f64> = unsafe { $lib.get($name) }.map_err($sym_err)?;
+            CRet::F(unsafe { sym($($v),*) })
+        } else {
+            let sym: libloading::Symbol<unsafe extern "C" fn($($t),*) -> i64> = unsafe { $lib.get($name) }.map_err($sym_err)?;
+            CRet::I(unsafe { sym($($v),*) })
+        }
+    };
+    // 单元素：消费最后一个索引位后进入基础规则
+    ([$i:tt], $bits:expr, $retf:expr, $lib:expr, $name:expr, $cargs:expr, $sym_err:expr, [$($t:ty),*], [$($v:expr),*]) => {
+        if ($bits >> $i) & 1 == 1 {
+            ffi_dispatch!([], $bits, $retf, $lib, $name, $cargs, $sym_err, [$($t,)* f64], [$($v,)* carg_f($cargs, $i)])
+        } else {
+            ffi_dispatch!([], $bits, $retf, $lib, $name, $cargs, $sym_err, [$($t,)* i64], [$($v,)* carg_i($cargs, $i)])
+        }
+    };
+    // 多元素：消费头部索引位，继续递归
+    ([$i:tt, $($ri:tt)*], $bits:expr, $retf:expr, $lib:expr, $name:expr, $cargs:expr, $sym_err:expr, [$($t:ty),*], [$($v:expr),*]) => {
+        if ($bits >> $i) & 1 == 1 {
+            ffi_dispatch!([$($ri)*], $bits, $retf, $lib, $name, $cargs, $sym_err, [$($t,)* f64], [$($v,)* carg_f($cargs, $i)])
+        } else {
+            ffi_dispatch!([$($ri)*], $bits, $retf, $lib, $name, $cargs, $sym_err, [$($t,)* i64], [$($v,)* carg_i($cargs, $i)])
+        }
+    };
+}
 
 /// 运行整个程序。debug 为 true 时 breakpoint; 生效。
 pub fn run(program: &Program, file: &str, src: &str, debug: bool) -> Result<(), ZError> {
@@ -165,6 +234,7 @@ pub fn run(program: &Program, file: &str, src: &str, debug: bool) -> Result<(), 
         depth: 0,
         libs: HashMap::new(),
         lazy_libs: HashMap::new(),
+        ffi_sigs: HashMap::new(),
         alias_map: HashMap::new(),
     };
     ip.collect_fns(&program.stmts)?;
@@ -355,9 +425,11 @@ impl Interp {
                 }
                 Ok(Flow::Normal)
             }
-            Stmt::Export { .. } => Ok(Flow::Normal), // 仅 zap build --dll 使用
+            Stmt::Export { .. } => Ok(Flow::Normal), // 仅 hone build --dll 使用
             Stmt::Import { name, url, alias, span } => self.exec_import(name, url, alias.as_deref(), *span),
-            Stmt::Load { lazy, path, alias, span } => self.exec_load(*lazy, path, alias.as_deref(), *span),
+            Stmt::Load { lazy, path, alias, from, sigs, span } => {
+                self.exec_load(*lazy, path, alias.as_deref(), from.as_deref(), sigs, *span)
+            }
             Stmt::Use { namespace, .. } => {
                 // 命名空间导入：内置函数已全局可用，namespace 仅作声明记录
                 let _ = namespace;
@@ -391,7 +463,7 @@ impl Interp {
             Stmt::Throw { value, span } => {
                 let v = self.eval_expr(env, value)?;
                 match v {
-                    // 抛字符串：构造一个 Z600 用户错误
+                    // 抛字符串：构造一个 H600 用户错误
                     Value::Str(s) => Err(self.runtime_err(codes::THROW, s, *span, None::<&str>)),
                     // 重抛 error 值：同文件保留原始定位，跨文件退化并附原始位置
                     Value::Error(e) => {
@@ -428,7 +500,7 @@ impl Interp {
     // ---------- 断点 ----------
 
     fn do_breakpoint(&self, env: &Env, span: Span) {
-        println!("[Zap Debug] 断点触发 -> {}:{}", self.file, span.line);
+        println!("[Hone Debug] 断点触发 -> {}:{}", self.file, span.line);
         println!("--- 变量快照 ---");
         let mut seen: HashSet<String> = HashSet::new();
         for scope in env.scopes.iter().rev() {
@@ -476,6 +548,7 @@ impl Interp {
                 // 已加载的库（Library 不可克隆）不跨线程；懒加载路径与别名可克隆
                 libs: HashMap::new(),
                 lazy_libs,
+                ffi_sigs: HashMap::new(),
                 alias_map,
             };
             if let Err(err) = t.call_fn(&callee, arg_vals, span) {
@@ -489,7 +562,7 @@ impl Interp {
 
     fn exec_import(&mut self, name: &str, url: &str, alias: Option<&str>, span: Span) -> Result<Flow, ZError> {
         let code = self.fetch_module(name, url, span)?;
-        let file = format!("{}.zp", name);
+        let file = format!("{}.hn", name);
         let program = parser::Parser::parse(&file, &code).map_err(|e| {
             self.runtime_err(
                 codes::SYNTAX,
@@ -558,7 +631,7 @@ impl Interp {
         Ok(())
     }
 
-    /// 获取模块源码：本地路径（非 http/https 开头）直接读取；否则缓存 ~/.zap/cache/<name>.zp 优先，下载写入缓存。
+    /// 获取模块源码：本地路径（非 http/https 开头）直接读取；否则缓存 ~/.hone/cache/<name>.hn 优先，下载写入缓存。
     fn fetch_module(&self, name: &str, url: &str, span: Span) -> Result<String, ZError> {
         // 本地路径模块：直接读文件，不写缓存（相对路径基于当前工作目录）
         if !url.starts_with("http://") && !url.starts_with("https://") {
@@ -571,7 +644,7 @@ impl Interp {
                 )
             });
         }
-        let cache_file = zap_cache_dir().join(format!("{}.zp", name));
+        let cache_file = hone_cache_dir().join(format!("{}.hn", name));
         if cache_file.exists() {
             return std::fs::read_to_string(&cache_file).map_err(|e| {
                 self.runtime_err(
@@ -603,7 +676,7 @@ impl Interp {
 
     // ---------- load 动态库 ----------
 
-    fn exec_load(&mut self, lazy: bool, path: &str, alias: Option<&str>, span: Span) -> Result<Flow, ZError> {
+    fn exec_load(&mut self, lazy: bool, path: &str, alias: Option<&str>, from: Option<&str>, sigs: &[FfiSig], span: Span) -> Result<Flow, ZError> {
         let lib_name = match alias {
             Some(a) => a.to_string(),
             None => std::path::Path::new(path)
@@ -611,6 +684,24 @@ impl Interp {
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| "lib".to_string()),
         };
+        // 注册签名：from 头文件解析的签名先注册，签名块中的同名声明覆盖之
+        if let Some(hpath) = from {
+            let src = std::fs::read_to_string(hpath).map_err(|e| {
+                self.runtime_err(
+                    codes::NOT_FOUND,
+                    format!("cannot read header `{}`: {}", hpath, e),
+                    span,
+                    Some("check the header path, or remove the `from` clause"),
+                )
+            })?;
+            let header_sigs = crate::header::parse(&src, span);
+            for sig in &header_sigs {
+                self.ffi_sigs.insert(format!("{}.{}", lib_name, sig.name), sig.clone());
+            }
+        }
+        for sig in sigs {
+            self.ffi_sigs.insert(format!("{}.{}", lib_name, sig.name), sig.clone());
+        }
         if lazy {
             self.lazy_libs.insert(lib_name, path.to_string());
             return Ok(Flow::Normal);
@@ -649,6 +740,10 @@ impl Interp {
                 ));
             }
         }
+        if let Some(sig) = self.ffi_sigs.get(callee).cloned() {
+            // typed FFI：按签名块声明的类型转换参数与返回值
+            return self.call_ffi_typed(&sig, lib_name, func_name, args, span);
+        }
         if args.len() > 8 {
             return Err(self.runtime_err(
                 codes::DLL_ARG,
@@ -671,7 +766,7 @@ impl Interp {
                 }
             }
         }
-        let sym: libloading::Symbol<ZapLibFn> = {
+        let sym: libloading::Symbol<KaLibFn> = {
             let lib = self.libs.get(lib_name).unwrap();
             unsafe { lib.get(func_name.as_bytes()) }
         }
@@ -685,6 +780,180 @@ impl Interp {
         })?;
         let ret = unsafe { sym(cargs[0], cargs[1], cargs[2], cargs[3], cargs[4], cargs[5], cargs[6], cargs[7]) };
         Ok(Value::Int(ret))
+    }
+
+    /// 调用签名块/头文件声明的 FFI 函数：按签名将 Hone 参数转换为 C ABI 值，调用后转换返回值。
+    fn call_ffi_typed(&mut self, sig: &FfiSig, lib_name: &str, func_name: &str, args: Vec<Value>, span: Span) -> Result<Value, ZError> {
+        // 头文件解析失败的原型（回调/变参/数组等）：调用时直接报错
+        if let Some(reason) = sig.unsupported {
+            return Err(self.runtime_err(
+                codes::NOT_IMPLEMENTED,
+                format!("`{}` cannot be called: {}", func_name, reason),
+                span,
+                Some("declare a manual signature for this function, or use `ptr` for the unsupported parts"),
+            ));
+        }
+        if sig.params.len() != args.len() {
+            return Err(self.runtime_err(
+                codes::DLL_ARG,
+                format!("`{}` expects {} arguments, got {}", func_name, sig.params.len(), args.len()),
+                span,
+                Some(format!(
+                    "declared signature: `fn {}({}) -> {}`",
+                    sig.name,
+                    sig.params.iter().map(|p| p.ty.name()).collect::<Vec<_>>().join(", "),
+                    sig.ret.name()
+                )),
+            ));
+        }
+        // 参数转换：str 参数需 CString 保持存活直到调用结束
+        let mut cargs: Vec<CArg> = Vec::with_capacity(args.len());
+        let mut cstrings: Vec<CString> = Vec::new();
+        for (p, a) in sig.params.iter().zip(args.iter()) {
+            match p.ty {
+                FfiTy::Int => match a {
+                    Value::Int(v) => cargs.push(CArg::I(*v)),
+                    other => {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` parameter `{}` expects `int`, got `{}`", func_name, p.name, other.type_name()),
+                            span,
+                            Some("the declared FFI signature maps `int` to int64"),
+                        ))
+                    }
+                },
+                FfiTy::Float => match a {
+                    Value::Float(v) => cargs.push(CArg::F(*v)),
+                    other => {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` parameter `{}` expects `float`, got `{}`", func_name, p.name, other.type_name()),
+                            span,
+                            Some("the declared FFI signature maps `float` to double"),
+                        ))
+                    }
+                },
+                FfiTy::Bool => match a {
+                    Value::Bool(b) => cargs.push(CArg::I(if *b { 1 } else { 0 })),
+                    other => {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` parameter `{}` expects `bool`, got `{}`", func_name, p.name, other.type_name()),
+                            span,
+                            Some("the declared FFI signature maps `bool` to a C boolean"),
+                        ))
+                    }
+                },
+                FfiTy::Str => match a {
+                    Value::Str(s) => {
+                        let cs = CString::new(s.as_bytes()).map_err(|_| {
+                            self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                format!("`{}` parameter `{}` contains a NUL byte", func_name, p.name),
+                                span,
+                                Some("C strings cannot contain embedded NUL characters"),
+                            )
+                        })?;
+                        let ptr = cs.as_ptr() as i64;
+                        cstrings.push(cs);
+                        cargs.push(CArg::I(ptr));
+                    }
+                    other => {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` parameter `{}` expects `str`, got `{}`", func_name, p.name, other.type_name()),
+                            span,
+                            Some("the declared FFI signature maps `str` to `const char*`"),
+                        ))
+                    }
+                },
+                FfiTy::Ptr => match a {
+                    Value::Ptr(p) => cargs.push(CArg::I(*p as i64)),
+                    Value::Int(0) => cargs.push(CArg::I(0)), // 0 作为 NULL
+                    other => {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` parameter `{}` expects `ptr`, got `{}`", func_name, p.name, other.type_name()),
+                            span,
+                            Some("pass a `ptr` value (e.g. from another FFI call) or `0` for NULL"),
+                        ))
+                    }
+                },
+                FfiTy::Void => unreachable!("void is not a parameter type"),
+            }
+        }
+        // 参数类别位：第 i 位 1 表示第 i 个参数为 float（double，走 XMM 寄存器）
+        let bits: u32 = sig
+            .params
+            .iter()
+            .enumerate()
+            .fold(0u32, |acc, (i, p)| if p.ty == FfiTy::Float { acc | (1 << i) } else { acc });
+        let retf = sig.ret == FfiTy::Float;
+        let name = func_name.as_bytes();
+        let lib = self.libs.get(lib_name).unwrap();
+        let sym_err = |e: libloading::Error| {
+            self.runtime_err(
+                codes::NOT_FOUND,
+                format!("symbol `{}` not found in library `{}`: {}", func_name, lib_name, e),
+                span,
+                Some("check the exported symbol name (e.g. `#[no_mangle] pub extern \"C\" fn`)"),
+            )
+        };
+        let cret = match args.len() {
+            0 => ffi_dispatch!([], bits, retf, lib, name, &cargs, &sym_err, [], []),
+            1 => ffi_dispatch!([0], bits, retf, lib, name, &cargs, &sym_err, [], []),
+            2 => ffi_dispatch!([0, 1], bits, retf, lib, name, &cargs, &sym_err, [], []),
+            3 => ffi_dispatch!([0, 1, 2], bits, retf, lib, name, &cargs, &sym_err, [], []),
+            4 => ffi_dispatch!([0, 1, 2, 3], bits, retf, lib, name, &cargs, &sym_err, [], []),
+            5 => ffi_dispatch!([0, 1, 2, 3, 4], bits, retf, lib, name, &cargs, &sym_err, [], []),
+            6 => ffi_dispatch!([0, 1, 2, 3, 4, 5], bits, retf, lib, name, &cargs, &sym_err, [], []),
+            7 => ffi_dispatch!([0, 1, 2, 3, 4, 5, 6], bits, retf, lib, name, &cargs, &sym_err, [], []),
+            8 => ffi_dispatch!([0, 1, 2, 3, 4, 5, 6, 7], bits, retf, lib, name, &cargs, &sym_err, [], []),
+            _ => {
+                return Err(self.runtime_err(
+                    codes::DLL_ARG,
+                    format!("`{}` takes at most 8 parameters", func_name),
+                    span,
+                    Some("the C ABI convention supports up to 8 scalar parameters"),
+                ))
+            }
+        };
+        // cstrings 在此作用域内保持存活，调用完成后再释放
+        Ok(match sig.ret {
+            FfiTy::Int => Value::Int(match cret {
+                CRet::I(v) => v,
+                CRet::F(_) => unreachable!("return class mismatch"),
+            }),
+            FfiTy::Float => Value::Float(match cret {
+                CRet::F(v) => v,
+                CRet::I(_) => unreachable!("return class mismatch"),
+            }),
+            FfiTy::Bool => Value::Bool(match cret {
+                CRet::I(v) => v != 0,
+                CRet::F(_) => unreachable!("return class mismatch"),
+            }),
+            FfiTy::Str => {
+                let p = match cret {
+                    CRet::I(v) => v,
+                    CRet::F(_) => unreachable!("return class mismatch"),
+                };
+                if p == 0 {
+                    return Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("`{}` returned NULL where `str` was expected", func_name),
+                        span,
+                        Some("the C function returned a null `const char*`"),
+                    ));
+                }
+                let s = unsafe { CStr::from_ptr(p as *const c_char) };
+                Value::Str(s.to_string_lossy().into_owned())
+            }
+            FfiTy::Ptr => Value::Ptr(match cret {
+                CRet::I(v) => v as usize,
+                CRet::F(_) => unreachable!("return class mismatch"),
+            }),
+            FfiTy::Void => Value::Null,
+        })
     }
 
     // ---------- 函数调用 ----------
@@ -894,12 +1163,16 @@ impl Interp {
             (Value::Str(x), Value::Str(y)) => Ok(x == y),
             (Value::List(x), Value::List(y)) => Ok(x == y),
             (Value::Dict(x), Value::Dict(y)) => Ok(x == y),
+            (Value::Ptr(x), Value::Ptr(y)) => Ok(x == y),
+            // ptr 与整数比较：`p == 0` 判断 NULL，`p == n` 比较句柄数值
+            (Value::Ptr(x), Value::Int(y)) => Ok(*x as i64 == *y),
+            (Value::Int(x), Value::Ptr(y)) => Ok(*x == *y as i64),
             (Value::Null, Value::Null) => Ok(true),
             _ => Err(self.runtime_err(
                 codes::TYPE_MISMATCH,
                 format!("cannot compare `{}` with `{}`", a.type_name(), b.type_name()),
                 span,
-                Some("Zap has no implicit type conversion"),
+                Some("Hone has no implicit type conversion"),
             )),
         }
     }
@@ -994,7 +1267,7 @@ impl Interp {
                     b.type_name()
                 ),
                 span,
-                Some("Zap has no implicit type conversion"),
+                Some("Hone has no implicit type conversion"),
             )),
         }
     }
@@ -1009,10 +1282,10 @@ fn default_value(ty: TyName) -> Value {
     }
 }
 
-/// ~/.zap/cache/ 模块缓存目录（Windows 用 USERPROFILE）。
-pub(crate) fn zap_cache_dir() -> std::path::PathBuf {
+/// ~/.hone/cache/ 模块缓存目录（Windows 用 USERPROFILE）。
+pub(crate) fn hone_cache_dir() -> std::path::PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(home).join(".zap").join("cache")
+    std::path::PathBuf::from(home).join(".hone").join("cache")
 }

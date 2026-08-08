@@ -1,0 +1,17 @@
+// list_demo.hn - 列表字面量与列表辅助函数演示
+// 期望输出：
+//   3
+//   [1, 2, 3, 4]
+//   true
+//   false
+//   3
+//   -1
+
+l = [1, 2, 3];
+print(len(l));           // 3
+l = append(l, 4);        // [1, 2, 3, 4]
+print(to_str(l));        // [1, 2, 3, 4]
+print(contains(l, 3));   // true
+print(contains(l, 9));   // false
+print(index_of(l, 4));   // 3
+print(index_of(l, 99));  // -1

@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Zap 标准库文档</title>
+<title>Hone 标准库文档</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <span class="logo">⚡ Zap</span>
+  <span class="logo">⚡ Hone</span>
   <nav>
     <a href="index.html">首页</a>
     <a href="docs.html">文档</a>
@@ -20,7 +20,7 @@
 </header>
 
 <main>
-  <p class="desc">Zap 标准库：纯 Zap 编写的模块（<code class="inline">zap_lib/</code>），本地路径导入即可使用。GUI 模块（<code class="inline">gui</code>）依赖 v0.3.0 新增的 <code class="inline">server.*</code> 内置函数。</p>
+  <p class="desc">Hone 标准库：纯 Hone 编写的模块（<code class="inline">hone_lib/</code>），本地路径导入即可使用。GUI 模块（<code class="inline">gui</code>）依赖 v0.3.0 新增的 <code class="inline">server.*</code> 内置函数。</p>
 
   <input type="text" id="search" class="search-box" placeholder="搜索标准库…（如 math_gcd、gui_run）" oninput="searchDocs(this.value)">
   <div id="search-count" class="search-count"></div>
@@ -38,15 +38,15 @@
 
   <section id="intro">
     <h2><span class="hash">#</span>1. 概述与导入</h2>
-    <p>标准库位于 <code class="inline">zap_lib/</code> 目录，全部用 Zap 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code>），通过本地路径 import 使用：</p>
+    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code>），通过本地路径 import 使用：</p>
 <pre><code><span class="c">// 本地路径导入（相对路径基于当前工作目录）</span>
-<span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./zap_lib/math.zp"</span>;
-<span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./zap_lib/collections.zp"</span>;
-<span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./zap_lib/str.zp"</span>;
-<span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./zap_lib/gui.zp"</span>;   <span class="c">// 需 v0.3.0+（依赖 server.*）</span>
+<span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
+<span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
+<span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;
+<span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./hone_lib/gui.hn"</span>;   <span class="c">// 需 v0.3.0+（依赖 server.*）</span>
 
 <span class="c">// import as：以别名导入，函数名前缀整体替换</span>
-<span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./zap_lib/math.zp"</span> <span class="k">as</span> m;   <span class="c">// m_clamp / m_gcd ...</span></code></pre>
+<span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span> <span class="k">as</span> m;   <span class="c">// m_clamp / m_gcd ...</span></code></pre>
   </section>
 
   <section id="math">
@@ -60,7 +60,7 @@
       <tr><td><code>math_factorial(n)</code></td><td>阶乘（迭代实现）</td><td><code>math_factorial(5)</code> → <code>120</code></td></tr>
       <tr><td><code>math_fib(n)</code></td><td>斐波那契（递归实现）</td><td><code>math_fib(10)</code> → <code>55</code></td></tr>
     </table>
-<pre><code><span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./zap_lib/math.zp"</span>;
+<pre><code><span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="f">print</span>(<span class="f">math_clamp</span>(<span class="n">5</span>, <span class="n">0</span>, <span class="n">3</span>));      <span class="c">// 3</span>
 <span class="f">print</span>(<span class="f">math_gcd</span>(<span class="n">12</span>, <span class="n">8</span>));       <span class="c">// 4</span>
 <span class="f">print</span>(<span class="f">math_factorial</span>(<span class="n">5</span>));    <span class="c">// 120</span>
@@ -78,7 +78,7 @@
       <tr><td><code>coll_unique(l)</code></td><td>去重（保持首次出现顺序）</td><td>→ <code>[3, 1, 4, 5]</code></td></tr>
       <tr><td><code>coll_count(l, v)</code></td><td>统计元素出现次数</td><td><code>coll_count([3,1,4,1,5], 1)</code> → <code>2</code></td></tr>
     </table>
-<pre><code><span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./zap_lib/collections.zp"</span>;
+<pre><code><span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
 l = [<span class="n">3</span>, <span class="n">1</span>, <span class="n">4</span>, <span class="n">1</span>, <span class="n">5</span>];
 <span class="f">print</span>(<span class="f">coll_sum</span>(l));            <span class="c">// 14</span>
 <span class="f">print</span>(<span class="f">coll_avg</span>(l));            <span class="c">// 2.8</span>
@@ -95,7 +95,7 @@ l = [<span class="n">3</span>, <span class="n">1</span>, <span class="n">4</span
       <tr><td><code>str_join(l, sep)</code></td><td>用分隔符拼接列表元素（自动 to_str）</td><td><code>str_join([3,1,4], "-")</code> → <code>"3-1-4"</code></td></tr>
       <tr><td><code>str_quote(s)</code></td><td>加双引号包裹（构造 JSON 字符串值）</td><td><code>str_quote("hi")</code> → <code>"\"hi\""</code></td></tr>
     </table>
-<pre><code><span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./zap_lib/str.zp"</span>;
+<pre><code><span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;
 <span class="f">print</span>(<span class="f">str_repeat</span>(<span class="s">"ab"</span>, <span class="n">3</span>));       <span class="c">// ababab</span>
 <span class="f">print</span>(<span class="f">str_empty</span>(<span class="s">""</span>));           <span class="c">// true</span>
 <span class="f">print</span>(<span class="f">str_join</span>([<span class="n">3</span>, <span class="n">1</span>, <span class="n">4</span>], <span class="s">"-"</span>));  <span class="c">// 3-1-4</span>
@@ -114,12 +114,12 @@ l = [<span class="n">3</span>, <span class="n">1</span>, <span class="n">4</span
       <tr><td><code>gui_html(html)</code></td><td>原始 HTML 片段</td></tr>
       <tr><td><code>gui_run(title, widgets)</code></td><td>启动服务器 + 打开浏览器 + 事件循环（Ctrl+C 退出）</td></tr>
     </table>
-<pre><code><span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./zap_lib/gui.zp"</span>;
+<pre><code><span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./hone_lib/gui.hn"</span>;
 
 <span class="c">// 事件处理：返回值按 JSON 协议解释</span>
 <span class="k">fn</span> <span class="f">on_event</span>(id : <span class="k">str</span>, value) -&gt; <span class="k">str</span> {
     <span class="k">if</span> (id == <span class="s">"btn_hi"</span>) {
-        <span class="k">return</span> <span class="f">json_stringify</span>({<span class="s">"update"</span>: [[<span class="s">"lbl_out"</span>, <span class="s">"你好，Zap GUI！"</span>]]});
+        <span class="k">return</span> <span class="f">json_stringify</span>({<span class="s">"update"</span>: [[<span class="s">"lbl_out"</span>, <span class="s">"你好，Hone GUI！"</span>]]});
     }
     <span class="k">return</span> <span class="s">""</span>;
 }
@@ -128,15 +128,15 @@ widgets = [
     <span class="f">gui_button</span>(<span class="s">"btn_hi"</span>, <span class="s">"打招呼"</span>),
     <span class="f">gui_label</span>(<span class="s">"lbl_out"</span>, <span class="s">"(事件输出)"</span>),
 ];
-<span class="f">gui_run</span>(<span class="s">"Zap GUI 演示"</span>, widgets);</code></pre>
+<span class="f">gui_run</span>(<span class="s">"Hone GUI 演示"</span>, widgets);</code></pre>
     <p>事件协议：<code class="inline">{"update": [[元素id, 新文本], ...]}</code> 更新元素文本、<code class="inline">{"alert": "消息"}</code> 弹窗提示、其他文本显示在页面底部状态栏。底层 <code class="inline">server.listen / server.poll / server.respond</code> 可直接使用（见 <a href="examples.html">示例 10.2</a>）。</p>
   </section>
 
   <section id="demo">
     <h2><span class="hash">#</span>6. 组合示例</h2>
-<pre><code><span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./zap_lib/math.zp"</span>;
-<span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./zap_lib/collections.zp"</span>;
-<span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./zap_lib/str.zp"</span>;
+<pre><code><span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
+<span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
+<span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;
 
 scores = [<span class="n">3</span>, <span class="n">1</span>, <span class="n">4</span>, <span class="n">1</span>, <span class="n">5</span>];
 <span class="f">print</span>(<span class="f">coll_sum</span>(scores));                      <span class="c">// 14</span>
@@ -164,7 +164,7 @@ function searchDocs(q) {
 </script>
 
 <footer>
-  Zap v0.3.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
+  Hone v0.3.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

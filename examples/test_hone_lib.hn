@@ -1,0 +1,30 @@
+// test_hone_lib.hn - hone_lib 标准库调用测试（本地路径 import）
+// 运行: hone examples/test_hone_lib.hn
+import "math" from "./hone_lib/math.hn";
+import "collections" from "./hone_lib/collections.hn";
+import "str" from "./hone_lib/str.hn";
+
+print("== math ==");
+print(math_clamp(5, 0, 3));     // 3
+print(math_clamp(-1, 0, 3));    // 0
+print(math_is_even(4));         // true
+print(math_is_odd(4));          // false
+print(math_gcd(12, 8));         // 4
+print(math_factorial(5));       // 120
+print(math_fib(10));            // 55
+
+print("== collections ==");
+l = [3, 1, 4, 1, 5];
+print(coll_sum(l));             // 14
+print(coll_avg(l));             // 2.8
+print(coll_max(l));             // 5
+print(coll_min(l));             // 1
+print(to_str(coll_unique(l)));  // [3, 1, 4, 5]
+print(coll_count(l, 1));        // 2
+
+print("== str ==");
+print(str_repeat("ab", 3));     // ababab
+print(str_empty(""));           // true
+print(str_empty("x"));          // false
+print(str_join(l, "-"));        // 3-1-4-1-5
+print(str_quote("hi"));         // "hi"

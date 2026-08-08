@@ -1,0 +1,50 @@
+// ffi_demo.hn - typed FFI 测试：load 签名块显式声明 C ABI 类型
+// 依赖 tests/hone_lib 构建出的动态库：cd tests/hone_lib && cargo build --release
+// 签名块内 fn 声明仅描述 C 函数 ABI，不定义 Hone 函数体。
+
+load "tests/hone_lib/target/release/hone_lib.dll" as m {
+    // 标量类型：int/float/bool/str/ptr，返回类型允许 void
+    fn lib_add_f(a: float, b: float) -> float;
+    fn lib_mix_f(f: float, n: int) -> float;
+    fn lib_strlen(s: str) -> int;
+    fn lib_hello() -> str;
+    fn lib_count_char(s: str, c: int) -> int;
+    fn lib_not(b: bool) -> bool;
+    fn lib_echo_ptr(p: ptr) -> ptr;
+    fn lib_sum4(a: int, b: int, c: int, d: int) -> int;
+    fn lib_bump() -> void;
+    fn lib_count() -> int;
+    // 旧约定函数在签名块外仍可用（int64 通道）
+}
+
+// float 参数与返回值
+print(m.lib_add_f(1.5, 2.25));   // 3.75
+print(m.lib_mix_f(2.0, 3));      // 6
+
+// str → int / str 返回 / 混合参数
+print(m.lib_strlen("hello"));    // 5
+print(m.lib_hello());            // hello from hone
+print(m.lib_count_char("kaka", 122)); // 2（'z' 的 ASCII 为 122）
+
+// bool 参数与返回值
+print(m.lib_not(true));          // false
+print(m.lib_not(false));         // true
+
+// ptr 句柄往返：返回值与参数同为 ptr
+p = m.lib_echo_ptr(0);           // NULL 传入原样返回
+print(p);                        // 0x0
+print(p == 0);                   // true（ptr 支持 == 比较）
+
+// 多参数（4 个 int）
+print(m.lib_sum4(1, 2, 3, 4));   // 10
+
+// void 返回值 + 全局状态副作用
+print(m.lib_count());            // 0
+m.lib_bump();
+m.lib_bump();
+print(m.lib_count());            // 2
+
+// 静态校验：以下调用会在检查阶段直接报错（而非运行时）
+// m.lib_strlen(123);           // H001: 参数期望 str，给了 int
+// m.lib_add_f(1, 2);           // H001: 参数期望 float，给了 int
+// m.lib_strlen();              // H005: 参数个数不匹配

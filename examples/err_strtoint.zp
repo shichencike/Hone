@@ -1,3 +1,0 @@
-// 字符串转整数失败：报 error[Z006]
-x = to_int("abc");
-print(x);

@@ -1,0 +1,39 @@
+// ffi_header.hn - from 头文件自动绑定：load 从 C 头文件提取原型生成 FFI 签名
+// 依赖 tests/hone_lib 构建出的动态库与头文件：
+//   cd tests/hone_lib && cargo build --release
+// 本示例等价于手写签名块（见 examples/ffi_demo.hn），但类型全部来自 hone_lib.h。
+
+load "tests/hone_lib/target/release/hone_lib.dll" as m from "tests/hone_lib/hone_lib.h";
+
+// typedef 展开：ka_int64 → long long → int
+print(m.lib_add(1, 2));         // 3
+print(m.lib_sum4(1, 2, 3, 4));  // 10
+
+// float / double
+print(m.lib_add_f(1.5, 2.25));  // 3.75
+print(m.lib_mix_f(2.0, 3));     // 6
+
+// str（const char* → str）
+print(m.lib_strlen("hello"));   // 5
+print(m.lib_hello());           // hello from hone
+print(m.lib_count_char("kaka", 122)); // 2（'z' 的 ASCII 为 122）
+
+// bool 以 int 形式在头文件中声明，映射为 int
+print(m.lib_not(1));            // 0
+print(m.lib_not(0));            // 1
+
+// ptr
+p = m.lib_echo_ptr(0);          // NULL 传入原样返回
+print(p);                       // 0x0
+print(p == 0);                  // true
+
+// void 返回 + 全局状态副作用
+print(m.lib_count());           // 0
+m.lib_bump();
+m.lib_bump();
+print(m.lib_count());           // 2
+
+// 头文件中不支持的原型（回调/变参/数组/结构体按值）会在调用时报错：
+// print(m.lib_cb(0));          // H006: cannot be called: callback parameter
+// print(m.lib_var("x"));       // H006: cannot be called: variadic (`...`)
+// 可用 hone bind tests/hone_lib/hone_lib.h 查看哪些原型被跳过

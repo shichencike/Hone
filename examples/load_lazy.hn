@@ -1,0 +1,6 @@
+// load lazy 懒加载：首次调用时才加载动态库
+load lazy "tests/hone_lib/target/release/hone_lib.dll" as lm;
+
+print("尚未加载库");
+print(lm.lib_fact(6));   // 720（此处触发加载）
+print(lm.lib_add(100, 1)); // 101

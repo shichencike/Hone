@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Zap 文档 - 语言手册</title>
+<title>Hone 文档 - 语言手册</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <span class="logo">⚡ Zap</span>
+  <span class="logo">⚡ Hone</span>
   <nav>
     <a href="index.html">首页</a>
     <a href="docs.html" class="active">文档</a>
@@ -20,7 +20,7 @@
 </header>
 
 <main>
-  <h2><span class="hash">#</span>Zap 语言手册</h2>
+  <h2><span class="hash">#</span>Hone 语言手册</h2>
   <p>类 C 语法的轻量脚本语言：静态强类型、解释执行、单文件分发。按章节循序渐进，10 分钟上手。</p>
 
   <input type="text" id="search" class="search-box" placeholder="搜索手册…（如 http_get、if、list）" oninput="searchDocs(this.value)">
@@ -46,11 +46,11 @@
 
   <section id="hello">
     <h2><span class="hash">#</span>1. 第一个程序</h2>
-    <p>和 C 语言一样，从 Hello World 开始。保存为 <code>hello.zp</code>：</p>
-<pre><code><span class="c">// 这是 Zap 的第一个程序</span>
-<span class="f">print</span>(<span class="s">"Hello, Zap!"</span>);</code></pre>
-    <p>运行：<code class="inline">zap hello.zp</code>（或 <code class="inline">zap run hello.zp</code>）。</p>
-    <p>Zap 是解释型脚本语言：无需编译、无需 <code class="inline">main</code> 函数，
+    <p>和 C 语言一样，从 Hello World 开始。保存为 <code>hello.hn</code>：</p>
+<pre><code><span class="c">// 这是 Hone 的第一个程序</span>
+<span class="f">print</span>(<span class="s">"Hello, Hone!"</span>);</code></pre>
+    <p>运行：<code class="inline">hone hello.hn</code>（或 <code class="inline">hone run hello.hn</code>）。</p>
+    <p>Hone 是解释型脚本语言：无需编译、无需 <code class="inline">main</code> 函数，
       顶层语句从上到下顺序执行。<code class="inline">print</code> 自动换行。</p>
   </section>
 
@@ -58,10 +58,10 @@
     <h2><span class="hash">#</span>2. 基础语法</h2>
     <table>
       <tr><th>项目</th><th>约定</th></tr>
-      <tr><td>文件扩展名</td><td><code>.zp</code></td></tr>
+      <tr><td>文件扩展名</td><td><code>.hn</code></td></tr>
       <tr><td>语句结束符</td><td><code>;</code> 分号</td></tr>
       <tr><td>代码块</td><td><code>{ }</code> 大括号</td></tr>
-      <tr><td>缩进</td><td>强制 Tab（<code>zap fmt</code> 统一）</td></tr>
+      <tr><td>缩进</td><td>强制 Tab（<code>hone fmt</code> 统一）</td></tr>
       <tr><td>注释</td><td><code>// 单行</code> 与 <code>/* 多行 */</code></td></tr>
       <tr><td>命名空间</td><td>点号访问：<code>time.now()</code>、<code>sys.msgbox()</code></td></tr>
       <tr><td>临时函数</td><td><code>tmp fn name() { ... }</code> 编译自动忽略</td></tr>
@@ -76,7 +76,7 @@
 f = <span class="n">3.14</span>;            <span class="c">// 自动推导为 float</span>
 y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">// 显式类型（Rust/TS 风格）</span>
 <span class="k">int</span> z = <span class="n">30</span>;      <span class="c">// 显式类型（C 风格）</span>
-x = <span class="s">"Zap"</span>;          <span class="c">// error[Z001]: 期望 int，得到 str</span></code></pre>
+x = <span class="s">"Hone"</span>;          <span class="c">// error[H001]: 期望 int，得到 str</span></code></pre>
     <table>
       <tr><th>类型</th><th>说明</th><th>字面量示例</th></tr>
       <tr><td><code>int</code></td><td>64 位有符号整数</td><td><code>0, 42, -1</code></td></tr>
@@ -84,7 +84,7 @@ x = <span class="s">"Zap"</span>;          <span class="c">// error[Z001]: 期�
       <tr><td><code>bool</code></td><td>布尔值</td><td><code>true, false</code></td></tr>
       <tr><td><code>str</code></td><td>UTF-8 字符串</td><td><code>"hello"</code>（支持 \n \t \\ \"）</td></tr>
       <tr><td><code>list</code></td><td>动态列表（元素类型不锁定）</td><td><code>[1, "a", true]</code></td></tr>
-      <tr><td><code>dict</code></td><td>动态字典（字符串键 → 任意值）</td><td><code>{"name": "zap", "ver": 1}</code></td></tr>
+      <tr><td><code>dict</code></td><td>动态字典（字符串键 → 任意值）</td><td><code>{"name": "hone", "ver": 1}</code></td></tr>
     </table>
   </section>
 
@@ -92,7 +92,7 @@ x = <span class="s">"Zap"</span>;          <span class="c">// error[Z001]: 期�
     <h2><span class="hash">#</span>4. 运算符</h2>
     <table>
       <tr><th>类别</th><th>运算符</th><th>说明</th></tr>
-      <tr><td>算术</td><td><code>+ - * / %</code></td><td>int 除法为整除，除零报 Z009</td></tr>
+      <tr><td>算术</td><td><code>+ - * / %</code></td><td>int 除法为整除，除零报 H009</td></tr>
       <tr><td>字符串拼接</td><td><code>+</code></td><td><code>"a" + "b"</code> → <code>"ab"</code>（仅 str + str）</td></tr>
       <tr><td>比较</td><td><code>== != &lt; &gt; &lt;= &gt;=</code></td><td>返回 bool，要求两侧同类型</td></tr>
       <tr><td>逻辑</td><td><code>&amp;&amp; || !</code></td><td>与、或、非；操作数为 bool</td></tr>
@@ -123,7 +123,7 @@ nums = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</s
     <span class="f">print</span>(x * x);      <span class="c">// 1 4 9</span>
 }
 
-user = {<span class="s">"name"</span>: <span class="s">"zap"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
+user = {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
 <span class="k">for</span> k, v <span class="k">in</span> user {
     <span class="f">print</span>(k + <span class="s">"= "</span> + <span class="f">to_str</span>(v));
 }</code></pre>
@@ -151,10 +151,10 @@ user = {<span class="s">"name"</span>: <span class="s">"zap"</span>, <span class
     <p>列表 <code>[a, b, c]</code> 与字典 <code>{"k": v}</code> 为动态集合类型：元素类型不锁定、可混合，
       变量本身仍遵循类型锁定规则（不能把列表赋给已锁定的标量变量）。</p>
 <pre><code>nums = [<span class="n">1</span>, <span class="s">"a"</span>, <span class="k">true</span>];          <span class="c">// 混合元素列表</span>
-user = {<span class="s">"name"</span>: <span class="s">"zap"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};   <span class="c">// 字符串键 → 任意值</span>
+user = {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};   <span class="c">// 字符串键 → 任意值</span>
 
 <span class="f">print</span>(<span class="f">len</span>(nums));               <span class="c">// 3（元素个数）</span>
-<span class="f">print</span>(<span class="f">to_str</span>(user));            <span class="c">// {name: zap, ver: 1}</span>
+<span class="f">print</span>(<span class="f">to_str</span>(user));            <span class="c">// {name: hone, ver: 1}</span>
 
 l = <span class="f">append</span>(nums, <span class="s">"x"</span>);          <span class="c">// [1, a, true, x]（返回新列表）</span>
 <span class="f">print</span>(<span class="f">contains</span>(l, <span class="s">"a"</span>));       <span class="c">// true</span>
@@ -162,11 +162,11 @@ l = <span class="f">append</span>(nums, <span class="s">"x"</span>);          <s
 
 <span class="f">print</span>(<span class="f">has_key</span>(user, <span class="s">"name"</span>));  <span class="c">// true</span>
 <span class="f">print</span>(<span class="f">to_str</span>(<span class="f">keys</span>(user)));      <span class="c">// [name, ver]</span>
-<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">values</span>(user)));    <span class="c">// [zap, 1]</span></code></pre>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">values</span>(user)));    <span class="c">// [hone, 1]</span></code></pre>
     <p><strong>f-string 字符串插值</strong>：<code>f"..."</code> 内 <code>{expr}</code> 嵌入任意表达式，
       <code>{{</code> / <code>}}</code> 转义字面大括号：</p>
-<pre><code>name = <span class="s">"zap"</span>;
-<span class="f">print</span>(<span class="s">f"你好, {name}! sum = {1 + 2}"</span>);   <span class="c">// 你好, zap! sum = 3</span>
+<pre><code>name = <span class="s">"hone"</span>;
+<span class="f">print</span>(<span class="s">f"你好, {name}! sum = {1 + 2}"</span>);   <span class="c">// 你好, hone! sum = 3</span>
 <span class="f">print</span>(<span class="s">f"{{{<span class="n">1</span> + <span class="n">1</span>}}}"</span>);                 <span class="c">// 字面大括号 + 表达式</span></code></pre>
     <p><strong>类型判断</strong>：<code>is_int</code> <code>is_float</code> <code>is_str</code> <code>is_bool</code>
       <code>is_list</code> <code>is_dict</code> <code>is_null</code>，判断运行期值类型，常用于分支处理混合集合。</p>
@@ -202,20 +202,20 @@ l = <span class="f">append</span>(nums, <span class="s">"x"</span>);          <s
 
   <section id="integ">
     <h2><span class="hash">#</span>9. 导入与外部集成</h2>
-<pre><code><span class="c">// import：远程模块下载并缓存到 ~/.zap/cache/（URL 支持 http/https）</span>
-<span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.zp"</span>;
+<pre><code><span class="c">// import：远程模块下载并缓存到 ~/.hn/cache/（URL 支持 http/https）</span>
+<span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.hn"</span>;
  <span class="f">print</span>(<span class="f">module_add</span>(<span class="n">20</span>, <span class="n">22</span>));
 
  <span class="c">// import as：以别名导入，函数名前缀自动替换</span>
- <span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.zp"</span> <span class="k">as</span> m;
+ <span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.hn"</span> <span class="k">as</span> m;
  <span class="f">print</span>(<span class="f">m_add</span>(<span class="n">20</span>, <span class="n">22</span>));
 
  <span class="c">// load：动态库加载（C ABI，int64 参数/返回值）</span>
- <span class="k">load</span> <span class="s">"path/to/zap_lib.dll"</span> <span class="k">as</span> m;
+ <span class="k">load</span> <span class="s">"path/to/hone_lib.dll"</span> <span class="k">as</span> m;
  <span class="f">print</span>(m.<span class="f">lib_add</span>(<span class="n">1</span>, <span class="n">2</span>));
 
  <span class="c">// load lazy：懒加载，首次调用时才加载</span>
- <span class="k">load</span> <span class="k">lazy</span> <span class="s">"path/to/zap_lib.dll"</span> <span class="k">as</span> lm;
+ <span class="k">load</span> <span class="k">lazy</span> <span class="s">"path/to/hone_lib.dll"</span> <span class="k">as</span> lm;
 
  <span class="c">// alias：函数别名</span>
  <span class="k">alias</span> <span class="f">greet</span> <span class="k">as</span> <span class="f">hi</span>;</code></pre>
@@ -225,40 +225,40 @@ l = <span class="f">append</span>(nums, <span class="s">"x"</span>);          <s
     <h2><span class="hash">#</span>10. 工具链</h2>
     <table>
       <tr><th>命令</th><th>说明</th></tr>
-      <tr><td><code>zap run &lt;script.zp&gt;</code></td><td>执行脚本（默认命令）</td></tr>
-      <tr><td><code>zap run --restart[=N] &lt;script.zp&gt;</code></td><td>失败自动重启；<code>--backoff=a,b,c</code> 间隔递增，<code>--restart-on=Zxxx</code> 错误码白名单</td></tr>
-      <tr><td><code>zap run --resume &lt;script.zp&gt;</code></td><td>恢复 db 检查点继续执行（db.set 自动落盘，脚本变更后检查点失效）</td></tr>
-      <tr><td><code>zap debug &lt;script.zp&gt;</code></td><td>断点调试：breakpoint 打印变量快照，等待 Enter 继续</td></tr>
-      <tr><td><code>zap fmt [-w] &lt;file.zp&gt;</code></td><td>代码格式化（Tab 缩进、运算符空格、大括号位置）</td></tr>
-      <tr><td><code>zap build --dll &lt;file.zp&gt;</code></td><td>打包 C ABI 动态库；类型映射 int→int64_t、float→double、bool→bool、str→const char*；需系统 C 编译器</td></tr>
-      <tr><td><code>zap build --exe &lt;file.zp&gt;</code></td><td>打包独立可执行文件（解释器+脚本自释放，<code>[-o &lt;out&gt;]</code>）；打包后 <code>--version</code> 查看版本信息，<code>--keep-cache</code> 保留缓存</td></tr>
-      <tr><td><code>zap explain &lt;code&gt;</code></td><td>查看错误码解释与修复建议（如 <code>zap explain Z201</code>）</td></tr>
-      <tr><td><code>zap get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存到 ~/.zap/cache/（也支持扫描脚本 import 批量预下载）</td></tr>
-      <tr><td><code>zap upgrade [-w] &lt;file.zp&gt;</code></td><td>按映射表自动迁移旧版本语法</td></tr>
-      <tr><td><code>zap lsp</code></td><td>语言服务器（补全/诊断/hover，LSP over stdio）</td></tr>
-      <tr><td><code>zap poop &lt;file.zp&gt;</code></td><td>屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
+      <tr><td><code>hone run &lt;script.hn&gt;</code></td><td>执行脚本（默认命令）</td></tr>
+      <tr><td><code>hone run --restart[=N] &lt;script.hn&gt;</code></td><td>失败自动重启；<code>--backoff=a,b,c</code> 间隔递增，<code>--restart-on=Hxxx</code> 错误码白名单</td></tr>
+      <tr><td><code>hone run --resume &lt;script.hn&gt;</code></td><td>恢复 db 检查点继续执行（db.set 自动落盘，脚本变更后检查点失效）</td></tr>
+      <tr><td><code>hone debug &lt;script.hn&gt;</code></td><td>断点调试：breakpoint 打印变量快照，等待 Enter 继续</td></tr>
+      <tr><td><code>hone fmt [-w] &lt;file.hn&gt;</code></td><td>代码格式化（Tab 缩进、运算符空格、大括号位置）</td></tr>
+      <tr><td><code>hone build --dll &lt;file.hn&gt;</code></td><td>打包 C ABI 动态库；类型映射 int→int64_t、float→double、bool→bool、str→const char*；需系统 C 编译器</td></tr>
+      <tr><td><code>hone build --exe &lt;file.hn&gt;</code></td><td>打包独立可执行文件（解释器+脚本自释放，<code>[-o &lt;out&gt;]</code>）；打包后 <code>--version</code> 查看版本信息，<code>--keep-cache</code> 保留缓存</td></tr>
+      <tr><td><code>hone explain &lt;code&gt;</code></td><td>查看错误码解释与修复建议（如 <code>hone explain H201</code>）</td></tr>
+      <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存到 ~/.hn/cache/（也支持扫描脚本 import 批量预下载）</td></tr>
+      <tr><td><code>hone upgrade [-w] &lt;file.hn&gt;</code></td><td>按映射表自动迁移旧版本语法</td></tr>
+      <tr><td><code>hone lsp</code></td><td>语言服务器（补全/诊断/hover，LSP over stdio）</td></tr>
+      <tr><td><code>hone poop &lt;file.hn&gt;</code></td><td>屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
     </table>
   </section>
 
   <section id="errors">
     <h2><span class="hash">#</span>11. 错误处理</h2>
-    <p>错误统一为 <code>error[Zxxx]</code> 格式：编译期静态检查报错，运行期可恢复错误用 try-catch 捕获。</p>
-<pre><code>error[Z001]: type mismatch: variable `x` is locked to `int`, got `str`
-  --&gt; err.zp:3:1
-3 | x = <span class="s">"Zap"</span>;
+    <p>错误统一为 <code>error[Hxxx]</code> 格式：编译期静态检查报错，运行期可恢复错误用 try-catch 捕获。</p>
+<pre><code>error[H001]: type mismatch: variable `x` is locked to `int`, got `str`
+  --&gt; err.hn:3:1
+3 | x = <span class="s">"Hone"</span>;
   | ^
-help: Zap types are locked after inference; no implicit conversion is allowed</code></pre>
+help: Hone types are locked after inference; no implicit conversion is allowed</code></pre>
     <table>
       <tr><th>错误码</th><th>含义</th></tr>
-      <tr><td>Z001 ~ Z012</td><td>类型 / 语法 / 推导 / 运行期基础错误</td></tr>
-      <tr><td>Z101 ~ Z104</td><td>词法语法细分：非法字符 / 未闭合字符串 / 未闭合注释 / 缺少分号</td></tr>
-      <tr><td>Z200 ~ Z204</td><td>网络：请求失败 / 超时 / 连接拒绝 / DNS 失败 / 非 2xx 响应</td></tr>
-      <tr><td>Z300 ~ Z303</td><td>系统 / DLL：系统调用 / 库加载失败 / 参数校验 / 权限不足</td></tr>
-      <tr><td>Z401 ~ Z404</td><td>文件：不存在 / 权限不足 / 被占用锁定 / 通用 NOT_FOUND</td></tr>
-      <tr><td>Z600</td><td>throw 主动抛出的用户错误</td></tr>
-      <tr><td>Z999</td><td>尚未实现</td></tr>
+      <tr><td>H001 ~ H012</td><td>类型 / 语法 / 推导 / 运行期基础错误</td></tr>
+      <tr><td>H101 ~ H104</td><td>词法语法细分：非法字符 / 未闭合字符串 / 未闭合注释 / 缺少分号</td></tr>
+      <tr><td>H200 ~ H204</td><td>网络：请求失败 / 超时 / 连接拒绝 / DNS 失败 / 非 2xx 响应</td></tr>
+      <tr><td>H300 ~ H303</td><td>系统 / DLL：系统调用 / 库加载失败 / 参数校验 / 权限不足</td></tr>
+      <tr><td>H401 ~ H404</td><td>文件：不存在 / 权限不足 / 被占用锁定 / 通用 NOT_FOUND</td></tr>
+      <tr><td>H600</td><td>throw 主动抛出的用户错误</td></tr>
+      <tr><td>H999</td><td>尚未实现</td></tr>
     </table>
-    <p>完整解释与修复建议：<code class="inline">zap explain Z201</code>。</p>
+    <p>完整解释与修复建议：<code class="inline">hone explain H201</code>。</p>
     <p><strong>try-catch 恢复</strong>：捕获可恢复错误（ZError 通道）；panic 类崩溃不进入捕获。
       配合 <code class="inline">--restart</code> / <code class="inline">--resume</code> 实现无人值守运行。</p>
 <pre><code><span class="k">try</span> {
@@ -268,21 +268,21 @@ help: Zap types are locked after inference; no implicit conversion is allowed</c
     resp = <span class="f">db.get</span>(<span class="s">"cached"</span>);        <span class="c">// 降级回退</span>
 }
 
-<span class="k">throw</span> <span class="s">"用户错误"</span>;   <span class="c">// 主动抛出 → error[Z600]</span>
+<span class="k">throw</span> <span class="s">"用户错误"</span>;   <span class="c">// 主动抛出 → error[H600]</span>
 <span class="k">throw</span> e;             <span class="c">// 重抛已捕获的 error 值</span></code></pre>
     <table>
       <tr><th>机制</th><th>说明</th></tr>
-      <tr><td><code>--restart[=N]</code></td><td>脚本失败自动重拉（默认最多 3 次）；<code>--backoff=a,b,c</code> 重启间隔递增（默认 1,3,10 秒）；<code>--restart-on=Z200,Z401</code> 只对白名单错误码重启，确定性错误直接退出</td></tr>
-      <tr><td><code>--resume</code></td><td>恢复上次 db 检查点；<code>db.set</code> 自动落盘 <code>~/.zap/state/</code>，崩溃不丢检查点，脚本内容变更后检查点自动失效</td></tr>
+      <tr><td><code>--restart[=N]</code></td><td>脚本失败自动重拉（默认最多 3 次）；<code>--backoff=a,b,c</code> 重启间隔递增（默认 1,3,10 秒）；<code>--restart-on=H200,H401</code> 只对白名单错误码重启，确定性错误直接退出</td></tr>
+      <tr><td><code>--resume</code></td><td>恢复上次 db 检查点；<code>db.set</code> 自动落盘 <code>~/.hn/state/</code>，崩溃不丢检查点，脚本内容变更后检查点自动失效</td></tr>
       <tr><td>错误对象字段</td><td><code>e.code</code> / <code>e.message</code> / <code>e.file</code> / <code>e.context</code>（str）；<code>e.line</code> / <code>e.col</code>（int）</td></tr>
     </table>
-    <p>注意：Zap 为块作用域，try/catch 块内赋值的变量在块外不可见，跨块共享的变量需在块前声明。示例见 <code class="inline">examples/try_catch.zp</code>、<code class="inline">examples/restart_demo.zp</code>、<code class="inline">examples/resume_demo.zp</code>。</p>
+    <p>注意：Hone 为块作用域，try/catch 块内赋值的变量在块外不可见，跨块共享的变量需在块前声明。示例见 <code class="inline">examples/try_catch.hn</code>、<code class="inline">examples/restart_demo.hn</code>、<code class="inline">examples/resume_demo.hn</code>。</p>
   </section>
 
   <section id="principles">
     <h2><span class="hash">#</span>12. 设计原则</h2>
     <ul>
-      <li><strong>不自举</strong>：Zap 不用于开发自己的编译器，保持设计与实现的灵活性</li>
+      <li><strong>不自举</strong>：Hone 不用于开发自己的编译器，保持设计与实现的灵活性</li>
       <li><strong>不背兼容包袱</strong>：旧版本永久可用，新版本自由演化（提供 upgrade 迁移工具）</li>
       <li><strong>无前缀声明</strong>：变量不需要 let / var / const</li>
       <li><strong>静态强类型</strong>：类型锁定，不隐式转换，报错精准</li>
@@ -291,14 +291,14 @@ help: Zap types are locked after inference; no implicit conversion is allowed</c
   </section>
 
   <section id="gui">
-    <h2><span class="hash">#</span>13. 图形界面库（zap_lib/gui.zp）</h2>
-    <p>纯 Zap 编写的跨平台 GUI：浏览器渲染 + 本地 HTTP 服务器双向交互（Windows / Linux / Termux 均有浏览器）。依赖 <code class="inline">server.*</code> 内置函数。</p>
-<pre><code><span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./zap_lib/gui.zp"</span>;
+    <h2><span class="hash">#</span>13. 图形界面库（hone_lib/gui.hn）</h2>
+    <p>纯 Hone 编写的跨平台 GUI：浏览器渲染 + 本地 HTTP 服务器双向交互（Windows / Linux / Termux 均有浏览器）。依赖 <code class="inline">server.*</code> 内置函数。</p>
+<pre><code><span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./hone_lib/gui.hn"</span>;
 
 <span class="c">// 界面事件处理：id 为控件 id，value 为用户输入值（约定函数名 on_event）</span>
 <span class="k">fn</span> <span class="f">on_event</span>(id : <span class="k">str</span>, value) -&gt; <span class="k">str</span> {
     <span class="k">if</span> (id == <span class="s">"btn_hi"</span>) {
-        <span class="k">return</span> <span class="f">json_stringify</span>({<span class="s">"update"</span>: [[<span class="s">"lbl_out"</span>, <span class="s">"你好，Zap GUI！"</span>]]});
+        <span class="k">return</span> <span class="f">json_stringify</span>({<span class="s">"update"</span>: [[<span class="s">"lbl_out"</span>, <span class="s">"你好，Hone GUI！"</span>]]});
     }
     <span class="k">return</span> <span class="s">""</span>;
 }
@@ -308,9 +308,9 @@ widgets = [
     <span class="f">gui_input</span>(<span class="s">"txt_name"</span>, <span class="s">"姓名"</span>, <span class="s">"输入名字"</span>),
     <span class="f">gui_label</span>(<span class="s">"lbl_out"</span>, <span class="s">"(事件输出)"</span>),
 ];
-<span class="f">gui_run</span>(<span class="s">"Zap GUI 演示"</span>, widgets);  <span class="c">// 启动本地服务器并自动打开浏览器，Ctrl+C 退出</span></code></pre>
+<span class="f">gui_run</span>(<span class="s">"Hone GUI 演示"</span>, widgets);  <span class="c">// 启动本地服务器并自动打开浏览器，Ctrl+C 退出</span></code></pre>
     <p>控件：<code class="inline">gui_button</code> <code class="inline">gui_label</code> <code class="inline">gui_input</code> <code class="inline">gui_select</code> <code class="inline">gui_html</code>；<code class="inline">on_event</code> 返回值按 JSON 协议解释：<code class="inline">{"update": [[元素id, 新文本], ...]}</code> 更新元素、<code class="inline">{"alert": "消息"}</code> 弹窗、其他文本显示在页面底部状态栏。</p>
-    <p>底层 <code class="inline">server.*</code> API：<code class="inline">server.listen(port)</code> 启动后台监听（0=自动分配，返回实际端口）、<code class="inline">server.poll()</code> 取出排队请求（返回 JSON 数组）、<code class="inline">server.respond(id, body)</code> 发送响应体（HTTP 200）。事件模型为后台线程收发 + 脚本主线程轮询响应，与解释器单线程模型兼容。示例：<code class="inline">examples/gui_demo.zp</code>、<code class="inline">examples/server_demo.zp</code>。</p>
+    <p>底层 <code class="inline">server.*</code> API：<code class="inline">server.listen(port)</code> 启动后台监听（0=自动分配，返回实际端口）、<code class="inline">server.poll()</code> 取出排队请求（返回 JSON 数组）、<code class="inline">server.respond(id, body)</code> 发送响应体（HTTP 200）。事件模型为后台线程收发 + 脚本主线程轮询响应，与解释器单线程模型兼容。示例：<code class="inline">examples/gui_demo.hn</code>、<code class="inline">examples/server_demo.hn</code>。</p>
   </section>
 </main>
 
@@ -332,7 +332,7 @@ function searchDocs(q) {
 </script>
 
 <footer>
-  Zap v0.3.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
+  Hone v0.3.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

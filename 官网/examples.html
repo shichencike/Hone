@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Zap 示例 - 期望运行效果</title>
+<title>Hone 示例 - 期望运行效果</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <span class="logo">⚡ Zap</span>
+  <span class="logo">⚡ Hone</span>
   <nav>
     <a href="index.html">首页</a>
     <a href="docs.html">文档</a>
@@ -21,7 +21,7 @@
 
 <main>
   <h2><span class="hash">#</span>示例代码</h2>
-  <p>按知识点分组，与<a href="docs.html">语言手册</a>章节对应。以下示例均可在 <code class="inline">examples/</code> 目录中找到，用 <code class="inline">zap run &lt;file.zp&gt;</code> 运行。</p>
+  <p>按知识点分组，与<a href="docs.html">语言手册</a>章节对应。以下示例均可在 <code class="inline">examples/</code> 目录中找到，用 <code class="inline">hone run &lt;file.hn&gt;</code> 运行。</p>
 
   <input type="text" id="search" class="search-box" placeholder="搜索示例…（如 http、list、f-string）" oninput="searchExamples(this.value)">
   <div id="search-count" class="search-count"></div>
@@ -30,9 +30,9 @@
 
   <div class="example">
     <div class="title">1.1 Hello World</div>
-    <div class="note">第一个 Zap 程序</div>
-<pre><code><span class="c">// 这是 Zap 的第一个示例</span>
-<span class="f">print</span>(<span class="s">"Hello Zap!"</span>);</code></pre>
+    <div class="note">第一个 Hone 程序</div>
+<pre><code><span class="c">// 这是 Hone 的第一个示例</span>
+<span class="f">print</span>(<span class="s">"Hello Hone!"</span>);</code></pre>
   </div>
 
   <div class="example">
@@ -49,7 +49,7 @@ f = <span class="n">3.14</span>;
 
 a = <span class="n">7</span> / <span class="n">2</span>;
 <span class="f">print</span>(a);           <span class="c">// 3（整数除法）</span>
-<span class="c">// x = "Zap";  // error[Z001]：类型锁定</span></code></pre>
+<span class="c">// x = "Hone";  // error[H001]：类型锁定</span></code></pre>
   </div>
 
   <h3><span class="hash">#</span>2. 控制流</h3>
@@ -83,7 +83,7 @@ score = <span class="n">85</span>;
     sum = sum + x;
 }
 
-d = {<span class="s">"name"</span>: <span class="s">"zap"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
+d = {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
 <span class="k">for</span> k, v <span class="k">in</span> d {
     <span class="f">print</span>(k + <span class="s">": "</span> + <span class="f">to_str</span>(v));
 }
@@ -127,21 +127,21 @@ l = <span class="f">append</span>(l, <span class="n">4</span>);        <span cla
 
   <div class="example">
     <div class="title">4.2 字典操作</div>
-    <div class="note">字典字面量、has_key/keys/values/len（期望输出：{name: zap, ver: 1} / true / false / [name, ver] / [zap, 1] / 2）</div>
-<pre><code>d = {<span class="s">"name"</span>: <span class="s">"zap"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
-<span class="f">print</span>(<span class="f">to_str</span>(d));          <span class="c">// {name: zap, ver: 1}</span>
+    <div class="note">字典字面量、has_key/keys/values/len（期望输出：{name: hone, ver: 1} / true / false / [name, ver] / [hone, 1] / 2）</div>
+<pre><code>d = {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
+<span class="f">print</span>(<span class="f">to_str</span>(d));          <span class="c">// {name: hone, ver: 1}</span>
 <span class="f">print</span>(<span class="f">has_key</span>(d, <span class="s">"name"</span>)); <span class="c">// true</span>
 <span class="f">print</span>(<span class="f">has_key</span>(d, <span class="s">"nope"</span>)); <span class="c">// false</span>
 <span class="f">print</span>(<span class="f">to_str</span>(<span class="f">keys</span>(d)));    <span class="c">// [name, ver]</span>
-<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">values</span>(d)));  <span class="c">// [zap, 1]</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">values</span>(d)));  <span class="c">// [hone, 1]</span>
 <span class="f">print</span>(<span class="f">len</span>(d));           <span class="c">// 2（键个数）</span></code></pre>
   </div>
 
   <div class="example">
     <div class="title">4.3 f-string 字符串插值</div>
     <div class="note">f"..." 内 {expr} 嵌入表达式，{{ / }} 转义字面大括号</div>
-<pre><code>name = <span class="s">"zap"</span>;
-<span class="f">print</span>(<span class="s">f"你好, {name}!"</span>);        <span class="c">// 你好, zap!</span>
+<pre><code>name = <span class="s">"hone"</span>;
+<span class="f">print</span>(<span class="s">f"你好, {name}!"</span>);        <span class="c">// 你好, hone!</span>
 
 a = <span class="n">3</span>; b = <span class="n">2</span>;
 <span class="f">print</span>(<span class="s">f"sum = {a + b}, pi = {3.14}"</span>);  <span class="c">// sum = 5, pi = 3.14</span>
@@ -210,8 +210,8 @@ b = <span class="f">json_parse</span>(<span class="s">"true"</span>);
 <pre><code>ok = <span class="f">regex.match</span>(<span class="s">"^\\d+$"</span>, <span class="s">"12345"</span>);
 <span class="f">print</span>(ok);  <span class="c">// true</span>
 
-result = <span class="f">regex.replace</span>(<span class="s">"world"</span>, <span class="s">"hello world"</span>, <span class="s">"Zap"</span>);
-<span class="f">print</span>(result);  <span class="c">// hello Zap</span></code></pre>
+result = <span class="f">regex.replace</span>(<span class="s">"world"</span>, <span class="s">"hello world"</span>, <span class="s">"Hone"</span>);
+<span class="f">print</span>(result);  <span class="c">// hello Hone</span></code></pre>
   </div>
 
   <div class="example">
@@ -297,14 +297,14 @@ resp = <span class="f">http_post</span>(<span class="s">"http://httpbin.org/post
   <div class="example">
     <div class="title">7.1 import as 别名导入</div>
     <div class="note">以别名导入远程模块（URL 支持 http/https），函数名前缀自动替换</div>
-<pre><code><span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.zp"</span> <span class="k">as</span> m;
+<pre><code><span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.hn"</span> <span class="k">as</span> m;
 <span class="f">print</span>(<span class="f">m_add</span>(<span class="n">20</span>, <span class="n">22</span>));  <span class="c">// 42</span></code></pre>
   </div>
 
   <div class="example">
     <div class="title">7.2 DLL 打包</div>
-    <div class="note">@export 标记导出，zap build --dll 生成 C ABI 动态库（可在 C / Python / Rust 中调用）</div>
-<pre><code><span class="c">// math.zp</span>
+    <div class="note">@export 标记导出，hone build --dll 生成 C ABI 动态库（可在 C / Python / Rust 中调用）</div>
+<pre><code><span class="c">// math.hn</span>
 <span class="k">fn</span> <span class="f">add</span>(a : <span class="k">int</span>, b : <span class="k">int</span>) -&gt; <span class="k">int</span> { <span class="k">return</span> a + b; }
 <span class="k">fn</span> <span class="f">avg</span>(a : <span class="k">float</span>, b : <span class="k">float</span>) -&gt; <span class="k">float</span> { <span class="k">return</span> (a + b) / <span class="n">2.0</span>; }
 <span class="k">fn</span> <span class="f">greet</span>(name : <span class="k">str</span>) -&gt; <span class="k">str</span> { <span class="k">return</span> <span class="s">"你好, "</span> + name + <span class="s">"!"</span>; }
@@ -321,15 +321,15 @@ resp = <span class="f">http_post</span>(<span class="s">"http://httpbin.org/post
     <div class="title">8.1 build --exe 打包独立可执行文件</div>
     <div class="note">解释器+脚本打包为单文件，双击即用；--version 查看内嵌版本信息</div>
 <pre><code><span class="c">// 打包(默认输出 app.exe,体积≈解释器+脚本)</span>
-zap build --exe app.zp [-o my_app.exe]
+hone build --exe app.hn [-o my_app.exe]
 
-<span class="c">// 运行:自动释放运行时到 .zap_cache,执行完毕后自动清理</span>
+<span class="c">// 运行:自动释放运行时到 .hone_cache,执行完毕后自动清理</span>
 ./my_app.exe
 
-<span class="c">// 版本信息(内嵌 Zap 版本/构建时间/脚本名/校验和)</span>
+<span class="c">// 版本信息(内嵌 Hone 版本/构建时间/脚本名/校验和)</span>
 ./my_app.exe --version
-<span class="c">// &gt; my_app.exe (Zap v0.2.0) built at 2026-08-07 09:24:30</span>
-<span class="c">// &gt; script: app.zp</span>
+<span class="c">// &gt; my_app.exe (Hone v0.2.0) built at 2026-08-07 09:24:30</span>
+<span class="c">// &gt; script: app.hn</span>
 
 <span class="c">// 保留缓存以加速下次启动</span>
 ./my_app.exe --keep-cache</code></pre>
@@ -337,11 +337,11 @@ zap build --exe app.zp [-o my_app.exe]
 
   <div class="example">
     <div class="title">8.2 断点调试</div>
-    <div class="note">zap debug 模式下 breakpoint 打印所有变量的类型与值快照</div>
+    <div class="note">hone debug 模式下 breakpoint 打印所有变量的类型与值快照</div>
 <pre><code>x = <span class="n">10</span>;
-name = <span class="s">"Zap"</span>;
+name = <span class="s">"Hone"</span>;
 flag = <span class="k">true</span>;
-<span class="k">breakpoint</span>;   <span class="c">// [Zap Debug] 断点触发 -&gt; debug.zp:4 + 变量快照</span>
+<span class="k">breakpoint</span>;   <span class="c">// [Hone Debug] 断点触发 -&gt; debug.hn:4 + 变量快照</span>
  <span class="f">print</span>(x);</code></pre>
   </div>
 
@@ -363,26 +363,26 @@ x = <span class="n">42</span>;
     <div class="note">捕获可恢复错误并降级回退；throw 主动抛出；错误对象字段 e.code / e.message / e.line</div>
 <pre><code>r = <span class="n">0</span>;
 <span class="k">try</span> {
-    r = <span class="n">10</span> / <span class="n">0</span>;              <span class="c">// error[Z009] 除零</span>
+    r = <span class="n">10</span> / <span class="n">0</span>;              <span class="c">// error[H009] 除零</span>
 } <span class="k">catch</span> e {
     <span class="f">print</span>(<span class="s">"caught "</span> + e.code + <span class="s">": "</span> + e.message);
     r = -<span class="n">1</span>;                  <span class="c">// 回退值</span>
 }
 <span class="f">print</span>(r);                   <span class="c">// -1</span>
 
-<span class="k">throw</span> <span class="s">"自定义错误"</span>;        <span class="c">// error[Z600]</span></code></pre>
+<span class="k">throw</span> <span class="s">"自定义错误"</span>;        <span class="c">// error[H600]</span></code></pre>
   </div>
 
   <div class="example">
     <div class="title">9.2 自动重启与检查点恢复</div>
     <div class="note">--restart 失败自动重拉（名刀机制）；--resume 从 db 检查点继续（崩溃不丢进度）</div>
 <pre><code><span class="c">// 失败自动重启(默认最多3次,间隔1s/3s/10s递增;--restart-on 错误码白名单)</span>
-zap run --restart=2 --backoff=1,1 --restart-on=Z401 app.zp
+hone run --restart=2 --backoff=1,1 --restart-on=H401 app.hn
 
-<span class="c">// 检查点恢复(db.set 自动落盘 ~/.zap/state/,脚本变更后检查点自动失效)</span>
-zap run --resume app.zp
+<span class="c">// 检查点恢复(db.set 自动落盘 ~/.hn/state/,脚本变更后检查点自动失效)</span>
+hone run --resume app.hn
 
-<span class="c">// app.zp 中写入检查点</span>
+<span class="c">// app.hn 中写入检查点</span>
 <span class="k">db.set</span>(<span class="s">"stage"</span>, <span class="s">"2"</span>);</code></pre>
   </div>
 
@@ -390,13 +390,13 @@ zap run --resume app.zp
 
   <div class="example">
     <div class="title">10.1 图形界面库（浏览器渲染 + 双向交互）</div>
-    <div class="note">zap_lib/gui.zp：纯 Zap 编写的跨平台 GUI，gui_run 启动本地服务器并自动打开浏览器</div>
-<pre><code><span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./zap_lib/gui.zp"</span>;
+    <div class="note">hone_lib/gui.hn：纯 Hone 编写的跨平台 GUI，gui_run 启动本地服务器并自动打开浏览器</div>
+<pre><code><span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./hone_lib/gui.hn"</span>;
 
 <span class="c">// 界面事件处理：id 为控件 id，value 为用户输入值（约定函数名 on_event）</span>
 <span class="k">fn</span> <span class="f">on_event</span>(id : <span class="k">str</span>, value) -&gt; <span class="k">str</span> {
     <span class="k">if</span> (id == <span class="s">"btn_hi"</span>) {
-        <span class="k">return</span> <span class="f">json_stringify</span>({<span class="s">"update"</span>: [[<span class="s">"lbl_out"</span>, <span class="s">"你好，Zap GUI！"</span>]]});
+        <span class="k">return</span> <span class="f">json_stringify</span>({<span class="s">"update"</span>: [[<span class="s">"lbl_out"</span>, <span class="s">"你好，Hone GUI！"</span>]]});
     }
     <span class="k">return</span> <span class="s">""</span>;
 }
@@ -406,7 +406,7 @@ widgets = [
     <span class="f">gui_input</span>(<span class="s">"txt_name"</span>, <span class="s">"姓名"</span>, <span class="s">"输入名字"</span>),
     <span class="f">gui_label</span>(<span class="s">"lbl_out"</span>, <span class="s">"(事件输出)"</span>),
 ];
-<span class="f">gui_run</span>(<span class="s">"Zap GUI 演示"</span>, widgets);  <span class="c">// 浏览器自动打开，Ctrl+C 退出</span></code></pre>
+<span class="f">gui_run</span>(<span class="s">"Hone GUI 演示"</span>, widgets);  <span class="c">// 浏览器自动打开，Ctrl+C 退出</span></code></pre>
   </div>
 
   <div class="example">
@@ -420,7 +420,7 @@ widgets = [
     <span class="k">if</span> (reqs != <span class="s">"[]"</span>) {
         list = <span class="f">json_parse</span>(reqs);
         <span class="k">for</span> req <span class="k">in</span> list {
-            <span class="c">// gui_dict_get(req, "id") 取字段（Zap 无 d["k"] 索引语法）</span>
+            <span class="c">// gui_dict_get(req, "id") 取字段（Hone 无 d["k"] 索引语法）</span>
             <span class="f">server.respond</span>(<span class="n">1</span>, <span class="s">"ok"</span>);  <span class="c">// 发送 HTTP 200 响应体</span>
         }
     }
@@ -460,7 +460,7 @@ function searchExamples(q) {
 </script>
 
 <footer>
-  Zap v0.3.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
+  Hone v0.3.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

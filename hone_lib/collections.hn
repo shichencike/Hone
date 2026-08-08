@@ -1,0 +1,57 @@
+// hone_lib/collections.hn - 集合标准库（用 Hone 编写）
+// 用法: import "collections" from "./hone_lib/collections.hn";
+// 函数统一 coll_ 前缀；列表函数面向数值/同类型列表
+
+// 列表求和
+fn coll_sum(l) -> int {
+    s = 0;
+    for x in l { s = s + x; }
+    return s;
+}
+
+// 列表平均值（返回 float）
+fn coll_avg(l) -> float {
+    s = 0;
+    for x in l { s = s + x; }
+    return to_float(s) / to_float(len(l));
+}
+
+// 列表最大值
+fn coll_max(l) -> int {
+    m = 0;
+    first = true;
+    for x in l {
+        if (first) { m = x; first = false; }
+        else if (x > m) { m = x; }
+    }
+    return m;
+}
+
+// 列表最小值
+fn coll_min(l) -> int {
+    m = 0;
+    first = true;
+    for x in l {
+        if (first) { m = x; first = false; }
+        else if (x < m) { m = x; }
+    }
+    return m;
+}
+
+// 去重（保持首次出现顺序）
+fn coll_unique(l) {
+    r = [];
+    for x in l {
+        if (!contains(r, x)) { r = append(r, x); }
+    }
+    return r;
+}
+
+// 统计元素出现次数
+fn coll_count(l, v) -> int {
+    c = 0;
+    for x in l {
+        if (x == v) { c = c + 1; }
+    }
+    return c;
+}

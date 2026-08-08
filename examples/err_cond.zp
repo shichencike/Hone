@@ -1,4 +1,0 @@
-// 条件必须是 bool：if (1) 报 error[Z008]
-if (1) {
-    print("hi");
-}

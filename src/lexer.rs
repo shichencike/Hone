@@ -1,4 +1,4 @@
-// lexer.rs - Zap 词法分析器
+// lexer.rs - Hone 词法分析器
 // 生成 token 流，每个 token 携带 Span（行:列 + 长度）用于精准报错。
 
 use crate::error::ZError;
@@ -556,7 +556,7 @@ impl Lexer {
                     crate::error::codes::SYNTAX,
                     format!("integer literal `{}` is out of range", text),
                     text.len(),
-                    Some("Zap `int` is a 64-bit signed integer"),
+                    Some("Hone `int` is a 64-bit signed integer"),
                 )),
             }
         }

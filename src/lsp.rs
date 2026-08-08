@@ -1,4 +1,4 @@
-// lsp.rs - Zap 语言服务器（LSP over stdio，最小实现）
+// lsp.rs - Hone 语言服务器（LSP over stdio，最小实现）
 // 支持：全文同步（didOpen/didChange）、诊断（语法/类型错误，publishDiagnostics）、
 //       补全（内置函数 + 关键字）、hover 说明。
 // 协议：Content-Length 头 + JSON-RPC 2.0 body（serde_json 手工构造，无额外依赖）。
@@ -113,7 +113,7 @@ fn initialize_result() -> Value {
             "completionProvider": { "triggerCharacters": ["."] },
             "hoverProvider": true
         },
-        "serverInfo": { "name": "zap-lsp", "version": "0.1.0" }
+        "serverInfo": { "name": "hone-lsp", "version": "0.1.0" }
     })
 }
 
@@ -146,7 +146,7 @@ fn diagnostic_from_error(e: &ZError) -> Value {
             "end": { "line": line, "character": col + e.len.max(1) as u64 }
         },
         "severity": 1,
-        "source": "zap",
+        "source": "hone",
         "code": e.code,
         "message": format!("{}: {}", e.code, e.msg)
     })
@@ -170,7 +170,7 @@ fn hover_result() -> Value {
     json!({
         "contents": {
             "kind": "markdown",
-            "value": "**Zap 语言**\n\n轻量级、跨平台、可嵌入的脚本语言。\n\n输入内置函数名可自动补全（如 `print`、`time.now`）；类型一经推导即锁定，禁止隐式转换。"
+            "value": "**Hone 语言**\n\n轻量级、跨平台、可嵌入的脚本语言。\n\n输入内置函数名可自动补全（如 `print`、`time.now`）；类型一经推导即锁定，禁止隐式转换。"
         }
     })
 }

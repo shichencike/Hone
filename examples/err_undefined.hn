@@ -1,0 +1,2 @@
+// 未定义变量：报 error[H002]
+print(nope);

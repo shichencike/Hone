@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Zap 安装教程</title>
+<title>Hone 安装教程</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <span class="logo">⚡ Zap</span>
+  <span class="logo">⚡ Hone</span>
   <nav>
     <a href="index.html">首页</a>
     <a href="docs.html">文档</a>
@@ -21,95 +21,77 @@
 
 <main>
   <h2><span class="hash">#</span>安装教程</h2>
-  <p>Zap 是单文件可执行程序：下载 → 解压 → 运行，零依赖、零配置。选择你的平台：</p>
+  <p>Hone 是单文件可执行程序：一行命令安装，零依赖、零配置。选择你的方式：</p>
 
   <div class="toc">
     <ol>
-      <li><a href="#download">下载二进制</a></li>
-      <li><a href="#windows">Windows</a></li>
-      <li><a href="#linux">Linux</a></li>
-      <li><a href="#termux">Termux（Android）</a></li>
+      <li><a href="#quick">一键脚本安装（推荐）</a></li>
+      <li><a href="#pkg">包管理器安装（Homebrew / Scoop）</a></li>
+      <li><a href="#download">手动下载（GitHub Releases）</a></li>
       <li><a href="#build">源码构建</a></li>
       <li><a href="#verify">验证安装</a></li>
     </ol>
   </div>
 
+  <section id="quick">
+    <h2><span class="hash">#</span>1. 一键脚本安装（推荐）</h2>
+    <h3>Linux / Termux（Android）</h3>
+<pre><code>curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code></pre>
+    <p>脚本自动识别平台（x86_64 → <code class="inline">hone-linux-x86_64</code>；aarch64 / Termux → <code class="inline">hone-termux-aarch64</code>），下载后校验 sha256 并安装到 <code class="inline">~/.hone/bin</code>。</p>
+    <h3>Windows（PowerShell 5.1+）</h3>
+<pre><code>irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex</code></pre>
+    <p>安装到 <code class="inline">%LOCALAPPDATA%\hone\bin</code> 并自动加入用户 PATH（新开的终端生效）。</p>
+    <p>指定版本：<code class="inline">HONE_VERSION=v0.3.0 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code>（Windows 同理，先 <code class="inline">$env:HONE_VERSION = "v0.3.0"</code>）。</p>
+  </section>
+
+  <section id="pkg">
+    <h2><span class="hash">#</span>2. 包管理器安装</h2>
+    <h3>Homebrew（Linux）</h3>
+<pre><code>brew tap shichencike/homebrew-hone
+brew install hone</code></pre>
+    <p>新版本发布后 <code class="inline">brew upgrade hone</code> 即可更新。</p>
+    <h3>Scoop（Windows）</h3>
+<pre><code>scoop bucket add hone https://github.com/shichencike/scoop-hone
+scoop install hone</code></pre>
+    <p>新版本发布后 <code class="inline">scoop update hone</code> 即可更新（manifest 配置了自动更新）。</p>
+    <p class="note">macOS 版暂未发布，Homebrew 安装目前面向 Linux；Windows 用户优先推荐脚本或 Scoop 安装。</p>
+  </section>
+
   <section id="download">
-    <h2><span class="hash">#</span>1. 下载二进制</h2>
-    <p>从 <a href="https://github.com/shichencike/zap/releases">GitHub Releases</a> 下载对应平台的 zap 可执行文件：</p>
+    <h2><span class="hash">#</span>3. 手动下载（GitHub Releases）</h2>
+    <p>从 <a href="https://github.com/shichencike/Hone/releases">GitHub Releases</a> 下载对应平台的可执行文件（每次发布同时附带 <code class="inline">checksums.txt</code> 供 sha256 校验）：</p>
     <table>
       <tr><th>平台</th><th>文件</th><th>说明</th></tr>
-      <tr><td>Windows x86_64</td><td><code>zap-windows-x86_64.exe</code></td><td>64 位 Windows 10 / 11</td></tr>
-      <tr><td>Linux x86_64</td><td><code>zap-linux-x86_64</code></td><td>musl 静态编译，任何发行版直接运行</td></tr>
-      <tr><td>Termux（Android）</td><td><code>zap-termux-aarch64</code></td><td>Termux 终端环境（ARM64）</td></tr>
+      <tr><td>Windows x86_64</td><td><code>hone-windows-x86_64.exe</code></td><td>64 位 Windows 10 / 11</td></tr>
+      <tr><td>Linux x86_64</td><td><code>hone-linux-x86_64</code></td><td>musl 静态编译，任何发行版直接运行</td></tr>
+      <tr><td>Termux（Android）</td><td><code>hone-termux-aarch64</code></td><td>Termux 终端环境（ARM64）</td></tr>
     </table>
     <p>Linux / Termux 版为静态编译，不依赖系统 glibc / bionic，开箱即用。</p>
   </section>
 
-  <section id="windows">
-    <h2><span class="hash">#</span>2. Windows</h2>
-<pre><code><span class="c">// 1. 下载 zap-windows-x86_64.exe，重命名为 zap.exe</span>
-mkdir C:\zap
-copy zap-windows-x86_64.exe C:\zap\zap.exe
-
-<span class="c">// 2. 验证</span>
-C:\zap\zap.exe --version    <span class="c">// zap 0.3.0</span>
-
-<span class="c">// 3.（可选）加入 PATH，任意目录直接使用 zap 命令</span>
-setx PATH "%PATH%;C:\zap"</code></pre>
-  </section>
-
-  <section id="linux">
-    <h2><span class="hash">#</span>3. Linux</h2>
-<pre><code><span class="c">// 1. 下载并赋予执行权限</span>
-wget https://github.com/shichencike/zap/releases/download/v0.3.0/zap-linux-x86_64
-chmod +x zap-linux-x86_64
-
-<span class="c">// 2. 放入 PATH 目录</span>
-sudo mv zap-linux-x86_64 /usr/local/bin/zap
-
-<span class="c">// 3. 验证</span>
-zap --version    <span class="c">// zap 0.3.0</span></code></pre>
-  </section>
-
-  <section id="termux">
-    <h2><span class="hash">#</span>4. Termux（Android）</h2>
-<pre><code><span class="c">// 1. 安装 Termux（F-Droid 商店）并打开终端</span>
-
-<span class="c">// 2. 下载 zap-termux-aarch64</span>
-curl -L -o zap https://github.com/shichencike/zap/releases/download/v0.3.0/zap-termux-aarch64
-
-<span class="c">// 3. 赋予执行权限并放入 PATH</span>
-chmod +x zap
-mv zap $PREFIX/bin/zap
-
-<span class="c">// 4. 验证</span>
-zap --version    <span class="c">// zap 0.3.0</span></code></pre>
-  </section>
-
   <section id="build">
-    <h2><span class="hash">#</span>5. 源码构建</h2>
+    <h2><span class="hash">#</span>4. 源码构建</h2>
     <p>需要 Rust 工具链（rustc ≥ 1.71）。</p>
-<pre><code>git clone https://github.com/shichencike/zap.git
-cd zap
+<pre><code>git clone https://github.com/shichencike/Hone.git
+cd Hone
 cargo build --release
-<span class="c">// 产物: target/release/zap（Windows 为 target/release/zap.exe）</span>
-./target/release/zap --version    <span class="c">// zap 0.3.0</span></code></pre>
+<span class="c">// 产物: target/release/hone（Windows 为 target/release/hone.exe）</span>
+./target/release/hone --version    <span class="c">// hone 0.3.0</span></code></pre>
   </section>
 
   <section id="verify">
-    <h2><span class="hash">#</span>6. 验证安装</h2>
-<pre><code><span class="c">// hello.zp</span>
-<span class="f">print</span>(<span class="s">"Hello, Zap!"</span>);
+    <h2><span class="hash">#</span>5. 验证安装</h2>
+<pre><code><span class="c">// hello.hn</span>
+<span class="f">print</span>(<span class="s">"Hello, Hone!"</span>);
 
 <span class="c">// 运行脚本</span>
-zap hello.zp    <span class="c">// Hello, Zap!</span></code></pre>
+hone hello.hn    <span class="c">// Hello, Hone!</span></code></pre>
     <p>安装完成！下一步：<a href="docs.html">阅读语言手册</a> 或 <a href="examples.html">查看示例</a>。</p>
   </section>
 </main>
 
 <footer>
-  Zap v0.3.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
+  Hone v0.3.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

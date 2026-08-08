@@ -1,0 +1,18 @@
+// JSON 解析与序列化（标量值）
+n = json_parse("42");
+print(n);               // 42
+print(type_of(n));      // int
+
+f = json_parse("3.14");
+print(f);               // 3.14
+
+b = json_parse("true");
+print(b);               // true
+
+s = json_parse("\"hello\"");
+print(s);               // hello
+
+print(json_stringify(3.14));       // 3.14
+print(json_stringify(true));       // true
+print(json_stringify("hi \"hone\"")); // "hi \"hone\""
+print(json_stringify(100));        // 100

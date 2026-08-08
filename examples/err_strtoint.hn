@@ -1,0 +1,3 @@
+// 字符串转整数失败：报 error[H006]
+x = to_int("abc");
+print(x);

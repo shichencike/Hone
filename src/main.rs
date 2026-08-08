@@ -1,5 +1,5 @@
-// main.rs - Zap 命令行入口（单文件 zap / zap.exe）
-// 命令：zap <script.zp>（默认）、zap run、zap debug、--help、--version
+// main.rs - Hone 命令行入口（单文件 hone / hone.exe）
+// 命令：hone <script.hn>（默认）、hone run、hone debug、--help、--version
 
 mod ast;
 mod builtins;
@@ -8,6 +8,7 @@ mod checker;
 mod codegen;
 mod error;
 mod fmt;
+mod header;
 mod interp;
 mod lexer;
 mod lsp;
@@ -25,7 +26,7 @@ use error::ZError;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn main() -> ExitCode {
-    // 管道被提前关闭（如 `zap --help | head`）时，不打印 broken pipe 的 panic 堆栈
+    // 管道被提前关闭（如 `hone --help | head`）时，不打印 broken pipe 的 panic 堆栈
     std::panic::set_hook(Box::new(|info| {
         let msg = info
             .payload()
@@ -70,7 +71,7 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
             Ok(())
         }
         "--version" | "-V" | "version" => {
-            println!("zap {}", VERSION);
+            println!("hone {}", VERSION);
             Ok(())
         }
         "run" => {
@@ -80,8 +81,8 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
                 .ok_or_else(|| {
                     ZError::plain(
                         codes::SYNTAX,
-                        "missing script path: `zap run <script.zp>`",
-                        Some("run `zap --help` for usage"),
+                        "missing script path: `hone run <script.hn>`",
+                        Some("run `hone --help` for usage"),
                     )
                 })?;
             if opts.resume {
@@ -99,14 +100,15 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
                 .ok_or_else(|| {
                     ZError::plain(
                         codes::SYNTAX,
-                        "missing script path: `zap debug <script.zp>`",
-                        Some("run `zap --help` for usage"),
+                        "missing script path: `hone debug <script.hn>`",
+                        Some("run `hone --help` for usage"),
                     )
                 })?;
             builtins::init_args(&args[2..]);
             run_file(path, true)
         }
         "fmt" => cmd_fmt(&args[1..]),
+        "bind" => cmd_bind(&args[1..]),
         "build" => cmd_build(&args[1..]),
         "get" => cmd_get(&args[1..]),
         "upgrade" => upgrade::cmd_upgrade(&args[1..]),
@@ -118,8 +120,8 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
                 .ok_or_else(|| {
                     ZError::plain(
                         codes::SYNTAX,
-                        "missing error code: `zap explain <code>`",
-                        Some("example: `zap explain Z201`"),
+                        "missing error code: `hone explain <code>`",
+                        Some("example: `hone explain H201`"),
                     )
                 })?;
             match error::explain(code) {
@@ -131,23 +133,23 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
                 None => Err(ZError::plain(
                     codes::NOT_FOUND,
                     format!("unknown error code `{}`", code),
-                    Some("run `zap explain` with a Zxxx code listed in the docs"),
+                    Some("run `hone explain` with a Hxxx code listed in the docs"),
                 )),
             }
         }
-        other if other.ends_with(".zp") => {
+        other if other.ends_with(".hn") => {
             builtins::init_args(&args[1..]);
             run_file(other, false)
         }
         other => Err(ZError::plain(
             codes::SYNTAX,
             format!("unknown command `{}`", other),
-            Some("run `zap --help` for usage"),
+            Some("run `hone --help` for usage"),
         )),
     }
 }
 
-/// 执行一个 .zp 脚本：读取 → 解析 → 类型检查 → 解释执行。
+/// 执行一个 .hn 脚本：读取 → 解析 → 类型检查 → 解释执行。
 fn run_file(path: &str, debug: bool) -> Result<(), ZError> {
     let src = std::fs::read_to_string(path).map_err(|e| {
         ZError::plain(
@@ -169,15 +171,15 @@ struct RestartPolicy {
     codes: Vec<String>,
 }
 
-/// `zap run` 的运行选项：重启策略（可选）与是否恢复检查点。
+/// `hone run` 的运行选项：重启策略（可选）与是否恢复检查点。
 struct RunOptions {
     restart: Option<RestartPolicy>,
     resume: bool,
 }
 
-/// 从 `zap run` 的参数中提取运行选项。
+/// 从 `hone run` 的参数中提取运行选项。
 /// 返回 (选项, 剩余参数)；剩余参数中第一个为脚本路径，其余为脚本自身的参数（原样传递）。
-/// 已知选项 `--restart[=N]` / `--backoff=a,b,c` / `--restart-on=Zxxx` / `--resume` 被消费，
+/// 已知选项 `--restart[=N]` / `--backoff=a,b,c` / `--restart-on=Hxxx` / `--resume` 被消费，
 /// 遇到第一个非选项参数即停止解析，其后内容一律视为脚本参数。
 fn parse_run_args(args: &[String]) -> (RunOptions, Vec<String>) {
     let mut max = 3usize;
@@ -266,12 +268,12 @@ fn run_with_restart(path: &str, policy: &RestartPolicy) -> Result<(), ZError> {
     }
 }
 
-/// ~/.zap/state/ 状态目录（Windows 用 USERPROFILE）。
+/// ~/.hone/state/ 状态目录（Windows 用 USERPROFILE）。
 fn state_dir() -> std::path::PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(home).join(".zap").join("state")
+    std::path::PathBuf::from(home).join(".hone").join("state")
 }
 
 /// `--resume`：恢复 db 检查点并启用自动落盘。
@@ -312,31 +314,82 @@ fn load_resume_state(path: &str) -> Result<(), ZError> {
 }
 
 fn print_help() {
-    println!("Zap v{} - 轻量级、跨平台、可嵌入的脚本语言", VERSION);
+    println!("Hone v{} - 轻量级、跨平台、可嵌入的脚本语言", VERSION);
     println!();
     println!("用法:");
-    println!("  zap <script.zp>         执行 Zap 脚本（默认命令）");
-    println!("  zap run <script.zp>     执行 Zap 脚本");
+    println!("  hone <script.hn>         执行 Hone 脚本（默认命令）");
+    println!("  hone run <script.hn>     执行 Hone 脚本");
     println!("       --restart[=N]       失败自动重启（N 为最大次数，默认 3；仅对可恢复错误）");
     println!("       --backoff=a,b,c     重启间隔递增序列（秒，默认 1,3,10）");
-    println!("       --restart-on=Zxxx   只对指定错误码重启（逗号分隔；省略则全部可重启）");
+    println!("       --restart-on=Hxxx   只对指定错误码重启（逗号分隔；省略则全部可重启）");
     println!("       --resume            恢复上次 db 检查点（脚本变更后自动失效）");
-    println!("  zap explain <code>       查看错误码解释（如 `zap explain Z201`）");
-    println!("  zap debug <script.zp>   断点调试模式（breakpoint 关键字生效）");
-    println!("  zap fmt [-w] <file.zp>  代码格式化（统一 Tab 缩进、运算符空格、大括号位置；-w 覆盖写）");
-    println!("  zap build --dll <file.zp> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
-    println!("  zap build --exe <file.zp> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
-    println!("  zap get <module> <url>  下载模块依赖并缓存到 ~/.zap/cache/");
-    println!("  zap get <script.zp>     预下载脚本中所有 import 声明的模块");
-    println!("  zap upgrade [-w] <file.zp> 按映射表自动迁移旧版本语法（-w 覆盖写）");
-    println!("  zap lsp                 启动语言服务器（补全/诊断，LSP over stdio）");
-    println!("  zap --help              显示帮助");
-    println!("  zap --version           显示版本");
+    println!("  hone explain <code>       查看错误码解释（如 `hone explain H201`）");
+    println!("  hone bind <header.h>      从 C 头文件生成 FFI 签名块（typed load 用）");
+    println!("  hone debug <script.hn>   断点调试模式（breakpoint 关键字生效）");
+    println!("  hone fmt [-w] <file.hn>  代码格式化（统一 Tab 缩进、运算符空格、大括号位置；-w 覆盖写）");
+    println!("  hone build --dll <file.hn> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
+    println!("  hone build --exe <file.hn> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
+    println!("  hone get <module> <url>  下载模块依赖并缓存到 ~/.hone/cache/");
+    println!("  hone get <script.hn>     预下载脚本中所有 import 声明的模块");
+    println!("  hone upgrade [-w] <file.hn> 按映射表自动迁移旧版本语法（-w 覆盖写）");
+    println!("  hone lsp                 启动语言服务器（补全/诊断，LSP over stdio）");
+    println!("  hone --help              显示帮助");
+    println!("  hone --version           显示版本");
     println!();
-    println!("可视化编辑器：浏览器打开 editor/index.html（拖拽代码块生成 .zp 代码）");
+    println!("可视化编辑器：浏览器打开 editor/index.html（拖拽代码块生成 .hn 代码）");
 }
 
-/// zap build --dll <script.zp> / zap build --exe <script.zp>
+/// hone bind <header.h>：解析 C 头文件，生成 typed load 签名块（打印到 stdout）。
+fn cmd_bind(args: &[String]) -> Result<(), ZError> {
+    let path = args
+        .first()
+        .ok_or_else(|| {
+            ZError::plain(
+                codes::SYNTAX,
+                "missing header path: `hone bind <header.h>`",
+                Some("example: `hone bind /usr/include/sqlite3.h`"),
+            )
+        })?;
+    let src = std::fs::read_to_string(path).map_err(|e| {
+        ZError::plain(
+            codes::NOT_FOUND,
+            format!("cannot read header `{}`: {}", path, e),
+            Some("check the header path"),
+        )
+    })?;
+    let sigs = header::parse(&src, lexer::Span { line: 1, col: 1, len: 1 });
+    let supported: Vec<_> = sigs.iter().filter(|s| s.unsupported.is_none()).collect();
+    let unsupported: Vec<_> = sigs.iter().filter(|s| s.unsupported.is_some()).collect();
+    println!("// 由 hone bind {} 生成（受限 C 原型提取，纯 Rust 实现）", path);
+    println!("// 用法一：load \"你的动态库\" as lib from \"{}\";", path);
+    println!("// 用法二：把下面的签名块粘贴进脚本：");
+    println!("load \"你的动态库\" as lib {{");
+    for sig in &supported {
+        let params = sig
+            .params
+            .iter()
+            .map(|p| format!("{}: {}", p.name, p.ty.name()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("    fn {}({}) -> {};", sig.name, params, sig.ret.name());
+    }
+    if !unsupported.is_empty() {
+        println!("    // 以下原型因受限解析器不支持而跳过（回调/变参/数组/结构体等）：");
+        for sig in &unsupported {
+            println!("    // fn {}() -> int;  // {}", sig.name, sig.unsupported.unwrap());
+        }
+    }
+    println!("}}");
+    println!(
+        "// 统计：共 {} 个原型，{} 个可直接绑定，{} 个不支持",
+        sigs.len(),
+        supported.len(),
+        unsupported.len()
+    );
+    Ok(())
+}
+
+/// hone build --dll <script.hn> / hone build --exe <script.hn>
 fn cmd_build(args: &[String]) -> Result<(), ZError> {
     match args.first().map(|s| s.as_str()) {
         Some("--dll") => {
@@ -345,8 +398,8 @@ fn cmd_build(args: &[String]) -> Result<(), ZError> {
                 .ok_or_else(|| {
                     ZError::plain(
                         codes::SYNTAX,
-                        "missing script path: `zap build --dll <script.zp>`",
-                        Some("run `zap --help` for usage"),
+                        "missing script path: `hone build --dll <script.hn>`",
+                        Some("run `hone --help` for usage"),
                     )
                 })?;
             cmd_build_dll(path)
@@ -354,17 +407,17 @@ fn cmd_build(args: &[String]) -> Result<(), ZError> {
         Some("--exe") => cmd_build_exe(&args[1..]),
         _ => Err(ZError::plain(
             codes::SYNTAX,
-            "unknown build options: `zap build --dll <script.zp>` or `zap build --exe <script.zp>`",
+            "unknown build options: `hone build --dll <script.hn>` or `hone build --exe <script.hn>`",
             Some("`--dll` compiles to a shared library; `--exe` bundles the script with the interpreter"),
         )),
     }
 }
 
-/// zap build --exe <script.zp> [-o <out>] [--icon <ico>] [--version]
-/// 将当前 zap 运行时与脚本打包为单个自释放可执行文件（见 bundle.rs 格式）。
+/// hone build --exe <script.hn> [-o <out>] [--icon <ico>] [--version]
+/// 将当前 hone 运行时与脚本打包为单个自释放可执行文件（见 bundle.rs 格式）。
 fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("zap build --exe (Zap v{})", VERSION);
+        println!("hone build --exe (Hone v{})", VERSION);
         return Ok(());
     }
     let mut out: Option<String> = None;
@@ -397,7 +450,7 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
                     return Err(ZError::plain(
                         codes::SYNTAX,
                         "too many arguments",
-                        Some("usage: `zap build --exe <script.zp> [-o <out>]`"),
+                        Some("usage: `hone build --exe <script.hn> [-o <out>]`"),
                     ));
                 }
             }
@@ -407,26 +460,26 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     let path = path.ok_or_else(|| {
         ZError::plain(
             codes::SYNTAX,
-            "missing script path: `zap build --exe <script.zp>`",
-            Some("run `zap --help` for usage"),
+            "missing script path: `hone build --exe <script.hn>`",
+            Some("run `hone --help` for usage"),
         )
     })?;
     if let Some(ic) = &icon {
         eprintln!("[build] warning: `--icon` is not supported in this build, ignoring `{}`", ic);
     }
 
-    // 以当前 zap 可执行文件作为内嵌运行时
+    // 以当前 hone 可执行文件作为内嵌运行时
     let exe_bytes = std::fs::read(std::env::current_exe().map_err(|e| {
         ZError::plain(
             codes::NOT_FOUND,
-            format!("cannot locate the zap runtime: {}", e),
+            format!("cannot locate the hone runtime: {}", e),
             None::<&str>,
         )
     })?)
     .map_err(|e| {
         ZError::plain(
             codes::NOT_FOUND,
-            format!("cannot read the zap runtime: {}", e),
+            format!("cannot read the hone runtime: {}", e),
             None::<&str>,
         )
     })?;
@@ -440,7 +493,7 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     let name = std::path::Path::new(&path)
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "script.zp".to_string());
+        .unwrap_or_else(|| "script.hn".to_string());
 
     let ver = parse_version(VERSION);
     let timestamp = std::time::SystemTime::now()
@@ -474,7 +527,7 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
         let _ = std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o755));
     }
     println!(
-        "生成 {} 完成（脚本: {}, Zap v{}.{}.{}, {:.1} KB）",
+        "生成 {} 完成（脚本: {}, Hone v{}.{}.{}, {:.1} KB）",
         out,
         name,
         ver.0,
@@ -494,7 +547,7 @@ fn parse_version(v: &str) -> (u16, u16, u16) {
     (major, minor, patch)
 }
 
-/// 将 .zp 脚本打包为 C ABI 动态库。进度条使用 \r 轻量显示。
+/// 将 .hn 脚本打包为 C ABI 动态库。进度条使用 \r 轻量显示。
 fn cmd_build_dll(path: &str) -> Result<(), ZError> {
     let src = std::fs::read_to_string(path).map_err(|e| {
         ZError::plain(
@@ -525,7 +578,7 @@ fn cmd_build_dll(path: &str) -> Result<(), ZError> {
     let stem = std::path::Path::new(path)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "zap_lib".to_string());
+        .unwrap_or_else(|| "hone_lib".to_string());
     let cfile = format!("{}.c", stem);
     std::fs::write(&cfile, &c_code).map_err(|e| {
         ZError::plain(
@@ -623,8 +676,8 @@ fn run_cc(cc: &str, cfile: &str, out: &str) -> Result<(), ZError> {
     }
 }
 
-/// zap get <module> <url> | zap get <script.zp>
-/// 远程下载模块依赖并缓存到 ~/.zap/cache/（进度条 \r 显示）。
+/// hone get <module> <url> | hone get <script.hn>
+/// 远程下载模块依赖并缓存到 ~/.hone/cache/（进度条 \r 显示）。
 fn cmd_get(args: &[String]) -> Result<(), ZError> {
     match args.len() {
         1 => {
@@ -655,8 +708,8 @@ fn cmd_get(args: &[String]) -> Result<(), ZError> {
         }
         _ => Err(ZError::plain(
             codes::SYNTAX,
-            "usage: `zap get <module> <url>` or `zap get <script.zp>`",
-            Some("run `zap --help` for usage"),
+            "usage: `hone get <module> <url>` or `hone get <script.hn>`",
+            Some("run `hone --help` for usage"),
         )),
     }
 }
@@ -678,15 +731,15 @@ fn collect_imports(stmts: &[ast::Stmt], out: &mut Vec<(String, String)>) {
     }
 }
 
-/// 下载模块并写入缓存 ~/.zap/cache/<name>.zp（已缓存则跳过）。
+/// 下载模块并写入缓存 ~/.hone/cache/<name>.hn（已缓存则跳过）。
 fn fetch_and_cache(name: &str, url: &str) -> Result<(), ZError> {
-    let cache_file = interp::zap_cache_dir().join(format!("{}.zp", name));
+    let cache_file = interp::hone_cache_dir().join(format!("{}.hn", name));
     if cache_file.exists() {
         let size = std::fs::metadata(&cache_file).map(|m| m.len()).unwrap_or(0);
         println!("已缓存: {} ({} 字节)", name, size);
         return Ok(());
     }
-    print!("\r[zap get] 下载 `{}` ...", name);
+    print!("\r[hone get] 下载 `{}` ...", name);
     let _ = std::io::Write::flush(&mut std::io::stdout());
     let span = lexer::Span { line: 1, col: 1, len: 1 };
     let code = builtins::http_request(url, "GET", None, span, name, "")?;
@@ -701,7 +754,7 @@ fn fetch_and_cache(name: &str, url: &str) -> Result<(), ZError> {
     Ok(())
 }
 
-/// zap fmt [-w] <file.zp>...：格式化到 stdout，或 -w 覆盖写入源文件。
+/// hone fmt [-w] <file.hn>...：格式化到 stdout，或 -w 覆盖写入源文件。
 fn cmd_fmt(args: &[String]) -> Result<(), ZError> {
     let mut overwrite = false;
     let mut files = Vec::new();
@@ -715,8 +768,8 @@ fn cmd_fmt(args: &[String]) -> Result<(), ZError> {
     if files.is_empty() {
         return Err(ZError::plain(
             codes::SYNTAX,
-            "missing file: `zap fmt [-w] <file.zp>...`",
-            Some("pass one or more .zp files, e.g. `zap fmt -w *.zp`"),
+            "missing file: `hone fmt [-w] <file.hn>...`",
+            Some("pass one or more .hn files, e.g. `hone fmt -w *.hn`"),
         ));
     }
     for f in files {
@@ -735,13 +788,13 @@ fn cmd_fmt(args: &[String]) -> Result<(), ZError> {
     Ok(())
 }
 
-/// zap poop <file.zp>：屎山检测
+/// hone poop <file.hn>：屎山检测
 fn cmd_poop(args: &[String]) -> Result<(), ZError> {
     let path = args.get(0).ok_or_else(|| {
         ZError::plain(
             codes::SYNTAX,
-            "missing file: `zap poop <file.zp>`",
-            Some("pass a .zp file to analyze, e.g. `zap poop mycode.zp`"),
+            "missing file: `hone poop <file.hn>`",
+            Some("pass a .hn file to analyze, e.g. `hone poop mycode.hn`"),
         )
     })?;
     let code = std::fs::read_to_string(path).map_err(|e| {

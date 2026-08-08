@@ -1,9 +1,9 @@
-// checker.rs - Zap 静态类型检查与推断
+// checker.rs - Hone 静态类型检查与推断
 // 设计要点（与规范一致）：
-//   - 类型一经推导或显式声明即锁定，禁止隐式转换（Z001）
-//   - 参数/变量类型可由使用上下文推导（强制绑定），推导失败报 Z003
-//   - 运算符歧义（如 + 可能为 int 或 str）报 Z004
-//   - 条件表达式必须是 bool（Z008）
+//   - 类型一经推导或显式声明即锁定，禁止隐式转换（H001）
+//   - 参数/变量类型可由使用上下文推导（强制绑定），推导失败报 H003
+//   - 运算符歧义（如 + 可能为 int 或 str）报 H004
+//   - 条件表达式必须是 bool（H008）
 // 实现：两阶段。Phase A 一次性构建所有绑定（slot 分配，跨轮次稳定）；
 // Phase B 对函数体与全局语句反复检查直到 slot 不再变化（不动点），
 // 最后以 strict 模式再跑一遍，对仍无法确定类型的用点报错。
@@ -88,6 +88,10 @@ pub struct Checker {
     has_return: bool,
     /// 程序中存在 import/load 等动态外部加载，未定义函数可能来自外部模块
     has_external: bool,
+    /// load 签名块声明的 FFI 函数（键为完整调用名 "alias.fn"）
+    ffi_sigs: HashMap<String, FfiSig>,
+    /// from 头文件解析结果缓存（键为头文件路径，避免固定点循环重复读取）
+    header_cache: HashMap<String, Vec<FfiSig>>,
     builtins: HashSet<&'static str>,
 }
 
@@ -106,6 +110,8 @@ impl Checker {
             strict: false,
             has_return: false,
             has_external: false,
+            ffi_sigs: HashMap::new(),
+            header_cache: HashMap::new(),
             builtins,
         };
 
@@ -606,8 +612,13 @@ impl Checker {
                 let _ = span;
                 Ok(())
             }
-            Stmt::Load { .. } | Stmt::Alias { .. } => {
-                // load 库函数 / alias 新名在运行时才可用，标记外部动态加载
+            Stmt::Load { alias, from, sigs, .. } => {
+                // load 库函数在运行时才可用，标记外部动态加载
+                self.has_external = true;
+                self.register_ffi_sigs(alias.as_deref(), from.as_deref(), sigs)
+            }
+            Stmt::Alias { .. } => {
+                // alias 新名在运行时才可用，标记外部动态加载
                 self.has_external = true;
                 Ok(())
             }
@@ -758,7 +769,11 @@ impl Checker {
                 let _ = span;
                 Ok(())
             }
-            Stmt::Load { .. } | Stmt::Alias { .. } => {
+            Stmt::Load { alias, from, sigs, .. } => {
+                self.has_external = true;
+                self.register_ffi_sigs(alias.as_deref(), from.as_deref(), sigs)
+            }
+            Stmt::Alias { .. } => {
                 self.has_external = true;
                 Ok(())
             }
@@ -1097,7 +1112,7 @@ impl Checker {
                 codes::TYPE_MISMATCH,
                 format!("cannot compare `{}` with `{}` using `{}`", a.name(), b.name(), sym),
                 span,
-                Some("Zap has no implicit type conversion; make both sides the same type"),
+                Some("Hone has no implicit type conversion; make both sides the same type"),
             )),
         }
     }
@@ -1322,14 +1337,129 @@ impl Checker {
 
     // ---------- 函数调用解析 ----------
 
-    /// 解析调用目标：用户函数 / 内置函数 / 未定义（Z002）。
+    /// 注册 load 的 FFI 函数签名（键为完整调用名 "alias.fn"）。
+    /// from 头文件解析出的签名先注册，签名块中的同名声明覆盖之。
+    fn register_ffi_sigs(&mut self, alias: Option<&str>, from: Option<&str>, sigs: &[FfiSig]) -> Result<(), ZError> {
+        if let Some(hpath) = from {
+            let header_sigs = if let Some(cached) = self.header_cache.get(hpath) {
+                cached.clone()
+            } else {
+                let src = std::fs::read_to_string(hpath).map_err(|e| {
+                    self.zerr(
+                        codes::NOT_FOUND,
+                        format!("cannot read header `{}`: {}", hpath, e),
+                        Span { line: 1, col: 1, len: 1 },
+                        Some("check the header path, or remove the `from` clause"),
+                    )
+                })?;
+                let sigs = crate::header::parse(&src, Span { line: 1, col: 1, len: 1 });
+                self.header_cache.insert(hpath.to_string(), sigs.clone());
+                sigs
+            };
+            for sig in &header_sigs {
+                let key = match alias {
+                    Some(a) => format!("{}.{}", a, sig.name),
+                    None => sig.name.clone(),
+                };
+                self.ffi_sigs.insert(key, sig.clone());
+            }
+        }
+        for sig in sigs {
+            let key = match alias {
+                Some(a) => format!("{}.{}", a, sig.name),
+                None => sig.name.clone(),
+            };
+            self.ffi_sigs.insert(key, sig.clone());
+        }
+        Ok(())
+    }
+
+    /// 校验对已声明签名的 FFI 函数的调用：参数个数与类型，返回声明的类型。
+    fn check_ffi_call(&mut self, sig: &FfiSig, arg_tys: &[TyRes], span: Span) -> Result<TyRes, ZError> {
+        // 头文件解析失败的原型（回调/变参/数组等）：调用时直接报错
+        if let Some(reason) = sig.unsupported {
+            return Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                format!("`{}` cannot be called: {}", sig.name, reason),
+                span,
+                Some("declare a manual signature for this function, or use `ptr` for the unsupported parts"),
+            ));
+        }
+        let shown = || {
+            format!(
+                "`fn {}({}) -> {}`",
+                sig.name,
+                sig.params
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, p.ty.name()))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                sig.ret.name()
+            )
+        };
+        if sig.params.len() != arg_tys.len() {
+            return Err(self.zerr(
+                codes::ARG_COUNT,
+                format!(
+                    "wrong number of arguments: `{}` expects {}, got {}",
+                    sig.name,
+                    sig.params.len(),
+                    arg_tys.len()
+                ),
+                span,
+                Some(format!("declared signature: {}", shown())),
+            ));
+        }
+        for (p, aty) in sig.params.iter().zip(arg_tys) {
+            let expected = match p.ty {
+                FfiTy::Int => Some(Ty::Int),
+                FfiTy::Float => Some(Ty::Float),
+                FfiTy::Bool => Some(Ty::Bool),
+                FfiTy::Str => Some(Ty::Str),
+                // 不透明指针：静态阶段不限制（值为运行时地址）
+                FfiTy::Ptr => None,
+                // 参数不允许 void（parser 已拦截）
+                FfiTy::Void => None,
+            };
+            if let Some(exp) = expected {
+                if aty.ty != Ty::Unknown && aty.ty != exp {
+                    return Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!(
+                            "`{}` parameter `{}` expects `{}`, got `{}`",
+                            sig.name,
+                            p.name,
+                            p.ty.name(),
+                            aty.ty.name()
+                        ),
+                        span,
+                        Some(format!("declared signature: {}", shown())),
+                    ));
+                }
+            }
+        }
+        let ty = match sig.ret {
+            FfiTy::Int => Ty::Int,
+            FfiTy::Float => Ty::Float,
+            FfiTy::Bool => Ty::Bool,
+            FfiTy::Str => Ty::Str,
+            FfiTy::Ptr => Ty::Unknown,
+            FfiTy::Void => Ty::Void,
+        };
+        Ok(TyRes { ty, slot: None })
+    }
+
+    /// 解析调用目标：用户函数 / 内置函数 / FFI 签名 / 未定义（H002）。
     fn resolve_call(&mut self, callee: &str, arg_tys: &[TyRes], span: Span) -> Result<TyRes, ZError> {
         if let Some(f) = self.fns.get(callee).cloned() {
             self.check_user_call(&f, arg_tys, span)
         } else if self.builtins.contains(callee) {
             self.builtin_result(callee, arg_tys, span)
+        } else if let Some(sig) = self.ffi_sigs.get(callee).cloned() {
+            // load 签名块声明的 FFI 函数：按签名静态校验参数，返回声明类型
+            self.check_ffi_call(&sig, arg_tys, span)
         } else if self.has_external || callee.contains('.') {
-            // 动态外部加载（import 模块函数 / load 库函数 / alias 别名）：
+            // 动态外部加载（未声明签名的 load 库函数 / import 模块函数 / alias 别名）：
             // 类型在运行时才能确定，静态阶段放行
             Ok(TyRes { ty: Ty::Unknown, slot: None })
         } else {
@@ -1399,7 +1529,7 @@ impl Checker {
                 codes::TYPE_MISMATCH,
                 format!("type mismatch: expected `{}`, got `{}` for {}", expected.name(), t.name(), what),
                 span,
-                Some("Zap has no implicit type conversion"),
+                Some("Hone has no implicit type conversion"),
             )),
         }
     }
@@ -1441,7 +1571,7 @@ impl Checker {
                 codes::TYPE_MISMATCH,
                 format!("type mismatch: {} is locked to `{}`, got `{}`", what, c.name(), t.name()),
                 span,
-                Some("Zap types are locked after inference; no implicit conversion is allowed"),
+                Some("Hone types are locked after inference; no implicit conversion is allowed"),
             )),
         }
     }
@@ -1660,7 +1790,7 @@ impl Checker {
                             y.name()
                         ),
                         span,
-                        Some("Zap has no implicit type conversion"),
+                        Some("Hone has no implicit type conversion"),
                     )),
                     (Ty::Unknown, y) if y.is_numeric() => {
                         if let Some(s) = a.slot {

@@ -1,4 +1,4 @@
-// ast.rs - Zap 抽象语法树定义
+// ast.rs - Hone 抽象语法树定义
 
 use crate::lexer::Span;
 
@@ -84,11 +84,16 @@ pub enum Stmt {
         alias: Option<String>,
         span: Span,
     },
-    /// load ["lazy"] "路径" [as 别名];  动态库加载
+    /// load ["lazy"] "路径" [as 别名] [from "头文件.h"] [ { fn 签名...; } ];  动态库加载
+    /// 签名块显式声明 C ABI 参数/返回类型（typed FFI），调用按签名转换，可被静态检查；
+    /// from 子句从 C 头文件自动提取原型生成签名（与签名块二选一，签名块优先）
     Load {
         lazy: bool,
         path: String,
         alias: Option<String>,
+        /// 可选的 C 头文件路径：解析其中的函数原型作为 FFI 签名
+        from: Option<String>,
+        sigs: Vec<FfiSig>,
         span: Span,
     },
     /// use 命名空间;
@@ -135,6 +140,55 @@ pub enum TyName {
     Float,
     Bool,
     Str,
+}
+
+/// load 签名块中的 C ABI 类型（typed FFI）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FfiTy {
+    /// int64_t
+    Int,
+    /// double
+    Float,
+    /// _Bool / bool（按整数寄存器传递，返回时非零即 true）
+    Bool,
+    /// const char*（UTF-8 / C 字符串）
+    Str,
+    /// void*（不透明指针，Hone 侧为 ptr 值）
+    Ptr,
+    /// void（仅作返回类型）
+    Void,
+}
+
+impl FfiTy {
+    pub fn name(&self) -> &'static str {
+        match self {
+            FfiTy::Int => "int",
+            FfiTy::Float => "float",
+            FfiTy::Bool => "bool",
+            FfiTy::Str => "str",
+            FfiTy::Ptr => "ptr",
+            FfiTy::Void => "void",
+        }
+    }
+}
+
+/// load 签名块中的参数声明：name: ty
+#[derive(Debug, Clone)]
+pub struct FfiParam {
+    pub name: String,
+    pub ty: FfiTy,
+    pub span: Span,
+}
+
+/// load 签名块中的函数签名：fn name(p: ty, ...) -> ret;
+#[derive(Debug, Clone)]
+pub struct FfiSig {
+    pub name: String,
+    pub params: Vec<FfiParam>,
+    pub ret: FfiTy,
+    /// 头文件解析失败的原型（如回调/变参/数组），调用时直接报错而非 ABI 崩溃
+    pub unsupported: Option<&'static str>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]

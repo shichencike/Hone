@@ -1,0 +1,17 @@
+// timeparse_demo.hn - time.parse 时间戳解析演示
+// 注意：time.format 占位符中 MM=月份、mm=分钟
+// 期望输出：
+//   1735689600
+//   2025-01-01 00:00:00
+//   2025-01-01 08:30:00
+//   2025-06-15 12:00:00
+
+t = time.parse("2025-01-01T00:00:00Z");
+print(t);                              // 1735689600
+print(time.format(t, "YYYY-MM-DD HH:mm:SS"));  // 2025-01-01 00:00:00
+
+t2 = time.parse("2025-01-01 08:30:00");
+print(time.format(t2, "YYYY-MM-DD HH:mm:SS")); // 2025-01-01 08:30:00
+
+t3 = time.parse("2025-06-15T12:00:00Z");
+print(time.format(t3, "YYYY-MM-DD HH:mm:SS")); // 2025-06-15 12:00:00

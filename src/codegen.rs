@@ -1,10 +1,10 @@
-// codegen.rs - zap build --dll 的 C 代码生成（类型化）
+// codegen.rs - hone build --dll 的 C 代码生成（类型化）
 // 类型映射（与规范一致）：int → int64_t，float → double，bool → bool（<stdbool.h>），str → const char*
 // 支持：数值/布尔/字符串运算、比较（含 strcmp）、if/while、递归与函数间调用。
 // 实现要点：
 //   - 轻量类型推导（参数注解或默认 int64_t、变量从初始化式推导、返回从 return 推导或注解）
 //   - str 拼接使用 GNU 语句表达式（栈缓冲 256B）；str 返回值经 static 缓冲（2048B）中转
-//   - 混合数值类型按语言语义报错（无隐式转换）；内置函数/模块调用报 error[Z999]
+//   - 混合数值类型按语言语义报错（无隐式转换）；内置函数/模块调用报 error[H999]
 
 use std::collections::{HashMap, HashSet};
 
@@ -112,7 +112,7 @@ pub fn generate(program: &Program, exports: &[String], file: &str, src: &str) ->
     }
 
     let mut out = String::new();
-    out.push_str("// 由 zap build --dll 自动生成，请勿手动编辑\n");
+    out.push_str("// 由 hone build --dll 自动生成，请勿手动编辑\n");
     out.push_str("#include <stdint.h>\n");
     out.push_str("#include <stdbool.h>\n");
     out.push_str("#include <stdio.h>\n");
@@ -302,7 +302,7 @@ impl Codegen {
                                     t.c_name()
                                 ),
                                 expr_span(e),
-                                Some("Zap has no implicit type conversion"),
+                                Some("Hone has no implicit type conversion"),
                             ));
                         }
                     }
@@ -443,7 +443,7 @@ impl Codegen {
                 codes::TYPE_MISMATCH,
                 format!("cannot apply `{}` to `{}` and `{}` (no implicit conversion)", op.symbol(), l.c_name(), r.c_name()),
                 span,
-                Some("Zap has no implicit type conversion"),
+                Some("Hone has no implicit type conversion"),
             )
         };
         match op {
@@ -556,7 +556,7 @@ impl Codegen {
         };
         // str 返回值经 static 缓冲中转（DLL 重复调用会覆盖，文档注明）
         if ret_type == CType::Str {
-            out.push_str("    static char zap_ret_buf[2048];\n");
+            out.push_str("    static char ka_ret_buf[2048];\n");
         }
         for s in &f.body {
             self.gen_stmt(s, &mut ctx, ret_type, out)?;
@@ -585,7 +585,7 @@ impl Codegen {
                             codes::TYPE_MISMATCH,
                             format!("type mismatch: variable `{}` is locked to `{}`, got `{}`", name, prev.c_name(), t.c_name()),
                             *span,
-                            Some("Zap types are locked after inference; no implicit conversion is allowed"),
+                            Some("Hone types are locked after inference; no implicit conversion is allowed"),
                         ));
                     }
                     Some(_) => out.push_str(&format!("    {} = {};\n", name, code)),
@@ -610,7 +610,7 @@ impl Codegen {
                                 t.c_name()
                             ),
                             *span,
-                            Some("Zap has no implicit type conversion"),
+                            Some("Hone has no implicit type conversion"),
                         ));
                     }
                     if ctx.var_types.contains_key(name) {
@@ -700,7 +700,7 @@ impl Codegen {
                         }
                         if ret_type == CType::Str {
                             out.push_str(&format!(
-                                "    {{ snprintf(zap_ret_buf, sizeof zap_ret_buf, \"%s\", {}); return zap_ret_buf; }}\n",
+                                "    {{ snprintf(ka_ret_buf, sizeof ka_ret_buf, \"%s\", {}); return ka_ret_buf; }}\n",
                                 code
                             ));
                         } else {
@@ -825,7 +825,7 @@ impl Codegen {
                             Ok((
                                 CType::Str,
                                 format!(
-                                    "({{ char zap_s{}[256]; snprintf(zap_s{}, sizeof zap_s{}, \"%s%s\", {}, {}); (const char*)zap_s{}; }})",
+                                    "({{ char ka_s{}[256]; snprintf(ka_s{}, sizeof ka_s{}, \"%s%s\", {}, {}); (const char*)ka_s{}; }})",
                                     n, n, n, ls, rs, n
                                 ),
                             ))
@@ -891,7 +891,7 @@ impl Codegen {
     }
 }
 
-/// Zap 字符串 → C 字符串字面量（转义）。
+/// Hone 字符串 → C 字符串字面量（转义）。
 fn c_str_lit(s: &str) -> String {
     let mut o = String::from("\"");
     for c in s.chars() {

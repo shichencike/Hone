@@ -1,6 +1,6 @@
-// builtins.rs - Zap 内置函数
-// 全部通过 `zap` 直接可用，无需导入。运行期校验参数类型（动态值兜底），
-// 失败统一按 error[Zxxx] 格式报告。
+// builtins.rs - Hone 内置函数
+// 全部通过 `hone` 直接可用，无需导入。运行期校验参数类型（动态值兜底），
+// 失败统一按 error[Hxxx] 格式报告。
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -384,7 +384,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "to_str" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             match v {
-                Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Error(_) => {
+                Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Error(_) | Value::Ptr(_) => {
                     Ok(Value::Str(v.display()))
                 }
                 Value::Str(s) => Ok(Value::Str(s.clone())),
@@ -552,7 +552,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                         span,
                         file,
                         src,
-                        Some("Zap has no implicit type conversion"),
+                        Some("Hone has no implicit type conversion"),
                     ));
                 }
             };
@@ -1190,7 +1190,7 @@ pub(crate) fn http_request(
     let (head, tail) = match body {
         Some(b) => (
             format!(
-                "{} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: zap/0.1.0\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                "{} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: hone/0.1.0\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 method,
                 path,
                 host_header,
@@ -1200,7 +1200,7 @@ pub(crate) fn http_request(
         ),
         None => (
             format!(
-                "{} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: zap/0.1.0\r\nConnection: close\r\n\r\n",
+                "{} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: hone/0.1.0\r\nConnection: close\r\n\r\n",
                 method, path, host_header
             ),
             Vec::new(),
@@ -1353,6 +1353,16 @@ fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String,
                 file,
                 src,
                 Some("convert the error to a string first, e.g. to_str(e)"),
+            ));
+        }
+        Value::Ptr(_) => {
+            return Err(err(
+                codes::TYPE_MISMATCH,
+                "cannot serialize a `ptr` value to JSON",
+                span,
+                file,
+                src,
+                Some("pointers are opaque handles; convert to a string first, e.g. to_str(p)"),
             ));
         }
     };

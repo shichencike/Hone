@@ -3,8 +3,8 @@
 //   server.listen(port)     -> int   启动后台监听线程，返回实际端口（port=0 自动分配）
 //   server.poll()           -> str   取出排队请求，返回 JSON 数组 [{id,method,path,body}, ...]
 //   server.respond(id, body)-> bool  发送响应体（HTTP 200），成功返回 true
-// 事件模型：后台线程只做 TCP 收发与请求排队；Zap 脚本在主线程轮询（poll）并响应
-// （respond），与解释器单线程模型完全兼容——Zap 函数只在脚本侧被调用，无跨线程状态。
+// 事件模型：后台线程只做 TCP 收发与请求排队；Hone 脚本在主线程轮询（poll）并响应
+// （respond），与解释器单线程模型完全兼容——Hone 函数只在脚本侧被调用，无跨线程状态。
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};

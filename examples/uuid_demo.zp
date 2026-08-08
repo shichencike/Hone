@@ -1,8 +1,0 @@
-// uuid_demo.zp - uuid.new 生成唯一 ID 演示
-// 期望输出：两行 UUID v4（形如 xxxxxxxx-xxxx-4xxx-xxxx-xxxxxxxxxxxx，互不相同）
-
-a = uuid.new();
-b = uuid.new();
-print(a);
-print(b);
-print(a != b); // true

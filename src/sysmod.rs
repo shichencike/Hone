@@ -3,10 +3,10 @@
 //   sys.msgbox(title, message, style)  系统消息弹窗（style: "info"/"warn"/"error"）
 //   sys.beep(freq, duration)           系统提示音（Hz, ms）
 //   sys.clipboard_set(text)            复制文本到剪贴板
-//   sys.get_screen_size()              返回 "宽x高"（Zap 无元组类型，以字符串表达）
+//   sys.get_screen_size()              返回 "宽x高"（Hone 无元组类型，以字符串表达）
 //   sys.reg_read(key)                  读取注册表值（Windows）
 //   sys.reg_write(key, value)          写入注册表值（Windows）
-// 非 Windows 平台：msgbox/beep 降级为终端输出，其余报 error[Z999]。
+// 非 Windows 平台：msgbox/beep 降级为终端输出，其余报 error[H999]。
 
 use crate::error::codes;
 use crate::error::ZError;
@@ -206,7 +206,7 @@ mod platform {
         Ok(Value::Str(format!("{}x{}", w, h)))
     }
 
-    /// 解析 "HKLM\Software\Zap\ValueName" → (根键, 路径, 值名)。
+    /// 解析 "HKLM\Software\Hone\ValueName" → (根键, 路径, 值名)。
     fn parse_reg_key(key: &str, span: Span, file: &str, src: &str) -> Result<(HKEY, String, String), ZError> {
         let mut parts = key.split('\\');
         let root = match parts.next().unwrap_or("").to_uppercase().as_str() {

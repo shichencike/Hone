@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Zap 可视化编辑器</title>
+<title>Hone 可视化编辑器</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; }
@@ -47,12 +47,12 @@
 </head>
 <body>
 <header>
-  <h1>⚡ Zap 可视化编辑器</h1>
-  <span>拖拽代码块生成 .zp 代码 · 方案 A（独立网页）</span>
+  <h1>⚡ Hone 可视化编辑器</h1>
+  <span>拖拽代码块生成 .hn 代码 · 方案 A（独立网页）</span>
   <div style="flex:1"></div>
   <button class="btn" id="btn-clear">清空画布</button>
   <button class="btn" id="btn-copy">复制代码</button>
-  <button class="btn primary" id="btn-download">下载 .zp</button>
+  <button class="btn primary" id="btn-download">下载 .hn</button>
 </header>
 <main>
   <section id="palette">
@@ -80,7 +80,7 @@
 const TEMPLATES = [
   { type: "var", label: "变量声明", hint: "x = 10; 自动推导类型", build: () => makeSimple("var", "变量", "x", "10") },
   { type: "assign", label: "赋值", hint: "x = 表达式;", build: () => makeSimple("assign", "赋值", "x", "x + 1") },
-  { type: "print", label: "输出 print", hint: "print(值);", build: () => makeSimple("print", "输出", "hello", '"Hello Zap!"') },
+  { type: "print", label: "输出 print", hint: "print(值);", build: () => makeSimple("print", "输出", "hello", '"Hello Hone!"') },
   { type: "if", label: "条件 if / else", hint: "条件必须是 bool", build: () => makeNested("if") },
   { type: "while", label: "循环 while", hint: "条件必须是 bool", build: () => makeNested("while") },
   { type: "fn", label: "函数定义", hint: "fn 名称(参数) { ... }", build: () => makeNested("fn") },
@@ -407,7 +407,7 @@ function downloadCode() {
   const blob = new Blob([code], { type: "text/plain" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "program.zp";
+  a.download = "program.hn";
   a.click();
   URL.revokeObjectURL(a.href);
 }

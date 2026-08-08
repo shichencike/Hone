@@ -1,14 +1,14 @@
-// bundle.rs - zap build --exe 打包与自释放启动器
+// bundle.rs - hone build --exe 打包与自释放启动器
 //
-// 文件布局: [zap.exe 字节][脚本名][脚本内容][56 字节定长尾部块]
+// 文件布局: [hone.exe 字节][脚本名][脚本内容][56 字节定长尾部块]
 // 尾部块(小端):
-//   magic(8) zap_len(8) name_len(4) script_len(4)
+//   magic(8) hone_len(8) name_len(4) script_len(4)
 //   ver_major(2) ver_minor(2) ver_patch(2) flags(2)
-//   timestamp(8) zap_crc(8) script_crc(8)
+//   timestamp(8) hone_crc(8) script_crc(8)
 //
-// 运行时:检测自身尾部 magic → 将内嵌 zap.exe 与 script.zp 释放到 .zap_cache
+// 运行时:检测自身尾部 magic → 将内嵌 hone.exe 与 script.hn 释放到 .hone_cache
 //   (当前目录不可写则回退系统临时目录)→ 子进程执行 → 默认清理缓存。
-//   普通 zap 启动时只读取自身尾部 56 字节做判断,开销可忽略。
+//   普通 hone 启动时只读取自身尾部 56 字节做判断,开销可忽略。
 
 use std::process::ExitCode;
 
@@ -16,12 +16,12 @@ use crate::builtins;
 use crate::error::codes;
 use crate::error::ZError;
 
-const MAGIC: &[u8; 8] = b"ZAPBND01";
+const MAGIC: &[u8; 8] = b"KABND001";
 const TAIL_LEN: usize = 56;
 
 /// 打包 exe 中解析出的内嵌信息。
 pub struct BundledInfo {
-    pub zap: Vec<u8>,
+    pub hone: Vec<u8>,
     pub name: String,
     pub script: Vec<u8>,
     pub version: (u16, u16, u16),
@@ -48,20 +48,20 @@ fn rd_u16(b: &[u8], off: usize) -> u16 {
     u16::from_le_bytes(b[off..off + 2].try_into().unwrap())
 }
 
-/// 组装打包文件: [zap.exe][name][script][尾部块]。
+/// 组装打包文件: [hone.exe][name][script][尾部块]。
 pub fn build(
-    zap: &[u8],
+    hone: &[u8],
     script: &str,
     name: &str,
     version: (u16, u16, u16),
     timestamp: u64,
 ) -> Vec<u8> {
-    let mut out = Vec::with_capacity(zap.len() + name.len() + script.len() + TAIL_LEN);
-    out.extend_from_slice(zap);
+    let mut out = Vec::with_capacity(hone.len() + name.len() + script.len() + TAIL_LEN);
+    out.extend_from_slice(hone);
     out.extend_from_slice(name.as_bytes());
     out.extend_from_slice(script.as_bytes());
     out.extend_from_slice(MAGIC);
-    out.extend_from_slice(&(zap.len() as u64).to_le_bytes());
+    out.extend_from_slice(&(hone.len() as u64).to_le_bytes());
     out.extend_from_slice(&(name.len() as u32).to_le_bytes());
     out.extend_from_slice(&(script.len() as u32).to_le_bytes());
     out.extend_from_slice(&version.0.to_le_bytes());
@@ -69,12 +69,12 @@ pub fn build(
     out.extend_from_slice(&version.2.to_le_bytes());
     out.extend_from_slice(&0u16.to_le_bytes()); // flags 保留
     out.extend_from_slice(&timestamp.to_le_bytes());
-    out.extend_from_slice(&fnv1a64(zap).to_le_bytes());
+    out.extend_from_slice(&fnv1a64(hone).to_le_bytes());
     out.extend_from_slice(&fnv1a64(script.as_bytes()).to_le_bytes());
     out
 }
 
-/// 检测当前可执行文件是否携带打包数据。普通 zap 返回 Ok(None)。
+/// 检测当前可执行文件是否携带打包数据。普通 hone 返回 Ok(None)。
 /// 先读尾部 56 字节判断，命中后才读取整个文件。
 pub fn detect() -> Result<Option<BundledInfo>, ZError> {
     use std::io::{Read, Seek, SeekFrom};
@@ -108,7 +108,7 @@ pub fn detect() -> Result<Option<BundledInfo>, ZError> {
     if &tail[0..8] != MAGIC {
         return Ok(None);
     }
-    let zap_len = rd_u64(&tail, 8) as usize;
+    let hone_len = rd_u64(&tail, 8) as usize;
     let name_len = rd_u32(&tail, 16) as usize;
     let script_len = rd_u32(&tail, 20) as usize;
 
@@ -116,21 +116,21 @@ pub fn detect() -> Result<Option<BundledInfo>, ZError> {
         Ok(d) => d,
         Err(_) => return Ok(None),
     };
-    if zap_len + name_len + script_len + TAIL_LEN != data.len() {
-        return Ok(None); // 结构不符 → 视为普通 zap（损坏文件兜底）
+    if hone_len + name_len + script_len + TAIL_LEN != data.len() {
+        return Ok(None); // 结构不符 → 视为普通 hone（损坏文件兜底）
     }
-    let zap = &data[..zap_len];
-    let name = String::from_utf8_lossy(&data[zap_len..zap_len + name_len]).into_owned();
-    let script = &data[zap_len + name_len..zap_len + name_len + script_len];
-    if rd_u64(&tail, 40) != fnv1a64(zap) || rd_u64(&tail, 48) != fnv1a64(script) {
+    let hone = &data[..hone_len];
+    let name = String::from_utf8_lossy(&data[hone_len..hone_len + name_len]).into_owned();
+    let script = &data[hone_len + name_len..hone_len + name_len + script_len];
+    if rd_u64(&tail, 40) != fnv1a64(hone) || rd_u64(&tail, 48) != fnv1a64(script) {
         return Err(ZError::plain(
             codes::NOT_FOUND,
             "bundled executable is corrupted (checksum mismatch)",
-            Some("rebuild it with `zap build --exe`"),
+            Some("rebuild it with `hone build --exe`"),
         ));
     }
     Ok(Some(BundledInfo {
-        zap: zap.to_vec(),
+        hone: hone.to_vec(),
         name,
         script: script.to_vec(),
         version: (rd_u16(&tail, 24), rd_u16(&tail, 26), rd_u16(&tail, 28)),
@@ -138,14 +138,14 @@ pub fn detect() -> Result<Option<BundledInfo>, ZError> {
     }))
 }
 
-/// 打包 exe 的 --version 输出：文件名 (Zap 版本) built at 构建时间 + 源脚本。
+/// 打包 exe 的 --version 输出：文件名 (Hone 版本) built at 构建时间 + 源脚本。
 pub fn show_version(info: &BundledInfo) {
     let exe_name = std::env::current_exe()
         .ok()
         .and_then(|p| p.file_name().map(|f| f.to_string_lossy().into_owned()))
         .unwrap_or_else(|| info.name.clone());
     println!(
-        "{} (Zap v{}.{}.{}) built at {}",
+        "{} (Hone v{}.{}.{}) built at {}",
         exe_name,
         info.version.0,
         info.version.1,
@@ -164,13 +164,13 @@ pub fn run(info: &BundledInfo, args: &[String]) -> ExitCode {
     let keep_cache = args.iter().any(|a| a == "--keep-cache");
     let script_args: Vec<String> = args.iter().filter(|a| *a != "--keep-cache").cloned().collect();
 
-    // 缓存目录：优先当前目录 .zap_cache，不可写则回退系统临时目录
+    // 缓存目录：优先当前目录 .hone_cache，不可写则回退系统临时目录
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let cache_dir = match create_cache_dir(&cwd.join(".zap_cache")) {
+    let cache_dir = match create_cache_dir(&cwd.join(".hone_cache")) {
         Ok(d) => d,
         Err(_) => {
             let fallback = std::env::temp_dir().join(format!(
-                "zap-bundle-{}",
+                "hone-bundle-{}",
                 info.name.replace(['.', '\\', '/'], "_")
             ));
             match create_cache_dir(&fallback) {
@@ -184,10 +184,10 @@ pub fn run(info: &BundledInfo, args: &[String]) -> ExitCode {
     };
 
     // 释放运行时与脚本（已存在且校验一致则跳过，避免重复写盘）
-    let runtime_name = if cfg!(windows) { "zap.exe" } else { "zap" };
-    let zap_path = cache_dir.join(runtime_name);
-    if !cache_file_ok(&zap_path, &info.zap) {
-        if let Err(e) = std::fs::write(&zap_path, &info.zap) {
+    let runtime_name = if cfg!(windows) { "hone.exe" } else { "hone" };
+    let hone_path = cache_dir.join(runtime_name);
+    if !cache_file_ok(&hone_path, &info.hone) {
+        if let Err(e) = std::fs::write(&hone_path, &info.hone) {
             eprintln!("[bundle] cannot write runtime: {}", e);
             return ExitCode::FAILURE;
         }
@@ -201,15 +201,15 @@ pub fn run(info: &BundledInfo, args: &[String]) -> ExitCode {
     }
     hide_dir(&cache_dir);
 
-    // 子进程执行：zap.exe script.zp [脚本参数...]，继承标准流，传播退出码
-    let code = match std::process::Command::new(&zap_path)
+    // 子进程执行：hone.exe script.hn [脚本参数...]，继承标准流，传播退出码
+    let code = match std::process::Command::new(&hone_path)
         .arg(&script_path)
         .args(&script_args)
         .status()
     {
         Ok(s) => s.code().unwrap_or(1),
         Err(e) => {
-            eprintln!("[bundle] cannot run bundled zap: {}", e);
+            eprintln!("[bundle] cannot run bundled hone: {}", e);
             1
         }
     };

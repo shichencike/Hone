@@ -1,5 +1,0 @@
-// import 远程模块测试：从本地 HTTP 服务器下载并缓存到 ~/.zap/cache/
-import "math_mod" from "http://127.0.0.1:8800/math_mod.zp";
-
-print(module_double(21));  // 42
-print(module_add(20, 22)); // 42

@@ -1,0 +1,4 @@
+// 无隐式转换：int + float 报 error[H001]
+x = 1;
+y = 2.5;
+z = x + y;

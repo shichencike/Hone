@@ -1,0 +1,42 @@
+// collections_demo.hn - 集合/迭代/插值综合演示
+// 覆盖：列表、字典、for-in、f-string、类型判断、时间解析、UUID、path
+// 期望输出：
+//   [3, 5, 7]
+//   15
+//   user hone (id 3) role admin
+//   true
+//   2025-01-01 00:00:00
+//   36
+
+// 1) 列表 + for-in + append
+nums = [1, 2, 3];
+odds = [];
+for x in nums {
+    odds = append(odds, x * 2 + 1);
+}
+print(to_str(odds));          // [3, 5, 7]
+sum = 0;
+for x in odds {
+    sum = sum + x;
+}
+print(sum);                   // 15
+
+// 2) 字典 + 双变量 for-in + f-string
+user = {"name": "hone", "id": 3, "role": "admin"};
+line = "";
+for k, v in user {
+    line = line + f"{k}={v} ";
+}
+print(line);                  // name=hone id=3 role=admin
+
+// 3) 类型判断
+print(is_list(odds) && is_dict(user));   // true
+
+// 4) 时间戳解析 + 格式化
+t = time.parse("2025-01-01T00:00:00Z");
+print(time.format(t, "YYYY-MM-DD HH:mm:SS"));  // 2025-01-01 00:00:00
+
+// 5) UUID + path + len
+u = uuid.new();
+print(len(u));                // 36（UUID 字符串长度）
+print(path.basename(path.join("a", "b", "x.hn"))); // x.hn

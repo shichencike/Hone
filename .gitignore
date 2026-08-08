@@ -6,8 +6,8 @@ token.txt
 ftp.txt
 
 # 设计规范文档
-zap[.][.]md
+ka[.][.]md
 
 # build --dll 生成的临时 C 源码
 *.c
-!tests/zap_lib/src/*.c
+!tests/ka_lib/src/*.c

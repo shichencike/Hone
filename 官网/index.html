@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Zap 编程语言 - 为效率而生，为乐趣而造</title>
+<title>Hone 编程语言 - 为效率而生，为乐趣而造</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <span class="logo">⚡ Zap</span>
+  <span class="logo">⚡ Hone</span>
   <nav>
     <a href="index.html" class="active">首页</a>
     <a href="docs.html">文档</a>
@@ -21,7 +21,7 @@
 
 <main>
   <div class="hero">
-    <h1>Zap</h1>
+    <h1>Hone</h1>
     <p class="slogan">为效率而生，为乐趣而造</p>
     <p class="desc">轻量级、跨平台、可嵌入的脚本语言 —— 用 Rust 实现，单文件可执行程序，开箱即用。</p>
     <div class="btns">
@@ -32,24 +32,24 @@
   </div>
 
   <section id="features">
-    <h2><span class="hash">#</span>为什么选择 Zap</h2>
+    <h2><span class="hash">#</span>为什么选择 Hone</h2>
     <div class="cards">
       <div class="card"><h4>🧰 极简无前缀</h4><p>变量不需要 let / var / const：<code class="inline">x = 10;</code> 自动推导类型，零冗余。</p></div>
-      <div class="card"><h4>🔒 静态强类型</h4><p>类型一经推导即锁定，禁止隐式转换，报错精准（error[Z001] 格式 + 行列定位 + 修复建议）。</p></div>
+      <div class="card"><h4>🔒 静态强类型</h4><p>类型一经推导即锁定，禁止隐式转换，报错精准（error[H001] 格式 + 行列定位 + 修复建议）。</p></div>
       <div class="card"><h4>📦 单文件分发</h4><p>下载 → 解压 → 运行，零配置。跨 Windows / Linux / macOS / Android（Termux）。</p></div>
       <div class="card"><h4>🛠 内置工具箱</h4><p>文件、HTTP、JSON、时间、随机、字符串、数学、系统 API 开箱即用。<br>新增：日志、路径、参数解析、环境变量、键值存储、正则、哈希、UUID、时间解析。</p></div>
       <div class="card"><h4>🧩 集合类型</h4><p>列表 <code class="inline">[1, 2, 3]</code>、字典 <code class="inline">{"k": v}</code> 开箱即用：<code class="inline">for-in</code> 遍历、<code class="inline">f"..."</code> 字符串插值、append / contains / keys / values 等集合函数。</p></div>
       <div class="card"><h4>⚡ 多线程与调试</h4><p><code class="inline">go task(1);</code> 一行启动线程；<code class="inline">breakpoint;</code> 断点；<code class="inline">debug_print</code> 调试输出；<code class="inline">tmp fn</code> 临时函数开发时自动忽略。</p></div>
       <div class="card"><h4>🔌 可嵌入可扩展</h4><p>@export 打包 C ABI 动态库（DLL/SO/DYLIB）、load 动态库调用、import 远程模块、LSP 语言服务器。</p></div>
-      <div class="card"><h4>🖥 图形界面库</h4><p>纯 Zap 编写的跨平台 GUI（zap_lib/gui.zp）：浏览器渲染 + 本地 HTTP 服务器双向交互，button / label / input / select 控件开箱即用。</p></div>
+      <div class="card"><h4>🖥 图形界面库</h4><p>纯 Hone 编写的跨平台 GUI（hone_lib/gui.hn）：浏览器渲染 + 本地 HTTP 服务器双向交互，button / label / input / select 控件开箱即用。</p></div>
     </div>
   </section>
 
   <section id="quickstart">
     <h2><span class="hash">#</span>快速开始</h2>
-    <p>下载 zap 可执行文件（或 <code class="inline">cargo build --release</code> 自行构建），然后：</p>
-<pre><code><span class="c">// hello.zp</span>
-<span class="f">print</span>(<span class="s">"Hello Zap!"</span>);
+    <p>安装 hone（<a href="install.html">一键脚本 / 包管理器</a>，或 <code class="inline">cargo build --release</code> 自行构建），然后：</p>
+<pre><code><span class="c">// hello.hn</span>
+<span class="f">print</span>(<span class="s">"Hello Hone!"</span>);
 
 <span class="c">// 变量与类型</span>
 x = <span class="n">10</span>;              <span class="c">// 自动推导为 int</span>
@@ -62,17 +62,17 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
     <span class="k">return</span> <span class="f">fib</span>(n - <span class="n">1</span>) + <span class="f">fib</span>(n - <span class="n">2</span>);
 }
 <span class="f">print</span>(<span class="f">fib</span>(<span class="n">10</span>));   <span class="c">// 55</span></code></pre>
-    <p>命令行工具链（全部集成在单文件 zap / zap.exe 中）：</p>
+    <p>命令行工具链（全部集成在单文件 hone / hone.exe 中）：</p>
     <table>
       <tr><th>命令</th><th>功能</th></tr>
-      <tr><td><code>zap run &lt;script.zp&gt;</code></td><td>执行脚本（默认命令）</td></tr>
-      <tr><td><code>zap debug &lt;script.zp&gt;</code></td><td>断点调试（breakpoint 生效）</td></tr>
-      <tr><td><code>zap fmt [-w] &lt;file.zp&gt;</code></td><td>代码格式化（Tab 缩进/运算符空格/大括号）</td></tr>
-      <tr><td><code>zap build --dll &lt;file.zp&gt;</code></td><td>打包 C ABI 动态库（int/float/bool/str 类型映射）</td></tr>
-      <tr><td><code>zap get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存</td></tr>
-      <tr><td><code>zap upgrade [-w] &lt;file.zp&gt;</code></td><td>按映射表迁移旧版本语法</td></tr>
-      <tr><td><code>zap lsp</code></td><td>语言服务器（补全/诊断/hover）</td></tr>
-	      <tr><td><code>zap poop &lt;file.zp&gt;</code></td><td>屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
+      <tr><td><code>hone run &lt;script.hn&gt;</code></td><td>执行脚本（默认命令）</td></tr>
+      <tr><td><code>hone debug &lt;script.hn&gt;</code></td><td>断点调试（breakpoint 生效）</td></tr>
+      <tr><td><code>hone fmt [-w] &lt;file.hn&gt;</code></td><td>代码格式化（Tab 缩进/运算符空格/大括号）</td></tr>
+      <tr><td><code>hone build --dll &lt;file.hn&gt;</code></td><td>打包 C ABI 动态库（int/float/bool/str 类型映射）</td></tr>
+      <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存</td></tr>
+      <tr><td><code>hone upgrade [-w] &lt;file.hn&gt;</code></td><td>按映射表迁移旧版本语法</td></tr>
+      <tr><td><code>hone lsp</code></td><td>语言服务器（补全/诊断/hover）</td></tr>
+	      <tr><td><code>hone poop &lt;file.hn&gt;</code></td><td>屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
     </table>
   </section>
 
@@ -81,18 +81,18 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
     <ul>
       <li>✅ <strong>阶段 1</strong>：核心执行器（词法 / 解析 / AST / 解释器 / 静态类型检查）</li>
       <li>✅ <strong>阶段 2</strong>：fmt、debug、go 多线程、sys Windows API、build --dll（int/float/bool/str）</li>
-      <li>✅ <strong>阶段 3</strong>：import 远程模块、load lazy、use / alias、zap get、upgrade、lsp、可视化编辑器</li>
-             <li>✅ <strong>阶段 4</strong>：GitHub 开源、独立官网、--dll 全类型映射、zap poop 屎山检测</li>
-             <li>✅ <strong>阶段 5</strong>：内置函数扩展（log/path/args/env/db/regex/crypto）、tmp fn、debug_print、import as、try/catch/throw、--restart/--resume、build --exe、zap explain</li>
+      <li>✅ <strong>阶段 3</strong>：import 远程模块、load lazy、use / alias、hone get、upgrade、lsp、可视化编辑器</li>
+             <li>✅ <strong>阶段 4</strong>：GitHub 开源、独立官网、--dll 全类型映射、hone poop 屎山检测</li>
+             <li>✅ <strong>阶段 5</strong>：内置函数扩展（log/path/args/env/db/regex/crypto）、tmp fn、debug_print、import as、try/catch/throw、--restart/--resume、build --exe、hone explain</li>
              <li>✅ <strong>阶段 6</strong>：集合类型（列表/字典）、for-in 循环、f-string 插值、类型判断、time.parse、uuid.new</li>
-             <li>🚧 <strong>阶段 7</strong>：本地 HTTP 服务器（server.listen / server.poll / server.respond）、zap_lib 图形界面库（浏览器渲染 + 双向交互）</li>
+             <li>🚧 <strong>阶段 7</strong>：本地 HTTP 服务器（server.listen / server.poll / server.respond）、hone_lib 图形界面库（浏览器渲染 + 双向交互）</li>
     </ul>
-    <p>可视化编辑器：浏览器打开 <code class="inline">editor/index.html</code>，拖拽代码块即可生成 .zp 代码。</p>
+    <p>可视化编辑器：浏览器打开 <code class="inline">editor/index.html</code>，拖拽代码块即可生成 .hn 代码。</p>
   </section>
 </main>
 
 <footer>
-  Zap v0.3.0 · MIT License · <span class="sword">🗡️</span> Zap – 为效率而生，为乐趣而造
+  Hone v0.3.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

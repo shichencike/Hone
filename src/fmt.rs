@@ -1,4 +1,4 @@
-// fmt.rs - Zap 代码格式化器（zap fmt）
+// fmt.rs - Hone 代码格式化器（hone fmt）
 // 规则（与规范一致）：
 //   - 统一 Tab 缩进（每层块 +1 Tab）
 //   - 二元运算符两侧空格，一元运算符后无空格
@@ -37,7 +37,7 @@ const KEYWORDS: &[&str] = &[
 
 const BIN_OPS: &[&str] = &["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||"];
 
-/// 对 Zap 源码做格式化。语法错误按 error[Z005] 报告。
+/// 对 Hone 源码做格式化。语法错误按 error[H005] 报告。
 pub fn format(src: &str) -> Result<String, ZError> {
     let items = tokenize(src)?;
     let mut f = Fmt {

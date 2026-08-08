@@ -1,0 +1,5 @@
+// pack_args.hn - 打包 exe 参数传递验证
+// 打包:hone build --exe examples/pack_args.hn
+// 运行:myapp --name hone  →  输出 name = hone
+print("name = " + args.get("name"));
+print("has flag = " + to_str(args.has("flag")));

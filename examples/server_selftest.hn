@@ -1,0 +1,42 @@
+// server_selftest.hn - server.* 进程内自测（客户端 http_get/http_post + 服务端 server.*）
+// 运行: hone examples/server_selftest.hn
+// 用 go 线程发起 HTTP 请求，主线程轮询并响应，两个请求处理完后自动退出。
+import "gui" from "./hone_lib/gui.hn";
+
+// go 线程：作为 HTTP 客户端访问本地服务器（线程不共享变量，port 以参数传入）
+fn requester(port : int) {
+    r = http_get("http://127.0.0.1:" + to_str(port) + "/");
+    print("client GET /   -> " + r);
+    e = http_post("http://127.0.0.1:" + to_str(port) + "/echo", "hello hone");
+    print("client POST /echo -> " + e);
+}
+
+port = server.listen(0);
+print("server on http://127.0.0.1:" + to_str(port) + "/");
+go requester(port);
+
+// 主线程：服务端轮询，响应 2 个请求后退出
+done = 0;
+while (done < 2) {
+    reqs = server.poll();
+    if (reqs != "[]") {
+        list = json_parse(reqs);
+        for req in list {
+            rid = gui_dict_get(req, "id");
+            method = gui_dict_get(req, "method");
+            path = gui_dict_get(req, "path");
+            body = gui_dict_get(req, "body");
+            print("server got " + method + " " + path + " body=[" + body + "]");
+            if (method == "GET" && path == "/") {
+                server.respond(rid, "<h1>Hello from Hone!</h1>");
+            } else if (method == "POST" && path == "/echo") {
+                server.respond(rid, "echo: " + body);
+            } else {
+                server.respond(rid, "not found");
+            }
+            done = done + 1;
+        }
+    }
+    time.sleep(0.05);
+}
+print("selftest PASS: 2 requests handled");

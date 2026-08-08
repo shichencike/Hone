@@ -1,0 +1,6 @@
+// 声明了返回类型却无 return：报 error[H001]
+fn f() -> int {
+    print("no return");
+}
+
+f();

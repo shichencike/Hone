@@ -363,6 +363,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hone"
+version = "0.3.0"
+dependencies = [
+ "libloading",
+ "md-5",
+ "once_cell",
+ "regex",
+ "rustls",
+ "rustls-rustcrypto",
+ "serde_json",
+ "sha2",
+ "webpki-roots 0.26.11",
+ "winapi",
+]
+
+[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1098,22 +1114,6 @@ dependencies = [
  "curve25519-dalek",
  "rand_core",
  "zeroize",
-]
-
-[[package]]
-name = "zap"
-version = "0.3.0"
-dependencies = [
- "libloading",
- "md-5",
- "once_cell",
- "regex",
- "rustls",
- "rustls-rustcrypto",
- "serde_json",
- "sha2",
- "webpki-roots 0.26.11",
- "winapi",
 ]
 
 [[package]]

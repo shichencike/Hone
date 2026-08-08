@@ -1,5 +1,5 @@
-// parser.rs - Zap 递归下降解析器
-// 将 token 流解析为 AST，语法错误统一报 error[Z005]。
+// parser.rs - Hone 递归下降解析器
+// 将 token 流解析为 AST，语法错误统一报 error[H005]。
 
 use crate::ast::*;
 use crate::error::codes;
@@ -514,7 +514,7 @@ impl Parser {
         Ok(Stmt::Export { name, span })
     }
 
-    /// load ["lazy"] "路径" [as 别名];
+    /// load ["lazy"] "路径" [as 别名] [ { fn 签名...; } ];
     fn parse_load(&mut self) -> Result<Stmt, ZError> {
         let (_, span) = self.next(); // load
         let lazy = if self.at(&Tok::Lazy) {
@@ -550,8 +550,128 @@ impl Parser {
         } else {
             None
         };
-        self.expect_semi()?;
-        Ok(Stmt::Load { lazy, path, alias, span })
+        // 可选 from 子句：load "lib" as m from "header.h";
+        let from = if self.at(&Tok::From) {
+            self.next();
+            let (ftok, _) = self.next();
+            match ftok {
+                Tok::StrLit(s) => Some(s),
+                other => {
+                    return Err(self.err_here(
+                        codes::SYNTAX,
+                        format!("expected a header path string after `from`, found {}", other.describe()),
+                        Some("`load \"path/to/lib\" as lib from \"path/to/header.h\";`"),
+                    ))
+                }
+            }
+        } else {
+            None
+        };
+        // 可选签名块：load "lib" as lib { fn name(params) -> ret; ... }
+        let has_sigs = self.at(&Tok::LBrace);
+        let sigs = if has_sigs {
+            if alias.is_none() {
+                return Err(self.err_here(
+                    codes::SYNTAX,
+                    "a signature block requires an alias: `load \"path\" as lib { fn ...; }`",
+                    Some("the alias is used as the call prefix, e.g. `lib.name(...)`"),
+                ));
+            }
+            self.parse_ffi_sigs()?
+        } else {
+            Vec::new()
+        };
+        // 签名块以 `}` 结束，无需分号；无签名块时保持旧语法 `load "path" as lib;`
+        if !has_sigs {
+            self.expect_semi()?;
+        }
+        Ok(Stmt::Load { lazy, path, alias, from, sigs, span })
+    }
+
+    /// 解析签名块 { fn name(p: ty, ...) -> ret; ... }
+    fn parse_ffi_sigs(&mut self) -> Result<Vec<FfiSig>, ZError> {
+        self.expect(&Tok::LBrace, "`{`")?;
+        let mut sigs = Vec::new();
+        while !self.at(&Tok::RBrace) {
+            self.expect(&Tok::Fn, "`fn`")?;
+            let (name_tok, fspan) = self.next();
+            let name = match name_tok {
+                Tok::Ident(s) => s,
+                other => {
+                    return Err(self.err_here(
+                        codes::SYNTAX,
+                        format!("expected a function name after `fn` in the signature block, found {}", other.describe()),
+                        Some("form: `fn name(p: ty, ...) -> ret;`"),
+                    ))
+                }
+            };
+            self.expect(&Tok::LParen, "`(`")?;
+            let mut params = Vec::new();
+            if !self.at(&Tok::RParen) {
+                loop {
+                    let (ptok, pspan) = self.next();
+                    let pname = match ptok {
+                        Tok::Ident(s) => s,
+                        other => {
+                            return Err(self.err_here(
+                                codes::SYNTAX,
+                                format!("expected a parameter name, found {}", other.describe()),
+                                Some("form: `name: ty`"),
+                            ))
+                        }
+                    };
+                    self.expect(&Tok::Colon, "`:`")?;
+                    let (ttok, _) = self.next();
+                    let ty = self.ffi_ty_from_tok(&ttok)?;
+                    if params.len() >= 8 {
+                        return Err(self.err_here(
+                            codes::SYNTAX,
+                            format!("`{}` has more than 8 parameters", name),
+                            Some("the C ABI convention supports up to 8 scalar parameters"),
+                        ));
+                    }
+                    params.push(FfiParam { name: pname, ty, span: pspan });
+                    if self.at(&Tok::Comma) {
+                        self.next();
+                        if self.at(&Tok::RParen) {
+                            break;
+                        }
+                        continue;
+                    }
+                    break;
+                }
+            }
+            self.expect(&Tok::RParen, "`)`")?;
+            self.expect(&Tok::Arrow, "`->`")?;
+            let (rtok, _) = self.next();
+            let ret = self.ffi_ty_from_tok(&rtok)?;
+            self.expect_semi()?;
+            sigs.push(FfiSig { name, params, ret, unsupported: None, span: fspan });
+        }
+        self.expect(&Tok::RBrace, "`}`")?;
+        Ok(sigs)
+    }
+
+    /// 将 token 解析为 FFI 类型。
+    fn ffi_ty_from_tok(&self, tok: &Tok) -> Result<FfiTy, ZError> {
+        match tok {
+            Tok::TInt => Ok(FfiTy::Int),
+            Tok::TFloat => Ok(FfiTy::Float),
+            Tok::TBool => Ok(FfiTy::Bool),
+            Tok::TStr => Ok(FfiTy::Str),
+            Tok::Ident(s) if s == "ptr" => Ok(FfiTy::Ptr),
+            Tok::Ident(s) if s == "void" => Ok(FfiTy::Void),
+            Tok::Fn => Err(self.err_here(
+                codes::SYNTAX,
+                "callback parameter types (`fn(...)`) are not supported yet",
+                Some("declare the callback as `ptr` and pass a function pointer obtained from the library"),
+            )),
+            other => Err(self.err_here(
+                codes::SYNTAX,
+                format!("expected a type name, found {}", other.describe()),
+                Some("supported FFI types: `int`/`float`/`bool`/`str`/`ptr`, return types also allow `void`"),
+            )),
+        }
     }
 
     /// use 命名空间;
