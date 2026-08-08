@@ -26,7 +26,6 @@
   <div class="toc">
     <ol>
       <li><a href="#quick">一键脚本安装（推荐）</a></li>
-      <li><a href="#pkg">包管理器安装（Homebrew / Scoop）</a></li>
       <li><a href="#download">手动下载（GitHub Releases）</a></li>
       <li><a href="#build">源码构建</a></li>
       <li><a href="#verify">验证安装</a></li>
@@ -44,21 +43,8 @@
     <p>指定版本：<code class="inline">HONE_VERSION=v0.4.0 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code>（Windows 同理，先 <code class="inline">$env:HONE_VERSION = "v0.4.0"</code>）。</p>
   </section>
 
-  <section id="pkg">
-    <h2><span class="hash">#</span>2. 包管理器安装</h2>
-    <h3>Homebrew（Linux）</h3>
-<pre><code>brew tap shichencike/homebrew-hone
-brew install hone</code></pre>
-    <p>新版本发布后 <code class="inline">brew upgrade hone</code> 即可更新。</p>
-    <h3>Scoop（Windows）</h3>
-<pre><code>scoop bucket add hone https://github.com/shichencike/scoop-hone
-scoop install hone</code></pre>
-    <p>新版本发布后 <code class="inline">scoop update hone</code> 即可更新（manifest 配置了自动更新）。</p>
-    <p class="note">macOS 版暂未发布，Homebrew 安装目前面向 Linux；Windows 用户优先推荐脚本或 Scoop 安装。</p>
-  </section>
-
   <section id="download">
-    <h2><span class="hash">#</span>3. 手动下载（GitHub Releases）</h2>
+    <h2><span class="hash">#</span>2. 手动下载（GitHub Releases）</h2>
     <p>从 <a href="https://github.com/shichencike/Hone/releases">GitHub Releases</a> 下载对应平台的可执行文件（每次发布同时附带 <code class="inline">checksums.txt</code> 供 sha256 校验）：</p>
     <table>
       <tr><th>平台</th><th>文件</th><th>说明</th></tr>
@@ -70,7 +56,7 @@ scoop install hone</code></pre>
   </section>
 
   <section id="build">
-    <h2><span class="hash">#</span>4. 源码构建</h2>
+    <h2><span class="hash">#</span>3. 源码构建</h2>
     <p>需要 Rust 工具链（rustc ≥ 1.71）。</p>
 <pre><code>git clone https://github.com/shichencike/Hone.git
 cd Hone
@@ -80,7 +66,7 @@ cargo build --release
   </section>
 
   <section id="verify">
-    <h2><span class="hash">#</span>5. 验证安装</h2>
+    <h2><span class="hash">#</span>4. 验证安装</h2>
 <pre><code><span class="c">// hello.hn</span>
 <span class="f">print</span>(<span class="s">"Hello, Hone!"</span>);
 

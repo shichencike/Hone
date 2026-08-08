@@ -21,7 +21,7 @@
 ### 变更
 - 语言更名：Zap → Hone（二进制 `hone`、扩展名 `.hn`、错误码 `Hxxx`、缓存目录 `~/.hone`）
 - 新增 GitHub Actions CI（Windows/Linux 构建测试 + Termux aarch64 交叉编译）与 tag 触发自动发布
-  （三平台二进制 → GitHub Releases + Homebrew tap + Scoop manifest 自动更新）
+  （三平台二进制 + 校验和 + 一键安装脚本 → GitHub Releases 附件）
 - 新增一键安装脚本 install.sh / install.ps1（sha256 校验）
 - 官网部署至 https://hone.xo.je
 
