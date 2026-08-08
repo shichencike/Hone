@@ -1,6 +1,6 @@
 [package]
 name = "hone"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "Hone - 轻量级、跨平台、可嵌入的脚本语言（单文件解释器）"
 license = "MIT"

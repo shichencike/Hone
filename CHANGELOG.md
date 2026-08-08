@@ -18,6 +18,13 @@
 - 新增示例 `examples/ffi_demo.hn`（typed FFI 全类型演示）、`examples/ffi_header.hn`（from 头文件
   自动绑定演示）；`tests/hone_lib` 扩展导出 float/str/bool/ptr/void 测试函数并新增 hone_lib.h
 
+### 变更
+- 语言更名：Zap → Hone（二进制 `hone`、扩展名 `.hn`、错误码 `Hxxx`、缓存目录 `~/.hone`）
+- 新增 GitHub Actions CI（Windows/Linux 构建测试 + Termux aarch64 交叉编译）与 tag 触发自动发布
+  （三平台二进制 → GitHub Releases + Homebrew tap + Scoop manifest 自动更新）
+- 新增一键安装脚本 install.sh / install.ps1（sha256 校验）
+- 官网部署至 https://hone.xo.je
+
 ### 文档
 - README、hone.md：load 章节补充签名块语法、类型映射与限制（回调 fn(...) 与可变参数 ... 暂不支持）、
   from 头文件自动绑定与 hone bind 用法
