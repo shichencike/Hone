@@ -86,7 +86,7 @@ jobs:
       # 以下两步需要预先配置：新建 tap/bucket 仓库 + 仓库 Secrets 里添加 TAP_TOKEN（PAT，权限 repo）
       # 未配置 TAP_TOKEN 时自动跳过，不影响 Releases 发布
       - name: update Homebrew tap
-        if: ${{ secrets.TAP_TOKEN != '' }}
+        if: env.TAP_TOKEN != ''
         env:
           TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
         run: |
@@ -113,7 +113,7 @@ jobs:
           git push
 
       - name: update Scoop bucket
-        if: ${{ secrets.TAP_TOKEN != '' }}
+        if: env.TAP_TOKEN != ''
         env:
           TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
         run: |
