@@ -26,6 +26,8 @@ pub enum Tok {
     Try,
     Catch,
     Throw,
+    // match 模式匹配
+    Match,
     Breakpoint,
     Load,
     Lazy,
@@ -35,6 +37,8 @@ pub enum Tok {
     As,
     From,
     Tmp,
+    // struct 结构体定义
+    Struct,
     // 类型关键字
     TInt,
     TFloat,
@@ -54,10 +58,12 @@ pub enum Tok {
     Ge,
     AndAnd,
     OrOr,
+    Pipe, // |>（管道操作符）
     Bang,
     Assign,
     Colon,
     Arrow, // ->
+    FatArrow, // =>（match 模式分支）
     Comma,
     Semi,
     Dot,
@@ -93,6 +99,7 @@ impl Tok {
             Tok::Try => "`try`".into(),
             Tok::Catch => "`catch`".into(),
             Tok::Throw => "`throw`".into(),
+            Tok::Match => "`match`".into(),
             Tok::Breakpoint => "`breakpoint`".into(),
             Tok::Load => "`load`".into(),
             Tok::Lazy => "`lazy`".into(),
@@ -102,6 +109,7 @@ impl Tok {
             Tok::As => "`as`".into(),
             Tok::From => "`from`".into(),
             Tok::Tmp => "`tmp`".into(),
+            Tok::Struct => "`struct`".into(),
             Tok::TInt => "type `int`".into(),
             Tok::TFloat => "type `float`".into(),
             Tok::TBool => "type `bool`".into(),
@@ -119,10 +127,12 @@ impl Tok {
             Tok::Ge => "`>=`".into(),
             Tok::AndAnd => "`&&`".into(),
             Tok::OrOr => "`||`".into(),
+            Tok::Pipe => "`|>`".into(),
             Tok::Bang => "`!`".into(),
             Tok::Assign => "`=`".into(),
             Tok::Colon => "`:`".into(),
             Tok::Arrow => "`->`".into(),
+            Tok::FatArrow => "`=>`".into(),
             Tok::Comma => "`,`".into(),
             Tok::Semi => "`;`".into(),
             Tok::Dot => "`.`".into(),
@@ -306,6 +316,7 @@ impl Lexer {
                 "try" => Tok::Try,
                 "catch" => Tok::Catch,
                 "throw" => Tok::Throw,
+                "match" => Tok::Match,
                 "breakpoint" => Tok::Breakpoint,
                 "load" => Tok::Load,
                 "lazy" => Tok::Lazy,
@@ -315,6 +326,7 @@ impl Lexer {
                 "as" => Tok::As,
                 "from" => Tok::From,
                 "tmp" => Tok::Tmp,
+                "struct" => Tok::Struct,
                 "int" => Tok::TInt,
                 "float" => Tok::TFloat,
                 "bool" => Tok::TBool,
@@ -371,6 +383,9 @@ impl Lexer {
                 if self.peek() == Some('=') {
                     self.bump();
                     Tok::EqEq
+                } else if self.peek() == Some('>') {
+                    self.bump();
+                    Tok::FatArrow
                 } else {
                     Tok::Assign
                 }
@@ -421,12 +436,15 @@ impl Lexer {
                 if self.peek() == Some('|') {
                     self.bump();
                     Tok::OrOr
+                } else if self.peek() == Some('>') {
+                    self.bump();
+                    Tok::Pipe
                 } else {
                     return Err(self.err(
                         crate::error::codes::SYNTAX,
-                        "expected `||` after `|`",
+                        "expected `||` or `|>` after `|`",
                         1,
-                        Some("use `||` for logical OR"),
+                        Some("use `||` for logical OR, or `|>` for piping"),
                     ));
                 }
             }

@@ -125,6 +125,12 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
+    /// struct 名称 { 字段: 类型, ... };  结构体定义（数据形态声明，构造 = 名称(字段...)）
+    StructDef {
+        name: String,
+        fields: Vec<(String, TyName)>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -216,6 +222,13 @@ pub enum Expr {
     Unary { op: UnOp, expr: Box<Expr>, span: Span },
     Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr>, span: Span },
     Call { callee: String, args: Vec<Expr>, span: Span },
+    /// match 表达式 { 模式 => 表达式, ..., _ => 默认值 }  模式匹配，返回匹配分支的值
+    Match {
+        value: Box<Expr>,
+        /// 模式 + 分支体；模式为 None 表示 `_` 通配符
+        arms: Vec<(Option<Expr>, Expr)>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -274,6 +287,7 @@ pub fn expr_span(e: &Expr) -> Span {
         | Expr::Field { span: s, .. }
         | Expr::Call { span: s, .. }
         | Expr::Unary { span: s, .. }
-        | Expr::Binary { span: s, .. } => *s,
+        | Expr::Binary { span: s, .. }
+        | Expr::Match { span: s, .. } => *s,
     }
 }

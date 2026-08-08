@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hone 下载中心</title>
+<meta name="description" content="下载 Hone 编程语言：Windows / Linux / Termux 三平台单文件可执行程序，附带 sha256 校验和。支持一键脚本安装与源码构建。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+</head>
+<body>
+<header>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
+  <nav>
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html" class="active">下载</a>
+  </nav>
+  <span class="ver">v0.5.0</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
+</header>
+
+<main>
+  <h2><span class="hash">#</span>下载中心</h2>
+  <p class="dl-intro">Hone 是单文件可执行程序：下载 → 解压 → 运行，零依赖、零配置。当前最新版本 <span class="tag">v0.5.0</span>，所有二进制均从 GitHub Releases 分发。</p>
+
+  <section>
+    <h3>直接下载（GitHub Releases）</h3>
+    <div class="dl-card">
+      <div>
+        <div class="dl-os">🪟 Windows x86_64</div>
+        <div class="dl-file">hone-windows-x86_64.exe</div>
+        <div class="dl-desc">64 位 Windows 10 / 11，无需安装，双击或命令行直接运行</div>
+      </div>
+      <a class="btn primary" href="https://github.com/shichencike/Hone/releases/latest/download/hone-windows-x86_64.exe">下载</a>
+    </div>
+    <div class="dl-card">
+      <div>
+        <div class="dl-os">🐧 Linux x86_64</div>
+        <div class="dl-file">hone-linux-x86_64</div>
+        <div class="dl-desc">musl 静态编译，不依赖系统 glibc，任何发行版直接运行</div>
+      </div>
+      <a class="btn primary" href="https://github.com/shichencike/Hone/releases/latest/download/hone-linux-x86_64">下载</a>
+    </div>
+    <div class="dl-card">
+      <div>
+        <div class="dl-os">🤖 Termux（Android）</div>
+        <div class="dl-file">hone-termux-aarch64</div>
+        <div class="dl-desc">Termux 终端环境（ARM64），静态编译开箱即用</div>
+      </div>
+      <a class="btn primary" href="https://github.com/shichencike/Hone/releases/latest/download/hone-termux-aarch64">下载</a>
+    </div>
+
+    <div class="dl-note">
+      校验和：每次发布附带 <a href="https://github.com/shichencike/Hone/releases/latest/download/checksums.txt">checksums.txt</a>，
+      用 <code class="inline">sha256sum</code>（Windows 用 <code class="inline">Get-FileHash -Algorithm SHA256</code>）比对下载文件的哈希。
+      全部历史版本见 <a href="https://github.com/shichencike/Hone/releases">GitHub Releases</a>。
+    </div>
+  </section>
+
+  <section>
+    <h3>一键脚本安装（推荐）</h3>
+    <p>脚本会自动下载对应平台二进制、校验 sha256 并安装，无需手动管理文件：</p>
+<pre><code><span class="c">// Linux / Termux</span>
+curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh
+
+<span class="c">// Windows（PowerShell 5.1+）</span>
+irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex</code></pre>
+    <p>指定版本：<code class="inline">HONE_VERSION=v0.5.0 curl -fsSL .../install.sh | sh</code>（Windows 先 <code class="inline">$env:HONE_VERSION = "v0.5.0"</code>）。详细说明见 <a href="install.html">安装教程</a>。</p>
+  </section>
+
+  <section>
+    <h3>源码构建</h3>
+    <p>需要 Rust 工具链（rustc ≥ 1.71）：</p>
+<pre><code>git clone https://github.com/shichencike/Hone.git
+cd Hone
+cargo build --release
+<span class="c">// 产物: target/release/hone（Windows 为 target/release/hone.exe）</span>
+./target/release/hone --version</code></pre>
+  </section>
+</main>
+
+<footer>
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+</footer>
+</body>
+</html>

@@ -64,19 +64,64 @@ Hone 编程语言 – 完整设计规范 v1.1
 · 命名空间访问：通过点号 别名.函数名 调用，如 sys.msgbox()
 · 不支持 :: 多层路径前缀，所有函数扁平化存在于全局符号表
 
+1.7 结构体（struct）
+
+· 语法：struct 名称 { 字段: 类型, ... };
+· 用于声明确定的数据形态（字段名与类型固定），实例用 dict 表示，字段访问 p.字段
+· 构造：名称(值1, 值2, ...)，按字段顺序传参；检查阶段校验字段个数与类型（H001/H011）
+· 运行时字段访问校验字段存在性（未知字段报 H002），实例可作为 dict 使用（keys/values 等）
+· 示例：
+
+struct Point { x: int, y: float };
+p = Point(3, 2.5);
+print(p.x);   // 3
+print(p.y);   // 2.5
+
+1.8 模式匹配（match）
+
+· 语法：match 表达式 { 模式 => 分支体, ..., _ => 默认值 }
+· 模式支持字面量（整数/浮点/布尔/字符串）与 `_` 通配符（匹配任意值，只能出现一次且放最后）
+· match 是表达式，返回匹配分支的值；所有分支都不匹配时运行时报错（建议补 `_` 兜底）
+· 各分支类型可以不同，返回值为动态类型
+· 示例：
+
+s = match 2 {
+    1 => "one",
+    2 => "two",
+    _ => "other",
+};
+print(s);   // two
+
+1.9 管道操作符（|>）
+
+· 语法：x |> f  等价于 f(x)；x |> f(a, b)  等价于 f(x, a, b)
+· 左侧表达式作为第一个参数传入右侧函数调用，可链式：a |> f |> g  等价于 g(f(a))
+· 是语法糖，在解析期转换为普通函数调用
+· 示例：
+
+print("hello world" |> len);      // 11
+print([1, 2, 3] |> len |> to_str); // "3"
+print(3 |> max(7) |> to_str);      // "7"
+
 二、工具链与命令
 
 Hone 提供完整的命令行工具链，所有功能集成在单文件 hone（或 hone.exe）中：
 
 命令 功能说明
-hone run <script.hn> 执行 Hone 脚本（默认命令）
+hone run <script.hn> 执行 Hone 脚本（默认命令，支持 --restart/--resume）
 hone fmt [options] <file.hn> 代码格式化（统一 Tab 缩进、运算符空格、大括号位置）
 hone fmt -w *.hn 直接覆盖写入源文件
+hone test [目录] 递归扫描 *.test.hn 测试文件，运行并汇总 PASS/FAIL（配合 assert 断言）
 hone build --dll <script.hn> 将脚本打包成 C ABI 动态库（DLL / SO / DYLIB）
+hone build --exe <script.hn> 打包独立可执行文件（解释器 + 脚本自释放，[-o <out>] [--icon <ico>]）
+hone build --script <script.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）
+hone bind <header.h> 从 C 头文件生成 typed load 签名块（FFI 自动绑定）
 hone debug <script.hn> 断点调试模式（支持 breakpoint 关键字）
 hone get <module> 远程下载模块依赖并缓存到本地
-hone upgrade <script.hn> 自动迁移旧版本代码到新语法（基于映射表）
+hone self-update [url] 从 URL 下载最新 hone 二进制并替换当前程序（也可用环境变量 HONE_UPDATE_URL）
+hone explain <code> 查看错误码解释与修复建议（如 hone explain H201）
 hone lsp 启动语言服务器（代码补全、跳转定义）
+hone poop <file.hn> 屎山检测（if 嵌套深度 + 圈复杂度）
 hone --help / --version 帮助信息 / 版本信息
 
 进度条策略：
@@ -92,8 +137,8 @@ hone --help / --version 帮助信息 / 版本信息
 · read_file(path) → str：读取文本文件内容
 · write_file(path, content)：写入文本文件
 · file_exists(path) → bool：检查文件是否存在
-· len(value) → int：返回字符串长度（字节数）
-· type_of(value) → str：返回变量类型名称（"int"、"float"、"bool"、"str"）
+· len(value) → int：返回字符串长度（字节数）、列表/字典元素个数
+· type_of(value) → str：返回变量类型名称（"int"、"float"、"bool"、"str"、"list"、"dict"、"null"、"error"、"ptr"）
 · http_get(url) → str：发送 HTTP GET 请求，返回响应体（支持 http:// 与 https://，TLS 为纯 Rust 实现、内置 Mozilla 根证书）
 · http_post(url, body) → str：发送 HTTP POST 请求（body 为字符串，支持 http:// 与 https://）
 · json_parse(str) → value：将 JSON 字符串解析为 Hone 值（自动映射为 int/float/bool/str）
@@ -214,6 +259,66 @@ print(to_float("xyz"));         // 抛出 H007
 · 暂停后等待用户按 Enter 继续，或按 Ctrl+C 退出
 · 不提供交互式查询命令（p x 等），全部直接输出
 
+3.10 集合操作与断言
+
+· append(list, value) → list：返回追加了 value 的新列表（列表是值类型，需配合 `l = append(l, x)` 使用）
+· clone(value) / copy(value) → value：深度拷贝（递归复制 list/dict，副本的后续修改不影响原值）
+· contains(list|str, value) → bool：列表是否包含某值 / 字符串是否包含子串
+· index_of(list, value) → int：元素位置（不存在返回 -1）；keys(dict) / values(dict) / has_key(dict, key) 字典操作
+· is_int / is_float / is_bool / is_str / is_list / is_dict / is_null(value) → bool：类型判断
+· assert(条件[, 消息])：条件为 false 时抛 error[H700]（测试框架 hone test 配合使用）
+
+3.11 args 命令行参数模块
+
+· args.get(key) → str 或 null：获取命令行参数值（--key value 格式）
+· args.get(key, type[, default]) → value：按期望类型转换，key 不存在时返回 default（缺省 null）
+  · type 支持 int / float / bool / str（可直接写 `args.get("port", int, 8080)`，类型关键字在表达式位置等价于其名称字符串）
+  · 转换失败报 H006（int）/ H007（float）/ H001（bool），键缺失且无默认值时返回 null
+· args.has(key) → bool：命令行是否包含该参数
+
+3.12 server 本地 HTTP 服务器模块
+
+· server.listen(port) → int：绑定 127.0.0.1 启动后台监听线程，返回实际端口（0=自动分配）
+· server.poll() → str：取出排队请求，返回 JSON 数组 [{id,method,path,body}, ...]
+· server.respond(id, body[, status]) → bool：发送响应体，可指定 HTTP 状态码（默认 200，如 404/500，范围 100..=599）
+· 事件模型：后台线程只做 TCP 收发与请求排队，脚本主线程轮询响应，与解释器单线程模型兼容
+
+3.13 crypto 加密与哈希模块
+
+· crypto.md5(str) → str：MD5 十六进制摘要
+· crypto.sha1(str) → str：SHA-1 十六进制摘要
+· crypto.sha256(str) → str：SHA-256 十六进制摘要
+· crypto.hmac_sha256(key, msg) → str：HMAC-SHA256 十六进制（密钥与消息均为字符串）
+· crypto.base64_encode(str) → str：Base64 编码
+· crypto.base64_decode(str) → str：Base64 解码（输入非法报 H001）
+
+3.14 archive 压缩与归档模块
+
+· archive.zip_list(path) → list：列出 zip 条目名
+· archive.zip_read(path, entry) → str：读取 zip 中指定条目的文本
+· archive.zip_extract(path, dir) → int：解压 zip 到目录，返回文件条目数
+· archive.zip_create(path, entries) → bool：从 dict {条目名: 内容} 创建 zip
+· archive.tgz_list / tgz_read / tgz_extract / tgz_create：同上，针对 tar.gz
+· 安全：解压时拒绝绝对路径与 `..` 穿越条目（防 zip-slip）
+
+3.15 ptr 指针类
+
+· ptr.alloc(size) → ptr：分配 size 字节内存（对齐 8），失败返回 0
+· ptr.free(p) → bool：释放由 ptr.alloc 分配的内存
+· ptr.is_null(p) → bool / ptr.is_valid(p) → bool / ptr.size(p) → int：查询
+· ptr.read_int/read_float/read_byte(p, offset) → value：按偏移读取 8 字节整数 / 8 字节 double / 1 字节
+· ptr.write_int/ptr.write_float/ptr.write_byte(p, offset, v)：对应写入（write_byte 值域 0..=255）
+· 安全模型（防野指针）：分配表跟踪 —— 未分配、已释放（use-after-free）、重复释放（double-free）报 H304，
+  越界访问报 H305，空指针读写报 H304；外部 FFI 句柄不在分配表中，free/read/write 拒绝操作
+
+3.16 plugin 插件系统
+
+· plugin.load(path, alias) → bool：运行期加载动态库并注册（之后可用 `alias.函数(...)` 调用，走 C ABI 通道）
+· plugin.has(alias) → bool：查询插件是否已注册
+· plugin.list() → list：列出已注册插件 [{name, path}, ...]
+· plugin.unload(alias) → bool：注销插件
+· 与 load 语句的区别：load 是编译期声明 + 静态检查；plugin.* 是运行期动态注册，二者调用链相同
+
 四、导入与外部集成
 
 4.1 load 动态库加载
@@ -319,10 +424,21 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · H004：运算符重载歧义（如 + 可能为 int 或 str 时）
 · H006：字符串转换为整数失败（非数字内容）
 · H007：字符串转换为浮点数失败（格式非法）
+· H011：参数数量不匹配
 · H100：动态库加载失败
 · H110：懒加载依赖函数未找到
 · H200：网络请求失败
+· H204：HTTP 非 2xx 状态码
+· H300：系统调用失败
+· H301：DLL 加载失败
+· H302：DLL 参数校验失败
+· H303：权限不足
+· H304：野指针（未分配/已释放/重复释放/空指针，ptr 类）
+· H305：指针越界访问（超出 ptr.alloc 分配大小）
+· H401：文件不存在
 · H404：文件或库不存在
+· H600：用户主动抛出（throw）
+· H700：assert 断言失败（测试框架）
 
 5.3 报错原则
 
@@ -383,7 +499,6 @@ codegen-units = 1
 · 不向后兼容：新版本不保证旧版本代码能直接运行
 · 不强制升级：旧版本解释器永久可用
 · 废弃机制：废弃功能仅标记 @deprecated 并输出警告，不删除
-· 迁移工具：hone upgrade 按映射表自动转换旧代码到新语法
 · 文档同步：每个版本发布时提供变更说明和迁移指南
 
 7.2 发布渠道

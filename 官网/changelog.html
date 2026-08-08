@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hone 更新日志</title>
+<meta name="description" content="Hone 编程语言更新日志：v0.5.0 语言特性与工具链扩展、v0.4.0 typed FFI 与头文件绑定、v0.3.0 本地服务器与 GUI 等版本记录。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+</head>
+<body>
+<header>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
+  <nav>
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+  </nav>
+  <span class="ver">v0.5.0</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
+</header>
+
+<main>
+  <h2><span class="hash">#</span>更新日志</h2>
+  <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
+
+  <div class="release">
+    <span class="ver-tag">v0.5.0</span><span class="date">2026-08-08</span>
+    <h4>新增</h4>
+    <ul>
+      <li><strong>语言特性</strong>：<code>struct</code> 结构体（确定数据形态，构造校验字段个数与类型）、
+        <code>match</code> 模式匹配（字面量 + <code>_</code> 通配符，表达式返回值）、
+        <code>|&gt;</code> 管道操作符（<code>x |&gt; f</code> 等价 <code>f(x)</code>，可链式）</li>
+      <li><strong>内置函数扩展</strong>：<code>clone</code> / <code>copy</code> 深度拷贝、<code>assert</code> 断言（H700）、
+        <code>args.get(key, type, default)</code> 类型转换与默认值、<code>server.respond(id, body, status)</code> 自定义 HTTP 状态码</li>
+      <li><strong>指针类 <code>ptr.*</code></strong>：<code>ptr.alloc/free/is_null/is_valid/size/read_*/write_*</code> 内存分配与读写；
+        分配表跟踪防野指针（未分配/已释放/重复释放报 H304，越界报 H305）</li>
+      <li><strong>压缩与归档 <code>archive.*</code></strong>：zip / tar.gz 的列表、读取、解压与创建（解压防 zip-slip 穿越）</li>
+      <li><strong>加密与哈希</strong>：<code>crypto.sha1</code> / <code>crypto.hmac_sha256</code> / <code>crypto.base64_encode</code> / <code>crypto.base64_decode</code></li>
+      <li><strong>插件系统 <code>plugin.*</code></strong>：<code>plugin.load/has/list/unload</code> 运行期动态注册，调用走 C ABI 通道</li>
+      <li><strong>测试框架</strong>：<code>hone test [目录]</code> 递归扫描 <code>*.test.hn</code> 运行并汇总 PASS/FAIL</li>
+      <li><strong>打包格式</strong>：<code>hone build --script</code> 生成仅脚本压缩包 <code>.hzp</code>（不内嵌解释器，<code>hone run</code> 执行）</li>
+      <li><strong>自动更新</strong>：<code>hone self-update [url]</code> 下载最新二进制替换当前程序（魔数校验防误下载）</li>
+    </ul>
+    <h4>变更</h4>
+    <ul>
+      <li>移除 <code>hone upgrade</code> 命令（旧语法迁移工具不再提供）</li>
+    </ul>
+  </div>
+
+  <div class="release">
+    <span class="ver-tag">v0.4.0</span><span class="date">2026-08-08</span>
+    <h4>新增</h4>
+    <ul>
+      <li>typed FFI：<code>load "lib" as m { fn f(p: ty, ...) -> ret; ... }</code> 签名块显式声明 C ABI 参数与返回类型，
+        支持 <code>int</code>（int64_t）/ <code>float</code>（double）/ <code>bool</code> / <code>str</code>（const char*）/ <code>ptr</code>（void*）/ <code>void</code>（返回），
+        调用时按声明精确转换，替代此前全 int64 单通道；参数最多 8 个，Windows / Linux / Termux ABI 一致</li>
+      <li>静态检查：签名块声明的函数调用在检查阶段校验参数个数与类型（H001/H005），返回类型参与类型推导；
+        未声明签名的库函数保持旧 int64 通道调用（完全向后兼容）</li>
+      <li>新类型 <code>ptr</code>：FFI 返回值/参数可传递不透明句柄，<code>p == 0</code> 判断 NULL；to_str(p) 输出 0x 十六进制</li>
+      <li>头文件自动绑定：<code>load "lib" as m from "header.h";</code> 从 C 头文件提取函数原型自动生成签名
+        （受限解析器：跳过注释/预处理/struct 定义/extern "C" 块，typedef 简单展开，属性宏跳过；
+        回调/变参/数组/结构体按值/long double 标记 unsupported，调用时直接报错而非 ABI 崩溃）</li>
+      <li>新命令 <code>hone bind &lt;header.h&gt;</code>：离线生成 typed load 签名块（可直接粘贴进脚本）</li>
+      <li>新增示例 <code>examples/ffi_demo.hn</code>（typed FFI 全类型演示）、<code>examples/ffi_header.hn</code>（from 头文件自动绑定演示）</li>
+    </ul>
+    <h4>变更</h4>
+    <ul>
+      <li>语言更名：Zap → Hone（二进制 <code>hone</code>、扩展名 <code>.hn</code>、错误码 <code>Hxxx</code>、缓存目录 <code>~/.hone</code>）</li>
+      <li>新增 GitHub Actions CI（Windows/Linux 构建测试 + Termux aarch64 交叉编译）与 tag 触发自动发布
+        （三平台二进制 + 校验和 + 一键安装脚本 → GitHub Releases 附件）</li>
+      <li>新增一键安装脚本 install.sh / install.ps1（sha256 校验）</li>
+      <li>官网部署至 <a href="https://hone.xo.je">hone.xo.je</a></li>
+    </ul>
+  </div>
+
+  <div class="release">
+    <span class="ver-tag">v0.3.0</span><span class="date">2026-08-07</span>
+    <h4>新增</h4>
+    <ul>
+      <li><code>server.listen(port)</code> / <code>server.poll()</code> / <code>server.respond(id, body)</code> 本地 HTTP 服务器内置函数：
+        纯 std::net 实现，Windows / Linux / Termux 跨平台一致，无 C 依赖；后台线程只做 TCP 收发与请求排队，
+        Hone 脚本在主线程轮询响应，与解释器单线程模型完全兼容</li>
+      <li>图形界面库 <code>hone_lib/gui.hn</code>（纯 Hone 编写）：浏览器渲染 + 本地服务器双向交互，
+        控件 <code>gui_button</code> / <code>gui_label</code> / <code>gui_input</code> / <code>gui_select</code> / <code>gui_html</code>，
+        事件回调约定 <code>on_event(id, value)</code>，返回值按 JSON 协议更新页面元素</li>
+      <li>新增示例 <code>examples/gui_demo.hn</code>（GUI 演示）、<code>examples/server_demo.hn</code>（server API 演示）、
+        <code>examples/server_selftest.hn</code>（进程内自测）</li>
+    </ul>
+  </div>
+
+  <div class="release">
+    <span class="ver-tag">v0.2.0</span><span class="date">2026-08-07</span>
+    <h4>新增</h4>
+    <ul>
+      <li><code>http_get</code> / <code>http_post</code> 支持 <code>https://</code>：TLS 采用 rustls + rustls-rustcrypto
+        （纯 Rust 实现，无 C 依赖），内置 Mozilla 根证书，Windows / Linux / Termux 跨平台行为一致</li>
+      <li>新增示例 <code>examples/https_demo.hn</code>：https GET、http POST、JSON 解析与错误捕获</li>
+    </ul>
+    <h4>修复</h4>
+    <ul>
+      <li>类型检查：<code>http_post</code> 的返回类型标注由 <code>void</code> 修正为 <code>str</code>（与运行时返回响应体一致），
+        此前将返回值传给其他函数会被静态检查误报</li>
+    </ul>
+  </div>
+</main>
+
+<footer>
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+</footer>
+</body>
+</html>

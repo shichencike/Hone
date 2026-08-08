@@ -143,12 +143,15 @@ pub mod codes {
     pub const DLL_LOAD: &str = "H301"; // DLL 加载失败
     pub const DLL_ARG: &str = "H302"; // DLL 参数校验失败
     pub const PERMISSION: &str = "H303"; // 权限不足
+    pub const PTR_INVALID: &str = "H304"; // 野指针：未分配/已释放/空指针
+    pub const PTR_OOB: &str = "H305"; // 指针越界访问
     // --- H400 区段：文件细分 ---
     pub const FILE_NOT_FOUND: &str = "H401"; // 文件不存在
     pub const FILE_PERMISSION: &str = "H402"; // 文件权限不足
     pub const FILE_LOCKED: &str = "H403"; // 文件被占用/锁定
     // --- H600 区段：主动抛出 ---
     pub const THROW: &str = "H600"; // throw 语句抛出的用户错误
+    pub const ASSERT: &str = "H700"; // assert 断言失败（测试框架）
 }
 
 /// 错误码解释表（`hone explain <code>` 使用）。未知错误码返回 None。
@@ -179,11 +182,14 @@ pub fn explain(code: &str) -> Option<&'static str> {
         "H301" => "DLL 加载失败：load 指定的动态库无法加载。\n  修复：确认库文件存在、路径正确、位数匹配（x64）。",
         "H302" => "DLL 参数校验失败：调用动态库函数时参数不符合 C ABI 约定。\n  修复：确认参数数量不超过 8 个且均为整数/数值类型。",
         "H303" => "权限不足：操作被系统拒绝（文件、注册表等）。\n  修复：以管理员身份运行，或调整文件/注册表权限。",
+        "H304" => "野指针：指针未分配、已释放（use-after-free）、重复释放（double-free）或为空。\n  修复：只读写/释放由 ptr.alloc 返回且尚未 ptr.free 的指针；外部 FFI 句柄由库管理。",
+        "H305" => "指针越界访问：读写区间超出 ptr.alloc 分配的大小。\n  修复：用 ptr.size(p) 查询分配大小，检查偏移是否在 0..size 内。",
         "H401" => "文件不存在：读取或写入的目标文件不存在。\n  修复：确认路径拼写，或先调用 write_file / file_exists 处理。",
         "H402" => "文件权限不足：无权限读取或写入该文件。\n  修复：检查文件只读属性与运行用户权限。",
         "H403" => "文件被占用/锁定：文件正被其他进程独占（Windows 常见）。\n  修复：关闭占用进程，稍后重试；可用 try-catch 配合重试。",
         "H404" => "文件或库不存在（通用）：NOT_FOUND。\n  修复：检查路径与模块缓存（~/.hone/cache/）。",
         "H600" => "用户主动抛出的错误（throw）。\n  修复：查看 throw 携带的 message 说明，或由调用方 try-catch 处理。",
+        "H700" => "assert 断言失败（测试框架）。\n  修复：检查断言条件与期望值；断言失败即测试用例不通过。",
         "H999" => "尚未实现的功能。\n  修复：该特性仍在规划中，请改用其他方式或等待新版本。",
         _ => return None,
     })

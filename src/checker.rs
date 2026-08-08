@@ -93,6 +93,8 @@ pub struct Checker {
     /// from 头文件解析结果缓存（键为头文件路径，避免固定点循环重复读取）
     header_cache: HashMap<String, Vec<FfiSig>>,
     builtins: HashSet<&'static str>,
+    /// 结构体定义：名称 → (字段名, 字段类型)
+    structs: HashMap<String, Vec<(String, Ty)>>,
 }
 
 impl Checker {
@@ -113,6 +115,7 @@ impl Checker {
             ffi_sigs: HashMap::new(),
             header_cache: HashMap::new(),
             builtins,
+            structs: HashMap::new(),
         };
 
         // Phase A：注册顶层函数并构建全局绑定
@@ -196,6 +199,19 @@ impl Checker {
             }
             Stmt::VarDecl { name, .. } => {
                 self.bind_or_unify(name, None, stmt_span(stmt))?;
+            }
+            Stmt::StructDef { name, fields, span } => {
+                // 注册结构体定义（供构造调用与字段访问的类型检查）
+                if self.structs.contains_key(name) {
+                    return Err(self.zerr(
+                        codes::SYNTAX,
+                        format!("struct `{}` is already defined", name),
+                        *span,
+                        Some("struct names must be unique"),
+                    ));
+                }
+                let mapped = fields.iter().map(|(f, t)| (f.clone(), Ty::from_annot(*t))).collect();
+                self.structs.insert(name.clone(), mapped);
             }
             Stmt::Assign { name, .. } => {
                 if self.globals.get(name).is_none() {
@@ -590,6 +606,7 @@ impl Checker {
                 Some("move the `return` into a `fn` body"),
             )),
             Stmt::FnDef { .. } => Ok(()), // 已注册
+            Stmt::StructDef { .. } => Ok(()), // 已注册
             Stmt::ExprStmt { expr, .. } => {
                 self.check_expr(expr)?;
                 Ok(())
@@ -758,6 +775,7 @@ impl Checker {
                 Ok(())
             }
             Stmt::FnDef { .. } => Ok(()),
+            Stmt::StructDef { .. } => Ok(()), // 顶层已注册，函数体内不新增
             Stmt::ExprStmt { expr, .. } => {
                 self.check_expr_in_fn(expr, scopes, scope_stack, param_slots, ret_slot)?;
                 Ok(())
@@ -834,6 +852,17 @@ impl Checker {
                 }
                 self.resolve_call(callee, &arg_tys, *span)
             }
+            Expr::Match { value, arms, .. } => {
+                // 模式匹配：值可为任意类型，各分支类型可不同 → 动态类型
+                self.check_expr(value)?;
+                for (pat, body) in arms {
+                    if let Some(p) = pat {
+                        self.check_expr(p)?;
+                    }
+                    self.check_expr(body)?;
+                }
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
             Expr::Binary { op, lhs, rhs, span } => {
                 let l = self.check_expr(lhs)?;
                 let r = self.check_expr(rhs)?;
@@ -901,6 +930,16 @@ impl Checker {
                 }
                 self.resolve_call(callee, &arg_tys, *span)
             }
+            Expr::Match { value, arms, .. } => {
+                self.check_expr_in_fn(value, scopes, scope_stack, param_slots, ret_slot)?;
+                for (pat, body) in arms {
+                    if let Some(p) = pat {
+                        self.check_expr_in_fn(p, scopes, scope_stack, param_slots, ret_slot)?;
+                    }
+                    self.check_expr_in_fn(body, scopes, scope_stack, param_slots, ret_slot)?;
+                }
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
             Expr::Binary { op, lhs, rhs, span } => {
                 let l = self.check_expr_in_fn(lhs, scopes, scope_stack, param_slots, ret_slot)?;
                 let r = self.check_expr_in_fn(rhs, scopes, scope_stack, param_slots, ret_slot)?;
@@ -957,17 +996,21 @@ impl Checker {
     }
 
     /// error 类型字段访问检查：e.code / e.message / e.file / e.context → str；e.line / e.col → int。
+    /// struct 实例 / dict 为动态类型（Unknown），字段访问放行，类型由运行期决定。
     fn check_field(&self, res: TyRes, field: &str, span: Span) -> Result<TyRes, ZError> {
-        if res.ty != Ty::Error && res.ty != Ty::Unknown {
+        if res.ty == Ty::Unknown {
+            return Ok(TyRes { ty: Ty::Unknown, slot: None });
+        }
+        if res.ty != Ty::Error {
             return Err(self.zerr(
                 codes::TYPE_MISMATCH,
                 format!(
-                    "field access `.{}` requires an `error` value, got `{}`",
+                    "field access `.{}` requires an `error`, `struct`, or `dict` value, got `{}`",
                     field,
                     res.ty.name()
                 ),
                 span,
-                Some("only error values (catch variables) support field access"),
+                Some("struct instances and dicts support field access; errors expose code/message/..."),
             ));
         }
         match field {
@@ -1453,6 +1496,30 @@ impl Checker {
     fn resolve_call(&mut self, callee: &str, arg_tys: &[TyRes], span: Span) -> Result<TyRes, ZError> {
         if let Some(f) = self.fns.get(callee).cloned() {
             self.check_user_call(&f, arg_tys, span)
+        } else if let Some(fields) = self.structs.get(callee).cloned() {
+            // 结构体构造：Point(1, 2) —— 校验字段个数与类型
+            if fields.len() != arg_tys.len() {
+                return Err(self.zerr(
+                    codes::ARG_COUNT,
+                    format!(
+                        "wrong number of arguments: struct `{}` expects {} fields, got {}",
+                        callee,
+                        fields.len(),
+                        arg_tys.len()
+                    ),
+                    span,
+                    Some(format!(
+                        "construct with `{}({})`",
+                        callee,
+                        fields.iter().map(|(f, _)| f.as_str()).collect::<Vec<_>>().join(", ")
+                    )),
+                ));
+            }
+            for ((fname, fty), aty) in fields.iter().zip(arg_tys) {
+                self.unify_with(*fty, *aty, span, format!("field `{}` of struct `{}`", fname, callee))?;
+            }
+            // struct 实例为动态类型（字段访问在运行时校验，字段类型可查定义）
+            Ok(TyRes { ty: Ty::Unknown, slot: None })
         } else if self.builtins.contains(callee) {
             self.builtin_result(callee, arg_tys, span)
         } else if let Some(sig) = self.ffi_sigs.get(callee).cloned() {
@@ -1649,6 +1716,33 @@ impl Checker {
         }
     }
 
+    /// 接受 int 或 float（数值）。用于允许 `int` 字面量通过 `float` 参数的场景。
+    fn expect_numeric(&mut self, name: &str, args: &[TyRes], i: usize, span: Span, what: &str) -> Result<(), ZError> {
+        match args[i].ty {
+            Ty::Int | Ty::Float => Ok(()),
+            Ty::Unknown => {
+                if let Some(slot) = args[i].slot {
+                    if !self.strict {
+                        self.unify_slot_ty(slot, Ty::Float, span, what.to_string())?;
+                    }
+                    return Ok(());
+                }
+                Ok(())
+            }
+            other => Err(self.zerr(
+                codes::TYPE_MISMATCH,
+                format!("`{}` expects a number for {}, got `{}`", name, what, other.name()),
+                span,
+                Some("pass an integer or float value"),
+            )),
+        }
+    }
+
+    /// 接受任意类型（含 Unknown/动态类型）。用于不透明指针等静态阶段无法确定的参数。
+    fn expect_any(&mut self, _name: &str, _args: &[TyRes], _i: usize, _span: Span, _what: &str) -> Result<(), ZError> {
+        Ok(())
+    }
+
     /// 内置函数签名检查，返回调用结果的类型。
     /// json_parse 返回动态类型（Unknown，无槽位）。
     fn builtin_result(&mut self, name: &str, args: &[TyRes], span: Span) -> Result<TyRes, ZError> {
@@ -1666,6 +1760,11 @@ impl Checker {
                 self.arg_count(name, n, 2, span)?;
                 // 列表是动态类型，返回类型未知
                 Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            "clone" | "copy" => {
+                self.arg_count(name, n, 1, span)?;
+                // 深度拷贝：返回类型与原值一致（集合为动态类型）
+                Ok(args[0])
             }
             "contains" => {
                 self.arg_count(name, n, 2, span)?;
@@ -1691,6 +1790,21 @@ impl Checker {
             "type_of" | "to_str" | "json_stringify" => {
                 self.arg_count(name, n, 1, span)?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "assert" => {
+                if !(1..=2).contains(&n) {
+                    return Err(self.zerr(
+                        codes::ARG_COUNT,
+                        format!("wrong number of arguments: `assert` expects 1-2 (condition[, message]), got {}", n),
+                        span,
+                        Some("form: assert(condition) or assert(condition, \"message\")"),
+                    ));
+                }
+                self.require_bool(args[0], &span)?;
+                if n == 2 {
+                    self.expect_str(name, args, 1, span, "the assertion message")?;
+                }
+                Ok(TyRes { ty: Ty::Void, slot: None })
             }
             "to_int" => {
                 self.arg_count(name, n, 1, span)?;
@@ -1732,10 +1846,59 @@ impl Checker {
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
             "server.respond" => {
-                self.arg_count(name, n, 2, span)?;
+                if !(2..=3).contains(&n) {
+                    return Err(self.zerr(
+                        codes::ARG_COUNT,
+                        format!("wrong number of arguments: `server.respond` expects 2-3 (id, body[, status]), got {}", n),
+                        span,
+                        Some("form: server.respond(id, body[, status])"),
+                    ));
+                }
                 self.expect_int(name, args, 0, span, "the request id from `server.poll`")?;
                 self.expect_str(name, args, 1, span, "the response body")?;
+                if n == 3 {
+                    self.expect_int(name, args, 2, span, "the HTTP status code (e.g. 404, 500)")?;
+                }
                 Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            // ---------- ptr 指针类 ----------
+            "ptr.alloc" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_int(name, args, 0, span, "the allocation size in bytes")?;
+                // ptr 为动态类型（值为运行时地址）
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            "ptr.free" | "ptr.is_null" | "ptr.is_valid" | "ptr.size" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_any(name, args, 0, span, "a `ptr` value (or `0` for NULL)")?;
+                let ty = if name == "ptr.size" { Ty::Int } else { Ty::Bool };
+                Ok(TyRes { ty, slot: None })
+            }
+            "ptr.read_int" | "ptr.read_byte" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_any(name, args, 0, span, "a `ptr` value")?;
+                self.expect_int(name, args, 1, span, "the byte offset")?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
+            "ptr.read_float" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_any(name, args, 0, span, "a `ptr` value")?;
+                self.expect_int(name, args, 1, span, "the byte offset")?;
+                Ok(TyRes { ty: Ty::Float, slot: None })
+            }
+            "ptr.write_int" | "ptr.write_byte" => {
+                self.arg_count(name, n, 3, span)?;
+                self.expect_any(name, args, 0, span, "a `ptr` value")?;
+                self.expect_int(name, args, 1, span, "the byte offset")?;
+                self.expect_int(name, args, 2, span, "the value to write")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            "ptr.write_float" => {
+                self.arg_count(name, n, 3, span)?;
+                self.expect_any(name, args, 0, span, "a `ptr` value")?;
+                self.expect_int(name, args, 1, span, "the byte offset")?;
+                self.expect_numeric(name, args, 2, span, "the value to write")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
             }
             "file_exists" => {
                 self.arg_count(name, n, 1, span)?;
@@ -1921,10 +2084,27 @@ impl Checker {
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
             // args
-            "args.get" | "args.has" => {
+            "args.has" => {
                 self.arg_count(name, n, 1, span)?;
                 self.expect_str(name, args, 0, span, "the key")?;
-                Ok(TyRes { ty: if name == "args.has" { Ty::Bool } else { Ty::Str }, slot: None })
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            "args.get" => {
+                if !(1..=3).contains(&n) {
+                    return Err(self.zerr(
+                        codes::ARG_COUNT,
+                        format!("wrong number of arguments: `args.get` expects 1-3 (key[, type[, default]]), got {}", n),
+                        span,
+                        Some("form: args.get(key) / args.get(key, type) / args.get(key, type, default)"),
+                    ));
+                }
+                self.expect_str(name, args, 0, span, "the key")?;
+                if n >= 2 {
+                    self.expect_str(name, args, 1, span, "the target type (`int`/`float`/`bool`/`str`)")?;
+                }
+                // 带类型转换时返回类型由运行期决定（字符串→数字/布尔），静态阶段按动态类型放行
+                let ty = if n == 1 { Ty::Str } else { Ty::Unknown };
+                Ok(TyRes { ty, slot: None })
             }
             // env
             "env.get" => {
@@ -1965,10 +2145,56 @@ impl Checker {
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
             // crypto
-            "crypto.md5" | "crypto.sha256" => {
+            "crypto.md5" | "crypto.sha1" | "crypto.sha256" | "crypto.base64_encode" | "crypto.base64_decode" => {
                 self.arg_count(name, n, 1, span)?;
                 self.expect_str(name, args, 0, span, "the input text")?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "crypto.hmac_sha256" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the HMAC key")?;
+                self.expect_str(name, args, 1, span, "the message")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            // ---------- archive 压缩与归档 ----------
+            "archive.zip_list" | "archive.tgz_list" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the archive path")?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None }) // 条目列表（动态类型）
+            }
+            "archive.zip_read" | "archive.tgz_read" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the archive path")?;
+                self.expect_str(name, args, 1, span, "the entry name")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "archive.zip_extract" | "archive.tgz_extract" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the archive path")?;
+                self.expect_str(name, args, 1, span, "the destination directory")?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
+            "archive.zip_create" | "archive.tgz_create" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the archive path")?;
+                self.expect_any(name, args, 1, span, "a dict of {entry: content}")?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            // ---------- plugin 插件系统 ----------
+            "plugin.load" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the plugin library path")?;
+                self.expect_str(name, args, 1, span, "the plugin alias")?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            "plugin.has" | "plugin.unload" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the plugin alias")?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            "plugin.list" => {
+                self.arg_count(name, n, 0, span)?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None }) // 插件信息列表（动态类型）
             }
             // uuid
             "uuid.new" => {
@@ -2009,6 +2235,7 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Go { span, .. }
         | Stmt::Try { span, .. }
         | Stmt::Throw { span, .. }
+        | Stmt::StructDef { span, .. }
         | Stmt::DebugPrint { span, .. } => *span,
     }
 }
@@ -2031,6 +2258,8 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "print",
         "len",
         "append",
+        "clone",
+        "copy",
         "contains",
         "index_of",
         "keys",
@@ -2044,6 +2273,7 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "is_dict",
         "is_null",
         "type_of",
+        "assert",
         "to_str",
         "to_int",
         "to_float",
@@ -2077,6 +2307,17 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "server.listen",
         "server.poll",
         "server.respond",
+        "ptr.alloc",
+        "ptr.free",
+        "ptr.is_null",
+        "ptr.is_valid",
+        "ptr.size",
+        "ptr.read_int",
+        "ptr.read_float",
+        "ptr.read_byte",
+        "ptr.write_int",
+        "ptr.write_float",
+        "ptr.write_byte",
         "log.info",
         "log.warn",
         "log.error",
@@ -2093,7 +2334,23 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "regex.match",
         "regex.replace",
         "crypto.md5",
+        "crypto.sha1",
         "crypto.sha256",
+        "crypto.hmac_sha256",
+        "crypto.base64_encode",
+        "crypto.base64_decode",
+        "archive.zip_list",
+        "archive.zip_read",
+        "archive.zip_extract",
+        "archive.zip_create",
+        "archive.tgz_list",
+        "archive.tgz_read",
+        "archive.tgz_extract",
+        "archive.tgz_create",
+        "plugin.load",
+        "plugin.has",
+        "plugin.list",
+        "plugin.unload",
         "uuid.new",
     ]
     .into_iter()

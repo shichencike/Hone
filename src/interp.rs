@@ -158,6 +158,8 @@ pub struct Interp {
     ffi_sigs: HashMap<String, FfiSig>,
     /// 函数别名（新名 → 原名）
     alias_map: HashMap<String, String>,
+    /// 结构体定义：名称 → 字段名（构造时按顺序生成 dict 实例）
+    structs: HashMap<String, Vec<String>>,
 }
 
 /// load 加载的 C ABI 库函数签名约定：全 int64 参数（不足补 0，x64 ABI 安全）。
@@ -236,8 +238,10 @@ pub fn run(program: &Program, file: &str, src: &str, debug: bool) -> Result<(), 
         lazy_libs: HashMap::new(),
         ffi_sigs: HashMap::new(),
         alias_map: HashMap::new(),
+        structs: HashMap::new(),
     };
     ip.collect_fns(&program.stmts)?;
+    ip.collect_structs(&program.stmts);
     let mut env = Env::new();
     ip.exec_stmts(&mut env, &program.stmts)?;
     Ok(())
@@ -272,6 +276,31 @@ impl Interp {
             }
         }
         Ok(())
+    }
+
+    /// 收集所有结构体定义（含嵌套），扁平化注册；解释执行时 StructDef 语句为 no-op。
+    fn collect_structs(&mut self, stmts: &[Stmt]) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::StructDef { name, fields, .. } => {
+                    self.structs.insert(name.clone(), fields.iter().map(|(f, _)| f.clone()).collect());
+                }
+                Stmt::Block { stmts, .. } => self.collect_structs(stmts),
+                Stmt::If { then_branch, else_branch, .. } => {
+                    self.collect_structs(then_branch);
+                    if let Some(eb) = else_branch {
+                        self.collect_structs(eb);
+                    }
+                }
+                Stmt::While { body, .. } => self.collect_structs(body),
+                Stmt::ForIn { body, .. } => self.collect_structs(body),
+                Stmt::Try { body, handler, .. } => {
+                    self.collect_structs(body);
+                    self.collect_structs(handler);
+                }
+                _ => {}
+            }
+        }
     }
 
     fn runtime_err(&self, code: &'static str, msg: impl Into<String>, span: Span, help: Option<impl Into<String>>) -> ZError {
@@ -439,6 +468,7 @@ impl Interp {
                 self.alias_map.insert(new_name.clone(), original.clone());
                 Ok(Flow::Normal)
             }
+            Stmt::StructDef { .. } => Ok(Flow::Normal), // 已扁平化注册
             Stmt::Go { callee, args, span } => self.exec_go(env, callee, args, *span),
             Stmt::DebugPrint { expr, span: _ } => {
                 if self.debug {
@@ -533,6 +563,7 @@ impl Interp {
         let fns = self.fns.clone();
         let alias_map = self.alias_map.clone();
         let lazy_libs = self.lazy_libs.clone();
+        let structs = self.structs.clone();
         let file = self.file.clone();
         let src = self.src.clone();
         let callee = callee.to_string();
@@ -550,6 +581,7 @@ impl Interp {
                 lazy_libs,
                 ffi_sigs: HashMap::new(),
                 alias_map,
+                structs,
             };
             if let Err(err) = t.call_fn(&callee, arg_vals, span) {
                 eprintln!("{}", err);
@@ -707,6 +739,8 @@ impl Interp {
             return Ok(Flow::Normal);
         }
         self.load_library(&lib_name, path, span)?;
+        // 同步到插件注册表（plugin.list / plugin.has 可见）
+        crate::pluginmod::register(&lib_name, path);
         Ok(Flow::Normal)
     }
 
@@ -731,12 +765,15 @@ impl Interp {
         if !self.libs.contains_key(lib_name) {
             if let Some(path) = self.lazy_libs.get(lib_name).cloned() {
                 self.load_library(lib_name, &path, span)?;
+            } else if let Some(path) = crate::pluginmod::lookup(lib_name) {
+                // 运行期 plugin.load 注册的插件：调用时加载
+                self.load_library(lib_name, &path, span)?;
             } else {
                 return Err(self.runtime_err(
                     codes::NOT_FOUND,
                     format!("library `{}` is not loaded", lib_name),
                     span,
-                    Some(format!("add `load \"path/to/lib\" as {};` before calling", lib_name)),
+                    Some(format!("add `load \"path/to/lib\" as {};` or `plugin.load(path, \"{}\")` before calling", lib_name, lib_name)),
                 ));
             }
         }
@@ -979,6 +1016,21 @@ impl Interp {
                 Flow::Return(v) => Ok(v),
                 Flow::Normal => Ok(Value::Null),
             }
+        } else if let Some(fields) = self.structs.get(callee).cloned() {
+            // 结构体构造：按字段顺序生成 dict 实例
+            if fields.len() != args.len() {
+                return Err(self.runtime_err(
+                    codes::ARG_COUNT,
+                    format!("struct `{}` expects {} fields, got {}", callee, fields.len(), args.len()),
+                    span,
+                    Some(format!(
+                        "construct with `{}({})`",
+                        callee,
+                        fields.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                    )),
+                ));
+            }
+            Ok(Value::Dict(fields.into_iter().zip(args).collect()))
         } else if builtins::is_builtin(callee) {
             // 内置函数优先（含 time.now / random.int / sys.* 等点号内置）
             builtins::call(callee, args, span, &self.file, &self.src)
@@ -1038,6 +1090,19 @@ impl Interp {
             Expr::Field { obj, field, span } => {
                 let v = self.eval_expr(env, obj)?;
                 match v {
+                    Value::Dict(entries) => {
+                        // struct 实例 / dict 字段访问：按键查找
+                        match entries.iter().find(|(k, _)| k == field) {
+                            Some((_, val)) => Ok(val.clone()),
+                            None => Err(self.runtime_err(
+                                codes::UNDEFINED,
+                                format!("unknown field `{}` (dict/struct has {})", field,
+                                    entries.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")),
+                                *span,
+                                Some("check the field name, or the struct definition"),
+                            )),
+                        }
+                    }
                     Value::Error(e) => match field.as_str() {
                         "code" => Ok(Value::Str(e.code.to_string())),
                         "message" => Ok(Value::Str(e.message.clone())),
@@ -1089,6 +1154,27 @@ impl Interp {
                 }
             }
             Expr::Binary { op, lhs, rhs, span } => self.eval_binary(env, *op, lhs, rhs, *span),
+            Expr::Match { value, arms, span } => {
+                let v = self.eval_expr(env, value)?;
+                for (pat, body) in arms {
+                    let matched = match pat {
+                        None => true, // `_` 通配符
+                        Some(p) => {
+                            let pv = self.eval_expr(env, p)?;
+                            self.values_eq(&v, &pv, *span)?
+                        }
+                    };
+                    if matched {
+                        return self.eval_expr(env, body);
+                    }
+                }
+                Err(self.runtime_err(
+                    codes::SYNTAX,
+                    "no match arm matched the value",
+                    *span,
+                    Some("add a `_` wildcard arm as the fallback"),
+                ))
+            }
             Expr::Call { callee, args, span } => {
                 let mut arg_vals = Vec::new();
                 for a in args {

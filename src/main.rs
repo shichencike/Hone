@@ -2,6 +2,7 @@
 // 命令：hone <script.hn>（默认）、hone run、hone debug、--help、--version
 
 mod ast;
+mod archmod;
 mod builtins;
 mod bundle;
 mod checker;
@@ -13,9 +14,10 @@ mod interp;
 mod lexer;
 mod lsp;
 mod parser;
+mod pluginmod;
+mod ptrmod;
 mod srvmod;
 mod sysmod;
-mod upgrade;
 
 use std::collections::HashMap;
 use std::process::ExitCode;
@@ -91,7 +93,7 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
             builtins::init_args(&rest[1..]);
             match opts.restart {
                 Some(p) => run_with_restart(path, &p),
-                None => run_file(path, false),
+                None => run_file_or_pkg(path, false),
             }
         }
         "debug" => {
@@ -108,10 +110,11 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
             run_file(path, true)
         }
         "fmt" => cmd_fmt(&args[1..]),
+        "test" => cmd_test(&args[1..]),
         "bind" => cmd_bind(&args[1..]),
         "build" => cmd_build(&args[1..]),
         "get" => cmd_get(&args[1..]),
-        "upgrade" => upgrade::cmd_upgrade(&args[1..]),
+        "self-update" => cmd_self_update(&args[1..]),
         "lsp" => lsp::run_lsp(),
         "poop" => cmd_poop(&args[1..]),
         "explain" => {
@@ -137,9 +140,9 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
                 )),
             }
         }
-        other if other.ends_with(".hn") => {
+        other if other.ends_with(".hn") || other.ends_with(".hzp") => {
             builtins::init_args(&args[1..]);
-            run_file(other, false)
+            run_file_or_pkg(other, false)
         }
         other => Err(ZError::plain(
             codes::SYNTAX,
@@ -158,9 +161,32 @@ fn run_file(path: &str, debug: bool) -> Result<(), ZError> {
             Some("check the path"),
         )
     })?;
-    let program = parser::Parser::parse(path, &src)?;
-    checker::Checker::check(&program, path, &src)?;
-    interp::run(&program, path, &src, debug)?;
+    run_script(path, &src, debug)
+}
+
+/// 执行脚本或仅脚本包（.hzp）：先尝试解包，不是包则按普通 .hn 执行。
+fn run_file_or_pkg(path: &str, debug: bool) -> Result<(), ZError> {
+    let data = std::fs::read(path).map_err(|e| {
+        ZError::plain(
+            codes::FILE_NOT_FOUND,
+            format!("cannot read `{}`: {}", path, e),
+            Some("check the path"),
+        )
+    })?;
+    if let Some((name, script)) = bundle::parse_script_pkg(&data) {
+        // 包内脚本名作为展示名；load/import 相对路径仍以包文件所在目录为基准
+        run_script(&name, &script, debug)
+    } else {
+        let src = String::from_utf8_lossy(&data).into_owned();
+        run_script(path, &src, debug)
+    }
+}
+
+/// 对已读取的源码执行完整流程：解析 → 类型检查 → 解释执行。
+fn run_script(path: &str, src: &str, debug: bool) -> Result<(), ZError> {
+    let program = parser::Parser::parse(path, src)?;
+    checker::Checker::check(&program, path, src)?;
+    interp::run(&program, path, src, debug)?;
     Ok(())
 }
 
@@ -329,9 +355,10 @@ fn print_help() {
     println!("  hone fmt [-w] <file.hn>  代码格式化（统一 Tab 缩进、运算符空格、大括号位置；-w 覆盖写）");
     println!("  hone build --dll <file.hn> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
     println!("  hone build --exe <file.hn> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
+    println!("  hone build --script <file.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）");
     println!("  hone get <module> <url>  下载模块依赖并缓存到 ~/.hone/cache/");
     println!("  hone get <script.hn>     预下载脚本中所有 import 声明的模块");
-    println!("  hone upgrade [-w] <file.hn> 按映射表自动迁移旧版本语法（-w 覆盖写）");
+    println!("  hone self-update [url]   从 URL 下载最新 hone 二进制并替换当前程序（需管理员/写权限）");
     println!("  hone lsp                 启动语言服务器（补全/诊断，LSP over stdio）");
     println!("  hone --help              显示帮助");
     println!("  hone --version           显示版本");
@@ -405,12 +432,92 @@ fn cmd_build(args: &[String]) -> Result<(), ZError> {
             cmd_build_dll(path)
         }
         Some("--exe") => cmd_build_exe(&args[1..]),
+        Some("--script") => cmd_build_script(&args[1..]),
         _ => Err(ZError::plain(
             codes::SYNTAX,
-            "unknown build options: `hone build --dll <script.hn>` or `hone build --exe <script.hn>`",
-            Some("`--dll` compiles to a shared library; `--exe` bundles the script with the interpreter"),
+            "unknown build options: `hone build --dll <script.hn>`, `hone build --exe <script.hn>` or `hone build --script <script.hn>`",
+            Some("`--dll` compiles to a shared library; `--exe` bundles the script with the interpreter; `--script` packs the script alone"),
         )),
     }
+}
+
+/// hone build --script <script.hn> [-o <out>]
+/// 仅脚本压缩包：不内嵌解释器，体积小，可配合任意 hone 运行时执行（hone run <pkg>）。
+fn cmd_build_script(args: &[String]) -> Result<(), ZError> {
+    let mut out: Option<String> = None;
+    let mut path: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-o" => {
+                i += 1;
+                out = args.get(i).cloned();
+            }
+            s if s.starts_with("--out=") => out = Some(s["--out=".len()..].to_string()),
+            s if s.starts_with('-') => {
+                return Err(ZError::plain(
+                    codes::SYNTAX,
+                    format!("unknown build option `{}`", s),
+                    Some("options: `-o <out>`"),
+                ));
+            }
+            s => {
+                if path.is_none() {
+                    path = Some(s.to_string());
+                } else {
+                    return Err(ZError::plain(
+                        codes::SYNTAX,
+                        "too many arguments",
+                        Some("usage: `hone build --script <script.hn> [-o <out>]`"),
+                    ));
+                }
+            }
+        }
+        i += 1;
+    }
+    let path = path.ok_or_else(|| {
+        ZError::plain(
+            codes::SYNTAX,
+            "missing script path: `hone build --script <script.hn>`",
+            Some("run `hone --help` for usage"),
+        )
+    })?;
+    let script = std::fs::read_to_string(&path).map_err(|e| {
+        ZError::plain(
+            codes::FILE_NOT_FOUND,
+            format!("cannot read `{}`: {}", path, e),
+            Some("check the path"),
+        )
+    })?;
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "script.hn".to_string());
+    let pkg = bundle::build_script_pkg(&script, &name);
+    let out = match out {
+        Some(o) => o,
+        None => {
+            let stem = std::path::Path::new(&path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "app".to_string());
+            format!("{}.hzp", stem)
+        }
+    };
+    std::fs::write(&out, &pkg).map_err(|e| {
+        ZError::plain(
+            codes::FILE_PERMISSION,
+            format!("cannot write `{}`: {}", out, e),
+            Some("check the directory permissions"),
+        )
+    })?;
+    println!(
+        "生成 {} 完成（仅脚本包, {:.1} KB；运行: hone run {}）",
+        out,
+        pkg.len() as f64 / 1024.0,
+        out
+    );
+    Ok(())
 }
 
 /// hone build --exe <script.hn> [-o <out>] [--icon <ico>] [--version]
@@ -754,6 +861,73 @@ fn fetch_and_cache(name: &str, url: &str) -> Result<(), ZError> {
     Ok(())
 }
 
+/// hone self-update [url]：从 URL 下载最新 hone 二进制并替换当前程序。
+/// 无参数时尝试从环境变量 HONE_UPDATE_URL 读取发布地址。
+fn cmd_self_update(args: &[String]) -> Result<(), ZError> {
+    let url = match args.first() {
+        Some(u) => u.clone(),
+        None => match std::env::var("HONE_UPDATE_URL") {
+            Ok(u) => u,
+            Err(_) => {
+                return Err(ZError::plain(
+                    codes::SYNTAX,
+                    "missing update URL: `hone self-update <url>`",
+                    Some("pass the URL of the latest hone binary, or set HONE_UPDATE_URL"),
+                ));
+            }
+        },
+    };
+    println!("hone self-update: 当前版本 v{}", VERSION);
+    print!("下载 `{}` ...", url);
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let span = lexer::Span { line: 1, col: 1, len: 1 };
+    let bytes = builtins::http_get_bytes(&url, span, "self-update", "")?;
+    println!();
+
+    // 基本可执行文件校验：非空 + 平台魔数（PE MZ / ELF）
+    let ok_magic = if cfg!(windows) {
+        bytes.len() > 0x40 && bytes.starts_with(b"MZ")
+    } else {
+        bytes.starts_with(b"\x7fELF")
+    };
+    if !ok_magic {
+        return Err(ZError::plain(
+            codes::NETWORK,
+            format!("downloaded file is not a valid hone executable ({} bytes)", bytes.len()),
+            Some("check the URL points to a hone binary for this platform"),
+        ));
+    }
+
+    // 替换当前可执行文件：先写临时文件再替换（Windows 下当前进程占用 exe，直接覆盖会失败）
+    let exe = std::env::current_exe().map_err(|e| {
+        ZError::plain(codes::SYSCALL, format!("cannot locate the current executable: {}", e), None::<&str>)
+    })?;
+    let tmp = exe.with_extension("new");
+    std::fs::write(&tmp, &bytes).map_err(|e| {
+        ZError::plain(
+            codes::FILE_PERMISSION,
+            format!("cannot write staging file `{}`: {}", tmp.display(), e),
+            Some("check the directory permissions (try running as administrator)"),
+        )
+    })?;
+    match std::fs::rename(&tmp, &exe) {
+        Ok(()) => {
+            println!("已更新到 v{}（{} 字节），重启后生效。", VERSION, bytes.len());
+            Ok(())
+        }
+        Err(e) => {
+            // Windows 下正在运行的 exe 无法被覆盖：保留新文件并提示手动替换
+            eprintln!("无法直接替换当前程序（{}）。", e);
+            eprintln!("新版本已保存到: {}", tmp.display());
+            Err(ZError::plain(
+                codes::FILE_PERMISSION,
+                format!("cannot replace `{}`: the executable is in use", exe.display()),
+                Some(format!("close this program and rename `{}` over `{}`", tmp.display(), exe.display())),
+            ))
+        }
+    }
+}
+
 /// hone fmt [-w] <file.hn>...：格式化到 stdout，或 -w 覆盖写入源文件。
 fn cmd_fmt(args: &[String]) -> Result<(), ZError> {
     let mut overwrite = false;
@@ -783,6 +957,58 @@ fn cmd_fmt(args: &[String]) -> Result<(), ZError> {
             })?;
         } else {
             print!("{}", formatted);
+        }
+    }
+    Ok(())
+}
+
+/// hone test [目录]：递归扫描 `*.test.hn` 测试文件，逐个运行并汇总结果。
+/// 测试文件用 assert(条件[, 消息]) 断言；任何文件解析/检查/运行失败均记为失败。
+fn cmd_test(args: &[String]) -> Result<(), ZError> {
+    let root = args.first().cloned().unwrap_or_else(|| ".".to_string());
+    let mut files = Vec::new();
+    collect_test_files(&root, &mut files)?;
+    if files.is_empty() {
+        println!("no *.test.hn files found under `{}`", root);
+        return Ok(());
+    }
+    let mut passed = 0usize;
+    let mut failed = 0usize;
+    for f in &files {
+        match run_file(f, false) {
+            Ok(()) => {
+                println!("PASS  {}", f);
+                passed += 1;
+            }
+            Err(e) => {
+                println!("FAIL  {} -> {}", f, e);
+                failed += 1;
+            }
+        }
+    }
+    println!();
+    println!("{} passed, {} failed ({} total)", passed, failed, passed + failed);
+    if failed > 0 {
+        return Err(ZError::plain(
+            codes::ASSERT,
+            format!("{} of {} test file(s) failed", failed, files.len()),
+            None::<&str>,
+        ));
+    }
+    Ok(())
+}
+
+/// 递归收集目录下所有以 `.test.hn` 结尾的文件。
+fn collect_test_files(dir: &str, out: &mut Vec<String>) -> Result<(), ZError> {
+    let entries = std::fs::read_dir(dir).map_err(|e| {
+        ZError::plain(codes::NOT_FOUND, format!("cannot read directory `{}`: {}", dir, e), Some("check the path"))
+    })?;
+    for entry in entries {
+        let path = entry.map_err(|e| ZError::plain(codes::SYSCALL, format!("cannot read dir entry: {}", e), None::<&str>))?.path();
+        if path.is_dir() {
+            collect_test_files(&path.to_string_lossy(), out)?;
+        } else if path.to_string_lossy().ends_with(".test.hn") {
+            out.push(path.to_string_lossy().into_owned());
         }
     }
     Ok(())

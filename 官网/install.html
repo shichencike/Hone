@@ -4,19 +4,38 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 安装教程</title>
+<meta name="description" content="Hone 安装教程：一行命令安装（Linux/Termux/Windows），手动下载 GitHub Releases，或从源码构建。零依赖、零配置。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
 </head>
 <body>
 <header>
-  <span class="logo">⚡ Hone</span>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
   <nav>
     <a href="index.html">首页</a>
     <a href="docs.html">文档</a>
     <a href="examples.html">示例</a>
-    <a href="install.html" class="active">安装</a>
     <a href="stdlib.html">标准库</a>
+    <a href="install.html" class="active">安装</a>
+    <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.4.0</span>
+  <span class="ver">v0.5.0</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
 <main>
@@ -40,7 +59,7 @@
     <h3>Windows（PowerShell 5.1+）</h3>
 <pre><code>irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex</code></pre>
     <p>安装到 <code class="inline">%LOCALAPPDATA%\hone\bin</code> 并自动加入用户 PATH（新开的终端生效）。</p>
-    <p>指定版本：<code class="inline">HONE_VERSION=v0.4.0 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code>（Windows 同理，先 <code class="inline">$env:HONE_VERSION = "v0.4.0"</code>）。</p>
+    <p>指定版本：<code class="inline">HONE_VERSION=v0.5.0 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code>（Windows 同理，先 <code class="inline">$env:HONE_VERSION = "v0.5.0"</code>）。</p>
   </section>
 
   <section id="download">
@@ -62,7 +81,7 @@
 cd Hone
 cargo build --release
 <span class="c">// 产物: target/release/hone（Windows 为 target/release/hone.exe）</span>
-./target/release/hone --version    <span class="c">// hone 0.3.0</span></code></pre>
+./target/release/hone --version    <span class="c">// hone 0.4.0</span></code></pre>
   </section>
 
   <section id="verify">
@@ -77,7 +96,19 @@ hone hello.hn    <span class="c">// Hello, Hone!</span></code></pre>
 </main>
 
 <footer>
-  Hone v0.4.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

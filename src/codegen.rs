@@ -397,6 +397,12 @@ impl Codegen {
                 expr_span(e),
                 Some("these features work in interpreted mode only"),
             )),
+            Expr::Match { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "match expressions are not supported in DLL builds",
+                *span,
+                Some("match works in interpreted mode only"),
+            )),
             Expr::Unary { op, expr, span } => {
                 let t = self.infer_expr_type(expr, vt, stack)?;
                 match op {
@@ -794,6 +800,12 @@ impl Codegen {
                 expr_span(e),
                 Some("these features work in interpreted mode only"),
             )),
+            Expr::Match { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "match expressions are not supported in DLL builds",
+                *span,
+                Some("match works in interpreted mode only"),
+            )),
             Expr::Unary { op, expr, span } => {
                 let (t, s) = self.gen_expr(expr, ctx)?;
                 match op {
@@ -955,6 +967,7 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Go { span, .. }
         | Stmt::Try { span, .. }
         | Stmt::Throw { span, .. }
+        | Stmt::StructDef { span, .. }
         | Stmt::DebugPrint { span, .. } => *span,
     }
 }

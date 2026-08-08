@@ -142,6 +142,8 @@ pub fn is_builtin(name: &str) -> bool {
         "print"
             | "len"
             | "append"
+            | "clone"
+            | "copy"
             | "contains"
             | "index_of"
             | "keys"
@@ -155,6 +157,7 @@ pub fn is_builtin(name: &str) -> bool {
             | "is_dict"
             | "is_null"
             | "type_of"
+            | "assert"
             | "to_str"
             | "to_int"
             | "to_float"
@@ -188,6 +191,17 @@ pub fn is_builtin(name: &str) -> bool {
             | "server.listen"
             | "server.poll"
             | "server.respond"
+            | "ptr.alloc"
+            | "ptr.free"
+            | "ptr.is_null"
+            | "ptr.is_valid"
+            | "ptr.size"
+            | "ptr.read_int"
+            | "ptr.read_float"
+            | "ptr.read_byte"
+            | "ptr.write_int"
+            | "ptr.write_float"
+            | "ptr.write_byte"
             | "log.info"
             | "log.warn"
             | "log.error"
@@ -204,7 +218,23 @@ pub fn is_builtin(name: &str) -> bool {
             | "regex.match"
             | "regex.replace"
             | "crypto.md5"
+            | "crypto.sha1"
             | "crypto.sha256"
+            | "crypto.hmac_sha256"
+            | "crypto.base64_encode"
+            | "crypto.base64_decode"
+            | "archive.zip_list"
+            | "archive.zip_read"
+            | "archive.zip_extract"
+            | "archive.zip_create"
+            | "archive.tgz_list"
+            | "archive.tgz_read"
+            | "archive.tgz_extract"
+            | "archive.tgz_create"
+            | "plugin.load"
+            | "plugin.has"
+            | "plugin.list"
+            | "plugin.unload"
             | "uuid.new"
     )
 }
@@ -254,6 +284,12 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                     Some("use `l = append(l, x)` to add `x` to the tail of list `l`"),
                 )),
             }
+        }
+        "clone" | "copy" => {
+            // 深度拷贝：递归复制集合（Value 的 Clone 对 List/Dict 即深拷贝），
+            // 后续对副本的 append/修改不影响原值。
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            Ok(v.clone())
         }
         "contains" => {
             let list = args.get(0).ok_or_else(|| arg_err(name, 2, 0, span, file, src))?;
@@ -352,6 +388,31 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "type_of" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             Ok(Value::Str(v.type_name().to_string()))
+        }
+        "assert" => {
+            // assert(条件[, 消息])：条件为 false 时抛 H700（测试框架用）
+            let cond = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            let ok = match cond {
+                Value::Bool(b) => *b,
+                other => {
+                    return Err(err(
+                        codes::TYPE_MISMATCH,
+                        format!("`assert` expects a `bool` condition, got `{}`", other.type_name()),
+                        span,
+                        file,
+                        src,
+                        Some("pass a boolean expression, e.g. `assert(x == 1)`"),
+                    ))
+                }
+            };
+            if !ok {
+                let msg = match args.get(1) {
+                    Some(Value::Str(s)) => s.clone(),
+                    _ => "assertion failed".to_string(),
+                };
+                return Err(err(codes::ASSERT, msg, span, file, src, None::<&str>));
+            }
+            Ok(Value::Null)
         }
         "is_int" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
@@ -660,6 +721,21 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "server.listen" | "server.poll" | "server.respond" => {
             crate::srvmod::call(name, &args, span, file, src)
         }
+        // 指针类（ptrmod 模块实现，分配表跟踪防野指针）
+        "ptr.alloc" | "ptr.free" | "ptr.is_null" | "ptr.is_valid" | "ptr.size"
+        | "ptr.read_int" | "ptr.read_float" | "ptr.read_byte"
+        | "ptr.write_int" | "ptr.write_float" | "ptr.write_byte" => {
+            crate::ptrmod::call(name, &args, span, file, src)
+        }
+        // 压缩与归档（archmod 模块实现，zip/tar.gz 读写）
+        "archive.zip_list" | "archive.zip_read" | "archive.zip_extract" | "archive.zip_create"
+        | "archive.tgz_list" | "archive.tgz_read" | "archive.tgz_extract" | "archive.tgz_create" => {
+            crate::archmod::call(name, &args, span, file, src)
+        }
+        // 插件系统（pluginmod 模块实现，运行期动态注册）
+        "plugin.load" | "plugin.has" | "plugin.list" | "plugin.unload" => {
+            crate::pluginmod::call(name, &args, span, file, src)
+        }
         // ---------- log ----------
         "log.info" => {
             let msg = as_str(&args[0], 0, name, span, file, src)?;
@@ -712,8 +788,69 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         // ---------- args ----------
         "args.get" => {
             let key = as_str(&args[0], 0, name, span, file, src)?;
-            let map = CLI_ARGS.lock().unwrap();
-            Ok(map.get(key).cloned().map(Value::Str).unwrap_or(Value::Null))
+            let raw = CLI_ARGS.lock().unwrap().get(key).cloned();
+            match raw {
+                Some(v) => {
+                    // 带类型参数时按期望类型转换；无类型参数时保持字符串
+                    if args.len() >= 2 {
+                        let ty = as_str(&args[1], 1, name, span, file, src)?;
+                        let t = v.trim();
+                        match ty {
+                            "int" => t.parse::<i64>().map(Value::Int).map_err(|_| {
+                                err(
+                                    codes::STR_TO_INT,
+                                    format!("`args.get(\"{}\", int)` cannot parse `{}` as an integer", key, v),
+                                    span,
+                                    file,
+                                    src,
+                                    Some("pass a valid integer on the command line"),
+                                )
+                            }),
+                            "float" => t.parse::<f64>().map(Value::Float).map_err(|_| {
+                                err(
+                                    codes::STR_TO_FLOAT,
+                                    format!("`args.get(\"{}\", float)` cannot parse `{}` as a float", key, v),
+                                    span,
+                                    file,
+                                    src,
+                                    Some("pass a valid number on the command line"),
+                                )
+                            }),
+                            "bool" => match t {
+                                "true" | "1" => Ok(Value::Bool(true)),
+                                "false" | "0" => Ok(Value::Bool(false)),
+                                _ => Err(err(
+                                    codes::TYPE_MISMATCH,
+                                    format!("`args.get(\"{}\", bool)` cannot parse `{}` as a boolean", key, v),
+                                    span,
+                                    file,
+                                    src,
+                                    Some("use `true`/`false` or `1`/`0`"),
+                                )),
+                            },
+                            "str" => Ok(Value::Str(v)),
+                            other => Err(err(
+                                codes::TYPE_MISMATCH,
+                                format!("unknown type `{}` for `args.get`", other),
+                                span,
+                                file,
+                                src,
+                                Some("expected one of `int`, `float`, `bool`, `str`"),
+                            )),
+                        }
+                    } else {
+                        Ok(Value::Str(v))
+                    }
+                }
+                // 键不存在：有默认值参数则返回默认值，否则返回 null
+                None => {
+                    if args.len() >= 3 {
+                        Ok(args[2].clone())
+                    } else {
+                        Ok(Value::Null)
+                    }
+                }
+            }
         }
         "args.has" => {
             let key = as_str(&args[0], 0, name, span, file, src)?;
@@ -785,12 +922,48 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let hash = md5::Md5::digest(s.as_bytes());
             Ok(Value::Str(format!("{:x}", hash)))
         }
+        "crypto.sha1" => {
+            let s = as_str(&args[0], 0, name, span, file, src)?;
+            let hash = sha1::Sha1::digest(s.as_bytes());
+            Ok(Value::Str(format!("{:x}", hash)))
+        }
         "crypto.sha256" => {
             let s = as_str(&args[0], 0, name, span, file, src)?;
             let mut hasher = sha2::Sha256::new();
             hasher.update(s.as_bytes());
             let hash = hasher.finalize();
             Ok(Value::Str(format!("{:x}", hash)))
+        }
+        "crypto.hmac_sha256" => {
+            // HMAC-SHA256(密钥, 消息)：密钥与消息均为字符串
+            let key = as_str(&args[0], 0, name, span, file, src)?;
+            let msg = as_str(&args[1], 1, name, span, file, src)?;
+            use hmac::{Hmac, Mac};
+            let mut mac = Hmac::<sha2::Sha256>::new_from_slice(key.as_bytes()).map_err(|_| {
+                err(codes::TYPE_MISMATCH, "invalid HMAC key", span, file, src, None::<&str>)
+            })?;
+            mac.update(msg.as_bytes());
+            Ok(Value::Str(format!("{:x}", mac.finalize().into_bytes())))
+        }
+        "crypto.base64_encode" => {
+            let s = as_str(&args[0], 0, name, span, file, src)?;
+            use base64::Engine;
+            Ok(Value::Str(base64::engine::general_purpose::STANDARD.encode(s.as_bytes())))
+        }
+        "crypto.base64_decode" => {
+            let s = as_str(&args[0], 0, name, span, file, src)?;
+            use base64::Engine;
+            match base64::engine::general_purpose::STANDARD.decode(s.trim()) {
+                Ok(bytes) => Ok(Value::Str(String::from_utf8_lossy(&bytes).into_owned())),
+                Err(e) => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("invalid base64 input: {}", e),
+                    span,
+                    file,
+                    src,
+                    Some("pass a valid base64 string, e.g. `aGVsbG8=`"),
+                )),
+            }
         }
         // ---------- uuid ----------
         "uuid.new" => {
@@ -1083,15 +1256,15 @@ static TLS: Lazy<Result<std::sync::Arc<rustls::ClientConfig>, String>> = Lazy::n
     Ok(std::sync::Arc::new(config))
 });
 
-/// 发送 HTTP 请求（interp 的 import 模块下载复用）。
-pub(crate) fn http_request(
+/// 发送 HTTP 请求并返回 (响应头文本, 原始响应体字节)。非 2xx 状态报错。
+fn http_fetch_raw(
     url: &str,
     method: &str,
     body: Option<&str>,
     span: Span,
     file: &str,
     src: &str,
-) -> Result<String, ZError> {
+) -> Result<(String, Vec<u8>), ZError> {
     // 按错误类型细分网络错误：超时 / 连接拒绝 / DNS 失败 / 其他
     let net_err = |act: &str, e: std::io::Error| {
         let (code, hint): (&'static str, &'static str) = match e.kind() {
@@ -1213,11 +1386,11 @@ pub(crate) fn http_request(
 
     let mut buf = Vec::new();
     stream.read_to_end(&mut buf).map_err(|e| net_err("read", e))?;
-    let text = String::from_utf8_lossy(&buf).into_owned();
 
-    let (head, mut body_text) = match text.split_once("\r\n\r\n") {
-        Some((h, b)) => (h.to_string(), b.to_string()),
-        None => (text.clone(), String::new()),
+    // 拆分响应头与响应体（原始字节，供文本与二进制两种消费）
+    let (head, body) = match buf.windows(4).position(|w| w == b"\r\n\r\n") {
+        Some(i) => (String::from_utf8_lossy(&buf[..i]).into_owned(), buf[i + 4..].to_vec()),
+        None => (String::from_utf8_lossy(&buf).into_owned(), Vec::new()),
     };
 
     // 状态行检查
@@ -1237,12 +1410,63 @@ pub(crate) fn http_request(
             Some("the server returned an error status"),
         ));
     }
+    Ok((head, body))
+}
 
+/// 发送 HTTP 请求（interp 的 import 模块下载复用），返回响应体文本。
+pub(crate) fn http_request(
+    url: &str,
+    method: &str,
+    body: Option<&str>,
+    span: Span,
+    file: &str,
+    src: &str,
+) -> Result<String, ZError> {
+    let (head, body_bytes) = http_fetch_raw(url, method, body, span, file, src)?;
+    let mut body_text = String::from_utf8_lossy(&body_bytes).into_owned();
     // 处理 chunked 传输编码
     if head.to_lowercase().contains("transfer-encoding: chunked") {
         body_text = decode_chunked(&body_text);
     }
     Ok(body_text)
+}
+
+/// 原始字节下载（self-update 等二进制下载用），返回响应体字节。
+pub(crate) fn http_get_bytes(url: &str, span: Span, file: &str, src: &str) -> Result<Vec<u8>, ZError> {
+    let (head, mut body) = http_fetch_raw(url, "GET", None, span, file, src)?;
+    if head.to_lowercase().contains("transfer-encoding: chunked") {
+        body = decode_chunked_bytes(&body);
+    }
+    Ok(body)
+}
+
+/// 字节版 chunked 解码（二进制响应体用）。
+fn decode_chunked_bytes(mut s: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    loop {
+        let line_end = match s.windows(2).position(|w| w == b"\r\n") {
+            Some(i) => i,
+            None => break,
+        };
+        let size = match std::str::from_utf8(&s[..line_end])
+            .ok()
+            .and_then(|t| usize::from_str_radix(t.trim(), 16).ok())
+        {
+            Some(v) => v,
+            None => break,
+        };
+        s = &s[line_end + 2..];
+        if size == 0 {
+            break;
+        }
+        if s.len() < size + 2 {
+            out.extend_from_slice(&s[..s.len().min(size)]);
+            break;
+        }
+        out.extend_from_slice(&s[..size]);
+        s = &s[size + 2..];
+    }
+    out
 }
 
 fn decode_chunked(mut s: &str) -> String {

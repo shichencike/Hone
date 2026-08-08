@@ -142,6 +142,7 @@ impl Parser {
             Tok::Alias => self.parse_alias(),
             Tok::At => self.parse_export(),
             Tok::Tmp => self.parse_tmp_fn(),
+            Tok::Struct => self.parse_struct_def(),
             other => Err(self.err_here(
                 codes::SYNTAX,
                 format!("expected a statement, found {}", other.describe()),
@@ -768,6 +769,99 @@ impl Parser {
         Ok(Stmt::Alias { original, new_name, span })
     }
 
+    /// struct 名称 { 字段: 类型, ... };  定义结构体（数据形态声明）。
+    fn parse_struct_def(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // struct
+        let (tok, _) = self.next();
+        let name = match tok {
+            Tok::Ident(s) => s,
+            other => {
+                return Err(self.err_here(
+                    codes::SYNTAX,
+                    format!("expected a struct name after `struct`, found {}", other.describe()),
+                    Some("`struct` form: `struct Name { field: type, ... };`"),
+                ))
+            }
+        };
+        self.expect(&Tok::LBrace, "`{`")?;
+        let mut fields = Vec::new();
+        while !self.at(&Tok::RBrace) {
+            let (ftok, fspan) = self.next();
+            let fname = match ftok {
+                Tok::Ident(s) => s,
+                other => {
+                    return Err(self.err_at(
+                        &fspan,
+                        codes::SYNTAX,
+                        format!("expected a field name, found {}", other.describe()),
+                        Some("fields look like `name: type`"),
+                    ))
+                }
+            };
+            self.expect(&Tok::Colon, "`:`")?;
+            let ty = self.parse_type()?;
+            fields.push((fname, ty));
+            if self.at(&Tok::Comma) {
+                self.next();
+            } else {
+                break;
+            }
+        }
+        self.expect(&Tok::RBrace, "`}`")?;
+        self.expect_semi()?;
+        Ok(Stmt::StructDef { name, fields, span })
+    }
+
+    /// match 表达式 { 模式 => 分支体, ..., _ => 默认值 }  模式匹配（模式为字面量或 `_`）。
+    /// 已消费 `match` 关键字；返回 Match 表达式，其值为匹配分支体的值。
+    fn parse_match(&mut self, span: Span) -> Result<Expr, ZError> {
+        let value = self.parse_expr()?;
+        self.expect(&Tok::LBrace, "`{`")?;
+        let mut arms = Vec::new();
+        let mut saw_wildcard = false;
+        while !self.at(&Tok::RBrace) {
+            let (ptok, pspan) = self.next();
+            let pat = match ptok {
+                Tok::IntLit(v) => Some(Expr::IntLit(v, pspan)),
+                Tok::FloatLit(v) => Some(Expr::FloatLit(v, pspan)),
+                Tok::True => Some(Expr::BoolLit(true, pspan)),
+                Tok::False => Some(Expr::BoolLit(false, pspan)),
+                Tok::StrLit(s) => Some(Expr::StrLit(s, pspan)),
+                // `_` 通配符：匹配任意值（None 标记）
+                Tok::Ident(s) if s == "_" => {
+                    if saw_wildcard {
+                        return Err(self.err_at(
+                            &pspan,
+                            codes::SYNTAX,
+                            "duplicate `_` wildcard in match",
+                            Some("`_` may only appear once, as the last arm"),
+                        ));
+                    }
+                    saw_wildcard = true;
+                    None
+                }
+                other => {
+                    return Err(self.err_at(
+                        &pspan,
+                        codes::SYNTAX,
+                        format!("unsupported match pattern, found {}", other.describe()),
+                        Some("patterns: literals (`1`, `\"a\"`, `true`) or `_` wildcard"),
+                    ))
+                }
+            };
+            self.expect(&Tok::FatArrow, "`=>`")?;
+            let body = self.parse_expr()?;
+            arms.push((pat, body));
+            if self.at(&Tok::Comma) {
+                self.next();
+            } else {
+                break;
+            }
+        }
+        self.expect(&Tok::RBrace, "`}`")?;
+        Ok(Expr::Match { value: Box::new(value), arms, span })
+    }
+
     fn parse_go(&mut self) -> Result<Stmt, ZError> {
         let (_, span) = self.next(); // go
         let (tok, _) = self.next();
@@ -824,7 +918,33 @@ impl Parser {
     // ---------- 表达式 ----------
 
     fn parse_expr(&mut self) -> Result<Expr, ZError> {
-        self.parse_or()
+        let mut lhs = self.parse_or()?;
+        // 管道操作符：x |> f  →  f(x)；x |> f(a, b)  →  f(x, a, b)
+        // 左侧作为第一个参数插入右侧调用，可链式：a |> f |> g  →  g(f(a))
+        while self.at(&Tok::Pipe) {
+            let (_, span) = self.next();
+            let (tok, fspan) = self.next();
+            let first = match tok {
+                Tok::Ident(s) => s,
+                other => {
+                    return Err(self.err_at(
+                        &fspan,
+                        codes::SYNTAX,
+                        format!("expected a function name after `|>`, found {}", other.describe()),
+                        Some("pipe form: `x |> f` or `x |> f(a, b)`"),
+                    ))
+                }
+            };
+            let callee = self.join_dotted(first, fspan)?;
+            let mut args = vec![lhs];
+            if self.at(&Tok::LParen) {
+                self.next();
+                args.extend(self.parse_args()?);
+                self.expect(&Tok::RParen, "`)`")?;
+            }
+            lhs = Expr::Call { callee, args, span };
+        }
+        Ok(lhs)
     }
 
     fn parse_or(&mut self) -> Result<Expr, ZError> {
@@ -981,6 +1101,11 @@ impl Parser {
             Tok::True => Ok(Expr::BoolLit(true, span)),
             Tok::False => Ok(Expr::BoolLit(false, span)),
             Tok::StrLit(s) => Ok(Expr::StrLit(s, span)),
+            // 类型关键字在表达式位置等价于类型名字符串（供 args.get 等指定期望类型）
+            Tok::TInt => Ok(Expr::StrLit("int".to_string(), span)),
+            Tok::TFloat => Ok(Expr::StrLit("float".to_string(), span)),
+            Tok::TBool => Ok(Expr::StrLit("bool".to_string(), span)),
+            Tok::TStr => Ok(Expr::StrLit("str".to_string(), span)),
             Tok::FStr(parts) => {
                 // 插值字符串：文字段保留（折叠转义大括号 {{ → {，}} → }），代码段子解析为表达式
                 let mut segs = Vec::new();
@@ -1045,6 +1170,7 @@ impl Parser {
                 self.expect(&Tok::RParen, "`)`")?;
                 Ok(inner)
             }
+            Tok::Match => self.parse_match(span),
             Tok::Ident(first) => {
                 let parts = self.join_dotted_parts(first, span)?;
                 if self.at(&Tok::LParen) {
@@ -1103,6 +1229,8 @@ impl Parser {
                 Tok::TFloat => parts.push("float".to_string()),
                 Tok::TBool => parts.push("bool".to_string()),
                 Tok::TStr => parts.push("str".to_string()),
+                // `plugin.load` 等模块成员：load 是关键字但可作为成员名
+                Tok::Load => parts.push("load".to_string()),
                 other => {
                     return Err(self.err_at(
                         &span,

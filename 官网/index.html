@@ -4,19 +4,38 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 编程语言 - 为效率而生，为乐趣而造</title>
+<meta name="description" content="Hone：轻量级、跨平台、可嵌入的脚本语言。用 Rust 实现，单文件可执行程序，静态强类型，开箱即用。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
 </head>
 <body>
 <header>
-  <span class="logo">⚡ Hone</span>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
   <nav>
     <a href="index.html" class="active">首页</a>
     <a href="docs.html">文档</a>
     <a href="examples.html">示例</a>
-    <a href="install.html">安装</a>
     <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.4.0</span>
+  <span class="ver">v0.5.0</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
 <main>
@@ -69,30 +88,50 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
       <tr><td><code>hone debug &lt;script.hn&gt;</code></td><td>断点调试（breakpoint 生效）</td></tr>
       <tr><td><code>hone fmt [-w] &lt;file.hn&gt;</code></td><td>代码格式化（Tab 缩进/运算符空格/大括号）</td></tr>
       <tr><td><code>hone build --dll &lt;file.hn&gt;</code></td><td>打包 C ABI 动态库（int/float/bool/str 类型映射）</td></tr>
+      <tr><td><code>hone build --exe &lt;file.hn&gt;</code></td><td>打包独立可执行文件（解释器+脚本自释放）</td></tr>
+      <tr><td><code>hone bind &lt;header.h&gt;</code></td><td>从 C 头文件生成 typed load 签名块（FFI 自动绑定）</td></tr>
+      <tr><td><code>hone explain &lt;code&gt;</code></td><td>查询错误码含义与修复建议</td></tr>
       <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存</td></tr>
-      <tr><td><code>hone upgrade [-w] &lt;file.hn&gt;</code></td><td>按映射表迁移旧版本语法</td></tr>
+      <tr><td><code>hone test [目录]</code></td><td>扫描并运行 *.test.hn 测试（配合 assert 断言，汇总 PASS/FAIL）</td></tr>
+      <tr><td><code>hone build --script &lt;file.hn&gt;</code></td><td>生成仅脚本压缩包 .hzp（不内嵌解释器，用 hone run 执行）</td></tr>
+      <tr><td><code>hone self-update [url]</code></td><td>下载最新 hone 二进制并替换当前程序</td></tr>
       <tr><td><code>hone lsp</code></td><td>语言服务器（补全/诊断/hover）</td></tr>
-	      <tr><td><code>hone poop &lt;file.hn&gt;</code></td><td>屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
-    </table>
-  </section>
+        <tr><td><code>hone poop &lt;file.hn&gt;</code></td><td>屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
+     </table>
+   </section>
 
   <section id="roadmap">
     <h2><span class="hash">#</span>路线图</h2>
     <ul>
       <li>✅ <strong>阶段 1</strong>：核心执行器（词法 / 解析 / AST / 解释器 / 静态类型检查）</li>
       <li>✅ <strong>阶段 2</strong>：fmt、debug、go 多线程、sys Windows API、build --dll（int/float/bool/str）</li>
-      <li>✅ <strong>阶段 3</strong>：import 远程模块、load lazy、use / alias、hone get、upgrade、lsp、可视化编辑器</li>
+      <li>✅ <strong>阶段 3</strong>：import 远程模块、load lazy、use / alias、hone get、lsp、可视化编辑器</li>
              <li>✅ <strong>阶段 4</strong>：GitHub 开源、独立官网、--dll 全类型映射、hone poop 屎山检测</li>
              <li>✅ <strong>阶段 5</strong>：内置函数扩展（log/path/args/env/db/regex/crypto）、tmp fn、debug_print、import as、try/catch/throw、--restart/--resume、build --exe、hone explain</li>
              <li>✅ <strong>阶段 6</strong>：集合类型（列表/字典）、for-in 循环、f-string 插值、类型判断、time.parse、uuid.new</li>
-             <li>🚧 <strong>阶段 7</strong>：本地 HTTP 服务器（server.listen / server.poll / server.respond）、hone_lib 图形界面库（浏览器渲染 + 双向交互）</li>
-    </ul>
+             <li>✅ <strong>阶段 7</strong>：本地 HTTP 服务器（server.listen / server.poll / server.respond）、hone_lib 图形界面库（浏览器渲染 + 双向交互）</li>
+      <li>✅ <strong>阶段 8</strong>：typed FFI 签名块（int/float/bool/str/ptr/void 精确类型映射）、头文件自动绑定（from "header.h"）、hone bind 离线生成签名</li>
+      <li>✅ <strong>阶段 9</strong>：struct 结构体、match 模式匹配、<code>|&gt;</code> 管道操作符、hone test 测试框架、build --script 仅脚本包、self-update 自动更新</li>
+      <li>✅ <strong>阶段 10</strong>：crypto 扩展（sha1/HMAC/base64）、archive 压缩归档（zip/tar.gz）、ptr 指针类（防野指针）、plugin 插件系统</li>
+     </ul>
     <p>可视化编辑器：浏览器打开 <code class="inline">editor/index.html</code>，拖拽代码块即可生成 .hn 代码。</p>
   </section>
 </main>
 
 <footer>
-  Hone v0.4.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

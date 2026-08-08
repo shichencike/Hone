@@ -4,19 +4,38 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 标准库文档</title>
+<meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui 模块，本地路径导入即可使用。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
 </head>
 <body>
 <header>
-  <span class="logo">⚡ Hone</span>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
   <nav>
     <a href="index.html">首页</a>
     <a href="docs.html">文档</a>
     <a href="examples.html">示例</a>
-    <a href="install.html">安装</a>
     <a href="stdlib.html" class="active">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.4.0</span>
+  <span class="ver">v0.5.0</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
 <main>
@@ -47,6 +66,11 @@
 
 <span class="c">// import as：以别名导入，函数名前缀整体替换</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span> <span class="k">as</span> m;   <span class="c">// m_clamp / m_gcd ...</span></code></pre>
+    <p><strong>内置模块（无需导入，开箱即用）</strong>：除上述纯 Hone 模块外，解释器内置大量模块函数，直接调用即可：
+      <code class="inline">crypto.*</code>（md5/sha1/sha256/hmac_sha256/base64）、<code class="inline">archive.*</code>（zip/tar.gz 压缩归档）、
+      <code class="inline">ptr.*</code>（指针类，分配表跟踪防野指针）、<code class="inline">plugin.*</code>（插件系统，运行期动态注册）、
+      <code class="inline">server.*</code>（本地 HTTP 服务器）、<code class="inline">args.*</code>（命令行参数，支持类型转换与默认值）、
+      <code class="inline">assert</code>（断言，配合 <code class="inline">hone test</code> 测试框架）。完整清单见 <a href="docs.html">语言手册 §8 内置函数参考</a>。</p>
   </section>
 
   <section id="math">
@@ -164,7 +188,19 @@ function searchDocs(q) {
 </script>
 
 <footer>
-  Hone v0.4.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

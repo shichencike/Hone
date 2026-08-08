@@ -4,19 +4,38 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 文档 - 语言手册</title>
+<meta name="description" content="Hone 语言手册：类 C 语法的轻量脚本语言，静态强类型、解释执行、单文件分发。从第一个程序到工具链，10 分钟上手。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
 </head>
 <body>
 <header>
-  <span class="logo">⚡ Hone</span>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
   <nav>
     <a href="index.html">首页</a>
     <a href="docs.html" class="active">文档</a>
     <a href="examples.html">示例</a>
-    <a href="install.html">安装</a>
     <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.4.0</span>
+  <span class="ver">v0.5.0</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
 <main>
@@ -83,6 +102,7 @@ x = <span class="s">"Hone"</span>;          <span class="c">// error[H001]: 期�
       <tr><td><code>float</code></td><td>64 位双精度（IEEE 754）</td><td><code>3.14, .2, 2.0</code></td></tr>
       <tr><td><code>bool</code></td><td>布尔值</td><td><code>true, false</code></td></tr>
       <tr><td><code>str</code></td><td>UTF-8 字符串</td><td><code>"hello"</code>（支持 \n \t \\ \"）</td></tr>
+      <tr><td><code>ptr</code></td><td>FFI 不透明指针句柄（void*，用于 load 动态库调用）</td><td><code>load</code> 返回值 / <code>0</code> 表示 NULL</td></tr>
       <tr><td><code>list</code></td><td>动态列表（元素类型不锁定）</td><td><code>[1, "a", true]</code></td></tr>
       <tr><td><code>dict</code></td><td>动态字典（字符串键 → 任意值）</td><td><code>{"name": "hone", "ver": 1}</code></td></tr>
     </table>
@@ -172,14 +192,37 @@ l = <span class="f">append</span>(nums, <span class="s">"x"</span>);          <s
       <code>is_list</code> <code>is_dict</code> <code>is_null</code>，判断运行期值类型，常用于分支处理混合集合。</p>
   </section>
 
+  <section id="lang-ext">
+    <h2><span class="hash">#</span>7.5 结构体 · 模式匹配 · 管道</h2>
+    <p><strong>struct 结构体</strong>：声明确定的数据形态（字段名与类型固定），实例用 dict 表示、字段访问 <code>p.字段</code>；
+      构造时按字段顺序传参，检查阶段校验字段个数与类型（H001/H011）：</p>
+<pre><code><span class="k">struct</span> <span class="f">Point</span> { x: <span class="k">int</span>, y: <span class="k">float</span> };
+p = <span class="f">Point</span>(<span class="n">3</span>, <span class="n">2.5</span>);
+<span class="f">print</span>(p.x);   <span class="c">// 3</span>
+<span class="f">print</span>(p.y);   <span class="c">// 2.5</span></code></pre>
+    <p><strong>match 模式匹配</strong>：多分支表达式的简洁写法，模式支持字面量与 <code>_</code> 通配符（放最后、只能一次），
+      返回匹配分支的值，全部不匹配时运行时报错（建议补 <code>_</code> 兜底）：</p>
+<pre><code>s = <span class="k">match</span> <span class="n">2</span> {
+    <span class="n">1</span> =&gt; <span class="s">"one"</span>,
+    <span class="n">2</span> =&gt; <span class="s">"two"</span>,
+    _ =&gt; <span class="s">"other"</span>,
+};
+<span class="f">print</span>(s);   <span class="c">// two</span></code></pre>
+    <p><strong>管道操作符 <code>|&gt;</code></strong>：数据流向更直观。<code>x |&gt; f</code> 等价 <code>f(x)</code>，
+      <code>x |&gt; f(a, b)</code> 等价 <code>f(x, a, b)</code>，可链式（解析期转换为普通调用）：</p>
+<pre><code><span class="f">print</span>(<span class="s">"hello world"</span> |&gt; <span class="f">len</span>);       <span class="c">// 11</span>
+<span class="f">print</span>([<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>] |&gt; <span class="f">len</span> |&gt; <span class="f">to_str</span>); <span class="c">// "3"</span></code></pre>
+  </section>
+
   <section id="builtins">
     <h2><span class="hash">#</span>8. 内置函数参考</h2>
     <p>全部开箱即用，无需导入：</p>
     <table>
       <tr><th>类别</th><th>函数</th></tr>
       <tr><td>基础</td><td><code>print</code> <code>len</code> <code>type_of</code> <code>read_file</code> <code>write_file</code> <code>file_exists</code></td></tr>
-      <tr><td>集合</td><td><code>append</code> <code>contains</code> <code>index_of</code> <code>keys</code> <code>values</code> <code>has_key</code></td></tr>
+      <tr><td>集合</td><td><code>append</code> <code>clone</code> <code>copy</code>（深度拷贝）<code>contains</code> <code>index_of</code> <code>keys</code> <code>values</code> <code>has_key</code></td></tr>
       <tr><td>类型判断</td><td><code>is_int</code> <code>is_float</code> <code>is_str</code> <code>is_bool</code> <code>is_list</code> <code>is_dict</code> <code>is_null</code></td></tr>
+      <tr><td>断言 / 测试</td><td><code>assert</code>（条件为 false 抛 H700，配合 <code>hone test</code>）</td></tr>
       <tr><td>字符串</td><td><code>str_contains</code> <code>str_replace</code> <code>str_trim</code></td></tr>
       <tr><td>数学</td><td><code>abs</code> <code>max</code> <code>min</code></td></tr>
       <tr><td>类型转换</td><td><code>to_str</code> <code>to_int</code> <code>to_float</code></td></tr>
@@ -187,22 +230,25 @@ l = <span class="f">append</span>(nums, <span class="s">"x"</span>);          <s
       <tr><td>随机</td><td><code>random.int</code> <code>random.float</code></td></tr>
       <tr><td>UUID</td><td><code>uuid.new</code>（UUID v4）</td></tr>
       <tr><td>网络 / JSON</td><td><code>http_get</code> <code>http_post</code>（支持 <code>http://</code> 与 <code>https://</code>）<code>json_parse</code> <code>json_stringify</code></td></tr>
-      <tr><td>本地服务器</td><td><code>server.listen</code> <code>server.poll</code> <code>server.respond</code>（纯 std::net 实现，跨平台一致）</td></tr>
+      <tr><td>本地服务器</td><td><code>server.listen</code> <code>server.poll</code> <code>server.respond</code>（纯 std::net 实现，跨平台一致；respond 可指定状态码如 404/500）</td></tr>
       <tr><td>系统（跨平台）</td><td><code>sys.run</code> <code>sys.get_env</code></td></tr>
       <tr><td>系统（Windows API）</td><td><code>sys.msgbox</code> <code>sys.beep</code> <code>sys.clipboard_set</code> <code>sys.get_screen_size</code> <code>sys.reg_read</code> <code>sys.reg_write</code></td></tr>
       <tr><td>日志（彩色）</td><td><code>log.info</code> <code>log.warn</code> <code>log.error</code> <code>log.debug</code></td></tr>
       <tr><td>路径</td><td><code>path.join</code> <code>path.dirname</code> <code>path.basename</code></td></tr>
-      <tr><td>命令行参数</td><td><code>args.get</code> <code>args.has</code></td></tr>
+      <tr><td>命令行参数</td><td><code>args.get</code>（支持类型转换与默认值：<code>args.get("port", int, 8080)</code>）<code>args.has</code></td></tr>
       <tr><td>环境变量</td><td><code>env.get</code> <code>env.set</code></td></tr>
       <tr><td>键值存储</td><td><code>db.set</code> <code>db.get</code></td></tr>
       <tr><td>正则</td><td><code>regex.match</code> <code>regex.replace</code></td></tr>
-      <tr><td>哈希</td><td><code>crypto.md5</code> <code>crypto.sha256</code></td></tr>
+      <tr><td>加密与哈希</td><td><code>crypto.md5</code> <code>crypto.sha1</code> <code>crypto.sha256</code> <code>crypto.hmac_sha256</code> <code>crypto.base64_encode</code> <code>crypto.base64_decode</code></td></tr>
+      <tr><td>压缩与归档</td><td><code>archive.zip_list</code> <code>archive.zip_read</code> <code>archive.zip_extract</code> <code>archive.zip_create</code>（tar.gz 同款 tgz_* 四函数）</td></tr>
+      <tr><td>指针类</td><td><code>ptr.alloc</code> <code>ptr.free</code> <code>ptr.is_null</code> <code>ptr.is_valid</code> <code>ptr.size</code> <code>ptr.read_int/float/byte</code> <code>ptr.write_int/float/byte</code>（分配表跟踪防野指针，H304/H305）</td></tr>
+      <tr><td>插件系统</td><td><code>plugin.load</code> <code>plugin.has</code> <code>plugin.list</code> <code>plugin.unload</code>（运行期动态注册，调用走 C ABI 通道）</td></tr>
     </table>
   </section>
 
   <section id="integ">
     <h2><span class="hash">#</span>9. 导入与外部集成</h2>
-<pre><code><span class="c">// import：远程模块下载并缓存到 ~/.hn/cache/（URL 支持 http/https）</span>
+<pre><code><span class="c">// import：远程模块下载并缓存到 ~/.hone/cache/（URL 支持 http/https）</span>
 <span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.hn"</span>;
  <span class="f">print</span>(<span class="f">module_add</span>(<span class="n">20</span>, <span class="n">22</span>));
 
@@ -214,11 +260,34 @@ l = <span class="f">append</span>(nums, <span class="s">"x"</span>);          <s
  <span class="k">load</span> <span class="s">"path/to/hone_lib.dll"</span> <span class="k">as</span> m;
  <span class="f">print</span>(m.<span class="f">lib_add</span>(<span class="n">1</span>, <span class="n">2</span>));
 
- <span class="c">// load lazy：懒加载，首次调用时才加载</span>
- <span class="k">load</span> <span class="k">lazy</span> <span class="s">"path/to/hone_lib.dll"</span> <span class="k">as</span> lm;
+ <span class="c">// typed FFI 签名块（v0.4+）：显式声明参数/返回类型，精确转换</span>
+ <span class="k">load</span> <span class="s">"path/to/hone_lib.dll"</span> <span class="k">as</span> tm {
+     <span class="k">fn</span> <span class="f">lib_add_f</span>(a: <span class="k">float</span>, b: <span class="k">float</span>) -&gt; <span class="k">float</span>;
+     <span class="k">fn</span> <span class="f">lib_strlen</span>(s: <span class="k">str</span>) -&gt; <span class="k">int</span>;
+     <span class="k">fn</span> <span class="f">lib_not</span>(b: <span class="k">bool</span>) -&gt; <span class="k">bool</span>;
+     <span class="k">fn</span> <span class="f">lib_echo_ptr</span>(p: <span class="k">ptr</span>) -&gt; <span class="k">ptr</span>;
+     <span class="k">fn</span> <span class="f">lib_bump</span>() -&gt; <span class="k">void</span>;
+ }
+ <span class="f">print</span>(tm.<span class="f">lib_add_f</span>(<span class="n">1.5</span>, <span class="n">2.25</span>));  <span class="c">// 3.75（float 通道）</span>
 
- <span class="c">// alias：函数别名</span>
- <span class="k">alias</span> <span class="f">greet</span> <span class="k">as</span> <span class="f">hi</span>;</code></pre>
+ <span class="c">// from 头文件自动绑定（v0.4+）：从 C 头文件提取原型生成签名</span>
+ <span class="k">load</span> <span class="s">"path/to/hone_lib.dll"</span> <span class="k">as</span> hm <span class="k">from</span> <span class="s">"path/to/hone_lib.h"</span>;
+ <span class="f">print</span>(hm.<span class="f">lib_strlen</span>(<span class="s">"hello"</span>));  <span class="c">// 5</span>
+
+ <span class="c">// hone bind：离线从头文件生成签名块，粘贴进脚本即可</span>
+ <span class="c">// hone bind path/to/hone_lib.h  →  输出 load 签名块到 stdout</span></code></pre>
+    <p><strong>typed FFI（v0.4+）</strong>：签名块内 <code class="inline">fn</code> 声明仅描述 C 函数 ABI，不定义 Hone 函数体。
+      支持类型映射：<code class="inline">int</code> → int64_t、<code class="inline">float</code> → double、<code class="inline">bool</code> → C bool、
+      <code class="inline">str</code> → const char*、<code class="inline">ptr</code> → void*；返回类型额外支持 <code class="inline">void</code>；
+      参数最多 8 个，回调 <code class="inline">fn(...)</code> 与可变参数 <code class="inline">...</code> 暂不支持。
+      调用在检查阶段校验参数个数与类型（H001/H005），返回类型参与类型推导。
+      未声明签名的库函数保持旧 int64 通道调用（向后兼容）。</p>
+    <p><strong>头文件自动绑定（v0.4+）</strong>：<code class="inline">load ... from "header.h"</code> 用受限解析器
+      （纯 Rust，无 libclang 依赖）从 C 头文件提取函数原型自动生成签名：跳过注释/预处理/struct 定义/extern "C" 块，
+      typedef 简单展开，属性宏跳过；类型映射 int/size_t→int、float/double→float、bool→bool、char*→str、
+      其余指针→ptr、void→void。回调/变参/数组/结构体按值/long double 标记 unsupported，调用时直接报错而非 ABI 崩溃。
+      <code class="inline">hone bind &lt;header.h&gt;</code> 离线生成签名块输出到 stdout，unsupported 原型列为注释。</p>
+    <p>示例：<code class="inline">examples/ffi_demo.hn</code>（typed FFI 全类型）、<code class="inline">examples/ffi_header.hn</code>（头文件绑定）。</p>
   </section>
 
   <section id="tools">
@@ -232,9 +301,12 @@ l = <span class="f">append</span>(nums, <span class="s">"x"</span>);          <s
       <tr><td><code>hone fmt [-w] &lt;file.hn&gt;</code></td><td>代码格式化（Tab 缩进、运算符空格、大括号位置）</td></tr>
       <tr><td><code>hone build --dll &lt;file.hn&gt;</code></td><td>打包 C ABI 动态库；类型映射 int→int64_t、float→double、bool→bool、str→const char*；需系统 C 编译器</td></tr>
       <tr><td><code>hone build --exe &lt;file.hn&gt;</code></td><td>打包独立可执行文件（解释器+脚本自释放，<code>[-o &lt;out&gt;]</code>）；打包后 <code>--version</code> 查看版本信息，<code>--keep-cache</code> 保留缓存</td></tr>
+      <tr><td><code>hone build --script &lt;file.hn&gt;</code></td><td>生成仅脚本压缩包 <code>.hzp</code>（不内嵌解释器，<code>[-o &lt;out&gt;]</code>，用 <code>hone run</code> 执行）</td></tr>
+      <tr><td><code>hone test [目录]</code></td><td>递归扫描 <code>*.test.hn</code> 运行测试并汇总 PASS/FAIL（配合 <code>assert</code> 断言，失败退出码非 0）</td></tr>
+      <tr><td><code>hone bind &lt;header.h&gt;</code></td><td>从 C 头文件离线生成 typed load 签名块（输出到 stdout，unsupported 原型列为注释）</td></tr>
       <tr><td><code>hone explain &lt;code&gt;</code></td><td>查看错误码解释与修复建议（如 <code>hone explain H201</code>）</td></tr>
-      <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存到 ~/.hn/cache/（也支持扫描脚本 import 批量预下载）</td></tr>
-      <tr><td><code>hone upgrade [-w] &lt;file.hn&gt;</code></td><td>按映射表自动迁移旧版本语法</td></tr>
+      <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存到 ~/.hone/cache/（也支持扫描脚本 import 批量预下载）</td></tr>
+      <tr><td><code>hone self-update [url]</code></td><td>从 URL（或环境变量 <code>HONE_UPDATE_URL</code>）下载最新 hone 二进制并替换当前程序，魔数校验防误下载</td></tr>
       <tr><td><code>hone lsp</code></td><td>语言服务器（补全/诊断/hover，LSP over stdio）</td></tr>
       <tr><td><code>hone poop &lt;file.hn&gt;</code></td><td>屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
     </table>
@@ -254,8 +326,10 @@ help: Hone types are locked after inference; no implicit conversion is allowed</
       <tr><td>H101 ~ H104</td><td>词法语法细分：非法字符 / 未闭合字符串 / 未闭合注释 / 缺少分号</td></tr>
       <tr><td>H200 ~ H204</td><td>网络：请求失败 / 超时 / 连接拒绝 / DNS 失败 / 非 2xx 响应</td></tr>
       <tr><td>H300 ~ H303</td><td>系统 / DLL：系统调用 / 库加载失败 / 参数校验 / 权限不足</td></tr>
+      <tr><td>H304 ~ H305</td><td>指针：野指针（未分配/已释放/重复释放/空指针）/ 越界访问（ptr 类）</td></tr>
       <tr><td>H401 ~ H404</td><td>文件：不存在 / 权限不足 / 被占用锁定 / 通用 NOT_FOUND</td></tr>
       <tr><td>H600</td><td>throw 主动抛出的用户错误</td></tr>
+      <tr><td>H700</td><td>assert 断言失败（测试框架）</td></tr>
       <tr><td>H999</td><td>尚未实现</td></tr>
     </table>
     <p>完整解释与修复建议：<code class="inline">hone explain H201</code>。</p>
@@ -273,7 +347,7 @@ help: Hone types are locked after inference; no implicit conversion is allowed</
     <table>
       <tr><th>机制</th><th>说明</th></tr>
       <tr><td><code>--restart[=N]</code></td><td>脚本失败自动重拉（默认最多 3 次）；<code>--backoff=a,b,c</code> 重启间隔递增（默认 1,3,10 秒）；<code>--restart-on=H200,H401</code> 只对白名单错误码重启，确定性错误直接退出</td></tr>
-      <tr><td><code>--resume</code></td><td>恢复上次 db 检查点；<code>db.set</code> 自动落盘 <code>~/.hn/state/</code>，崩溃不丢检查点，脚本内容变更后检查点自动失效</td></tr>
+      <tr><td><code>--resume</code></td><td>恢复上次 db 检查点；<code>db.set</code> 自动落盘 <code>~/.hone/state/</code>，崩溃不丢检查点，脚本内容变更后检查点自动失效</td></tr>
       <tr><td>错误对象字段</td><td><code>e.code</code> / <code>e.message</code> / <code>e.file</code> / <code>e.context</code>（str）；<code>e.line</code> / <code>e.col</code>（int）</td></tr>
     </table>
     <p>注意：Hone 为块作用域，try/catch 块内赋值的变量在块外不可见，跨块共享的变量需在块前声明。示例见 <code class="inline">examples/try_catch.hn</code>、<code class="inline">examples/restart_demo.hn</code>、<code class="inline">examples/resume_demo.hn</code>。</p>
@@ -283,7 +357,7 @@ help: Hone types are locked after inference; no implicit conversion is allowed</
     <h2><span class="hash">#</span>12. 设计原则</h2>
     <ul>
       <li><strong>不自举</strong>：Hone 不用于开发自己的编译器，保持设计与实现的灵活性</li>
-      <li><strong>不背兼容包袱</strong>：旧版本永久可用，新版本自由演化（提供 upgrade 迁移工具）</li>
+      <li><strong>不背兼容包袱</strong>：旧版本永久可用，新版本自由演化</li>
       <li><strong>无前缀声明</strong>：变量不需要 let / var / const</li>
       <li><strong>静态强类型</strong>：类型锁定，不隐式转换，报错精准</li>
       <li><strong>单文件分发</strong>：下载 → 解压 → 运行，零配置；多版本共存互不干扰</li>
@@ -332,7 +406,19 @@ function searchDocs(q) {
 </script>
 
 <footer>
-  Hone v0.4.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

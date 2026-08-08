@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hone 常见问题（FAQ）</title>
+<meta name="description" content="Hone 编程语言常见问题：安装、使用、报错处理、与其它语言的对比、GUI 与 FFI 等常见疑问解答。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+</head>
+<body>
+<header>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
+  <nav>
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+  </nav>
+  <span class="ver">v0.5.0</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
+</header>
+
+<main>
+  <h2><span class="hash">#</span>常见问题</h2>
+
+  <details class="faq-item">
+    <summary>Hone 是什么？和 Python / Lua / JavaScript 有什么区别？</summary>
+    <div class="faq-a">Hone 是用 Rust 实现的轻量级脚本语言：<strong>静态强类型</strong>（类型一经推导即锁定、禁止隐式转换）、
+      <strong>单文件分发</strong>（一个可执行程序开箱即用）、<strong>内置工具箱</strong>（文件 / HTTP / JSON / 时间 / 正则 /
+      哈希 / 多线程等零配置可用）。与解释型脚本语言相比，它在编译期就能报出类型错误，且不需要装运行时环境；
+      与 Rust / Go 相比，它没有编译与配置成本，适合快速脚本、自动化与胶水场景。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>如何安装 Hone？支持哪些平台？</summary>
+    <div class="faq-a">一行命令安装（<a href="install.html">详见安装教程</a>）：Linux / Termux 用
+      <code class="inline">curl -fsSL .../install.sh | sh</code>，Windows 用
+      <code class="inline">irm .../install.ps1 | iex</code>；也可从 <a href="download.html">下载中心</a> 手动下载
+      （Windows x86_64、Linux x86_64、Termux aarch64 三平台单文件二进制）。macOS 暂未发布。
+      所有版本都是静态编译，不依赖系统动态库，开箱即用。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么变量不需要 let / var / const？</summary>
+    <div class="faq-a">Hone 采用<strong>无前缀声明</strong>：<code class="inline">x = 10;</code> 自动推导类型并锁定。
+      这是刻意的设计取舍——少写关键字、代码更简洁；类型一经锁定，后续赋值不同类型会直接报
+      <code class="inline">error[H001]</code>，编译期即可发现，并不比显式声明更危险。需要显式类型时可用
+      <code class="inline">y : int = 20;</code>（Rust/TS 风格）或 <code class="inline">int z = 30;</code>（C 风格）。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>报错 <code>error[Hxxx]</code> 看不懂怎么办？</summary>
+    <div class="faq-a">错误统一为 <code class="inline">error[Hxxx]</code> 格式，带文件、行、列与修复建议。用内置命令
+      <code class="inline">hone explain H201</code> 可查看错误码的完整含义与修复方法（如 H001 类型不匹配、
+      H005 参数个数错误、H200 网络错误、H401 文件不存在）。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>脚本崩溃了如何自动恢复？</summary>
+    <div class="faq-a">两条路线：<code class="inline">hone run --restart=3 app.hn</code> 失败自动重启（
+      <code class="inline">--backoff=1,3,10</code> 递增等待，<code class="inline">--restart-on=H200,H401</code> 只对白名单错误码重启）；
+      <code class="inline">hone run --resume app.hn</code> 启用检查点恢复——<code class="inline">db.set</code> 自动落盘到
+      <code class="inline">~/.hone/state/</code>，崩溃后从上次检查点继续，脚本内容变更后检查点自动失效。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>能不能调用 C / C++ 写的库？</summary>
+    <div class="faq-a">可以。v0.4.0 起支持 <strong>typed FFI</strong>：<code class="inline">load "lib" as m { fn f(a: int) -> float; }</code>
+      签名块显式声明 C ABI 类型（int/float/bool/str/ptr/void），调用时精确转换；还可
+      <code class="inline">load "lib" as m from "header.h"</code> 从 C 头文件自动提取原型生成签名，或用
+      <code class="inline">hone bind header.h</code> 离线生成。反之，用 <code class="inline">@export</code> + <code class="inline">hone build --dll</code>
+      也可把 Hone 函数打包成 C ABI 动态库供其他语言调用。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>能写图形界面吗？</summary>
+    <div class="faq-a">能。标准库自带 <code class="inline">hone_lib/gui.hn</code>：浏览器渲染 + 本地 HTTP 服务器双向交互的
+      跨平台 GUI（Windows / Linux / Termux 均有浏览器），button / label / input / select 控件开箱即用，
+      事件回调约定 <code class="inline">on_event(id, value)</code>。见 <a href="stdlib.html">标准库文档</a> 与
+      <code class="inline">examples/gui_demo.hn</code>。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>能不能把脚本打包成独立的可执行文件？</summary>
+    <div class="faq-a">可以。<code class="inline">hone build --exe app.hn [-o my_app.exe]</code> 把解释器与脚本打包为
+      自释放单文件，双击即用（运行后自动清理缓存，<code class="inline">--keep-cache</code> 可保留以加速下次启动）；
+      <code class="inline">--version</code> 查看内嵌版本信息。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Hone 是开源的么？用什么许可证？</summary>
+    <div class="faq-a">是的，源码托管在 <a href="https://github.com/shichencike/Hone">github.com/shichencike/Hone</a>，
+      MIT 许可证，可自由使用、修改与分发。欢迎提交 issue 与 PR。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>从哪里获得更新？有升级工具吗？</summary>
+    <div class="faq-a">发布信息见 <a href="changelog.html">更新日志</a> 与
+      <a href="https://github.com/shichencike/Hone/releases">GitHub Releases</a>；
+      <code class="inline">hone self-update</code> 可直接下载并替换最新版本。
+      设计上「旧版本永久可用、新版本自由演化」，升级不背兼容包袱。</div>
+  </details>
+</main>
+
+<footer>
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+</footer>
+</body>
+</html>
