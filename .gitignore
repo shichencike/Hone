@@ -11,3 +11,6 @@ ka[.][.]md
 # build --dll 生成的临时 C 源码
 *.c
 !tests/ka_lib/src/*.c
+
+# 测试生成物
+examples/plot_test.svg

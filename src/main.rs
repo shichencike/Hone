@@ -7,17 +7,24 @@ mod builtins;
 mod bundle;
 mod checker;
 mod codegen;
+mod datamod;
 mod error;
 mod fmt;
 mod header;
 mod interp;
 mod lexer;
 mod lsp;
+mod netmod;
 mod parser;
 mod pluginmod;
+mod plotmod;
 mod ptrmod;
 mod srvmod;
+mod sqlitemod;
+mod statmod;
 mod sysmod;
+mod sysutilmod;
+mod textmod;
 
 use std::collections::HashMap;
 use std::process::ExitCode;
@@ -861,28 +868,75 @@ fn fetch_and_cache(name: &str, url: &str) -> Result<(), ZError> {
     Ok(())
 }
 
+/// 当前平台的 hone 发布资产名（self-update 默认 URL 用）。
+fn update_asset_name() -> &'static str {
+    if cfg!(windows) {
+        "hone-windows-x86_64.exe"
+    } else if cfg!(target_os = "macos") {
+        "hone-macos-x86_64"
+    } else if cfg!(target_arch = "aarch64") {
+        "hone-termux-aarch64"
+    } else {
+        "hone-linux-x86_64"
+    }
+}
+
+/// 默认更新 URL 候选：镜像源优先（清华 TUNA github-release），失败回退官方 GitHub。
+/// HONE_MIRROR 可覆盖镜像地址；HONE_MIRROR=off 强制只用官方源。
+fn default_update_urls() -> Vec<String> {
+    let asset = update_asset_name();
+    let official = format!("https://github.com/shichencike/Hone/releases/latest/download/{}", asset);
+    let official_url = |base: &str| format!("{}/releases/latest/download/{}", base.trim_end_matches('/'), asset);
+    match std::env::var("HONE_MIRROR") {
+        Ok(m) if m == "off" => vec![official],
+        Ok(m) => vec![official_url(&m), official],
+        Err(_) => vec![
+            official_url("https://mirrors.tuna.tsinghua.edu.cn/github-release/shichencike/Hone"),
+            official,
+        ],
+    }
+}
+
 /// hone self-update [url]：从 URL 下载最新 hone 二进制并替换当前程序。
-/// 无参数时尝试从环境变量 HONE_UPDATE_URL 读取发布地址。
+/// 无参数时依次尝试：HONE_MIRROR 镜像源（默认清华源）→ 官方 GitHub。
 fn cmd_self_update(args: &[String]) -> Result<(), ZError> {
-    let url = match args.first() {
-        Some(u) => u.clone(),
-        None => match std::env::var("HONE_UPDATE_URL") {
-            Ok(u) => u,
-            Err(_) => {
-                return Err(ZError::plain(
-                    codes::SYNTAX,
-                    "missing update URL: `hone self-update <url>`",
-                    Some("pass the URL of the latest hone binary, or set HONE_UPDATE_URL"),
-                ));
-            }
-        },
+    // 候选 URL 列表：显式参数 > HONE_UPDATE_URL > 镜像源 + 官方默认
+    let candidates: Vec<String> = if let Some(u) = args.first() {
+        vec![u.clone()]
+    } else if let Ok(u) = std::env::var("HONE_UPDATE_URL") {
+        vec![u]
+    } else {
+        default_update_urls()
     };
+
     println!("hone self-update: 当前版本 v{}", VERSION);
-    print!("下载 `{}` ...", url);
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    let span = lexer::Span { line: 1, col: 1, len: 1 };
-    let bytes = builtins::http_get_bytes(&url, span, "self-update", "")?;
-    println!();
+    let mut last_err: Option<ZError> = None;
+    let mut bytes: Vec<u8> = Vec::new();
+    for url in &candidates {
+        print!("下载 `{}` ...", url);
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        let span = lexer::Span { line: 1, col: 1, len: 1 };
+        match builtins::http_get_bytes(url, span, "self-update", "") {
+            Ok(b) => {
+                bytes = b;
+                println!(" ok");
+                break;
+            }
+            Err(e) => {
+                println!(" 失败（{}）", e.msg);
+                last_err = Some(e);
+            }
+        }
+    }
+    if bytes.is_empty() {
+        return Err(last_err.unwrap_or_else(|| {
+            ZError::plain(
+                codes::NETWORK,
+                "self-update: 所有下载源均失败",
+                Some("检查网络，或改用 `hone self-update <url>` 指定下载地址"),
+            )
+        }));
+    }
 
     // 基本可执行文件校验：非空 + 平台魔数（PE MZ / ELF）
     let ok_magic = if cfg!(windows) {

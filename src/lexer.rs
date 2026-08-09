@@ -39,6 +39,8 @@ pub enum Tok {
     Tmp,
     // struct 结构体定义
     Struct,
+    // class 类定义（成员函数不进入全局符号表）
+    Class,
     // 类型关键字
     TInt,
     TFloat,
@@ -110,6 +112,7 @@ impl Tok {
             Tok::From => "`from`".into(),
             Tok::Tmp => "`tmp`".into(),
             Tok::Struct => "`struct`".into(),
+            Tok::Class => "`class`".into(),
             Tok::TInt => "type `int`".into(),
             Tok::TFloat => "type `float`".into(),
             Tok::TBool => "type `bool`".into(),
@@ -327,6 +330,7 @@ impl Lexer {
                 "from" => Tok::From,
                 "tmp" => Tok::Tmp,
                 "struct" => Tok::Struct,
+                "class" => Tok::Class,
                 "int" => Tok::TInt,
                 "float" => Tok::TFloat,
                 "bool" => Tok::TBool,

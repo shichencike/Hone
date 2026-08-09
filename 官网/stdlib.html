@@ -34,7 +34,7 @@ function toggleTheme(){
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.5.0</span>
+  <span class="ver">v0.6.0</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
@@ -68,6 +68,13 @@ function toggleTheme(){
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span> <span class="k">as</span> m;   <span class="c">// m_clamp / m_gcd ...</span></code></pre>
     <p><strong>内置模块（无需导入，开箱即用）</strong>：除上述纯 Hone 模块外，解释器内置大量模块函数，直接调用即可：
       <code class="inline">crypto.*</code>（md5/sha1/sha256/hmac_sha256/base64）、<code class="inline">archive.*</code>（zip/tar.gz 压缩归档）、
+      <code class="inline">zlib.*</code>（zlib/gzip 压缩）、<code class="inline">csv.*</code>（CSV 解析/序列化）、
+      <code class="inline">stat.*</code>（均值/中位数/方差/标准差）与 <code class="inline">matrix.*</code>（矩阵运算）、
+      <code class="inline">diff.*</code>（文本对比）与 <code class="inline">regex.*</code>（find/groups/split）、
+      <code class="inline">glob.*</code>（文件匹配）与 <code class="inline">temp.*</code>（临时文件/目录）、
+      <code class="inline">plot.*</code>（SVG 图表）与 <code class="inline">yaml.*</code>（YAML 解析/序列化）、
+      <code class="inline">http.request</code>（超时/自定义 Header）、<code class="inline">smtp.send</code>（发邮件）、
+      <code class="inline">ws.request</code>（WebSocket）、<code class="inline">sqlite.*</code>（SQLite 封装，运行时加载系统库）、
       <code class="inline">ptr.*</code>（指针类，分配表跟踪防野指针）、<code class="inline">plugin.*</code>（插件系统，运行期动态注册）、
       <code class="inline">server.*</code>（本地 HTTP 服务器）、<code class="inline">args.*</code>（命令行参数，支持类型转换与默认值）、
       <code class="inline">assert</code>（断言，配合 <code class="inline">hone test</code> 测试框架）。完整清单见 <a href="docs.html">语言手册 §8 内置函数参考</a>。</p>
@@ -200,7 +207,7 @@ function searchDocs(q) {
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.6.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

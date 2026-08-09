@@ -111,6 +111,28 @@ tmp fn helper() { print("debug"); }
 
 // 调试输出（仅 hone debug 模式生效）
 debug_print("当前 x = " + to_str(x));
+
+// class 类：成员函数不进全局符号表，经 类.方法(...) 调用
+class Math {
+    fn double(x) { return x * 2; }
+    fn fib(n) {
+        if (n <= 1) { return n; }
+        return Math.fib(n - 1) + Math.fib(n - 2);
+    }
+}
+print(Math.double(21));   // 42
+print(Math.fib(10));      // 55
+
+// 泛型：fn name[T, U](...) 声明类型参数，调用时按实参推导（编译期擦除，运行期零成本）
+fn identity[T](x: T) -> T { return x; }
+print(identity(42));          // 42（T=int）
+print(identity("hello"));     // hello（T=str）
+
+fn pick[T](a: T, b: T, want_first: bool) -> T {
+    if (want_first) { return a; }
+    return b;
+}
+print(pick(10, 20, false));   // 20（T=int）
 ```
 
 ## 内置功能

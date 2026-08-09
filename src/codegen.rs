@@ -39,6 +39,8 @@ impl CType {
             TyName::Float => CType::Double,
             TyName::Bool => CType::Bool,
             TyName::Str => CType::Str,
+            // 泛型类型参数在 DLL 导出时无单一 C 类型，按默认 int 处理
+            TyName::Var(_) => CType::Int,
         }
     }
 
@@ -145,7 +147,7 @@ impl Codegen {
                             CFn {
                                 name: name.clone(),
                                 params: params.clone(),
-                                ret: *ret,
+                                ret: ret.clone(),
                                 body: body.clone(),
                             },
                         );
@@ -253,13 +255,13 @@ impl Codegen {
         let mut param_types = Vec::new();
         let mut vt: HashMap<String, CType> = HashMap::new();
         for p in &f.params {
-            let t = p.ty.map(CType::from_annot).unwrap_or(CType::Int);
+            let t = p.ty.clone().map(CType::from_annot).unwrap_or(CType::Int);
             param_types.push(t);
             vt.insert(p.name.clone(), t);
         }
         self.infer_body_types(&f.body, &mut vt, stack)?;
 
-        let ret = if let Some(a) = f.ret {
+        let ret = if let Some(a) = f.ret.clone() {
             CType::from_annot(a)
         } else {
             if stack.contains(&f.name) {
@@ -289,7 +291,7 @@ impl Codegen {
                     }
                 }
                 Stmt::VarDecl { name, ty, init, .. } => {
-                    let annot = CType::from_annot(*ty);
+                    let annot = CType::from_annot(ty.clone());
                     if let Some(e) = init {
                         let t = self.infer_expr_type(e, vt, stack)?;
                         if t != annot {
@@ -603,7 +605,7 @@ impl Codegen {
                 Ok(())
             }
             Stmt::VarDecl { name, ty, init, span } => {
-                let annot = CType::from_annot(*ty);
+                let annot = CType::from_annot(ty.clone());
                 if let Some(e) = init {
                     let (t, code) = self.gen_expr(e, ctx)?;
                     if t != annot {
@@ -968,6 +970,7 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Try { span, .. }
         | Stmt::Throw { span, .. }
         | Stmt::StructDef { span, .. }
+        | Stmt::ClassDef { span, .. }
         | Stmt::DebugPrint { span, .. } => *span,
     }
 }

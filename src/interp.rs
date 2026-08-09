@@ -160,6 +160,9 @@ pub struct Interp {
     alias_map: HashMap<String, String>,
     /// 结构体定义：名称 → 字段名（构造时按顺序生成 dict 实例）
     structs: HashMap<String, Vec<String>>,
+    /// 类定义：类名 → (方法名 → FnDef)。成员函数不进全局 fns 表，
+    /// 只能经 `类.方法(...)` 调用（call_fn 按限定名解析）。
+    classes: HashMap<String, HashMap<String, FnDef>>,
 }
 
 /// load 加载的 C ABI 库函数签名约定：全 int64 参数（不足补 0，x64 ABI 安全）。
@@ -239,9 +242,11 @@ pub fn run(program: &Program, file: &str, src: &str, debug: bool) -> Result<(), 
         ffi_sigs: HashMap::new(),
         alias_map: HashMap::new(),
         structs: HashMap::new(),
+        classes: HashMap::new(),
     };
     ip.collect_fns(&program.stmts)?;
     ip.collect_structs(&program.stmts);
+    ip.collect_classes(&program.stmts);
     let mut env = Env::new();
     ip.exec_stmts(&mut env, &program.stmts)?;
     Ok(())
@@ -303,6 +308,46 @@ impl Interp {
         }
     }
 
+    /// 收集所有类定义（含嵌套），注册到 classes 表（类名 → 方法名 → FnDef）。
+    /// 成员函数不进入全局 fns 表，只能经 `类.方法(...)` 调用。
+    fn collect_classes(&mut self, stmts: &[Stmt]) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::ClassDef { name, methods, .. } => {
+                    let mut methods_map: HashMap<String, FnDef> = HashMap::new();
+                    for m in methods {
+                        if let Stmt::FnDef { name: mname, params, body, tmp, .. } = m {
+                            if !tmp {
+                                methods_map.insert(
+                                    mname.clone(),
+                                    FnDef {
+                                        params: params.clone(),
+                                        body: body.clone(),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    self.classes.insert(name.clone(), methods_map);
+                }
+                Stmt::Block { stmts, .. } => self.collect_classes(stmts),
+                Stmt::If { then_branch, else_branch, .. } => {
+                    self.collect_classes(then_branch);
+                    if let Some(eb) = else_branch {
+                        self.collect_classes(eb);
+                    }
+                }
+                Stmt::While { body, .. } => self.collect_classes(body),
+                Stmt::ForIn { body, .. } => self.collect_classes(body),
+                Stmt::Try { body, handler, .. } => {
+                    self.collect_classes(body);
+                    self.collect_classes(handler);
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn runtime_err(&self, code: &'static str, msg: impl Into<String>, span: Span, help: Option<impl Into<String>>) -> ZError {
         ZError::new(code, msg, &self.file, &self.src, span.line, span.col, span.len.max(1), help)
     }
@@ -331,7 +376,7 @@ impl Interp {
             Stmt::VarDecl { name, ty, init, .. } => {
                 let v = match init {
                     Some(e) => self.eval_expr(env, e)?,
-                    None => default_value(*ty),
+                    None => default_value(ty.clone()),
                 };
                 env.set_or_declare(name, v);
                 Ok(Flow::Normal)
@@ -469,6 +514,7 @@ impl Interp {
                 Ok(Flow::Normal)
             }
             Stmt::StructDef { .. } => Ok(Flow::Normal), // 已扁平化注册
+            Stmt::ClassDef { .. } => Ok(Flow::Normal), // 已注册到 classes 表（成员函数不进全局 fns）
             Stmt::Go { callee, args, span } => self.exec_go(env, callee, args, *span),
             Stmt::DebugPrint { expr, span: _ } => {
                 if self.debug {
@@ -564,6 +610,7 @@ impl Interp {
         let alias_map = self.alias_map.clone();
         let lazy_libs = self.lazy_libs.clone();
         let structs = self.structs.clone();
+        let classes = self.classes.clone();
         let file = self.file.clone();
         let src = self.src.clone();
         let callee = callee.to_string();
@@ -582,6 +629,7 @@ impl Interp {
                 ffi_sigs: HashMap::new(),
                 alias_map,
                 structs,
+                classes,
             };
             if let Err(err) = t.call_fn(&callee, arg_vals, span) {
                 eprintln!("{}", err);
@@ -997,25 +1045,7 @@ impl Interp {
 
     fn call_fn(&mut self, callee: &str, args: Vec<Value>, span: Span) -> Result<Value, ZError> {
         if let Some(f) = self.fns.get(callee).cloned() {
-            if self.depth >= 5000 {
-                return Err(self.runtime_err(
-                    codes::RECURSION_DEPTH,
-                    "recursion depth exceeded (limit 5000)",
-                    span,
-                    Some("check for infinite recursion, or rewrite iteratively"),
-                ));
-            }
-            let mut call_env = Env::new();
-            for (p, v) in f.params.iter().zip(args) {
-                call_env.declare(&p.name, v);
-            }
-            self.depth += 1;
-            let flow = self.exec_stmts(&mut call_env, &f.body);
-            self.depth -= 1;
-            match flow? {
-                Flow::Return(v) => Ok(v),
-                Flow::Normal => Ok(Value::Null),
-            }
+            self.exec_user_fn(&f, args, span)
         } else if let Some(fields) = self.structs.get(callee).cloned() {
             // 结构体构造：按字段顺序生成 dict 实例
             if fields.len() != args.len() {
@@ -1031,6 +1061,9 @@ impl Interp {
                 ));
             }
             Ok(Value::Dict(fields.into_iter().zip(args).collect()))
+        } else if let Some(result) = self.call_class_method(callee, &args, span) {
+            // 类方法（类名.方法名）：成员函数不进全局 fns 表，经此解析执行
+            result
         } else if builtins::is_builtin(callee) {
             // 内置函数优先（含 time.now / random.int / sys.* 等点号内置）
             builtins::call(callee, args, span, &self.file, &self.src)
@@ -1040,6 +1073,45 @@ impl Interp {
             self.call_lib_fn(callee, args, span)
         } else {
             builtins::call(callee, args, span, &self.file, &self.src)
+        }
+    }
+
+    /// 执行用户函数/类方法体：绑定参数到新环境，执行函数体，处理 return。
+    fn exec_user_fn(&mut self, f: &FnDef, args: Vec<Value>, span: Span) -> Result<Value, ZError> {
+        if self.depth >= 5000 {
+            return Err(self.runtime_err(
+                codes::RECURSION_DEPTH,
+                "recursion depth exceeded (limit 5000)",
+                span,
+                Some("check for infinite recursion, or rewrite iteratively"),
+            ));
+        }
+        let mut call_env = Env::new();
+        for (p, v) in f.params.iter().zip(args) {
+            call_env.declare(&p.name, v);
+        }
+        self.depth += 1;
+        let flow = self.exec_stmts(&mut call_env, &f.body);
+        self.depth -= 1;
+        match flow? {
+            Flow::Return(v) => Ok(v),
+            Flow::Normal => Ok(Value::Null),
+        }
+    }
+
+    /// 尝试按「类名.方法名」解析类方法调用。
+    /// 类已注册 → Some(执行结果)；类未注册或非类调用 → None（落入常规解析）。
+    fn call_class_method(&mut self, callee: &str, args: &[Value], span: Span) -> Option<Result<Value, ZError>> {
+        let (cls, method) = callee.split_once('.')?;
+        let methods = self.classes.get(cls)?;
+        match methods.get(method).cloned() {
+            Some(f) => Some(self.exec_user_fn(&f, args.to_vec(), span)),
+            None => Some(Err(self.runtime_err(
+                codes::UNDEFINED,
+                format!("class `{}` has no method `{}`", cls, method),
+                span,
+                Some("check the method name"),
+            ))),
         }
     }
 
@@ -1365,6 +1437,8 @@ fn default_value(ty: TyName) -> Value {
         TyName::Float => Value::Float(0.0),
         TyName::Bool => Value::Bool(false),
         TyName::Str => Value::Str(String::new()),
+        // 泛型类型参数无固定默认值（编译期擦除，运行时不可达）
+        TyName::Var(_) => Value::Null,
     }
 }
 

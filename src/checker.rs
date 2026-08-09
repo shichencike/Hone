@@ -47,6 +47,8 @@ impl Ty {
             TyName::Float => Ty::Float,
             TyName::Bool => Ty::Bool,
             TyName::Str => Ty::Str,
+            // 类型变量不直接映射具体类型（build_fn_info 中由类型参数槽接管）
+            TyName::Var(_) => Ty::Unknown,
         }
     }
 
@@ -74,6 +76,9 @@ struct FnInfo {
     span: Span,
     /// 函数体内每个作用域的绑定表（Phase A 构建，Phase B 复用）
     scopes: Vec<HashMap<String, usize>>,
+    /// 泛型类型参数槽（按声明顺序）。调用点为其新建槽实现实例化，
+    /// 使同一泛型函数可以不同类型多次调用（编译期擦除，运行期零成本）。
+    type_param_slots: Vec<usize>,
 }
 
 pub struct Checker {
@@ -95,6 +100,9 @@ pub struct Checker {
     builtins: HashSet<&'static str>,
     /// 结构体定义：名称 → (字段名, 字段类型)
     structs: HashMap<String, Vec<(String, Ty)>>,
+    /// 类定义：类名 → (方法名 → FnInfo)。成员函数不进入全局符号表，
+    /// 只能经 `类.方法(...)` 调用（resolve_call 按限定名解析）。
+    classes: HashMap<String, HashMap<String, FnInfo>>,
 }
 
 impl Checker {
@@ -116,6 +124,7 @@ impl Checker {
             header_cache: HashMap::new(),
             builtins,
             structs: HashMap::new(),
+            classes: HashMap::new(),
         };
 
         // Phase A：注册顶层函数并构建全局绑定
@@ -156,9 +165,9 @@ impl Checker {
 
     fn register_top_stmt(&mut self, stmt: &Stmt) -> Result<(), ZError> {
         match stmt {
-            Stmt::FnDef { name, params, ret, body, span, tmp } => {
+            Stmt::FnDef { name, type_params, params, ret, body, span, tmp } => {
                 if !tmp {
-                    self.register_fn(name, params, *ret, body, *span)?;
+                    self.register_fn(name, type_params, params, ret.clone(), body, *span)?;
                 }
             }
             Stmt::Block { stmts, .. } => {
@@ -210,8 +219,31 @@ impl Checker {
                         Some("struct names must be unique"),
                     ));
                 }
-                let mapped = fields.iter().map(|(f, t)| (f.clone(), Ty::from_annot(*t))).collect();
+                let mapped = fields.iter().map(|(f, t)| (f.clone(), Ty::from_annot(t.clone()))).collect();
                 self.structs.insert(name.clone(), mapped);
+            }
+            Stmt::ClassDef { name, methods, span } => {
+                // 注册类定义：类名唯一；成员函数以「类名.方法名」限定键存入 classes 表，
+                // 不进入全局 fns 表（成员函数不可被裸名调用）
+                if self.classes.contains_key(name) || self.structs.contains_key(name) {
+                    return Err(self.zerr(
+                        codes::SYNTAX,
+                        format!("class `{}` is already defined", name),
+                        *span,
+                        Some("class names must be unique and not clash with struct names"),
+                    ));
+                }
+                let mut methods_map: HashMap<String, FnInfo> = HashMap::new();
+                for m in methods {
+                    if let Stmt::FnDef { name: mname, type_params, params, ret, body, span: mspan, tmp } = m {
+                        if !tmp {
+                            let fname = format!("{}.{}", name, mname);
+                            let info = self.build_fn_info(&fname, type_params, params, ret.clone(), body, *mspan)?;
+                            methods_map.insert(mname.clone(), info);
+                        }
+                    }
+                }
+                self.classes.insert(name.clone(), methods_map);
             }
             Stmt::Assign { name, .. } => {
                 if self.globals.get(name).is_none() {
@@ -233,9 +265,9 @@ impl Checker {
     ) -> Result<(), ZError> {
         for stmt in body {
             match stmt {
-                Stmt::FnDef { name, params, ret, body, span, tmp: _ } => {
+                Stmt::FnDef { name, type_params, params, ret, body, span, tmp: _ } => {
                     // 嵌套函数定义：扁平化注册到全局符号表
-                    self.register_fn(name, params, *ret, body, *span)?;
+                    self.register_fn(name, type_params, params, ret.clone(), body, *span)?;
                 }
                 Stmt::Block { stmts, .. } => {
                     let idx = scopes.len();
@@ -390,6 +422,7 @@ impl Checker {
     fn register_fn(
         &mut self,
         name: &str,
+        type_params: &[String],
         params: &[Param],
         ret: Option<TyName>,
         body: &[Stmt],
@@ -403,6 +436,24 @@ impl Checker {
                 Some("function names must be unique; builtin names cannot be redefined"),
             ));
         }
+        let info = self.build_fn_info(name, type_params, params, ret, body, span)?;
+        self.fns.insert(name.to_string(), info);
+        Ok(())
+    }
+
+    /// 构建 FnInfo（参数槽 / 返回槽 / 函数体作用域注册）。类方法复用此逻辑，
+    /// 但插入 classes 表而非全局 fns 表（成员函数不进全局符号表）。
+    /// 泛型：每个类型参数（fn name[T, U]）建一个专属槽，注解 `x: T` / `-> T`
+    /// 直接复用该槽（槽别名），调用点 unify 参数时自然推导出具体类型。
+    fn build_fn_info(
+        &mut self,
+        name: &str,
+        type_params: &[String],
+        params: &[Param],
+        ret: Option<TyName>,
+        body: &[Stmt],
+        span: Span,
+    ) -> Result<FnInfo, ZError> {
         let mut seen = HashSet::new();
         for p in params {
             if !seen.insert(&p.name) {
@@ -415,41 +466,84 @@ impl Checker {
             }
         }
 
+        // 类型参数 → 槽映射（泛型：T 首次出现时建槽，后续注解复用）
+        let mut type_slots: HashMap<String, usize> = HashMap::new();
+        for tp in type_params {
+            if type_slots.contains_key(tp) {
+                return Err(self.zerr(
+                    codes::SYNTAX,
+                    format!("duplicate type parameter `{}` in `{}`", tp, name),
+                    span,
+                    Some("type parameters must be unique"),
+                ));
+            }
+            type_slots.insert(tp.clone(), self.new_slot());
+        }
+
         // 构建函数作用域（scope 0 = 函数体顶层）
         let mut scopes: Vec<HashMap<String, usize>> = vec![HashMap::new()];
         let mut param_slots = Vec::new();
         let mut scope_stack: Vec<usize> = vec![0];
         for p in params {
-            let slot = self.new_slot();
-            if let Some(t) = p.ty {
-                self.slots[slot].set(Some(Ty::from_annot(t)));
-                self.changed = true;
-            }
+            let slot = match &p.ty {
+                // 注解为类型变量：直接用类型参数槽（编译期擦除，调用点推导）
+                Some(TyName::Var(tv)) => match type_slots.get(tv) {
+                    Some(s) => *s,
+                    None => {
+                        return Err(self.zerr(
+                            codes::UNDEFINED,
+                            format!("undeclared type parameter `{}` in function `{}`", tv, name),
+                            p.span,
+                            Some(format!("add `[{}]` to the function signature", tv)),
+                        ))
+                    }
+                },
+                // 常规注解：新槽并锁定类型
+                Some(t) => {
+                    let s = self.new_slot();
+                    self.slots[s].set(Some(Ty::from_annot(t.clone())));
+                    self.changed = true;
+                    s
+                }
+                None => self.new_slot(),
+            };
             scopes[0].insert(p.name.clone(), slot);
             param_slots.push(slot);
         }
         self.register_fn_body(body, &mut scopes, &mut scope_stack)?;
 
-        let ret_slot = self.new_slot();
-        if let Some(t) = ret {
-            self.slots[ret_slot].set(Some(Ty::from_annot(t)));
-            self.changed = true;
-        }
-
-        self.fns.insert(
-            name.to_string(),
-            FnInfo {
-                name: name.to_string(),
-                params: params.iter().map(|p| p.name.clone()).collect(),
-                param_slots,
-                ret_slot,
-                ret_annot: ret.map(Ty::from_annot),
-                body: body.to_vec(),
-                span,
-                scopes,
+        let ret_slot = match &ret {
+            Some(TyName::Var(tv)) => match type_slots.get(tv) {
+                Some(s) => *s,
+                None => {
+                    return Err(self.zerr(
+                        codes::UNDEFINED,
+                        format!("undeclared type parameter `{}` in return type of `{}`", tv, name),
+                        span,
+                        Some(format!("add `[{}]` to the function signature", tv)),
+                    ))
+                }
             },
-        );
-        Ok(())
+            Some(t) => {
+                let s = self.new_slot();
+                self.slots[s].set(Some(Ty::from_annot(t.clone())));
+                self.changed = true;
+                s
+            }
+            None => self.new_slot(),
+        };
+
+        Ok(FnInfo {
+            name: name.to_string(),
+            params: params.iter().map(|p| p.name.clone()).collect(),
+            param_slots,
+            ret_slot,
+            ret_annot: ret.map(|t| Ty::from_annot(t.clone())),
+            body: body.to_vec(),
+            span,
+            scopes,
+            type_param_slots: type_params.iter().map(|tp| type_slots[tp]).collect(),
+        })
     }
 
     // ---------- Phase B：类型检查 ----------
@@ -460,22 +554,50 @@ impl Checker {
         for name in names {
             self.check_fn(&name)?;
         }
+        // 再检查类成员函数（以「类名.方法名」限定键展示）
+        let class_methods: Vec<(String, String)> = self
+            .classes
+            .iter()
+            .flat_map(|(cls, methods)| methods.keys().map(move |m| (cls.clone(), m.clone())))
+            .collect();
+        for (cls, m) in class_methods {
+            let fname = format!("{}.{}", cls, m);
+            self.check_fn(&fname)?;
+        }
         // 再检查全局语句
         self.check_stmts(top_stmts)?;
         Ok(())
     }
 
     fn check_fn(&mut self, name: &str) -> Result<(), ZError> {
-        let (body, param_slots, ret_slot, mut scopes, ret_annot) = {
-            let f = self.fns.get(name).unwrap();
-            (
-                f.body.clone(),
-                f.param_slots.clone(),
-                f.ret_slot,
-                f.scopes.clone(),
-                f.ret_annot,
-            )
+        // 类方法（类名.方法名）从 classes 表取，普通函数从 fns 表取
+        let info = if let Some((cls, m)) = name.split_once('.') {
+            if let Some(methods) = self.classes.get(cls) {
+                match methods.get(m) {
+                    Some(i) => i.clone(),
+                    None => return Ok(()), // 不是类方法限定名，按普通函数走下方
+                }
+            } else {
+                return Ok(());
+            }
+        } else {
+            match self.fns.get(name) {
+                Some(i) => i.clone(),
+                None => return Ok(()),
+            }
         };
+        self.check_method(&info)
+    }
+
+    /// 检查单个函数/方法体：返回语句与声明类型一致性。
+    fn check_method(&mut self, f: &FnInfo) -> Result<(), ZError> {
+        let (body, param_slots, ret_slot, mut scopes, ret_annot) = (
+            f.body.clone(),
+            f.param_slots.clone(),
+            f.ret_slot,
+            f.scopes.clone(),
+            f.ret_annot,
+        );
         self.has_return = false;
         let mut scope_stack: Vec<usize> = vec![0];
         self.check_stmts_with_scopes(&body, &mut scopes, &mut scope_stack, &param_slots, ret_slot)?;
@@ -490,12 +612,11 @@ impl Checker {
                 }
                 (Some(_), Some(_)) => {
                     // 声明了返回类型却没有任何 return 语句
-                    let f = self.fns.get(name).unwrap();
                     return Err(self.zerr(
                         codes::TYPE_MISMATCH,
                         format!(
                             "function `{}` declares `-> {}` but never returns a value",
-                            name,
+                            f.name,
                             ret_annot.unwrap().name()
                         ),
                         f.span,
@@ -534,7 +655,7 @@ impl Checker {
     fn check_stmt(&mut self, stmt: &Stmt) -> Result<(), ZError> {
         match stmt {
             Stmt::VarDecl { name, ty, init, span } => {
-                let annot = Ty::from_annot(*ty);
+                let annot = Ty::from_annot(ty.clone());
                 if let Some(e) = init {
                     let res = self.check_expr(e)?;
                     self.unify_with(annot, res, *span, format!("variable `{}`", name))?;
@@ -607,6 +728,7 @@ impl Checker {
             )),
             Stmt::FnDef { .. } => Ok(()), // 已注册
             Stmt::StructDef { .. } => Ok(()), // 已注册
+            Stmt::ClassDef { .. } => Ok(()), // 已注册（成员函数经 classes 表单独校验）
             Stmt::ExprStmt { expr, .. } => {
                 self.check_expr(expr)?;
                 Ok(())
@@ -681,7 +803,7 @@ impl Checker {
     ) -> Result<(), ZError> {
         match stmt {
             Stmt::VarDecl { name, ty, init, span } => {
-                let annot = Ty::from_annot(*ty);
+                let annot = Ty::from_annot(ty.clone());
                 if let Some(e) = init {
                     let res = self.check_expr_in_fn(e, scopes, scope_stack, param_slots, ret_slot)?;
                     self.unify_with(annot, res, *span, format!("variable `{}`", name))?;
@@ -775,7 +897,8 @@ impl Checker {
                 Ok(())
             }
             Stmt::FnDef { .. } => Ok(()),
-            Stmt::StructDef { .. } => Ok(()), // 顶层已注册，函数体内不新增
+            Stmt::StructDef { .. } => Ok(()),
+            Stmt::ClassDef { .. } => Ok(()), // 类定义仅注册，方法体经 check_all 校验 // 顶层已注册，函数体内不新增
             Stmt::ExprStmt { expr, .. } => {
                 self.check_expr_in_fn(expr, scopes, scope_stack, param_slots, ret_slot)?;
                 Ok(())
@@ -1492,8 +1615,24 @@ impl Checker {
         Ok(TyRes { ty, slot: None })
     }
 
-    /// 解析调用目标：用户函数 / 内置函数 / FFI 签名 / 未定义（H002）。
+    /// 解析调用目标：用户函数 / 类方法 / 内置函数 / FFI 签名 / 未定义（H002）。
     fn resolve_call(&mut self, callee: &str, arg_tys: &[TyRes], span: Span) -> Result<TyRes, ZError> {
+        // 类方法（类名.方法名）：成员函数不在全局符号表，只经类名限定调用。
+        // 类名已注册但方法不存在 → 明确报错；类名未注册 → 落入下方常规解析
+        // （内置点号函数如 time.now、load 库、import 模块等）。
+        if let Some((cls, method)) = callee.split_once('.') {
+            if let Some(info) = self.classes.get(cls).and_then(|m| m.get(method).cloned()) {
+                return self.check_user_call(&info, arg_tys, span);
+            }
+            if self.classes.contains_key(cls) {
+                return Err(self.zerr(
+                    codes::UNDEFINED,
+                    format!("class `{}` has no method `{}`", cls, method),
+                    span,
+                    Some("check the method name"),
+                ));
+            }
+        }
         if let Some(f) = self.fns.get(callee).cloned() {
             self.check_user_call(&f, arg_tys, span)
         } else if let Some(fields) = self.structs.get(callee).cloned() {
@@ -1557,15 +1696,22 @@ impl Checker {
                 )),
             ));
         }
+        // 泛型调用点实例化：为每个类型参数新建槽（旧类型参数槽 → 新槽映射）。
+        // 使同一泛型函数可以不同类型多次调用，且互不锁定（编译期擦除，运行期零成本）。
+        let mut fresh: HashMap<usize, usize> = HashMap::new();
+        for old in &f.type_param_slots {
+            fresh.insert(*old, self.new_slot());
+        }
+        let map_slot = |slot: usize| fresh.get(&slot).copied().unwrap_or(slot);
         for i in 0..arg_tys.len() {
             self.unify_slot(
-                f.param_slots[i],
+                map_slot(f.param_slots[i]),
                 arg_tys[i],
                 span,
                 format!("parameter `{}` of `{}`", f.params[i], f.name),
             )?;
         }
-        Ok(self.res_from_slot(f.ret_slot))
+        Ok(self.res_from_slot(map_slot(f.ret_slot)))
     }
 
     fn res_from_slot(&self, slot: usize) -> TyRes {
@@ -1831,6 +1977,35 @@ impl Checker {
                 self.expect_str(name, args, 1, span, "the request body")?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
+            "http.request" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the URL")?;
+                self.expect_any(name, args, 1, span, "an options dict {method, headers, body, timeout}")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "smtp.send" => {
+                self.arg_count(name, n, 3, span)?;
+                self.expect_str(name, args, 0, span, "the SMTP host")?;
+                self.expect_int(name, args, 1, span, "the port")?;
+                self.expect_any(name, args, 2, span, "an options dict {from, to, subject, body, ...}")?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            "ws.request" => {
+                if n < 2 || n > 3 {
+                    return Err(self.zerr(
+                        codes::ARG_COUNT,
+                        format!("wrong number of arguments: `ws.request` expects 2-3, got {}", n),
+                        span,
+                        Some("form: ws.request(url, message[, timeout])"),
+                    ));
+                }
+                self.expect_str(name, args, 0, span, "the WebSocket URL")?;
+                self.expect_str(name, args, 1, span, "the message")?;
+                if n == 3 {
+                    self.expect_any(name, args, 2, span, "the timeout (seconds)")?;
+                }
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
             "sys.run" => {
                 self.arg_count(name, n, 1, span)?;
                 self.expect_str(name, args, 0, span, "the command")?;
@@ -2008,6 +2183,23 @@ impl Checker {
                 self.expect_str(name, args, 0, span, "the timestamp string")?;
                 Ok(TyRes { ty: Ty::Int, slot: None })
             }
+            "time.add" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_int(name, args, 0, span, "the timestamp")?;
+                self.expect_int(name, args, 1, span, "the seconds to add")?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
+            "time.diff" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_int(name, args, 0, span, "the first timestamp")?;
+                self.expect_int(name, args, 1, span, "the second timestamp")?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
+            "time.weekday" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_int(name, args, 0, span, "the timestamp")?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
             "random.int" => {
                 self.arg_count(name, n, 2, span)?;
                 self.expect_int(name, args, 0, span, "the minimum")?;
@@ -2180,6 +2372,158 @@ impl Checker {
                 self.expect_any(name, args, 1, span, "a dict of {entry: content}")?;
                 Ok(TyRes { ty: Ty::Bool, slot: None })
             }
+            // ---------- zlib / gzip 压缩 ----------
+            "zlib.compress" | "zlib.decompress" | "zlib.gzip" | "zlib.gunzip" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the input string")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            // ---------- csv 数据处理 ----------
+            "csv.parse" | "csv.parse_dict" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the CSV text")?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None }) // 行/字典列表（动态类型）
+            }
+            "csv.stringify" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_any(name, args, 0, span, "a list of rows")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            // ---------- glob / temp 系统工具 ----------
+            "glob.match" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the glob pattern")?;
+                self.expect_str(name, args, 1, span, "the path")?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            "glob.list" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the glob pattern")?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None }) // 路径列表（动态类型）
+            }
+            "temp.dir" | "temp.file" => {
+                if n > 1 {
+                    self.arg_count(name, n, 1, span)?;
+                }
+                if n == 1 {
+                    self.expect_str(name, args, 0, span, "the prefix (or null)")?;
+                }
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "temp.remove" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the path")?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            // ---------- stat / matrix 科学计算 ----------
+            "stat.sum" | "stat.mean" | "stat.median" | "stat.variance" | "stat.stddev"
+            | "stat.min" | "stat.max" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_any(name, args, 0, span, "a list of numbers")?;
+                let ty = if name == "stat.sum" { Ty::Unknown } else { Ty::Float };
+                Ok(TyRes { ty, slot: None })
+            }
+            "matrix.identity" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_any(name, args, 0, span, "the matrix size")?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None }) // 矩阵（动态类型）
+            }
+            "matrix.transpose" | "matrix.scale" => {
+                if name == "matrix.transpose" {
+                    self.arg_count(name, n, 1, span)?;
+                } else {
+                    self.arg_count(name, n, 2, span)?;
+                }
+                self.expect_any(name, args, 0, span, "a matrix (list of lists)")?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            "matrix.add" | "matrix.mul" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_any(name, args, 0, span, "a matrix (list of lists)")?;
+                self.expect_any(name, args, 1, span, "a matrix (list of lists)")?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            // ---------- diff / regex 文本处理 ----------
+            "diff.lines" | "diff.unified" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the original text")?;
+                self.expect_str(name, args, 1, span, "the modified text")?;
+                let ty = if name == "diff.lines" { Ty::Unknown } else { Ty::Str };
+                Ok(TyRes { ty, slot: None })
+            }
+            "regex.find" | "regex.groups" | "regex.split" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the pattern")?;
+                self.expect_str(name, args, 1, span, "the text")?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None }) // 结果列表（动态类型）
+            }
+            // ---------- plot / yaml ----------
+            "plot.bar" => {
+                if n < 1 || n > 2 {
+                    return Err(self.zerr(
+                        codes::ARG_COUNT,
+                        format!("wrong number of arguments: `plot.bar` expects 1-2, got {}", n),
+                        span,
+                        Some("form: plot.bar(values[, labels])"),
+                    ));
+                }
+                self.expect_any(name, args, 0, span, "a list of numbers")?;
+                if n == 2 {
+                    self.expect_any(name, args, 1, span, "a list of labels")?;
+                }
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "plot.line" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_any(name, args, 0, span, "a list of x values")?;
+                self.expect_any(name, args, 1, span, "a list of y values")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "yaml.parse" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the YAML text")?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None }) // 动态类型
+            }
+            "yaml.stringify" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_any(name, args, 0, span, "a value")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            // ---------- sqlite ----------
+            "sqlite.open" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the database path")?;
+                Ok(TyRes { ty: Ty::Int, slot: None }) // 句柄 id
+            }
+            "sqlite.close" | "sqlite.last_insert_id" | "sqlite.changes" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_int(name, args, 0, span, "the database handle")?;
+                let ty = if name == "sqlite.close" { Ty::Bool } else { Ty::Int };
+                Ok(TyRes { ty, slot: None })
+            }
+            "sqlite.exec" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_int(name, args, 0, span, "the database handle")?;
+                self.expect_str(name, args, 1, span, "the SQL statement")?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            "sqlite.query" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_int(name, args, 0, span, "the database handle")?;
+                self.expect_str(name, args, 1, span, "the SQL query")?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None }) // dict 列表（动态类型）
+            }
+            "sqlite.query_one" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_int(name, args, 0, span, "the database handle")?;
+                self.expect_str(name, args, 1, span, "the SQL query")?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None }) // dict 或 null（动态类型）
+            }
+            "sqlite.escape" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the string to escape")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
             // ---------- plugin 插件系统 ----------
             "plugin.load" => {
                 self.arg_count(name, n, 2, span)?;
@@ -2236,6 +2580,7 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Try { span, .. }
         | Stmt::Throw { span, .. }
         | Stmt::StructDef { span, .. }
+        | Stmt::ClassDef { span, .. }
         | Stmt::DebugPrint { span, .. } => *span,
     }
 }
@@ -2290,10 +2635,16 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "time.sleep",
         "time.format",
         "time.parse",
+        "time.add",
+        "time.diff",
+        "time.weekday",
         "random.int",
         "random.float",
         "http_get",
         "http_post",
+        "http.request",
+        "smtp.send",
+        "ws.request",
         "json_parse",
         "json_stringify",
         "sys.run",
@@ -2347,6 +2698,47 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "archive.tgz_read",
         "archive.tgz_extract",
         "archive.tgz_create",
+        "zlib.compress",
+        "zlib.decompress",
+        "zlib.gzip",
+        "zlib.gunzip",
+        "csv.parse",
+        "csv.parse_dict",
+        "csv.stringify",
+        "glob.match",
+        "glob.list",
+        "temp.dir",
+        "temp.file",
+        "temp.remove",
+        "stat.sum",
+        "stat.mean",
+        "stat.median",
+        "stat.variance",
+        "stat.stddev",
+        "stat.min",
+        "stat.max",
+        "matrix.identity",
+        "matrix.transpose",
+        "matrix.add",
+        "matrix.mul",
+        "matrix.scale",
+        "diff.lines",
+        "diff.unified",
+        "regex.find",
+        "regex.groups",
+        "regex.split",
+        "plot.bar",
+        "plot.line",
+        "yaml.parse",
+        "yaml.stringify",
+        "sqlite.open",
+        "sqlite.close",
+        "sqlite.exec",
+        "sqlite.query",
+        "sqlite.query_one",
+        "sqlite.escape",
+        "sqlite.last_insert_id",
+        "sqlite.changes",
         "plugin.load",
         "plugin.has",
         "plugin.list",

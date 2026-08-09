@@ -34,7 +34,7 @@ function toggleTheme(){
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.5.0</span>
+  <span class="ver">v0.6.0</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
@@ -118,6 +118,50 @@ function toggleTheme(){
       <code class="inline">hone self-update</code> 可直接下载并替换最新版本。
       设计上「旧版本永久可用、新版本自由演化」，升级不背兼容包袱。</div>
   </details>
+
+  <h2 class="faq-group">语言陷阱（常见坑）</h2>
+
+  <details class="faq-item">
+    <summary>为什么 try/catch 块内声明的变量，块外访问报「未定义」？</summary>
+    <div class="faq-a">Hone 是<strong>块作用域</strong>：try 体、catch 处理器各自是独立作用域，
+      块内声明的变量不会泄漏到块外，catch 绑定的 <code class="inline">e</code> 也只在 catch 块内有效。
+      需要跨块共享的变量请<strong>在 try 之前声明</strong>，块内只做赋值：
+<pre><code>x = <span class="n">0</span>;
+<span class="k">try</span> { x = <span class="f">to_int</span>(<span class="s">"42"</span>); }
+<span class="k">catch</span> e { x = <span class="n">-1</span>; }
+<span class="f">print</span>(x);   <span class="c">// 42</span></code></pre></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 append 之后列表没变？</summary>
+    <div class="faq-a">列表是<strong>值类型</strong>：<code class="inline">append(list, x)</code>
+      返回追加后的<strong>新列表</strong>，不会原地修改原列表。
+      必须把返回值赋回去：<code class="inline">nums = append(nums, 4);</code>。
+      <code class="inline">clone</code> / <code class="inline">copy</code> 同理是深拷贝，改副本不影响原值。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 <code>2</code> 和 <code>2.0</code> 不能比较 / 混算？</summary>
+    <div class="faq-a">字面量 <code class="inline">2</code> 是 int，<code class="inline">2.0</code> 才是 float。
+      Hone 禁止隐式转换（int↔float 也不行），混合运算或比较会报
+      <code class="inline">error[H001]</code>。需要时显式转换：
+      <code class="inline">to_float(x)</code> / <code class="inline">to_int(x)</code>。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 <code>len("你好")</code> 返回 6 而不是 2？</summary>
+    <div class="faq-a"><code class="inline">len</code> 对字符串返回的是 <strong>UTF-8 字节数</strong>，
+      每个汉字占 3 字节。需要按字符处理时，用
+      <code class="inline">str_contains</code> / <code class="inline">str_replace</code> 等字符串函数，
+      不要依赖下标或 len。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么我的函数名报 already defined？</summary>
+    <div class="faq-a">函数名<strong>全局唯一</strong>：所有函数扁平化存在于全局符号表，
+      不支持嵌套作用域遮蔽，重复定义直接报错。模块函数会带前缀
+      （如 <code class="inline">math_clamp</code>），命名时加前缀或分类可避免冲突。</div>
+  </details>
 </main>
 
 <footer>
@@ -133,7 +177,7 @@ function toggleTheme(){
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.6.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

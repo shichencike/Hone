@@ -34,7 +34,7 @@ function toggleTheme(){
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.5.0</span>
+  <span class="ver">v0.6.0</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
@@ -60,6 +60,8 @@ function toggleTheme(){
       <div class="card"><h4>🧩 集合类型</h4><p>列表 <code class="inline">[1, 2, 3]</code>、字典 <code class="inline">{"k": v}</code> 开箱即用：<code class="inline">for-in</code> 遍历、<code class="inline">f"..."</code> 字符串插值、append / contains / keys / values 等集合函数。</p></div>
       <div class="card"><h4>⚡ 多线程与调试</h4><p><code class="inline">go task(1);</code> 一行启动线程；<code class="inline">breakpoint;</code> 断点；<code class="inline">debug_print</code> 调试输出；<code class="inline">tmp fn</code> 临时函数开发时自动忽略。</p></div>
       <div class="card"><h4>🔌 可嵌入可扩展</h4><p>@export 打包 C ABI 动态库（DLL/SO/DYLIB）、load 动态库调用、import 远程模块、LSP 语言服务器。</p></div>
+      <div class="card"><h4>🏷 class 类与泛型</h4><p><code class="inline">class Math { fn double(x) {...} }</code> 类成员函数不进全局符号表，经 <code class="inline">类.方法(...)</code> 调用；
+        <code class="inline">fn identity[T](x: T) -&gt; T</code> 泛型函数按实参自动推导，编译期擦除、运行期零成本。</p></div>
       <div class="card"><h4>🖥 图形界面库</h4><p>纯 Hone 编写的跨平台 GUI（hone_lib/gui.hn）：浏览器渲染 + 本地 HTTP 服务器双向交互，button / label / input / select 控件开箱即用。</p></div>
     </div>
   </section>
@@ -131,7 +133,7 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.6.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

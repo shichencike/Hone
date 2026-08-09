@@ -309,6 +309,37 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             })?;
             Ok(Value::Bool(true))
         }
+        // ---------- zlib / gzip 压缩（结果以 base64 返回，str 无法直接承载二进制） ----------
+        "zlib.compress" => {
+            let s = as_str(&args[0], 0, span, file, src)?;
+            let bytes = zlib_compress(s.as_bytes(), span, file, src)?;
+            use base64::Engine;
+            Ok(Value::Str(base64::engine::general_purpose::STANDARD.encode(bytes)))
+        }
+        "zlib.decompress" => {
+            let s = as_str(&args[0], 0, span, file, src)?;
+            use base64::Engine;
+            let raw = base64::engine::general_purpose::STANDARD
+                .decode(s)
+                .map_err(|e| zerr(codes::TYPE_MISMATCH, format!("invalid base64: {}", e), span, file, src, Some("`zlib.compress` 的输出可直接传给 `zlib.decompress`")))?;
+            let out = zlib_decompress(&raw, span, file, src)?;
+            Ok(Value::Str(out))
+        }
+        "zlib.gzip" => {
+            let s = as_str(&args[0], 0, span, file, src)?;
+            let bytes = gzip_compress(s.as_bytes(), span, file, src)?;
+            use base64::Engine;
+            Ok(Value::Str(base64::engine::general_purpose::STANDARD.encode(bytes)))
+        }
+        "zlib.gunzip" => {
+            let s = as_str(&args[0], 0, span, file, src)?;
+            use base64::Engine;
+            let raw = base64::engine::general_purpose::STANDARD
+                .decode(s)
+                .map_err(|e| zerr(codes::TYPE_MISMATCH, format!("invalid base64: {}", e), span, file, src, Some("`zlib.gzip` 的输出可直接传给 `zlib.gunzip`")))?;
+            let out = gzip_decompress(&raw, span, file, src)?;
+            Ok(Value::Str(out))
+        }
         _ => Err(zerr(
             codes::NOT_IMPLEMENTED,
             format!("unknown archive function `{}`", name),
@@ -318,4 +349,46 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             None::<&str>,
         )),
     }
+}
+
+// ---------- zlib / gzip 压缩辅助 ----------
+
+/// zlib 压缩（RFC 1950 deflate 流）。
+fn zlib_compress(data: &[u8], span: Span, file: &str, src: &str) -> Result<Vec<u8>, ZError> {
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
+    let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+    enc.write_all(data)
+        .and_then(|_| enc.finish())
+        .map_err(|e| zerr(codes::SYSCALL, format!("zlib compress failed: {}", e), span, file, src, None::<&str>))
+}
+
+/// zlib 解压为文本。
+fn zlib_decompress(data: &[u8], span: Span, file: &str, src: &str) -> Result<String, ZError> {
+    use flate2::read::ZlibDecoder;
+    let mut dec = ZlibDecoder::new(data);
+    let mut out = String::new();
+    dec.read_to_string(&mut out)
+        .map_err(|e| zerr(codes::SYSCALL, format!("zlib decompress failed: {}", e), span, file, src, Some("data may be corrupted or not zlib-compressed")))?;
+    Ok(out)
+}
+
+/// gzip 压缩（含 gzip 文件头）。
+fn gzip_compress(data: &[u8], span: Span, file: &str, src: &str) -> Result<Vec<u8>, ZError> {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+    enc.write_all(data)
+        .and_then(|_| enc.finish())
+        .map_err(|e| zerr(codes::SYSCALL, format!("gzip compress failed: {}", e), span, file, src, None::<&str>))
+}
+
+/// gzip 解压为文本。
+fn gzip_decompress(data: &[u8], span: Span, file: &str, src: &str) -> Result<String, ZError> {
+    use flate2::read::GzDecoder;
+    let mut dec = GzDecoder::new(data);
+    let mut out = String::new();
+    dec.read_to_string(&mut out)
+        .map_err(|e| zerr(codes::SYSCALL, format!("gzip decompress failed: {}", e), span, file, src, Some("data may be corrupted or not gzip-compressed")))?;
+    Ok(out)
 }

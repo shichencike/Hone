@@ -399,6 +399,8 @@ footer .links { margin-bottom: 6px; }
 .faq-item summary::before { content: "▸ "; color: var(--accent); }
 .faq-item[open] summary::before { content: "▾ "; }
 .faq-item .faq-a { color: var(--text-2); font-size: 14px; margin-top: 10px; padding-left: 22px; }
+.faq-group { font-size: 19px; margin: 44px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border-soft); color: var(--text); font-weight: 700; }
+.faq-group::before { content: "▸ "; color: var(--accent); }
 
 /* ---------- 关于页 ---------- */
 .about-grid {

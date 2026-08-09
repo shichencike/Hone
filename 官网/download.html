@@ -34,13 +34,13 @@ function toggleTheme(){
     <a href="install.html">安装</a>
     <a href="download.html" class="active">下载</a>
   </nav>
-  <span class="ver">v0.5.0</span>
+  <span class="ver">v0.6.0</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
 <main>
   <h2><span class="hash">#</span>下载中心</h2>
-  <p class="dl-intro">Hone 是单文件可执行程序：下载 → 解压 → 运行，零依赖、零配置。当前最新版本 <span class="tag">v0.5.0</span>，所有二进制均从 GitHub Releases 分发。</p>
+  <p class="dl-intro">Hone 是单文件可执行程序：下载 → 解压 → 运行，零依赖、零配置。当前最新版本 <span class="tag">v0.6.0</span>，所有二进制均从 GitHub Releases 分发。</p>
 
   <section>
     <h3>直接下载（GitHub Releases）</h3>
@@ -84,7 +84,10 @@ curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.
 
 <span class="c">// Windows（PowerShell 5.1+）</span>
 irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex</code></pre>
-    <p>指定版本：<code class="inline">HONE_VERSION=v0.5.0 curl -fsSL .../install.sh | sh</code>（Windows 先 <code class="inline">$env:HONE_VERSION = "v0.5.0"</code>）。详细说明见 <a href="install.html">安装教程</a>。</p>
+    <p>指定版本：<code class="inline">HONE_VERSION=v0.6.0 curl -fsSL .../install.sh | sh</code>（Windows 先 <code class="inline">$env:HONE_VERSION = "v0.6.0"</code>）。详细说明见 <a href="install.html">安装教程</a>。</p>
+    <p><strong>镜像源（国内加速）</strong>：安装脚本默认先走<strong>清华 TUNA github-release 镜像</strong>，失败自动回退官方 GitHub；
+      可用 <code class="inline">HONE_MIRROR</code> 指定其他镜像，或 <code class="inline">HONE_MIRROR=off</code> 强制只用官方源。
+      <code class="inline">hone self-update</code> 更新命令同样支持（默认镜像优先、自动回退）。</p>
   </section>
 
   <section>
@@ -111,7 +114,7 @@ cargo build --release
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.6.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

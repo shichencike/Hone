@@ -34,7 +34,7 @@ function toggleTheme(){
     <a href="install.html" class="active">安装</a>
     <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.5.0</span>
+  <span class="ver">v0.6.0</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
@@ -59,7 +59,16 @@ function toggleTheme(){
     <h3>Windows（PowerShell 5.1+）</h3>
 <pre><code>irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex</code></pre>
     <p>安装到 <code class="inline">%LOCALAPPDATA%\hone\bin</code> 并自动加入用户 PATH（新开的终端生效）。</p>
-    <p>指定版本：<code class="inline">HONE_VERSION=v0.5.0 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code>（Windows 同理，先 <code class="inline">$env:HONE_VERSION = "v0.5.0"</code>）。</p>
+    <p>指定版本：<code class="inline">HONE_VERSION=v0.6.0 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code>（Windows 同理，先 <code class="inline">$env:HONE_VERSION = "v0.6.0"</code>）。</p>
+    <p><strong>镜像源（国内加速）</strong>：脚本默认先走<strong>清华 TUNA github-release 镜像</strong>，失败自动回退官方 GitHub，无需任何配置。
+      也可用环境变量 <code class="inline">HONE_MIRROR</code> 指定其他镜像，或设 <code class="inline">HONE_MIRROR=off</code> 强制只用官方源：</p>
+<pre><code><span class="c"># 指定镜像（任意前缀，自动拼 /releases/latest/download/&lt;资产&gt;）</span>
+HONE_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/github-release/shichencike/Hone curl -fsSL .../install.sh | sh
+<span class="c"># 强制只用官方 GitHub（不走镜像）</span>
+HONE_MIRROR=off curl -fsSL .../install.sh | sh
+<span class="c"># Windows 同理：先设环境变量再执行安装脚本</span>
+$env:HONE_MIRROR = "https://mirrors.tuna.tsinghua.edu.cn/github-release/shichencike/Hone"
+irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex</code></pre>
   </section>
 
   <section id="download">
@@ -108,7 +117,7 @@ hone hello.hn    <span class="c">// Hello, Hone!</span></code></pre>
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.6.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

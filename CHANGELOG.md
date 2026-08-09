@@ -1,5 +1,50 @@
 # Changelog
 
+## [v0.6.0] - 2026-08-09
+
+### 新增
+- **class 类**：`class 名称 { fn 方法(...) { ... } }` 将相关函数组织成命名空间，经 `类.方法(...)` 调用；
+  成员函数不进全局符号表（裸名调用报 H002，不污染全局命名空间，同名全局函数可与类方法共存）；
+  类内互调用限定名（`Math.fib(n-1)`）；类名与 struct 名不重复；支持参数/返回值/递归/`-> type` 注解
+- **泛型**：`fn name[T, U](参数) -> T` 在函数名后声明类型参数，参数/返回注解可引用（`x: T`）；
+  调用时按实参自动推导，同一泛型函数可不同类型多次调用、互不锁定；**编译期擦除**——运行期零成本、
+  不产生重复代码；类方法同样支持泛型；未声明类型参数报 H002、重复类型参数报 H005
+- **标准库大规模扩展**（内置函数，开箱即用）：
+  - 数据处理：`csv.parse` / `csv.parse_dict` / `csv.stringify`（RFC 4180）、`yaml.parse` / `yaml.stringify`
+  - 系统工具：`glob.match` / `glob.list`（glob 匹配）、`temp.dir` / `temp.file` / `temp.remove`
+  - 压缩：`zlib.compress` / `zlib.decompress` / `zlib.gzip` / `zlib.gunzip`（结果 base64 编码）
+  - 科学计算：`stat.*`（sum/mean/median/variance/stddev/min/max）、`matrix.*`（identity/transpose/add/mul/scale）
+  - 文本处理：`diff.lines` / `diff.unified`（LCS 对比）、`regex.find` / `regex.groups` / `regex.split`
+  - 时间增强：`time.add` / `time.diff` / `time.weekday`（ISO 1-7），`time.format` 新增 `WW` 星期占位符
+  - 网络：`http.request`（通用请求：method/headers/body/timeout，可自定义 User-Agent）、
+    `smtp.send`（发邮件，STARTTLS / 隐式 TLS / AUTH LOGIN）、`ws.request`（WebSocket 请求-响应，支持 wss://）
+  - 绘图：`plot.bar` / `plot.line`（生成 SVG 图表文本，可保存为 .svg）
+  - 数据库：`sqlite.*`（open/close/exec/query/query_one/escape/last_insert_id/changes，
+    运行时通过 libloading 加载系统 libsqlite3，保持零 C 构建依赖）
+- 语言特性：点号后允许关键字作为模块成员名（如 `glob.match`、`random.int`、`plugin.load`）
+- 新增示例 `examples/stdlib_test.hn`、`examples/class_test.hn`、`examples/generic_test.hn`
+
+### 文档
+- README、hone.md、官网 docs.html / stdlib.html / changelog.html：补充 class 类、泛型与全部新标准库模块
+
+## [v0.5.0] - 2026-08-08
+
+### 新增
+- 语言特性：`struct` 结构体（确定数据形态，构造校验字段个数与类型）、`match` 模式匹配（字面量 + `_` 通配符）、
+  `|>` 管道操作符（可链式，解析期转为普通调用）
+- 内置函数扩展：`clone` / `copy` 深度拷贝、`assert` 断言（H700）、`args.get(key, type, default)` 类型转换与默认值、
+  `server.respond(id, body, status)` 自定义 HTTP 状态码
+- 指针类 `ptr.*`：`ptr.alloc/free/is_null/is_valid/size/read_*/write_*` 内存分配与读写；分配表跟踪防野指针
+- 压缩与归档 `archive.*`：zip / tar.gz 的列表、读取、解压与创建（防 zip-slip 穿越）
+- 加密与哈希：`crypto.sha1` / `crypto.hmac_sha256` / `crypto.base64_encode` / `crypto.base64_decode`
+- 插件系统 `plugin.*`：运行期动态注册，调用走 C ABI 通道
+- 测试框架：`hone test [目录]` 递归扫描 `*.test.hn` 运行并汇总 PASS/FAIL
+- 打包格式：`hone build --script` 生成仅脚本压缩包 `.hzp`（`hone run` 执行）
+- 自动更新：`hone self-update [url]` 下载最新二进制替换当前程序
+
+### 变更
+- 移除 `hone upgrade` 命令（旧语法迁移工具不再提供）
+
 ## [v0.4.0] - 2026-08-08
 
 ### 新增

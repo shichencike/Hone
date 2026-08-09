@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 更新日志</title>
-<meta name="description" content="Hone 编程语言更新日志：v0.5.0 语言特性与工具链扩展、v0.4.0 typed FFI 与头文件绑定、v0.3.0 本地服务器与 GUI 等版本记录。">
+<meta name="description" content="Hone 编程语言更新日志：v0.6.0 class 类与泛型、标准库大规模扩展（csv/yaml/sqlite/smtp/ws 等）、v0.6.0 语言特性与工具链扩展、v0.4.0 typed FFI 与头文件绑定等版本记录。">
 <meta name="theme-color" content="#0d1117">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
@@ -34,7 +34,7 @@ function toggleTheme(){
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.5.0</span>
+  <span class="ver">v0.6.0</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
@@ -43,7 +43,34 @@ function toggleTheme(){
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
 
   <div class="release">
-    <span class="ver-tag">v0.5.0</span><span class="date">2026-08-08</span>
+    <span class="ver-tag">v0.6.0</span><span class="date">2026-08-09</span>
+    <h4>新增</h4>
+    <ul>
+      <li><strong>class 类</strong>：<code>class 名称 { fn 方法(...) { ... } }</code> 将相关函数组织成命名空间，
+        经 <code>类.方法(...)</code> 调用；<strong>成员函数不进全局符号表</strong>（裸名调用报 H002，同名全局函数可与类方法共存）；
+        类内互调用限定名；类名与 struct 名不重复；支持参数/返回值/递归/<code>-&gt; type</code> 注解</li>
+      <li><strong>泛型</strong>：<code>fn name[T, U](参数) -&gt; T</code> 声明类型参数，注解可引用（<code>x: T</code>）；
+        调用时按实参自动推导，同一泛型函数可不同类型多次调用、互不锁定；
+        <strong>编译期擦除</strong>——运行期零成本、不产生重复代码；类方法同样支持泛型</li>
+      <li><strong>标准库大规模扩展</strong>（内置函数，开箱即用）：
+        <code>csv.*</code>（解析/序列化）、<code>yaml.*</code>、<code>glob.*</code> 与 <code>temp.*</code>、
+        <code>zlib.*</code> / <code>gzip</code> 压缩、<code>stat.*</code> 统计与 <code>matrix.*</code> 矩阵、
+        <code>diff.*</code> 文本对比与 <code>regex.find/groups/split</code>、
+        <code>time.add/diff/weekday</code>（<code>WW</code> 星期占位符）、
+        <code>http.request</code>（method/headers/body/timeout，可自定义 User-Agent）、
+        <code>smtp.send</code>（发邮件）、<code>ws.request</code>（WebSocket，支持 wss://）、
+        <code>plot.bar/line</code>（SVG 图表）、<code>sqlite.*</code>（运行时加载系统 libsqlite3，零 C 构建依赖）</li>
+      <li><strong>语言特性</strong>：点号后允许关键字作为模块成员名（如 <code>glob.match</code>、<code>random.int</code>、<code>plugin.load</code>）</li>
+      <li>新增示例 <code>examples/stdlib_test.hn</code>、<code>examples/class_test.hn</code>、<code>examples/generic_test.hn</code></li>
+    </ul>
+    <h4>文档</h4>
+    <ul>
+      <li>README、hone.md、官网 docs.html / stdlib.html：补充 class 类、泛型与全部新标准库模块</li>
+    </ul>
+  </div>
+
+  <div class="release">
+    <span class="ver-tag">v0.6.0</span><span class="date">2026-08-08</span>
     <h4>新增</h4>
     <ul>
       <li><strong>语言特性</strong>：<code>struct</code> 结构体（确定数据形态，构造校验字段个数与类型）、
@@ -136,7 +163,7 @@ function toggleTheme(){
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.5.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.6.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

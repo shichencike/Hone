@@ -54,6 +54,8 @@ pub enum Stmt {
     },
     FnDef {
         name: String,
+        /// 泛型类型参数（fn name[T, U](...)），编译期擦除，运行期零成本
+        type_params: Vec<String>,
         params: Vec<Param>,
         ret: Option<TyName>,
         body: Vec<Stmt>,
@@ -131,6 +133,13 @@ pub enum Stmt {
         fields: Vec<(String, TyName)>,
         span: Span,
     },
+    /// class 名称 { fn 方法(...) {...} ... }  类定义。
+    /// 成员函数不进入全局符号表，只能经 类.方法(...) 调用（methods 中每个元素为 FnDef）。
+    ClassDef {
+        name: String,
+        methods: Vec<Stmt>,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -140,12 +149,14 @@ pub struct Param {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TyName {
     Int,
     Float,
     Bool,
     Str,
+    /// 泛型类型参数引用（fn name[T] 中的 T，注解写 `x: T`）
+    Var(String),
 }
 
 /// load 签名块中的 C ABI 类型（typed FFI）。

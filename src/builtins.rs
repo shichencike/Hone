@@ -174,10 +174,16 @@ pub fn is_builtin(name: &str) -> bool {
             | "time.sleep"
             | "time.format"
             | "time.parse"
+            | "time.add"
+            | "time.diff"
+            | "time.weekday"
             | "random.int"
             | "random.float"
             | "http_get"
             | "http_post"
+            | "http.request"
+            | "smtp.send"
+            | "ws.request"
             | "json_parse"
             | "json_stringify"
             | "sys.run"
@@ -231,6 +237,47 @@ pub fn is_builtin(name: &str) -> bool {
             | "archive.tgz_read"
             | "archive.tgz_extract"
             | "archive.tgz_create"
+            | "zlib.compress"
+            | "zlib.decompress"
+            | "zlib.gzip"
+            | "zlib.gunzip"
+            | "csv.parse"
+            | "csv.parse_dict"
+            | "csv.stringify"
+            | "glob.match"
+            | "glob.list"
+            | "temp.dir"
+            | "temp.file"
+            | "temp.remove"
+            | "stat.sum"
+            | "stat.mean"
+            | "stat.median"
+            | "stat.variance"
+            | "stat.stddev"
+            | "stat.min"
+            | "stat.max"
+            | "matrix.identity"
+            | "matrix.transpose"
+            | "matrix.add"
+            | "matrix.mul"
+            | "matrix.scale"
+            | "diff.lines"
+            | "diff.unified"
+            | "regex.find"
+            | "regex.groups"
+            | "regex.split"
+            | "plot.bar"
+            | "plot.line"
+            | "yaml.parse"
+            | "yaml.stringify"
+            | "sqlite.open"
+            | "sqlite.close"
+            | "sqlite.exec"
+            | "sqlite.query"
+            | "sqlite.query_one"
+            | "sqlite.escape"
+            | "sqlite.last_insert_id"
+            | "sqlite.changes"
             | "plugin.load"
             | "plugin.has"
             | "plugin.list"
@@ -675,6 +722,29 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 )),
             }
         }
+        "time.add" => {
+            // 时间戳算术：time.add(ts, seconds) -> 新时间戳（秒）
+            let ts = as_int(&args[0], 0, name, span, file, src)?;
+            let secs = as_int(&args[1], 1, name, span, file, src)?;
+            ts.checked_add(secs)
+                .map(Value::Int)
+                .ok_or_else(|| err(codes::INTEGER_OVERFLOW, "time.add: timestamp overflow", span, file, src, None::<&str>))
+        }
+        "time.diff" => {
+            // 时间差：time.diff(a, b) -> a - b（秒）
+            let a = as_int(&args[0], 0, name, span, file, src)?;
+            let b = as_int(&args[1], 1, name, span, file, src)?;
+            a.checked_sub(b)
+                .map(Value::Int)
+                .ok_or_else(|| err(codes::INTEGER_OVERFLOW, "time.diff: timestamp overflow", span, file, src, None::<&str>))
+        }
+        "time.weekday" => {
+            // 星期几（ISO 8601）：1=周一 … 7=周日。1970-01-01 是周四。
+            let ts = as_int(&args[0], 0, name, span, file, src)?;
+            let days = ts.div_euclid(86400);
+            let wd = ((days + 3).rem_euclid(7)) + 1;
+            Ok(Value::Int(wd))
+        }
         "random.int" => {
             let min = as_int(&args[0], 0, name, span, file, src)?;
             let max = as_int(&args[1], 1, name, span, file, src)?;
@@ -699,6 +769,80 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let url = as_str(&args[0], 0, name, span, file, src)?;
             let body = as_str(&args[1], 1, name, span, file, src)?;
             http_request(url, "POST", Some(body), span, file, src).map(Value::Str)
+        }
+        "http.request" => {
+            // 通用 HTTP 请求：http.request(url, {method?, headers?, body?, timeout?})
+            let url = as_str(&args[0], 0, name, span, file, src)?;
+            let opts = &args[1];
+            let mut method = "GET";
+            let mut body: Option<String> = None;
+            let mut headers: Vec<(String, String)> = Vec::new();
+            let mut timeout: u64 = 15;
+            match opts {
+                Value::Dict(entries) => {
+                    for (k, v) in entries {
+                        match k.as_str() {
+                            "method" => method = as_str(v, 0, name, span, file, src)?,
+                            "body" => body = Some(as_str(v, 0, name, span, file, src)?.to_string()),
+                            "headers" => {
+                                if let Value::Dict(hdrs) = v {
+                                    for (hk, hv) in hdrs {
+                                        let hv_s = as_str(hv, 0, name, span, file, src)?;
+                                        headers.push((hk.clone(), hv_s.to_string()));
+                                    }
+                                } else {
+                                    return Err(err(
+                                        codes::TYPE_MISMATCH,
+                                        "`http.request` headers must be a dict of strings",
+                                        span,
+                                        file,
+                                        src,
+                                        Some("pass {\"headers\": {\"User-Agent\": \"...\"}}"),
+                                    ));
+                                }
+                            }
+                            "timeout" => {
+                                timeout = match v {
+                                    Value::Int(i) if *i >= 0 => *i as u64,
+                                    Value::Float(f) if *f >= 0.0 => *f as u64,
+                                    _ => {
+                                        return Err(err(
+                                            codes::TYPE_MISMATCH,
+                                            "`http.request` timeout must be a non-negative number (seconds)",
+                                            span,
+                                            file,
+                                            src,
+                                            Some("pass an int or float number of seconds"),
+                                        ))
+                                    }
+                                }
+                            }
+                            _ => {} // 忽略未知选项键
+                        }
+                    }
+                }
+                other => {
+                    return Err(err(
+                        codes::TYPE_MISMATCH,
+                        format!("`http.request` expects a dict of options, got `{}`", other.type_name()),
+                        span,
+                        file,
+                        src,
+                        Some("form: http.request(url, {method, headers, body, timeout})"),
+                    ))
+                }
+            }
+            let header_refs: Vec<(&str, &str)> = headers.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+            let (head, body_bytes) = http_fetch_opts(url, method, body.as_deref(), &header_refs, timeout, span, file, src)?;
+            let mut text = String::from_utf8_lossy(&body_bytes).into_owned();
+            if head.to_lowercase().contains("transfer-encoding: chunked") {
+                text = decode_chunked(&text);
+            }
+            Ok(Value::Str(text))
+        }
+        // 网络与通信（netmod 模块实现，SMTP 发邮件 / WebSocket 请求）
+        "smtp.send" | "ws.request" => {
+            crate::netmod::call(name, &args, span, file, src)
         }
         "json_parse" => {
             let s = as_str(&args[0], 0, name, span, file, src)?;
@@ -727,10 +871,38 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         | "ptr.write_int" | "ptr.write_float" | "ptr.write_byte" => {
             crate::ptrmod::call(name, &args, span, file, src)
         }
-        // 压缩与归档（archmod 模块实现，zip/tar.gz 读写）
+        // 压缩与归档（archmod 模块实现，zip/tar.gz 读写 + zlib/gzip 压缩）
         "archive.zip_list" | "archive.zip_read" | "archive.zip_extract" | "archive.zip_create"
-        | "archive.tgz_list" | "archive.tgz_read" | "archive.tgz_extract" | "archive.tgz_create" => {
+        | "archive.tgz_list" | "archive.tgz_read" | "archive.tgz_extract" | "archive.tgz_create"
+        | "zlib.compress" | "zlib.decompress" | "zlib.gzip" | "zlib.gunzip" => {
             crate::archmod::call(name, &args, span, file, src)
+        }
+        // 数据处理（datamod 模块实现，csv 解析/序列化）
+        "csv.parse" | "csv.parse_dict" | "csv.stringify" => {
+            crate::datamod::call(name, &args, span, file, src)
+        }
+        // 系统工具（sysutilmod 模块实现，glob 匹配 / temp 临时文件目录）
+        "glob.match" | "glob.list" | "temp.dir" | "temp.file" | "temp.remove" => {
+            crate::sysutilmod::call(name, &args, span, file, src)
+        }
+        // 科学计算（statmod 模块实现，stat 统计 / matrix 矩阵运算）
+        "stat.sum" | "stat.mean" | "stat.median" | "stat.variance" | "stat.stddev"
+        | "stat.min" | "stat.max" | "matrix.identity" | "matrix.transpose"
+        | "matrix.add" | "matrix.mul" | "matrix.scale" => {
+            crate::statmod::call(name, &args, span, file, src)
+        }
+        // 文本处理（textmod 模块实现，diff 对比 / regex find/groups/split）
+        "diff.lines" | "diff.unified" | "regex.find" | "regex.groups" | "regex.split" => {
+            crate::textmod::call(name, &args, span, file, src)
+        }
+        // 绘图与数据格式（plotmod 模块实现，SVG 图表 / YAML 解析）
+        "plot.bar" | "plot.line" | "yaml.parse" | "yaml.stringify" => {
+            crate::plotmod::call(name, &args, span, file, src)
+        }
+        // SQLite 轻量封装（sqlitemod 模块实现，运行时 FFI 加载系统 libsqlite3）
+        "sqlite.open" | "sqlite.close" | "sqlite.exec" | "sqlite.query" | "sqlite.query_one"
+        | "sqlite.escape" | "sqlite.last_insert_id" | "sqlite.changes" => {
+            crate::sqlitemod::call(name, &args, span, file, src)
         }
         // 插件系统（pluginmod 模块实现，运行期动态注册）
         "plugin.load" | "plugin.has" | "plugin.list" | "plugin.unload" => {
@@ -1073,6 +1245,13 @@ pub(crate) fn format_timestamp(secs: i64, fmt: &str) -> String {
                     i += 2;
                     continue;
                 }
+                "WW" => {
+                    // ISO 8601 星期几：1=周一 … 7=周日（1970-01-01 为周四）
+                    let days = secs.div_euclid(86400);
+                    out.push_str(&(((days + 3).rem_euclid(7)) + 1).to_string());
+                    i += 2;
+                    continue;
+                }
                 _ => {}
             }
         }
@@ -1237,13 +1416,13 @@ fn random_float() -> f64 {
 
 // ---------- http（std::net + rustls 实现，支持 http:// 与 https://） ----------
 
-/// 统一读写抽象：TcpStream 与 TlsStream 共用
-trait ReadWrite: Read + Write {}
+/// 统一读写抽象：TcpStream 与 TlsStream 共用（netmod 等模块复用）
+pub(crate) trait ReadWrite: Read + Write {}
 impl<T: Read + Write> ReadWrite for T {}
 
 /// TLS 配置：rustls + rustls-rustcrypto（纯 Rust 实现，无 C 依赖），
 /// Windows/Linux/Termux 跨平台一致，webpki-roots 内置 Mozilla 根证书
-static TLS: Lazy<Result<std::sync::Arc<rustls::ClientConfig>, String>> = Lazy::new(|| {
+pub(crate) static TLS: Lazy<Result<std::sync::Arc<rustls::ClientConfig>, String>> = Lazy::new(|| {
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
@@ -1256,11 +1435,26 @@ static TLS: Lazy<Result<std::sync::Arc<rustls::ClientConfig>, String>> = Lazy::n
     Ok(std::sync::Arc::new(config))
 });
 
-/// 发送 HTTP 请求并返回 (响应头文本, 原始响应体字节)。非 2xx 状态报错。
+/// 发送 HTTP 请求（默认超时 15 秒、无自定义头）。供 http_request / http_get_bytes 复用。
 fn http_fetch_raw(
     url: &str,
     method: &str,
     body: Option<&str>,
+    span: Span,
+    file: &str,
+    src: &str,
+) -> Result<(String, Vec<u8>), ZError> {
+    http_fetch_opts(url, method, body, &[], 15, span, file, src)
+}
+
+/// 发送 HTTP 请求并返回 (响应头文本, 原始响应体字节)。非 2xx 状态报错。
+/// 支持自定义 Header（可覆盖 User-Agent / Content-Type）与超时秒数。
+fn http_fetch_opts(
+    url: &str,
+    method: &str,
+    body: Option<&str>,
+    headers: &[(&str, &str)],
+    timeout_secs: u64,
     span: Span,
     file: &str,
     src: &str,
@@ -1305,8 +1499,8 @@ fn http_fetch_raw(
     let addr = format!("{}:{}", host, port);
 
     let tcp = TcpStream::connect(&addr).map_err(|e| net_err("connect", e))?;
-    tcp.set_read_timeout(Some(Duration::from_secs(15))).ok();
-    tcp.set_write_timeout(Some(Duration::from_secs(15))).ok();
+    tcp.set_read_timeout(Some(Duration::from_secs(timeout_secs))).ok();
+    tcp.set_write_timeout(Some(Duration::from_secs(timeout_secs))).ok();
 
     // https 时做 TLS 握手（webpki-roots 内置 Mozilla 根证书验证）
     let mut stream: Box<dyn ReadWrite> = if use_tls {
@@ -1360,25 +1554,37 @@ fn http_fetch_raw(
         format!("{}:{}", host, port)
     };
 
-    let (head, tail) = match body {
-        Some(b) => (
-            format!(
-                "{} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: hone/0.1.0\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                method,
-                path,
-                host_header,
-                b.len()
-            ),
-            b.as_bytes().to_vec(),
-        ),
-        None => (
-            format!(
-                "{} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: hone/0.1.0\r\nConnection: close\r\n\r\n",
-                method, path, host_header
-            ),
-            Vec::new(),
-        ),
+    // 请求头构造：默认头 + 自定义头（可覆盖 User-Agent / Content-Type）
+    let mut head = format!(
+        "{} {} HTTP/1.1\r\nHost: {}\r\n",
+        method, path, host_header
+    );
+    let mut has_ua = false;
+    let mut has_ct = false;
+    for (k, v) in headers {
+        let lower = k.to_ascii_lowercase();
+        if lower == "user-agent" {
+            has_ua = true;
+        }
+        if lower == "content-type" {
+            has_ct = true;
+        }
+        head.push_str(&format!("{}: {}\r\n", k, v));
+    }
+    if !has_ua {
+        head.push_str("User-Agent: hone/0.1.0\r\n");
+    }
+    let tail = match body {
+        Some(b) => {
+            if !has_ct {
+                head.push_str("Content-Type: text/plain\r\n");
+            }
+            head.push_str(&format!("Content-Length: {}\r\n", b.len()));
+            b.as_bytes().to_vec()
+        }
+        None => Vec::new(),
     };
+    head.push_str("Connection: close\r\n\r\n");
     stream.write_all(head.as_bytes()).map_err(|e| net_err("write", e))?;
     if !tail.is_empty() {
         stream.write_all(&tail).map_err(|e| net_err("write", e))?;

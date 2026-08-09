@@ -13,6 +13,43 @@ pub struct Parser {
     pos: usize,
 }
 
+/// 关键字 token → 源文本。点号后允许关键字作为模块成员名
+/// （如 glob.match、random.int、plugin.load），解析时映射回名字符串。
+fn keyword_text(tok: &Tok) -> Option<&'static str> {
+    Some(match tok {
+        Tok::Fn => "fn",
+        Tok::If => "if",
+        Tok::Else => "else",
+        Tok::While => "while",
+        Tok::For => "for",
+        Tok::In => "in",
+        Tok::Return => "return",
+        Tok::True => "true",
+        Tok::False => "false",
+        Tok::Go => "go",
+        Tok::Try => "try",
+        Tok::Catch => "catch",
+        Tok::Throw => "throw",
+        Tok::Match => "match",
+        Tok::Breakpoint => "breakpoint",
+        Tok::Load => "load",
+        Tok::Lazy => "lazy",
+        Tok::Use => "use",
+        Tok::Import => "import",
+        Tok::Alias => "alias",
+        Tok::As => "as",
+        Tok::From => "from",
+        Tok::Tmp => "tmp",
+        Tok::Struct => "struct",
+        Tok::Class => "class",
+        Tok::TInt => "int",
+        Tok::TFloat => "float",
+        Tok::TBool => "bool",
+        Tok::TStr => "str",
+        _ => return None,
+    })
+}
+
 impl Parser {
     /// 词法分析 + 语法分析，返回整个程序的 AST。
     pub fn parse(file: &str, src: &str) -> Result<Program, ZError> {
@@ -143,6 +180,7 @@ impl Parser {
             Tok::At => self.parse_export(),
             Tok::Tmp => self.parse_tmp_fn(),
             Tok::Struct => self.parse_struct_def(),
+            Tok::Class => self.parse_class_def(),
             other => Err(self.err_here(
                 codes::SYNTAX,
                 format!("expected a statement, found {}", other.describe()),
@@ -261,6 +299,31 @@ impl Parser {
                 ))
             }
         };
+        // 泛型类型参数：fn name[T, U](...)（编译期擦除，运行期零成本）
+        let mut type_params = Vec::new();
+        if self.at(&Tok::LBracket) {
+            self.next(); // [
+            while !self.at(&Tok::RBracket) {
+                let (tp_tok, tp_span) = self.next();
+                match tp_tok {
+                    Tok::Ident(s) => type_params.push(s),
+                    other => {
+                        return Err(self.err_at(
+                            &tp_span,
+                            codes::SYNTAX,
+                            format!("expected a type parameter name, found {}", other.describe()),
+                            Some("type parameters look like `fn name[T, U](...)`"),
+                        ))
+                    }
+                }
+                if self.at(&Tok::Comma) {
+                    self.next();
+                } else {
+                    break;
+                }
+            }
+            self.expect(&Tok::RBracket, "`]`")?;
+        }
         self.expect(&Tok::LParen, "`(`")?;
         let mut params = Vec::new();
         while !self.at(&Tok::RParen) {
@@ -282,6 +345,7 @@ impl Parser {
         let body = self.parse_block_body()?;
         Ok(Stmt::FnDef {
             name,
+            type_params,
             params,
             ret,
             body,
@@ -357,9 +421,11 @@ impl Parser {
             Tok::TFloat => Ok(TyName::Float),
             Tok::TBool => Ok(TyName::Bool),
             Tok::TStr => Ok(TyName::Str),
+            // 泛型类型变量（fn name[T] 的 T）：注解写 `x: T`。是否已声明由 checker 校验。
+            Tok::Ident(s) => Ok(TyName::Var(s)),
             other => Err(self.err_here(
                 codes::SYNTAX,
-                format!("expected a type name (`int`/`float`/`bool`/`str`), found {}", other.describe()),
+                format!("expected a type name (`int`/`float`/`bool`/`str` or a type parameter), found {}", other.describe()),
                 None::<&str>,
             )),
         }
@@ -812,6 +878,49 @@ impl Parser {
         Ok(Stmt::StructDef { name, fields, span })
     }
 
+    /// class 名称 { fn 方法(...) {...} ... }  类定义。
+    /// 成员函数不进入全局符号表，只能经 `类.方法(...)` 调用。
+    fn parse_class_def(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // class
+        let (tok, _) = self.next();
+        let name = match tok {
+            Tok::Ident(s) => s,
+            other => {
+                return Err(self.err_here(
+                    codes::SYNTAX,
+                    format!("expected a class name after `class`, found {}", other.describe()),
+                    Some("`class` form: `class Name { fn method(...) { ... } ... }`"),
+                ))
+            }
+        };
+        self.expect(&Tok::LBrace, "`{`")?;
+        let mut methods = Vec::new();
+        while !self.at(&Tok::RBrace) {
+            let (mtok, mspan) = self.next();
+            match mtok {
+                Tok::Fn => methods.push(self.parse_fn_body(false)?),
+                Tok::Tmp => {
+                    self.expect(&Tok::Fn, "`fn`")?;
+                    methods.push(self.parse_fn_body(true)?);
+                }
+                other => {
+                    return Err(self.err_at(
+                        &mspan,
+                        codes::SYNTAX,
+                        format!("expected a method definition (`fn`), found {}", other.describe()),
+                        Some("class members are functions: `fn method(params) { ... }`"),
+                    ))
+                }
+            }
+        }
+        self.expect(&Tok::RBrace, "`}`")?;
+        // 类定义结尾分号可选（与 struct 不同，class 是块结构）
+        if self.at(&Tok::Semi) {
+            self.next();
+        }
+        Ok(Stmt::ClassDef { name, methods, span })
+    }
+
     /// match 表达式 { 模式 => 分支体, ..., _ => 默认值 }  模式匹配（模式为字面量或 `_`）。
     /// 已消费 `match` 关键字；返回 Match 表达式，其值为匹配分支体的值。
     fn parse_match(&mut self, span: Span) -> Result<Expr, ZError> {
@@ -1225,20 +1334,18 @@ impl Parser {
             let (tok, span) = self.next();
             match tok {
                 Tok::Ident(part) => parts.push(part),
-                Tok::TInt => parts.push("int".to_string()),
-                Tok::TFloat => parts.push("float".to_string()),
-                Tok::TBool => parts.push("bool".to_string()),
-                Tok::TStr => parts.push("str".to_string()),
-                // `plugin.load` 等模块成员：load 是关键字但可作为成员名
-                Tok::Load => parts.push("load".to_string()),
-                other => {
-                    return Err(self.err_at(
-                        &span,
-                        codes::SYNTAX,
-                        format!("expected an identifier after `.`, found {}", other.describe()),
-                        None::<&str>,
-                    ))
-                }
+                // 点号后的关键字一律视为模块成员名（如 glob.match、random.int、plugin.load）
+                other => match keyword_text(&other) {
+                    Some(kw) => parts.push(kw.to_string()),
+                    None => {
+                        return Err(self.err_at(
+                            &span,
+                            codes::SYNTAX,
+                            format!("expected an identifier after `.`, found {}", other.describe()),
+                            None::<&str>,
+                        ))
+                    }
+                },
             }
         }
         Ok(parts)
