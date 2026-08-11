@@ -96,10 +96,11 @@ impl Value {
     }
 }
 
-/// 语句执行流程：Normal 继续；Return 携带返回值向上传播。
+/// 语句执行流程：Normal 继续；Return 携带返回值向上传播；Break 跳出最近循环。
 enum Flow {
     Normal,
     Return(Value),
+    Break,
 }
 
 #[derive(Clone)]
@@ -358,6 +359,7 @@ impl Interp {
         for s in stmts {
             match self.exec_stmt(env, s)? {
                 Flow::Return(v) => return Ok(Flow::Return(v)),
+                Flow::Break => return Ok(Flow::Break),
                 Flow::Normal => {}
             }
         }
@@ -422,8 +424,10 @@ impl Interp {
                             None::<&str>,
                         ));
                     }
-                    if let Flow::Return(v) = self.exec_block(env, body)? {
-                        return Ok(Flow::Return(v));
+                    match self.exec_block(env, body)? {
+                        Flow::Return(v) => return Ok(Flow::Return(v)),
+                        Flow::Break => break,
+                        Flow::Normal => {}
                     }
                 }
                 Ok(Flow::Normal)
@@ -447,8 +451,10 @@ impl Interp {
                             env.declare(var, item);
                             let flow = self.exec_stmts(env, body)?;
                             env.scopes.pop();
-                            if let Flow::Return(v) = flow {
-                                return Ok(Flow::Return(v));
+                            match flow {
+                                Flow::Return(v) => return Ok(Flow::Return(v)),
+                                Flow::Break => break,
+                                Flow::Normal => {}
                             }
                         }
                         Ok(Flow::Normal)
@@ -463,8 +469,10 @@ impl Interp {
                             }
                             let flow = self.exec_stmts(env, body)?;
                             env.scopes.pop();
-                            if let Flow::Return(v) = flow {
-                                return Ok(Flow::Return(v));
+                            match flow {
+                                Flow::Return(v) => return Ok(Flow::Return(v)),
+                                Flow::Break => break,
+                                Flow::Normal => {}
                             }
                         }
                         Ok(Flow::Normal)
@@ -493,6 +501,7 @@ impl Interp {
                 self.eval_expr(env, expr)?;
                 Ok(Flow::Normal)
             }
+            Stmt::Break { .. } => Ok(Flow::Break),
             Stmt::Breakpoint { span } => {
                 if self.debug {
                     self.do_breakpoint(env, *span);
@@ -1096,6 +1105,14 @@ impl Interp {
         match flow? {
             Flow::Return(v) => Ok(v),
             Flow::Normal => Ok(Value::Null),
+            // checker 已保证 break 只在循环体内，循环会捕获它，
+            // 因此正常情况下不会逃逸到函数体；兜底防内部不一致
+            Flow::Break => Err(self.runtime_err(
+                codes::SYNTAX,
+                "`break` escaped a function body (internal error)",
+                span,
+                None::<&str>,
+            )),
         }
     }
 

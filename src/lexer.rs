@@ -28,6 +28,7 @@ pub enum Tok {
     Throw,
     // match 模式匹配
     Match,
+    Break,
     Breakpoint,
     Load,
     Lazy,
@@ -102,6 +103,7 @@ impl Tok {
             Tok::Catch => "`catch`".into(),
             Tok::Throw => "`throw`".into(),
             Tok::Match => "`match`".into(),
+            Tok::Break => "`break`".into(),
             Tok::Breakpoint => "`breakpoint`".into(),
             Tok::Load => "`load`".into(),
             Tok::Lazy => "`lazy`".into(),
@@ -320,6 +322,7 @@ impl Lexer {
                 "catch" => Tok::Catch,
                 "throw" => Tok::Throw,
                 "match" => Tok::Match,
+                "break" => Tok::Break,
                 "breakpoint" => Tok::Breakpoint,
                 "load" => Tok::Load,
                 "lazy" => Tok::Lazy,

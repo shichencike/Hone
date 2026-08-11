@@ -91,6 +91,8 @@ pub struct Checker {
     changed: bool,
     strict: bool,
     has_return: bool,
+    /// 当前嵌套的循环深度（>0 时 break 合法），顶层与函数内检查共用
+    loop_depth: usize,
     /// 程序中存在 import/load 等动态外部加载，未定义函数可能来自外部模块
     has_external: bool,
     /// load 签名块声明的 FFI 函数（键为完整调用名 "alias.fn"）
@@ -119,6 +121,7 @@ impl Checker {
             changed: false,
             strict: false,
             has_return: false,
+            loop_depth: 0,
             has_external: false,
             ffi_sigs: HashMap::new(),
             header_cache: HashMap::new(),
@@ -703,7 +706,9 @@ impl Checker {
                 let res = self.check_expr(cond)?;
                 self.require_bool(res, span)?;
                 self.global_scopes.push(HashMap::new());
+                self.loop_depth += 1;
                 self.check_stmts(body)?;
+                self.loop_depth -= 1;
                 self.global_scopes.pop();
                 Ok(())
             }
@@ -716,7 +721,9 @@ impl Checker {
                 if let Some(v2) = var2 {
                     self.bind_or_unify(v2, None, *span)?;
                 }
+                self.loop_depth += 1;
                 self.check_stmts(body)?;
+                self.loop_depth -= 1;
                 self.global_scopes.pop();
                 Ok(())
             }
@@ -731,6 +738,17 @@ impl Checker {
             Stmt::ClassDef { .. } => Ok(()), // 已注册（成员函数经 classes 表单独校验）
             Stmt::ExprStmt { expr, .. } => {
                 self.check_expr(expr)?;
+                Ok(())
+            }
+            Stmt::Break { span } => {
+                if self.loop_depth == 0 {
+                    return Err(self.zerr(
+                        codes::SYNTAX,
+                        "`break` is only allowed inside a loop",
+                        *span,
+                        Some("move the `break` into a `while` or `for` body"),
+                    ));
+                }
                 Ok(())
             }
             Stmt::Breakpoint { .. } => Ok(()),
@@ -863,7 +881,9 @@ impl Checker {
                 let idx = scopes.len();
                 scopes.push(HashMap::new());
                 scope_stack.push(idx);
+                self.loop_depth += 1;
                 self.check_stmts_with_scopes(body, scopes, scope_stack, param_slots, ret_slot)?;
+                self.loop_depth -= 1;
                 scope_stack.pop();
                 scopes.pop();
                 Ok(())
@@ -878,7 +898,9 @@ impl Checker {
                 if let Some(v2) = var2 {
                     self.bind_in_stack(v2, None, *span, scopes, scope_stack)?;
                 }
+                self.loop_depth += 1;
                 self.check_stmts_with_scopes(body, scopes, scope_stack, param_slots, ret_slot)?;
+                self.loop_depth -= 1;
                 scope_stack.pop();
                 scopes.pop();
                 Ok(())
@@ -901,6 +923,17 @@ impl Checker {
             Stmt::ClassDef { .. } => Ok(()), // 类定义仅注册，方法体经 check_all 校验 // 顶层已注册，函数体内不新增
             Stmt::ExprStmt { expr, .. } => {
                 self.check_expr_in_fn(expr, scopes, scope_stack, param_slots, ret_slot)?;
+                Ok(())
+            }
+            Stmt::Break { span } => {
+                if self.loop_depth == 0 {
+                    return Err(self.zerr(
+                        codes::SYNTAX,
+                        "`break` is only allowed inside a loop",
+                        *span,
+                        Some("move the `break` into a `while` or `for` body"),
+                    ));
+                }
                 Ok(())
             }
             Stmt::Breakpoint { .. } => Ok(()),
@@ -2568,6 +2601,7 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::While { span, .. }
         | Stmt::ForIn { span, .. }
         | Stmt::Return { span, .. }
+        | Stmt::Break { span, .. }
         | Stmt::FnDef { span, .. }
         | Stmt::ExprStmt { span, .. }
         | Stmt::Breakpoint { span, .. }

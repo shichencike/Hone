@@ -31,6 +31,7 @@ fn keyword_text(tok: &Tok) -> Option<&'static str> {
         Tok::Catch => "catch",
         Tok::Throw => "throw",
         Tok::Match => "match",
+        Tok::Break => "break",
         Tok::Breakpoint => "breakpoint",
         Tok::Load => "load",
         Tok::Lazy => "lazy",
@@ -163,6 +164,11 @@ impl Parser {
             Tok::Go => self.parse_go(),
             Tok::Try => self.parse_try(),
             Tok::Throw => self.parse_throw(),
+            Tok::Break => {
+                let (_, span) = self.next();
+                self.expect_semi()?;
+                Ok(Stmt::Break { span })
+            }
             Tok::Breakpoint => {
                 let (_, span) = self.next();
                 self.expect_semi()?;

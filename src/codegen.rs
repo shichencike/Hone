@@ -958,6 +958,7 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::While { span, .. }
         | Stmt::ForIn { span, .. }
         | Stmt::Return { span, .. }
+        | Stmt::Break { span, .. }
         | Stmt::FnDef { span, .. }
         | Stmt::ExprStmt { span, .. }
         | Stmt::Breakpoint { span, .. }

@@ -52,6 +52,10 @@ pub enum Stmt {
         value: Option<Expr>,
         span: Span,
     },
+    /// break;  跳出当前 while / for 循环（checker 校验只能在循环体内）
+    Break {
+        span: Span,
+    },
     FnDef {
         name: String,
         /// 泛型类型参数（fn name[T, U](...)），编译期擦除，运行期零成本
