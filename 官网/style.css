@@ -338,7 +338,9 @@ footer .links { margin-bottom: 6px; }
   margin: 2px 0;
 }
 .dl-card .dl-desc { font-size: 13px; color: var(--text-3); }
-.dl-card .btn { padding: 8px 18px; font-size: 14px; margin-left: 10px; }
+.dl-card .btn { padding: 8px 18px; font-size: 14px; }
+.dl-btns { display: flex; align-items: center; gap: 10px; margin-left: 12px; }
+.dl-btns .btn { margin-left: 0; white-space: nowrap; }
 .dl-note {
   font-size: 13px;
   color: var(--text-3);

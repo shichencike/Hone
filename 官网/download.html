@@ -40,17 +40,21 @@ function toggleTheme(){
 
 <main>
   <h2><span class="hash">#</span>下载中心</h2>
-  <p class="dl-intro">Hone 是单文件可执行程序：下载 → 解压 → 运行，零依赖、零配置。当前最新版本 <span class="tag">v0.6.0</span>，所有二进制均从 GitHub Releases 分发。</p>
+  <p class="dl-intro">Hone 是单文件可执行程序：下载 → 解压 → 运行，零依赖、零配置。当前最新版本 <span class="tag">v0.6.0</span>。
+    国内用户无需加速器：直接点下方「国内镜像」按钮，走清华 TUNA 镜像高速下载，与官方 GitHub 文件完全一致（sha256 相同）。</p>
 
   <section>
-    <h3>直接下载（GitHub Releases）</h3>
+    <h3>直接下载</h3>
     <div class="dl-card">
       <div>
         <div class="dl-os">🪟 Windows x86_64</div>
         <div class="dl-file">hone-windows-x86_64.exe</div>
         <div class="dl-desc">64 位 Windows 10 / 11，无需安装，双击或命令行直接运行</div>
       </div>
-      <a class="btn primary" href="https://github.com/shichencike/Hone/releases/latest/download/hone-windows-x86_64.exe">下载</a>
+      <div class="dl-btns">
+        <a class="btn primary" href="https://mirrors.tuna.tsinghua.edu.cn/github-release/shichencike/Hone/releases/latest/download/hone-windows-x86_64.exe">国内镜像</a>
+        <a class="btn" href="https://github.com/shichencike/Hone/releases/latest/download/hone-windows-x86_64.exe">GitHub 官方</a>
+      </div>
     </div>
     <div class="dl-card">
       <div>
@@ -58,7 +62,10 @@ function toggleTheme(){
         <div class="dl-file">hone-linux-x86_64</div>
         <div class="dl-desc">musl 静态编译，不依赖系统 glibc，任何发行版直接运行</div>
       </div>
-      <a class="btn primary" href="https://github.com/shichencike/Hone/releases/latest/download/hone-linux-x86_64">下载</a>
+      <div class="dl-btns">
+        <a class="btn primary" href="https://mirrors.tuna.tsinghua.edu.cn/github-release/shichencike/Hone/releases/latest/download/hone-linux-x86_64">国内镜像</a>
+        <a class="btn" href="https://github.com/shichencike/Hone/releases/latest/download/hone-linux-x86_64">GitHub 官方</a>
+      </div>
     </div>
     <div class="dl-card">
       <div>
@@ -66,11 +73,15 @@ function toggleTheme(){
         <div class="dl-file">hone-termux-aarch64</div>
         <div class="dl-desc">Termux 终端环境（ARM64），静态编译开箱即用</div>
       </div>
-      <a class="btn primary" href="https://github.com/shichencike/Hone/releases/latest/download/hone-termux-aarch64">下载</a>
+      <div class="dl-btns">
+        <a class="btn primary" href="https://mirrors.tuna.tsinghua.edu.cn/github-release/shichencike/Hone/releases/latest/download/hone-termux-aarch64">国内镜像</a>
+        <a class="btn" href="https://github.com/shichencike/Hone/releases/latest/download/hone-termux-aarch64">GitHub 官方</a>
+      </div>
     </div>
 
     <div class="dl-note">
-      校验和：每次发布附带 <a href="https://github.com/shichencike/Hone/releases/latest/download/checksums.txt">checksums.txt</a>，
+      校验和：每次发布附带 <a href="https://mirrors.tuna.tsinghua.edu.cn/github-release/shichencike/Hone/releases/latest/download/checksums.txt">checksums.txt（镜像）</a> /
+      <a href="https://github.com/shichencike/Hone/releases/latest/download/checksums.txt">GitHub</a>，
       用 <code class="inline">sha256sum</code>（Windows 用 <code class="inline">Get-FileHash -Algorithm SHA256</code>）比对下载文件的哈希。
       全部历史版本见 <a href="https://github.com/shichencike/Hone/releases">GitHub Releases</a>。
     </div>
@@ -78,11 +89,15 @@ function toggleTheme(){
 
   <section>
     <h3>一键脚本安装（推荐）</h3>
-    <p>脚本会自动下载对应平台二进制、校验 sha256 并安装，无需手动管理文件：</p>
-<pre><code><span class="c">// Linux / Termux</span>
-curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh
+    <p>脚本会自动下载对应平台二进制、校验 sha256 并安装，无需手动管理文件。国内用户可直接从镜像拉取脚本（无需加速器）：</p>
+<pre><code><span class="c">// Linux / Termux（镜像拉取，国内直连）</span>
+curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/github-release/shichencike/Hone/releases/latest/download/install.sh | sh
 
-<span class="c">// Windows（PowerShell 5.1+）</span>
+<span class="c">// Windows（PowerShell 5.1+，镜像拉取）</span>
+irm https://mirrors.tuna.tsinghua.edu.cn/github-release/shichencike/Hone/releases/latest/download/install.ps1 | iex
+
+<span class="c">// 或从 GitHub 官方拉取（脚本内部默认已走镜像、失败自动回退官方）</span>
+curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh
 irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex</code></pre>
     <p>指定版本：<code class="inline">HONE_VERSION=v0.6.0 curl -fsSL .../install.sh | sh</code>（Windows 先 <code class="inline">$env:HONE_VERSION = "v0.6.0"</code>）。详细说明见 <a href="install.html">安装教程</a>。</p>
     <p><strong>镜像源（国内加速）</strong>：安装脚本默认先走<strong>清华 TUNA github-release 镜像</strong>，失败自动回退官方 GitHub；
