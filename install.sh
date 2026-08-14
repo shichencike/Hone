@@ -4,7 +4,7 @@
 # 用法: curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh
 #
 # 功能特性：
-#   - 镜像优先 + 失败自动回退官方源（清华 TUNA github-release 镜像，HONE_MIRROR 可覆盖）
+#   - 镜像优先 + 失败自动回退官方源（ghproxy.net 前缀代理，HONE_MIRROR 可覆盖）
 #   - 断点续传 + 自动重试（curl -C - --retry；无 curl 时回退 wget）
 #   - 优先下载 .tar.gz 压缩包（体积更小），sha256 校验后解压安装
 #   - 幂等：已安装版本哈希一致时跳过下载，直接完成
@@ -14,7 +14,7 @@
 #
 # 环境变量（均可选）：
 #   HONE_VERSION    指定版本号（默认 latest）
-#   HONE_MIRROR     镜像前缀（默认清华 TUNA）；off = 只用官方源
+#   HONE_MIRROR     镜像前缀（默认 ghproxy.net，前缀代理直接拼官方完整路径）；off = 只用官方源
 #   HONE_PREFIX     安装目录（默认 ~/.hone/bin；Termux 下默认 $PREFIX/bin）
 #   HONE_UNINSTALL  1 = 卸载
 #   HONE_NO_PATH    1 = 不自动修改 shell 配置文件
@@ -23,7 +23,8 @@ set -e
 
 REPO="shichencike/Hone"          # TODO: 按实际 GitHub 仓库名修改
 VERSION="${HONE_VERSION:-latest}"
-MIRROR="${HONE_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/github-release/$REPO}"
+# ghproxy.net 为前缀代理：镜像地址 = 前缀 + 官方完整路径（无需 TUNA 的 /LatestRelease 目录结构）
+MIRROR="${HONE_MIRROR:-https://ghproxy.net/}"
 OFFICIAL="https://github.com/$REPO"
 
 # ---------- 终端输出（非 TTY 自动去色） ----------
@@ -99,11 +100,11 @@ fi
 # ---------- 下载地址 ----------
 if [ "$VERSION" = "latest" ]; then
   OFFICIAL_BASE="$OFFICIAL/releases/latest/download"
-  MIRROR_BASE="$MIRROR/releases/latest/download"
 else
   OFFICIAL_BASE="$OFFICIAL/releases/download/$VERSION"
-  MIRROR_BASE="$MIRROR/releases/download/$VERSION"
 fi
+# 镜像 = 前缀代理 + 官方完整路径；HONE_MIRROR 可覆盖为任意前缀（如其他 ghproxy 站点）
+MIRROR_BASE="${MIRROR%/}/$OFFICIAL_BASE"
 
 # 单次下载（断点续传 + 重试）
 dl() {

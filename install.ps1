@@ -6,7 +6,7 @@
 #   - 优先使用系统自带 curl.exe（Windows 10 1803+ 已内置）下载：更快、支持断点续传与重试；
 #     无 curl 时回退 Invoke-WebRequest
 #   - 强制 TLS 1.2（旧系统默认 TLS 1.0 会被 GitHub 拒绝）
-#   - 镜像优先 + 失败自动回退官方源（清华 TUNA github-release 镜像，HONE_MIRROR 可覆盖）
+#   - 镜像优先 + 失败自动回退官方源（ghproxy.net 前缀代理，HONE_MIRROR 可覆盖）
 #   - 幂等：已安装版本哈希一致时跳过下载，直接完成
 #   - 原子安装：临时文件 + Move-Item 覆盖，中断不留半成品
 #   - 幂等写入用户 PATH（精确匹配条目，不重复添加）
@@ -14,7 +14,7 @@
 #
 # 环境变量（均可选）：
 #   HONE_VERSION    指定版本号（默认 latest）
-#   HONE_MIRROR     镜像前缀（默认清华 TUNA）；"off" = 只用官方源
+#   HONE_MIRROR     镜像前缀（默认 ghproxy.net，前缀代理直接拼官方完整路径）；"off" = 只用官方源
 #   HONE_PREFIX     安装目录（默认 %LOCALAPPDATA%\hone\bin）
 #   HONE_UNINSTALL  1 = 卸载
 #   HONE_NO_PATH    1 = 不修改用户 PATH
@@ -29,16 +29,17 @@ try {
 $Repo = "shichencike/Hone"   # TODO: 按实际 GitHub 仓库名修改
 $Version = if ($env:HONE_VERSION) { $env:HONE_VERSION } else { "latest" }
 $Asset = "hone-windows-x86_64.exe"
-$Mirror = if ($env:HONE_MIRROR) { $env:HONE_MIRROR } else { "https://mirrors.tuna.tsinghua.edu.cn/github-release/$Repo" }
+# ghproxy.net 为前缀代理：镜像地址 = 前缀 + 官方完整路径（无需 TUNA 的 /LatestRelease 目录结构）
+$Mirror = if ($env:HONE_MIRROR) { $env:HONE_MIRROR } else { "https://ghproxy.net/" }
 $Official = "https://github.com/$Repo"
 
 if ($Version -eq "latest") {
   $OfficialBase = "$Official/releases/latest/download"
-  $MirrorBase = "$Mirror/releases/latest/download"
 } else {
   $OfficialBase = "$Official/releases/download/$Version"
-  $MirrorBase = "$Mirror/releases/download/$Version"
 }
+# 镜像 = 前缀代理 + 官方完整路径；HONE_MIRROR 可覆盖为任意前缀（如其他 ghproxy 站点）
+$MirrorBase = "$($Mirror.TrimEnd('/'))/$OfficialBase"
 
 $Dir = if ($env:HONE_PREFIX) { $env:HONE_PREFIX } else { Join-Path $env:LOCALAPPDATA "hone\bin" }
 $Out = Join-Path $Dir "hone.exe"
