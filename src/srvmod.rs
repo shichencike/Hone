@@ -14,7 +14,7 @@ use std::sync::mpsc::SyncSender;
 use std::sync::{mpsc, Mutex};
 use std::time::Duration;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use crate::error::codes;
 use crate::error::ZError;
@@ -32,7 +32,7 @@ struct PendingReq {
 /// 待处理请求队列（server.poll 取走）。
 static QUEUE: Mutex<VecDeque<PendingReq>> = Mutex::new(VecDeque::new());
 /// id -> 响应通道（server.respond 发送 (状态码, 响应体) 后由后台线程写回浏览器）。
-static RESPONDERS: Lazy<Mutex<HashMap<u64, SyncSender<(u16, String)>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static RESPONDERS: LazyLock<Mutex<HashMap<u64, SyncSender<(u16, String)>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// 请求 id 分配器。
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 

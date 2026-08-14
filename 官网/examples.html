@@ -34,7 +34,7 @@ function toggleTheme(){
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.6.0</span>
+  <span class="ver">v0.6.1</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
@@ -465,6 +465,26 @@ p = m.<span class="f">lib_echo_ptr</span>(<span class="n">0</span>);            
       完整示例见 <code class="inline">examples/ffi_header.hn</code>。</p>
   </div>
 
+  <div class="example">
+    <div class="title">7.5 函数别名：alias 原名 as 新名（v0.6.1+）</div>
+    <div class="note">给已有函数起新名字再调用；原名支持点号路径（模块/类/内置函数），别名可叠加、可指向内置函数</div>
+<pre><code><span class="k">fn</span> <span class="f">greet</span>(name : <span class="k">str</span>) -&gt; <span class="k">str</span> { <span class="k">return</span> <span class="s">"你好 "</span> + name; }
+
+<span class="k">alias</span> <span class="f">greet</span> <span class="k">as</span> hi;           <span class="c">// 用户函数别名</span>
+<span class="f">print</span>(<span class="f">hi</span>(<span class="s">"Hone"</span>));               <span class="c">// 你好 Hone</span>
+
+<span class="k">alias</span> <span class="f">random.int</span> <span class="k">as</span> rint;     <span class="c">// 点号路径原名（内置点号函数）</span>
+<span class="f">print</span>(<span class="f">rint</span>(<span class="n">1</span>, <span class="n">100</span>));            <span class="c">// [1, 100] 随机整数</span>
+
+<span class="k">alias</span> <span class="f">greet</span> <span class="k">as</span> hello;          <span class="c">// 别名叠加：hello → greet</span>
+<span class="k">alias</span> <span class="f">hello</span> <span class="k">as</span> hey;           <span class="c">// hey → hello → greet</span>
+<span class="f">print</span>(<span class="f">hey</span>(<span class="s">"World"</span>));             <span class="c">// 你好 World</span>
+
+<span class="k">alias</span> <span class="f">abs</span> <span class="k">as</span> mabs;             <span class="c">// 内置函数别名</span>
+<span class="f">print</span>(<span class="f">mabs</span>(<span class="n">-5</span>));                 <span class="c">// 5</span></code></pre>
+    <p>别名作用域为文件级，<code class="inline">alias</code> 语句之后即可用新名调用。完整示例见 <code class="inline">examples/alias_demo.hn</code>。</p>
+  </div>
+
   <h3><span class="hash">#</span>8. 工具链</h3>
 
   <div class="example">
@@ -652,7 +672,7 @@ function searchExamples(q) {
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.6.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.6.1 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use crate::error::codes;
 use crate::error::ZError;
@@ -19,7 +19,7 @@ use crate::interp::Value;
 use crate::lexer::Span;
 
 /// 插件注册表：别名 -> 动态库路径。interp 调用库函数时若本实例未加载，会查询此表。
-static PLUGINS: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static PLUGINS: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn zerr(code: &'static str, msg: impl Into<String>, span: Span, file: &str, src: &str, help: Option<impl Into<String>>) -> ZError {
     ZError::new(code, msg, file, src, span.line, span.col, span.len.max(1), help)

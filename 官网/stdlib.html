@@ -34,7 +34,7 @@ function toggleTheme(){
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.6.0</span>
+  <span class="ver">v0.6.1</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
@@ -163,8 +163,57 @@ widgets = [
     <p>事件协议：<code class="inline">{"update": [[元素id, 新文本], ...]}</code> 更新元素文本、<code class="inline">{"alert": "消息"}</code> 弹窗提示、其他文本显示在页面底部状态栏。底层 <code class="inline">server.listen / server.poll / server.respond</code> 可直接使用（见 <a href="examples.html">示例 10.2</a>）。</p>
   </section>
 
+  <section id="spider">
+    <h2><span class="hash">#</span>6. spider 爬虫模块</h2>
+    <p>静态页面直取 + 动态页面渲染的轻量爬虫库（v0.7+，纯 Hone 编写）。设计遵循「渲染服务分离」：Hone 不内置 JS 引擎，动态页面渲染外包给外部服务（node/puppeteer 或 python/playwright），通过 <code class="inline">sys.run</code> 通信，Hone 只做请求、解析与提取。所有请求函数返回统一响应 dict：<code class="inline">{ok, status, headers, url, text, err}</code>。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>sp_get(url, opts)</code></td><td>智能请求：默认静态直取；<code>{"render": true}</code> 走渲染服务；<code>{"engine": "curl"}</code> 用 curl 拿真实状态码</td></tr>
+      <tr><td><code>sp_static(url, opts)</code></td><td>静态请求（内置 http.request，零依赖；status 为 0 表示未知）</td></tr>
+      <tr><td><code>sp_curl(url, opts)</code></td><td>curl 请求（能拿到状态码/响应头，curl 不可用时自动回退 sp_static）</td></tr>
+      <tr><td><code>sp_render(url, opts)</code></td><td>渲染请求（依次尝试 node 脚本 → python 脚本，输出最终 HTML）</td></tr>
+      <tr><td><code>sp_text(html, sel)</code> / <code>sp_text_all</code></td><td>CSS 选择器提取元素文本（支持 tag、.class、#id、[attr] 及组合）</td></tr>
+      <tr><td><code>sp_attr(html, sel, name)</code> / <code>sp_attr_all</code></td><td>CSS 选择器提取属性值</td></tr>
+      <tr><td><code>sp_links(html, base)</code></td><td>提取页面全部绝对链接（相对 href 自动补全）</td></tr>
+      <tr><td><code>sp_cookie_set(jar, name, value)</code> / <code>sp_cookie_get</code></td><td>Cookie 管理（字符串 jar："a=1; b=2"）</td></tr>
+      <tr><td><code>sp_ua_list()</code> / <code>sp_ua_rotate(agents, i)</code></td><td>User-Agent 轮换</td></tr>
+      <tr><td><code>sp_throttle(seconds)</code></td><td>请求限速（防反爬）</td></tr>
+      <tr><td><code>sp_body(resp)</code> / <code>sp_json(resp)</code></td><td>响应便捷函数：取正文 / 解析正文为 JSON</td></tr>
+    </table>
+    <p><strong>opts 选项</strong>（dict）：<code class="inline">ua</code>（User-Agent）、<code class="inline">cookie</code>（Cookie jar）、<code class="inline">timeout</code>（秒）、<code class="inline">retries</code>（重试次数）、<code class="inline">delay</code>（重试间隔秒）、<code class="inline">method</code> / <code class="inline">body</code>（POST 等）、<code class="inline">render</code> / <code class="inline">engine</code> / <code class="inline">render_cmd</code> / <code class="inline">render_js</code> / <code class="inline">render_py</code>。</p>
+<pre><code><span class="k">import</span> <span class="s">"spider"</span> <span class="k">from</span> <span class="s">"./hone_lib/spider.hn"</span>;
+
+<span class="c">// 1. 静态页面：直取 HTML，CSS 选择器提取</span>
+r = <span class="f">sp_get</span>(<span class="s">"https://example.com/"</span>, {});
+<span class="k">if</span> (r.ok) {
+    <span class="k">for</span> t <span class="k">in</span> <span class="f">sp_text_all</span>(r.text, <span class="s">"div.item"</span>) { <span class="f">print</span>(t); }
+    <span class="k">for</span> u <span class="k">in</span> <span class="f">sp_links</span>(r.text, <span class="s">"https://example.com/"</span>) { <span class="f">print</span>(u); }
+}
+
+<span class="c">// 2. 动态页面（JS 渲染）：外包给 node/puppeteer 或 python/playwright</span>
+<span class="c">//    后端脚本在 hone_lib/render/，安装后开箱即用：npm i puppeteer</span>
+r2 = <span class="f">sp_get</span>(<span class="s">"https://spa.example.com/"</span>, {<span class="s">"render"</span>: <span class="k">true</span>});
+<span class="f">print</span>(r2.status, <span class="f">len</span>(r2.text));
+
+<span class="c">// 3. 带 UA 轮换 / Cookie / 限速的批量抓取</span>
+uas = <span class="f">sp_ua_list</span>();
+jar = <span class="s">""</span>;
+i = <span class="n">0</span>;
+<span class="k">while</span> (i &lt; <span class="n">3</span>) {
+    u = <span class="f">sp_ua_rotate</span>(uas, i);
+    r3 = <span class="f">sp_get</span>(<span class="s">"https://example.com/"</span>, {<span class="s">"ua"</span>: u.ua, <span class="s">"cookie"</span>: jar});
+    jar = <span class="f">sp_cookie_set</span>(jar, <span class="s">"visit"</span>, <span class="f">to_str</span>(i));
+    <span class="f">sp_throttle</span>(<span class="n">1.0</span>);
+    i = u.next;
+}</code></pre>
+    <p>渲染后端安装（二选一）：<br>
+      · Node.js：<code class="inline">cd hone_lib/render &amp;&amp; npm i puppeteer</code>（或 <code class="inline">npm i playwright &amp;&amp; npx playwright install chromium</code>）<br>
+      · Python：<code class="inline">pip install playwright &amp;&amp; playwright install chromium</code><br>
+    脚本输出单行 JSON <code class="inline">{"status":200,"headers":{...},"url":"...","html":"..."}</code> 供 Hone 解析。</p>
+  </section>
+
   <section id="demo">
-    <h2><span class="hash">#</span>6. 组合示例</h2>
+    <h2><span class="hash">#</span>7. 组合示例</h2>
 <pre><code><span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
 <span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;
@@ -207,7 +256,7 @@ function searchDocs(q) {
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.6.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.6.1 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

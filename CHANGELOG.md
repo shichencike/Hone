@@ -1,5 +1,24 @@
 # Changelog
 
+## [v0.6.1] - 2026-08-14
+
+### 性能（解释器深度优化）
+- 函数定义改为 `Arc<FnDef>` 共享：消除每次调用的 AST 深拷贝（递归 fib(26) 约 3.4s → 1.6s）
+- while / for-in 循环作用域复用 + 原地赋值更新：消除每轮迭代的堆分配与 String 分配
+  （2000 万次纯循环 71s → 42s；字符串拼接 20 万次 90s → 20s，拼接改为预分配容量、免 O(n²) 整串复制）
+- 函数调用环境按参数个数预分配；解释器整体基准提升约 40%–78%，语义完全不变
+- 移除 `once_cell` 依赖，改用标准库 `LazyLock`；清理 `FfiSig`/`FfiParam` 死字段（编译警告清零）
+- 官网（`官网/`）兼容 Android 8.1（Chrome 61 级 WebView）：flex `gap` 改为 margin 间距
+
+### 新增
+- **alias 别名增强**：原名支持点号路径（`alias time.now as tnow;` 之后可 `tnow(...)` 调用），
+  别名可叠加（别名再起别名）、可指向内置函数（`alias print as p;`）；
+  新增示例 `examples/alias_demo.hn`
+
+### 文档
+- hone.md（4.4 别名、6.2 编译优化实测说明）、README（性能基准表 + alias 用法 + 版本号同步）、
+  官网 docs.html / examples.html / changelog.html / index.html 同步更新
+
 ## [v0.6.0] - 2026-08-09
 
 ### 新增

@@ -694,6 +694,8 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 
 · 支持 as 子句：load "path" as lib;
 · 支持二次重命名：alias 原名称 as 新名称;
+· 原名支持点号路径（模块/类/内置点号函数）：alias time.now as tnow; 之后可 tnow(...) 调用
+· 别名可叠加（别名再起别名），可指向内置函数：alias print as p;
 · 别名作用域为文件级（当前 .hn 文件全局可见）
 
 4.5 DLL 打包（hone build --dll）
@@ -776,6 +778,8 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 Rust Cargo.toml 配置：
 
 toml
+# 实测（2026-08-14）：fat LTO + 单 codegen unit 在 Windows 本机编译最快（约 4min）且体积最小（约 3.7MB）；
+# thin LTO 的两种组合（cgu=1 / cgu=16）反而更慢（4min47s+）且更大（4.0MB+），故保留此配置。
 [profile.release]
 lto = true
 opt-level = "z"

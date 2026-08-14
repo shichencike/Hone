@@ -339,8 +339,10 @@ footer .links { margin-bottom: 6px; }
 }
 .dl-card .dl-desc { font-size: 13px; color: var(--text-3); }
 .dl-card .btn { padding: 8px 18px; font-size: 14px; }
-.dl-btns { display: flex; align-items: center; gap: 10px; margin-left: 12px; }
+.dl-btns { display: flex; align-items: center; margin-left: 12px; }
+/* Chrome 61（Android 8.1 WebView）不支持 flex gap，用 margin 实现按钮间距 */
 .dl-btns .btn { margin-left: 0; white-space: nowrap; }
+.dl-btns .btn:not(:last-child) { margin-right: 10px; }
 .dl-note {
   font-size: 13px;
   color: var(--text-3);

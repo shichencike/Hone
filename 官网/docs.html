@@ -34,7 +34,7 @@ function toggleTheme(){
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.6.0</span>
+  <span class="ver">v0.6.1</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
@@ -529,7 +529,26 @@ widgets = [
       推荐目录：入口 <code class="inline">main.hn</code> + <code class="inline">libs/</code> 自有模块 + <code class="inline">data/</code> 数据；
       用 <code class="inline">hone get &lt;script.hn&gt;</code> 预下载脚本中所有 import 的模块。</p>
 
-    <h3>14.2 调试复杂逻辑</h3>
+    <h3>14.2 函数别名（alias）</h3>
+    <p>给已有函数起新名字再调用，原名保持不变：</p>
+<pre><code><span class="c">// 基础：alias 原名 as 新名;  之后用新名调用</span>
+<span class="k">fn</span> <span class="f">greet</span>(name) { <span class="k">return</span> <span class="s">"你好 "</span> + name; }
+<span class="k">alias</span> <span class="f">greet</span> <span class="k">as</span> hi;
+<span class="f">hi</span>(<span class="s">"Hone"</span>);          <span class="c">// 你好 Hone</span>
+
+<span class="c">// 原名支持点号路径（模块 / 类 / 内置点号函数）</span>
+<span class="k">alias</span> <span class="f">random.int</span> <span class="k">as</span> rint;
+<span class="f">rint</span>(<span class="n">1</span>, <span class="n">100</span>);         <span class="c">// [1, 100] 随机整数</span>
+
+<span class="c">// 别名可叠加（别名再起别名）、可指向内置函数</span>
+<span class="k">alias</span> <span class="f">greet</span> <span class="k">as</span> hello;
+<span class="k">alias</span> <span class="f">hello</span> <span class="k">as</span> hey;
+<span class="k">alias</span> <span class="f">print</span> <span class="k">as</span> p;
+<span class="f">p</span>(<span class="s">"OK"</span>);</code></pre>
+    <p>别名作用域为文件级（当前 .hn 文件全局可见），在 <code class="inline">alias</code> 语句之后即可用新名调用。
+      完整示例见 <code class="inline">examples/alias_demo.hn</code>。</p>
+
+    <h3>14.3 调试复杂逻辑</h3>
     <table>
       <tr><th>工具</th><th>用途</th></tr>
       <tr><td><code class="inline">hone debug &lt;script.hn&gt;</code> + <code class="inline">breakpoint;</code></td><td>运行到断点暂停，打印当前作用域全部变量快照，Enter 继续 / Ctrl+C 退出</td></tr>
@@ -544,7 +563,7 @@ widgets = [
       <code class="inline">breakpoint;</code> 观察变量快照 → 用 try/catch 捕获运行时错误并打印
       <code class="inline">e.code / e.message / e.line</code> → 用 <code class="inline">assert</code> 固化关键不变量防止回归。</p>
 
-    <h3>14.3 性能优化</h3>
+    <h3>14.4 性能优化</h3>
     <ul>
       <li><strong>避免循环内反复 append</strong>：列表是值类型，<code class="inline">append</code> 返回新列表（整体拷贝），
         循环里 <code class="inline">l = append(l, x)</code> 是 O(n²)。累积数据时优先用 dict，或先确定规模再一次性构造</li>
@@ -606,7 +625,7 @@ function searchDocs(q) {
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.6.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.6.1 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

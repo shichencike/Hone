@@ -14,10 +14,9 @@
 use std::collections::HashMap;
 
 use crate::ast::{FfiParam, FfiSig, FfiTy};
-use crate::lexer::Span;
 
 /// 解析 C 头文件源码，返回 FFI 签名列表（含 unsupported 标记的原型）。
-pub fn parse(src: &str, span: Span) -> Vec<FfiSig> {
+pub fn parse(src: &str) -> Vec<FfiSig> {
     let toks = tokenize(src);
     let defs = collect_typedefs(&toks);
     let mut sigs = Vec::new();
@@ -34,7 +33,7 @@ pub fn parse(src: &str, span: Span) -> Vec<FfiSig> {
                             continue;
                         }
                     }
-                    if let Some((sig, next)) = try_proto(&toks, i, &defs, span) {
+                    if let Some((sig, next)) = try_proto(&toks, i, &defs) {
                         sigs.push(sig);
                         i = next;
                         continue;
@@ -214,7 +213,7 @@ fn collect_typedefs(toks: &[Tok]) -> HashMap<String, TyDef> {
 
 /// 尝试在 toks[i]（函数名标识符）处解析一个函数原型。
 /// 成功返回 (签名, 下一个扫描位置)；失败返回 None。
-fn try_proto(toks: &[Tok], i: usize, defs: &HashMap<String, TyDef>, span: Span) -> Option<(FfiSig, usize)> {
+fn try_proto(toks: &[Tok], i: usize, defs: &HashMap<String, TyDef>) -> Option<(FfiSig, usize)> {
     let name = match &toks[i] {
         Tok::Ident(s) => s.clone(),
         _ => return None,
@@ -286,7 +285,7 @@ fn try_proto(toks: &[Tok], i: usize, defs: &HashMap<String, TyDef>, span: Span) 
         Ok(t) => t,
         Err(reason) => {
             return Some((
-                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some(reason), span },
+                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some(reason) },
                 next,
             ))
         }
@@ -310,19 +309,19 @@ fn try_proto(toks: &[Tok], i: usize, defs: &HashMap<String, TyDef>, span: Span) 
         // 不支持项
         if pt.iter().any(|t| t == &Tok::Punct("...".to_string())) {
             return Some((
-                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some("variadic (`...`)"), span },
+                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some("variadic (`...`)") },
                 next,
             ));
         }
         if pt.iter().any(|t| t == &Tok::Punct("(".to_string())) {
             return Some((
-                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some("callback parameter"), span },
+                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some("callback parameter") },
                 next,
             ));
         }
         if pt.iter().any(|t| t == &Tok::Punct("[".to_string())) {
             return Some((
-                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some("array parameter"), span },
+                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some("array parameter") },
                 next,
             ));
         }
@@ -339,15 +338,15 @@ fn try_proto(toks: &[Tok], i: usize, defs: &HashMap<String, TyDef>, span: Span) 
             Ok(t) => t,
             Err(reason) => {
                 return Some((
-                    FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some(reason), span },
+                    FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some(reason) },
                     next,
                 ))
             }
         };
         let pname = pname.unwrap_or_else(|| format!("p{}", pi + 1));
-        params.push(FfiParam { name: pname, ty, span });
+        params.push(FfiParam { name: pname, ty });
     }
-    Some((FfiSig { name, params, ret, unsupported: None, span }, next))
+    Some((FfiSig { name, params, ret, unsupported: None }, next))
 }
 
 /// 找到从 open 开始的匹配右括号索引。

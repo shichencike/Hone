@@ -3,7 +3,7 @@
 轻量级、跨平台、可嵌入的脚本语言。用 Rust 实现，单文件可执行程序，开箱即用。
 
 > 设计规范：`hone.md`（v1.1）
-> 当前版本：v0.4.0（完整工具链，详见 CHANGELOG）
+> 当前版本：v0.6.1（完整工具链，详见 CHANGELOG）
 
 ## 构建
 
@@ -11,6 +11,20 @@
 cargo build --release
 # 产物：target/release/hone（Windows 下为 hone.exe）
 ```
+
+## 性能
+
+解释器为 AST 树遍历实现，2026-08-14 深度优化后的代表性基准（Windows x86_64，release 构建）：
+
+| 基准 | 优化前 | 优化后 |
+|------|--------|--------|
+| 递归 fib(26) | ~3.4s | ~1.6s |
+| 纯循环 2000 万次 | 71s | 42s |
+| 字符串拼接 20 万次 | 90s | 20s |
+
+关键手段：函数定义 `Arc` 共享（免每次调用的 AST 深拷贝）、循环作用域复用 +
+原地赋值更新（免每轮迭代的堆分配）、字符串拼接预分配容量（免 O(n²) 整串复制）。
+二进制体积约 3.7MB（strip + fat LTO + opt-level z）。基准脚本见 `bench/` 目录。
 
 ## 用法
 
@@ -194,9 +208,15 @@ print(lm.lib_fact(5));
 // use：命名空间导入（内置函数已全局可用，声明保留）
 use std_io;
 
-// alias：函数别名
+// alias：函数别名（原名支持点号路径，别名可叠加、可指向内置函数）
 alias greet as hi;
 hi("Hone");
+
+alias random.int as rint;   // 点号路径原名（模块/内置函数）
+print(rint(1, 100));
+
+alias print as p;           // 内置函数别名
+p("via alias");
 ```
 
 - `import` 底层基于 TCP（复用 `http_get`），模块解析后其函数合并进全局符号表，顶层语句在独立作用域执行

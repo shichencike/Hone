@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use sha2::digest::Digest;
 
@@ -20,7 +20,7 @@ use crate::interp::Value;
 use crate::lexer::Span;
 
 /// 全局键值存储（db.set / db.get）
-static KV_STORE: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static KV_STORE: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// --resume 持久化目标：(状态文件路径, 脚本内容哈希)。启用后 db.set 自动落盘。
 static STATE_FILE: Mutex<Option<(PathBuf, String)>> = Mutex::new(None);
@@ -39,7 +39,7 @@ pub fn load_state(kv: HashMap<String, String>) {
 }
 
 /// 命令行参数（args.get / args.has），由 main.rs 初始化
-static CLI_ARGS: Lazy<Mutex<HashMap<String, String>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static CLI_ARGS: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// 初始化命令行参数解析（由 main.rs 调用）
 pub fn init_args(args: &[String]) {
@@ -1422,7 +1422,7 @@ impl<T: Read + Write> ReadWrite for T {}
 
 /// TLS 配置：rustls + rustls-rustcrypto（纯 Rust 实现，无 C 依赖），
 /// Windows/Linux/Termux 跨平台一致，webpki-roots 内置 Mozilla 根证书
-pub(crate) static TLS: Lazy<Result<std::sync::Arc<rustls::ClientConfig>, String>> = Lazy::new(|| {
+pub(crate) static TLS: LazyLock<Result<std::sync::Arc<rustls::ClientConfig>, String>> = LazyLock::new(|| {
     let mut roots = rustls::RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(

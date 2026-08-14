@@ -24,7 +24,7 @@ use std::alloc::{alloc, dealloc, Layout};
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use crate::error::codes;
 use crate::error::ZError;
@@ -37,7 +37,7 @@ struct PtrEntry {
 }
 
 /// 分配表：地址 -> 块信息。free 时移除条目，实现 use-after-free / double-free 检测。
-static ALLOCS: Lazy<Mutex<HashMap<usize, PtrEntry>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static ALLOCS: LazyLock<Mutex<HashMap<usize, PtrEntry>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn zerr(code: &'static str, msg: impl Into<String>, span: Span, file: &str, src: &str, help: Option<impl Into<String>>) -> ZError {
     ZError::new(code, msg, file, src, span.line, span.col, span.len.max(1), help)

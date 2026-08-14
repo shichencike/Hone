@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::io::{self, Write};
 use std::os::raw::c_char;
+use std::sync::Arc;
 
 use crate::ast::*;
 use crate::builtins;
@@ -129,11 +130,11 @@ impl Env {
         None
     }
 
-    /// 赋值：找到最近绑定则更新，否则在当前作用域声明。
+    /// 赋值：找到最近绑定则原地更新（避免 String 分配与二次哈希），否则在当前作用域声明。
     fn set_or_declare(&mut self, name: &str, v: Value) {
         for s in self.scopes.iter_mut().rev() {
-            if s.contains_key(name) {
-                s.insert(name.to_string(), v);
+            if let Some(slot) = s.get_mut(name) {
+                *slot = v;
                 return;
             }
         }
@@ -148,7 +149,8 @@ impl Env {
 pub struct Interp {
     pub file: String,
     pub src: String,
-    fns: HashMap<String, FnDef>,
+    /// 函数定义用 Arc 共享：每次调用只克隆引用计数，避免深拷贝整个函数体 AST
+    fns: HashMap<String, Arc<FnDef>>,
     debug: bool,
     depth: usize,
     /// 已加载的动态库（别名 → Library）
@@ -163,7 +165,7 @@ pub struct Interp {
     structs: HashMap<String, Vec<String>>,
     /// 类定义：类名 → (方法名 → FnDef)。成员函数不进全局 fns 表，
     /// 只能经 `类.方法(...)` 调用（call_fn 按限定名解析）。
-    classes: HashMap<String, HashMap<String, FnDef>>,
+    classes: HashMap<String, HashMap<String, Arc<FnDef>>>,
 }
 
 /// load 加载的 C ABI 库函数签名约定：全 int64 参数（不足补 0，x64 ABI 安全）。
@@ -262,10 +264,10 @@ impl Interp {
                     if !tmp {
                         self.fns.insert(
                             name.clone(),
-                            FnDef {
+                            Arc::new(FnDef {
                                 params: params.clone(),
                                 body: body.clone(),
-                            },
+                            }),
                         );
                     }
                 }
@@ -315,16 +317,16 @@ impl Interp {
         for stmt in stmts {
             match stmt {
                 Stmt::ClassDef { name, methods, .. } => {
-                    let mut methods_map: HashMap<String, FnDef> = HashMap::new();
+                    let mut methods_map: HashMap<String, Arc<FnDef>> = HashMap::new();
                     for m in methods {
                         if let Stmt::FnDef { name: mname, params, body, tmp, .. } = m {
                             if !tmp {
                                 methods_map.insert(
                                     mname.clone(),
-                                    FnDef {
+                                    Arc::new(FnDef {
                                         params: params.clone(),
                                         body: body.clone(),
-                                    },
+                                    }),
                                 );
                             }
                         }
@@ -410,6 +412,8 @@ impl Interp {
                 }
             }
             Stmt::While { cond, body, .. } => {
+                // 复用同一个作用域 HashMap：热循环每轮迭代避免一次堆分配
+                let mut body_scope = HashMap::new();
                 loop {
                     let c = self.eval_expr(env, cond)?;
                     if let Value::Bool(b) = c {
@@ -424,7 +428,12 @@ impl Interp {
                             None::<&str>,
                         ));
                     }
-                    match self.exec_block(env, body)? {
+                    env.scopes.push(body_scope);
+                    let flow = self.exec_stmts(env, body);
+                    body_scope = env.scopes.pop().expect("while body scope");
+                    // 复用作用域必须清空：否则上一轮迭代体内声明的变量会泄漏到下一轮
+                    body_scope.clear();
+                    match flow? {
                         Flow::Return(v) => return Ok(Flow::Return(v)),
                         Flow::Break => break,
                         Flow::Normal => {}
@@ -434,7 +443,6 @@ impl Interp {
             }
             Stmt::ForIn { var, var2, iter, body, span } => {
                 let it = self.eval_expr(env, iter)?;
-                let is_dict = matches!(it, Value::Dict(_));
                 match it {
                     // 列表：单变量绑定元素
                     Value::List(items) => {
@@ -446,12 +454,16 @@ impl Interp {
                                 Some("iterate lists with a single variable: `for x in list`"),
                             ));
                         }
+                        // 复用同一个作用域 HashMap：每轮迭代避免一次堆分配
+                        let mut body_scope = HashMap::new();
                         for item in items {
-                            env.scopes.push(HashMap::new());
+                            env.scopes.push(body_scope);
                             env.declare(var, item);
-                            let flow = self.exec_stmts(env, body)?;
-                            env.scopes.pop();
-                            match flow {
+                            let flow = self.exec_stmts(env, body);
+                            body_scope = env.scopes.pop().expect("for-in scope");
+                            // 复用作用域必须清空：否则上一轮迭代体内声明的变量会泄漏到下一轮
+                            body_scope.clear();
+                            match flow? {
                                 Flow::Return(v) => return Ok(Flow::Return(v)),
                                 Flow::Break => break,
                                 Flow::Normal => {}
@@ -461,15 +473,18 @@ impl Interp {
                     }
                     // 字典：var=键，var2=值（可选）
                     Value::Dict(entries) => {
+                        let mut body_scope = HashMap::new();
                         for (k, v) in entries {
-                            env.scopes.push(HashMap::new());
+                            env.scopes.push(body_scope);
                             env.declare(var, Value::Str(k));
                             if let Some(v2) = var2 {
                                 env.declare(v2, v);
                             }
-                            let flow = self.exec_stmts(env, body)?;
-                            env.scopes.pop();
-                            match flow {
+                            let flow = self.exec_stmts(env, body);
+                            body_scope = env.scopes.pop().expect("for-in scope");
+                            // 复用作用域必须清空：否则上一轮迭代体内声明的变量会泄漏到下一轮
+                            body_scope.clear();
+                            match flow? {
                                 Flow::Return(v) => return Ok(Flow::Return(v)),
                                 Flow::Break => break,
                                 Flow::Normal => {}
@@ -479,11 +494,7 @@ impl Interp {
                     }
                     other => Err(self.runtime_err(
                         codes::TYPE_MISMATCH,
-                        format!(
-                            "`for in` requires a list or dict, got `{}`{}",
-                            other.type_name(),
-                            if is_dict { "" } else { "" }
-                        ),
+                        format!("`for in` requires a list or dict, got `{}`", other.type_name()),
                         expr_span(iter),
                         Some("iterate a list with `for x in list` or a dict with `for k, v in dict`"),
                     )),
@@ -688,10 +699,10 @@ impl Interp {
                     };
                     self.fns.insert(
                         new_name,
-                        FnDef {
+                        Arc::new(FnDef {
                             params: params.clone(),
                             body: body.clone(),
-                        },
+                        }),
                     );
                 }
             }
@@ -783,7 +794,7 @@ impl Interp {
                     Some("check the header path, or remove the `from` clause"),
                 )
             })?;
-            let header_sigs = crate::header::parse(&src, span);
+            let header_sigs = crate::header::parse(&src);
             for sig in &header_sigs {
                 self.ffi_sigs.insert(format!("{}.{}", lib_name, sig.name), sig.clone());
             }
@@ -1095,7 +1106,9 @@ impl Interp {
                 Some("check for infinite recursion, or rewrite iteratively"),
             ));
         }
-        let mut call_env = Env::new();
+        let mut call_env = Env {
+            scopes: vec![HashMap::with_capacity(f.params.len())],
+        };
         for (p, v) in f.params.iter().zip(args) {
             call_env.declare(&p.name, v);
         }
@@ -1381,6 +1394,16 @@ impl Interp {
                 Some("check the divisor before dividing"),
             )
         };
+        // 字符串拼接快速路径：预留容量一次分配，避免 format! 的额外开销
+        // （只借用检查，非 Str 情况落回下方原有算术逻辑）
+        if op == BinOp::Add {
+            if let (Value::Str(x), Value::Str(y)) = (&a, &b) {
+                let mut out = String::with_capacity(x.len() + y.len());
+                out.push_str(x);
+                out.push_str(y);
+                return Ok(Value::Str(out));
+            }
+        }
         match (&a, &b) {
             (Value::Int(x), Value::Int(y)) => {
                 let r = match op {

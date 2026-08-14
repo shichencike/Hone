@@ -667,7 +667,7 @@ impl Parser {
         let mut sigs = Vec::new();
         while !self.at(&Tok::RBrace) {
             self.expect(&Tok::Fn, "`fn`")?;
-            let (name_tok, fspan) = self.next();
+            let (name_tok, _fspan) = self.next();
             let name = match name_tok {
                 Tok::Ident(s) => s,
                 other => {
@@ -682,7 +682,7 @@ impl Parser {
             let mut params = Vec::new();
             if !self.at(&Tok::RParen) {
                 loop {
-                    let (ptok, pspan) = self.next();
+                    let (ptok, _pspan) = self.next();
                     let pname = match ptok {
                         Tok::Ident(s) => s,
                         other => {
@@ -703,7 +703,7 @@ impl Parser {
                             Some("the C ABI convention supports up to 8 scalar parameters"),
                         ));
                     }
-                    params.push(FfiParam { name: pname, ty, span: pspan });
+                    params.push(FfiParam { name: pname, ty });
                     if self.at(&Tok::Comma) {
                         self.next();
                         if self.at(&Tok::RParen) {
@@ -719,7 +719,7 @@ impl Parser {
             let (rtok, _) = self.next();
             let ret = self.ffi_ty_from_tok(&rtok)?;
             self.expect_semi()?;
-            sigs.push(FfiSig { name, params, ret, unsupported: None, span: fspan });
+            sigs.push(FfiSig { name, params, ret, unsupported: None });
         }
         self.expect(&Tok::RBrace, "`}`")?;
         Ok(sigs)
@@ -811,11 +811,11 @@ impl Parser {
         Ok(Stmt::Import { name, url, alias, span })
     }
 
-    /// alias 原名 as 新名;
+    /// alias 原名 as 新名;   原名支持点号路径（模块/类/内置点号函数），如 alias time.now as tnow;
     fn parse_alias(&mut self) -> Result<Stmt, ZError> {
         let (_, span) = self.next(); // alias
         let (tok, _) = self.next();
-        let original = match tok {
+        let first = match tok {
             Tok::Ident(s) => s,
             other => {
                 return Err(self.err_here(
@@ -825,6 +825,8 @@ impl Parser {
                 ))
             }
         };
+        // 支持点号原名（模块/类/内置点号函数）：alias time.now as tnow;
+        let original = self.join_dotted(first, span)?;
         self.expect(&Tok::As, "`as`")?;
         let (tok, _) = self.next();
         let new_name = match tok {

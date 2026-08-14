@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::sync::Mutex;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use crate::error::codes;
 use crate::error::ZError;
@@ -160,11 +160,11 @@ fn load_api() -> Result<SqliteApi, String> {
     Err(last_err)
 }
 
-static API: Lazy<Result<SqliteApi, String>> = Lazy::new(load_api);
+static API: LazyLock<Result<SqliteApi, String>> = LazyLock::new(load_api);
 
 /// 打开的数据库句柄表：句柄 id -> sqlite3*（以 usize 存指针地址，满足 Send）
-static HANDLES: Lazy<Mutex<HashMap<i64, usize>>> = Lazy::new(|| Mutex::new(HashMap::new()));
-static NEXT_ID: Lazy<Mutex<i64>> = Lazy::new(|| Mutex::new(1));
+static HANDLES: LazyLock<Mutex<HashMap<i64, usize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static NEXT_ID: LazyLock<Mutex<i64>> = LazyLock::new(|| Mutex::new(1));
 
 fn db_err(api: &SqliteApi, db: *mut c_void, ctx: &str, span: Span, file: &str, src: &str) -> ZError {
     let msg = unsafe {

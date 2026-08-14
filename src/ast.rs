@@ -198,7 +198,6 @@ impl FfiTy {
 pub struct FfiParam {
     pub name: String,
     pub ty: FfiTy,
-    pub span: Span,
 }
 
 /// load 签名块中的函数签名：fn name(p: ty, ...) -> ret;
@@ -209,7 +208,6 @@ pub struct FfiSig {
     pub ret: FfiTy,
     /// 头文件解析失败的原型（如回调/变参/数组），调用时直接报错而非 ABI 崩溃
     pub unsupported: Option<&'static str>,
-    pub span: Span,
 }
 
 #[derive(Debug, Clone)]

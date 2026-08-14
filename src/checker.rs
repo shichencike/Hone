@@ -1551,7 +1551,7 @@ impl Checker {
                         Some("check the header path, or remove the `from` clause"),
                     )
                 })?;
-                let sigs = crate::header::parse(&src, Span { line: 1, col: 1, len: 1 });
+                let sigs = crate::header::parse(&src);
                 self.header_cache.insert(hpath.to_string(), sigs.clone());
                 sigs
             };

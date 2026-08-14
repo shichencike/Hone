@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 更新日志</title>
-<meta name="description" content="Hone 编程语言更新日志：v0.6.0 class 类与泛型、标准库大规模扩展（csv/yaml/sqlite/smtp/ws 等）、v0.6.0 语言特性与工具链扩展、v0.4.0 typed FFI 与头文件绑定等版本记录。">
+<meta name="description" content="Hone 编程语言更新日志：v0.6.1 解释器深度优化与 alias 别名增强、v0.6.0 class 类与泛型、标准库大规模扩展（csv/yaml/sqlite/smtp/ws 等）、v0.4.0 typed FFI 与头文件绑定等版本记录。">
 <meta name="theme-color" content="#0d1117">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
@@ -34,13 +34,37 @@ function toggleTheme(){
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
   </nav>
-  <span class="ver">v0.6.0</span>
+  <span class="ver">v0.6.1</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
 <main>
   <h2><span class="hash">#</span>更新日志</h2>
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
+
+  <div class="release">
+    <span class="ver-tag">v0.6.1</span><span class="date">2026-08-14</span>
+    <h4>性能（解释器深度优化）</h4>
+    <ul>
+      <li><strong>函数定义 <code>Arc</code> 共享</strong>：消除每次调用的 AST 深拷贝（递归 fib(26) 约 3.4s → 1.6s）</li>
+      <li><strong>循环作用域复用 + 原地赋值更新</strong>：消除每轮迭代的堆分配与 String 分配
+        （2000 万次纯循环 71s → 42s；字符串拼接 20 万次 90s → 20s，预分配容量免 O(n²) 整串复制）</li>
+      <li>解释器整体基准提升约 40%–78%，语义完全不变；移除 <code>once_cell</code> 依赖（改用标准库
+        <code>LazyLock</code>）、清理死字段，编译警告清零</li>
+      <li>官网兼容 Android 8.1（Chrome 61 级 WebView）：flex <code>gap</code> 改为 margin 间距</li>
+    </ul>
+    <h4>新增</h4>
+    <ul>
+      <li><strong>alias 别名增强</strong>：原名支持点号路径（<code>alias time.now as tnow;</code> 之后可
+        <code>tnow(...)</code> 调用），别名可叠加（别名再起别名）、可指向内置函数（<code>alias print as p;</code>）；
+        新增示例 <code>examples/alias_demo.hn</code></li>
+    </ul>
+    <h4>文档</h4>
+    <ul>
+      <li>hone.md（4.4 别名、6.2 编译优化实测说明）、README（性能基准表 + alias 用法 + 版本号同步）、
+        官网 docs.html / examples.html / changelog.html / index.html 同步更新</li>
+    </ul>
+  </div>
 
   <div class="release">
     <span class="ver-tag">v0.6.0</span><span class="date">2026-08-09</span>
@@ -163,7 +187,7 @@ function toggleTheme(){
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.6.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.6.1 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

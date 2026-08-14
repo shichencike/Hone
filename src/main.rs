@@ -391,7 +391,7 @@ fn cmd_bind(args: &[String]) -> Result<(), ZError> {
             Some("check the header path"),
         )
     })?;
-    let sigs = header::parse(&src, lexer::Span { line: 1, col: 1, len: 1 });
+    let sigs = header::parse(&src);
     let supported: Vec<_> = sigs.iter().filter(|s| s.unsupported.is_none()).collect();
     let unsupported: Vec<_> = sigs.iter().filter(|s| s.unsupported.is_some()).collect();
     println!("// 由 hone bind {} 生成（受限 C 原型提取，纯 Rust 实现）", path);
@@ -886,7 +886,8 @@ fn update_asset_name() -> &'static str {
 fn default_update_urls() -> Vec<String> {
     let asset = update_asset_name();
     let official = format!("https://github.com/shichencike/Hone/releases/latest/download/{}", asset);
-    let official_url = |base: &str| format!("{}/releases/latest/download/{}", base.trim_end_matches('/'), asset);
+    // TUNA 镜像目录结构：LatestRelease 软链指向最新版本（无 releases/latest/download 路径）
+    let official_url = |base: &str| format!("{}/LatestRelease/{}", base.trim_end_matches('/'), asset);
     match std::env::var("HONE_MIRROR") {
         Ok(m) if m == "off" => vec![official],
         Ok(m) => vec![official_url(&m), official],
