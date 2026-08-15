@@ -58,6 +58,9 @@ function toggleTheme(){
       <li><strong>alias 别名增强</strong>：原名支持点号路径（<code>alias time.now as tnow;</code> 之后可
         <code>tnow(...)</code> 调用），别名可叠加（别名再起别名）、可指向内置函数（<code>alias print as p;</code>）；
         新增示例 <code>examples/alias_demo.hn</code></li>
+      <li><strong>music 乐理标准库</strong>（<code>hone_lib/music.hn</code>，纯 Hone 编写）：
+        音名 ↔ MIDI 编号 ↔ 频率换算、音阶与和弦生成（16 种音阶 / 20 种和弦）、时值与 BPM、
+        音程与移调、调号与调性、顺阶和声、音分与纯律比率；详见 <a href="stdlib.html#music">标准库文档</a></li>
     </ul>
     <h4>文档</h4>
     <ul>

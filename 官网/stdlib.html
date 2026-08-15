@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 标准库文档</title>
-<meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui 模块，本地路径导入即可使用。">
+<meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui / music / spider 模块，本地路径导入即可使用。">
 <meta name="theme-color" content="#0d1117">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
@@ -51,18 +51,22 @@ function toggleTheme(){
       <li><a href="#collections">collections 集合模块</a></li>
       <li><a href="#str">str 字符串模块</a></li>
       <li><a href="#gui">gui 图形界面模块</a></li>
+      <li><a href="#music">music 乐理模块</a></li>
+      <li><a href="#spider">spider 爬虫模块</a></li>
       <li><a href="#demo">组合示例</a></li>
     </ol>
   </div>
 
   <section id="intro">
     <h2><span class="hash">#</span>1. 概述与导入</h2>
-    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code>），通过本地路径 import 使用：</p>
+    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code> / <code class="inline">music_</code> / <code class="inline">sp_</code>），通过本地路径 import 使用：</p>
 <pre><code><span class="c">// 本地路径导入（相对路径基于当前工作目录）</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
 <span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;
 <span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./hone_lib/gui.hn"</span>;   <span class="c">// 需 v0.3.0+（依赖 server.*）</span>
+<span class="k">import</span> <span class="s">"music"</span> <span class="k">from</span> <span class="s">"./hone_lib/music.hn"</span>; <span class="c">// 乐理：音名/音阶/和弦/调性等</span>
+<span class="k">import</span> <span class="s">"spider"</span> <span class="k">from</span> <span class="s">"./hone_lib/spider.hn"</span>; <span class="c">// 爬虫：静态直取 + 动态渲染</span>
 
 <span class="c">// import as：以别名导入，函数名前缀整体替换</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span> <span class="k">as</span> m;   <span class="c">// m_clamp / m_gcd ...</span></code></pre>
@@ -163,8 +167,41 @@ widgets = [
     <p>事件协议：<code class="inline">{"update": [[元素id, 新文本], ...]}</code> 更新元素文本、<code class="inline">{"alert": "消息"}</code> 弹窗提示、其他文本显示在页面底部状态栏。底层 <code class="inline">server.listen / server.poll / server.respond</code> 可直接使用（见 <a href="examples.html">示例 10.2</a>）。</p>
   </section>
 
+  <section id="music">
+    <h2><span class="hash">#</span>6. music 乐理模块</h2>
+    <p>音乐理论标准库（纯 Hone 编写）：音名 ↔ MIDI 编号 ↔ 频率换算、音阶与和弦生成、时值与 BPM、音程与移调、调号与调性、顺阶和声、音分与纯律比率。MIDI 编号 60 = C4，A4 = 440Hz。Hone 无 pow/log 内置，频率与音分按十二平均律半音比迭代计算。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>music_note_to_midi(note)</code> / <code>music_midi_to_note(m)</code></td><td>音名 ↔ MIDI 编号（C4=60，A4=69，A#4=70，Bb3=58）</td></tr>
+      <tr><td><code>music_midi_to_freq(m)</code> / <code>music_freq_to_midi(freq)</code></td><td>MIDI ↔ 频率(Hz)（十二平均律，A4=440）</td></tr>
+      <tr><td><code>music_note_to_freq(note)</code></td><td>音名 → 频率(Hz)</td></tr>
+      <tr><td><code>music_scale(root, name)</code> / <code>music_scale_names()</code></td><td>音阶生成（major/minor/dorian/.../blues/chromatic 共 16 种）</td></tr>
+      <tr><td><code>music_chord(root, name)</code> / <code>music_chord_names()</code></td><td>和弦生成（major/minor/maj7/dom7/sus2/power 等 20 种）</td></tr>
+      <tr><td><code>music_beat_sec(bpm)</code></td><td>每拍时长(秒)：60 / bpm</td></tr>
+      <tr><td><code>music_note_beats(note)</code></td><td>音符时值 → 拍数（whole=4 / half=2 / quarter=1 / eighth=0.5 ...）</td></tr>
+      <tr><td><code>music_note_dur_sec(bpm, note)</code> / <code>music_dur_sec(bpm, beats)</code></td><td>时值 / 拍数 → 秒数</td></tr>
+      <tr><td><code>music_interval_name(semitones)</code> / <code>music_interval_between(n1, n2)</code></td><td>音程（纯一度/小二度/.../纯八度）</td></tr>
+      <tr><td><code>music_transpose(note, semitones)</code> / <code>music_transpose_midi(m, semitones)</code></td><td>音名 / MIDI 编号按半音移调</td></tr>
+      <tr><td><code>music_shift_octave(note, octaves)</code></td><td>音名按八度移调（如 C4 移 1 → C5）</td></tr>
+      <tr><td><code>music_key_signature(tonic)</code> / <code>music_key_signature_str(tonic)</code></td><td>调号：升/降号数（正/负）与字符串（G→"#"、Eb→"bbb"）</td></tr>
+      <tr><td><code>music_relative_minor(tonic)</code> / <code>music_relative_major(tonic)</code></td><td>关系小调 / 关系大调（C 大调 → A 小调）</td></tr>
+      <tr><td><code>music_circle_of_fifths()</code></td><td>五度圈：纯五度上行的 12 个调主音序列</td></tr>
+      <tr><td><code>music_diatonic_triads(root, scale)</code> / <code>music_diatonic_sevenths(root, scale)</code></td><td>调内顺阶三和弦 / 七和弦</td></tr>
+      <tr><td><code>music_harmonize(root, scale)</code></td><td>顺阶和声标记（如 C 大调：C4, D4m, E4m, F4, G4, A4m, B4dim）</td></tr>
+      <tr><td><code>music_ratio_to_cents(f1, f2)</code> / <code>music_freq_to_cents(freq, ref)</code></td><td>频率比 → 音分（2^(1/1200) 迭代逼近）</td></tr>
+      <tr><td><code>music_just_ratio(name)</code> / <code>music_just_cents(name)</code> / <code>music_just_names()</code></td><td>纯律（自然音程）频率比与音分（如 perfect_fifth ≈ 702 音分）</td></tr>
+    </table>
+<pre><code><span class="k">import</span> <span class="s">"music"</span> <span class="k">from</span> <span class="s">"./hone_lib/music.hn"</span>;
+<span class="f">print</span>(<span class="f">music_note_to_midi</span>(<span class="s">"A4"</span>));       <span class="c">// 69</span>
+<span class="f">print</span>(<span class="f">music_midi_to_note</span>(<span class="n">60</span>));       <span class="c">// C4</span>
+<span class="f">print</span>(<span class="f">music_midi_to_freq</span>(<span class="n">69</span>));       <span class="c">// 440.0</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">music_scale</span>(<span class="n">60</span>, <span class="s">"major"</span>)));  <span class="c">// [60, 62, 64, 65, 67, 69, 71]</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">music_chord</span>(<span class="n">60</span>, <span class="s">"maj7"</span>)));   <span class="c">// [60, 64, 67, 71]</span>
+<span class="f">print</span>(<span class="f">music_note_dur_sec</span>(<span class="n">120</span>, <span class="s">"quarter"</span>)); <span class="c">// 0.5（120 BPM 每拍 0.5 秒）</span></code></pre>
+  </section>
+
   <section id="spider">
-    <h2><span class="hash">#</span>6. spider 爬虫模块</h2>
+    <h2><span class="hash">#</span>7. spider 爬虫模块</h2>
     <p>静态页面直取 + 动态页面渲染的轻量爬虫库（v0.7+，纯 Hone 编写）。设计遵循「渲染服务分离」：Hone 不内置 JS 引擎，动态页面渲染外包给外部服务（node/puppeteer 或 python/playwright），通过 <code class="inline">sys.run</code> 通信，Hone 只做请求、解析与提取。所有请求函数返回统一响应 dict：<code class="inline">{ok, status, headers, url, text, err}</code>。</p>
     <table>
       <tr><th>函数</th><th>说明</th></tr>
@@ -213,7 +250,7 @@ i = <span class="n">0</span>;
   </section>
 
   <section id="demo">
-    <h2><span class="hash">#</span>7. 组合示例</h2>
+    <h2><span class="hash">#</span>8. 组合示例</h2>
 <pre><code><span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
 <span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;
