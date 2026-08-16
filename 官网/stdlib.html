@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 标准库文档</title>
-<meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui / music / spider 模块，本地路径导入即可使用。">
+<meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui / music / spider / process 模块，本地路径导入即可使用。">
 <meta name="theme-color" content="#0d1117">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
@@ -53,13 +53,14 @@ function toggleTheme(){
       <li><a href="#gui">gui 图形界面模块</a></li>
       <li><a href="#music">music 乐理模块</a></li>
       <li><a href="#spider">spider 爬虫模块</a></li>
+      <li><a href="#process">process 进程模块</a></li>
       <li><a href="#demo">组合示例</a></li>
     </ol>
   </div>
 
   <section id="intro">
     <h2><span class="hash">#</span>1. 概述与导入</h2>
-    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code> / <code class="inline">music_</code> / <code class="inline">sp_</code>），通过本地路径 import 使用：</p>
+    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code> / <code class="inline">music_</code> / <code class="inline">sp_</code> / <code class="inline">proc_</code>），通过本地路径 import 使用：</p>
 <pre><code><span class="c">// 本地路径导入（相对路径基于当前工作目录）</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
@@ -67,6 +68,7 @@ function toggleTheme(){
 <span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./hone_lib/gui.hn"</span>;   <span class="c">// 需 v0.3.0+（依赖 server.*）</span>
 <span class="k">import</span> <span class="s">"music"</span> <span class="k">from</span> <span class="s">"./hone_lib/music.hn"</span>; <span class="c">// 乐理：音名/音阶/和弦/调性等</span>
 <span class="k">import</span> <span class="s">"spider"</span> <span class="k">from</span> <span class="s">"./hone_lib/spider.hn"</span>; <span class="c">// 爬虫：静态直取 + 动态渲染</span>
+<span class="k">import</span> <span class="s">"process"</span> <span class="k">from</span> <span class="s">"./hone_lib/process.hn"</span>; <span class="c">// 进程：枚举/查找/结束（跨平台）</span>
 
 <span class="c">// import as：以别名导入，函数名前缀整体替换</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span> <span class="k">as</span> m;   <span class="c">// m_clamp / m_gcd ...</span></code></pre>
@@ -249,8 +251,46 @@ i = <span class="n">0</span>;
     脚本输出单行 JSON <code class="inline">{"status":200,"headers":{...},"url":"...","html":"..."}</code> 供 Hone 解析。</p>
   </section>
 
+  <section id="process">
+    <h2><span class="hash">#</span>8. process 进程模块</h2>
+    <p>跨平台进程检测库（纯 Hone 编写）。Hone 无内置进程 API，本库经 <code class="inline">sys.run</code> 调用系统命令实现：Windows 用 <code class="inline">tasklist /FO CSV /NH</code> 枚举、<code class="inline">taskkill /F /PID</code> 结束；Linux/macOS 用 <code class="inline">ps -eo pid=,comm=,args=,rss=</code> 枚举、<code class="inline">kill -9</code> 结束。所有查询函数返回进程对象 dict：<code class="inline">{pid, name, mem, cmdline}</code>（<code class="inline">mem</code> 为 KB；<code class="inline">cmdline</code> 仅 Unix 有值，Windows 恒为空）。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>proc_os()</code></td><td>平台识别：<code class="inline">"windows"</code> / <code class="inline">"linux"</code> / <code class="inline">"macos"</code> / <code class="inline">"unknown"</code></td></tr>
+      <tr><td><code>proc_list()</code></td><td>枚举全部进程 → 进程对象列表</td></tr>
+      <tr><td><code>proc_find(name)</code></td><td>按名称模糊查找（不区分大小写、子串匹配）</td></tr>
+      <tr><td><code>proc_exists(name)</code></td><td>是否存在指定名称的进程</td></tr>
+      <tr><td><code>proc_by_pid(pid)</code></td><td>按 PID 反查（未找到返回空 dict）</td></tr>
+      <tr><td><code>proc_count(name)</code></td><td>匹配进程数量</td></tr>
+      <tr><td><code>proc_pids(name)</code></td><td>匹配进程的 PID 列表</td></tr>
+      <tr><td><code>proc_names()</code></td><td>全部进程名（去重）</td></tr>
+      <tr><td><code>proc_kill(pid)</code></td><td>结束指定 PID 的进程，成功判定：结束后进程不再存在</td></tr>
+      <tr><td><code>proc_kill_by_name(name)</code></td><td>结束全部同名进程，返回成功数</td></tr>
+    </table>
+<pre><code><span class="k">import</span> <span class="s">"process"</span> <span class="k">from</span> <span class="s">"./hone_lib/process.hn"</span>;
+
+os = <span class="f">proc_os</span>();
+<span class="f">print</span>(os);   <span class="c">// windows / linux / macos</span>
+
+<span class="k">if</span> (<span class="f">proc_exists</span>(<span class="s">"hone.exe"</span>)) { <span class="f">print</span>(<span class="s">"hone 正在运行"</span>); }
+
+<span class="c">// 枚举 / 模糊查找（Windows 进程名含 .exe，Unix 不含；子串匹配两边通用）</span>
+<span class="k">for</span> p <span class="k">in</span> <span class="f">proc_find</span>(<span class="s">"chrome"</span>) {
+    <span class="f">print</span>(p.pid, p.name, p.mem);
+}
+
+<span class="c">// 按 PID 反查</span>
+info = <span class="f">proc_by_pid</span>(<span class="n">1234</span>);
+<span class="f">print</span>(info.name);
+
+<span class="c">// 结束进程</span>
+<span class="f">proc_kill</span>(<span class="n">1234</span>);                        <span class="c">// 结束单个 PID</span>
+n = <span class="f">proc_kill_by_name</span>(<span class="s">"notepad.exe"</span>);  <span class="c">// 结束全部同名进程，返回成功数</span></code></pre>
+    <p><strong>跨平台差异</strong>：<code class="inline">name</code> 在 Windows 含扩展名（如 <code class="inline">chrome.exe</code>）、Unix 为命令名（如 <code class="inline">chrome</code>），请用 <code class="inline">proc_find("chrome")</code> 这类子串匹配以保证两边一致；<code class="inline">mem</code> 均为 KB；<code class="inline">cmdline</code> 仅 Unix 有值。测试脚本见 <code class="inline">examples/test_process_lib.hn</code>。</p>
+  </section>
+
   <section id="demo">
-    <h2><span class="hash">#</span>8. 组合示例</h2>
+    <h2><span class="hash">#</span>9. 组合示例</h2>
 <pre><code><span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
 <span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;

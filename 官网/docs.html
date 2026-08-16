@@ -60,6 +60,7 @@ function toggleTheme(){
       <li><a href="#integ">导入与外部集成</a></li>
       <li><a href="#tools">工具链</a></li>
       <li><a href="#gui">图形界面库</a></li>
+      <li><a href="#process">进程检测库</a></li>
       <li><a href="#errors">错误处理</a></li>
       <li><a href="#principles">设计原则</a></li>
       <li><a href="#advanced">进阶用法</a></li>
@@ -510,10 +511,28 @@ widgets = [
     <p>底层 <code class="inline">server.*</code> API：<code class="inline">server.listen(port)</code> 启动后台监听（0=自动分配，返回实际端口）、<code class="inline">server.poll()</code> 取出排队请求（返回 JSON 数组）、<code class="inline">server.respond(id, body)</code> 发送响应体（HTTP 200）。事件模型为后台线程收发 + 脚本主线程轮询响应，与解释器单线程模型兼容。示例：<code class="inline">examples/gui_demo.hn</code>、<code class="inline">examples/server_demo.hn</code>。</p>
   </section>
 
-  <section id="advanced">
-    <h2><span class="hash">#</span>14. 进阶用法（多文件 / 调试 / 性能）</h2>
+  <section id="process">
+    <h2><span class="hash">#</span>14. 进程检测库（hone_lib/process.hn）</h2>
+    <p>纯 Hone 编写的跨平台进程检测库（Windows / Linux / macOS）：枚举进程、按名称/PID 查找、结束进程。Hone 无内置进程 API，本库经 <code class="inline">sys.run</code> 调用系统命令实现（Windows 用 <code class="inline">tasklist</code> / <code class="inline">taskkill</code>，Unix 用 <code class="inline">ps</code> / <code class="inline">kill -9</code>）。查询函数返回进程对象 <code class="inline">{pid, name, mem, cmdline}</code>（<code class="inline">mem</code> 为 KB；<code class="inline">cmdline</code> 仅 Unix 有值）。</p>
+<pre><code><span class="k">import</span> <span class="s">"process"</span> <span class="k">from</span> <span class="s">"./hone_lib/process.hn"</span>;
 
-    <h3>14.1 多文件项目组织</h3>
+<span class="k">if</span> (<span class="f">proc_exists</span>(<span class="s">"hone.exe"</span>)) { <span class="f">print</span>(<span class="s">"hone 正在运行"</span>); }
+
+<span class="c">// 枚举 / 模糊查找（不区分大小写）</span>
+<span class="k">for</span> p <span class="k">in</span> <span class="f">proc_find</span>(<span class="s">"chrome"</span>) {
+    <span class="f">print</span>(p.pid, p.name, p.mem);
+}
+
+<span class="c">// 结束进程（taskkill /F /PID 或 kill -9）</span>
+<span class="f">proc_kill</span>(<span class="n">1234</span>);
+n = <span class="f">proc_kill_by_name</span>(<span class="s">"notepad.exe"</span>);  <span class="c">// 返回成功数</span></code></pre>
+    <p>函数：<code class="inline">proc_os</code> <code class="inline">proc_list</code> <code class="inline">proc_find</code> <code class="inline">proc_exists</code> <code class="inline">proc_by_pid</code> <code class="inline">proc_count</code> <code class="inline">proc_pids</code> <code class="inline">proc_names</code> <code class="inline">proc_kill</code> <code class="inline">proc_kill_by_name</code>。跨平台差异：Windows 进程名含 <code class="inline">.exe</code>、Unix 不含，用子串匹配（如 <code class="inline">proc_find("chrome")</code>）两边通用。完整函数表与测试脚本见 <a href="stdlib.html#process">标准库 · process 进程模块</a>。</p>
+  </section>
+
+  <section id="advanced">
+    <h2><span class="hash">#</span>15. 进阶用法（多文件 / 调试 / 性能）</h2>
+
+    <h3>15.1 多文件项目组织</h3>
     <p>单文件即可运行，项目变大后建议拆分模块。三种复用方式：</p>
 <pre><code><span class="c">// import：.hn 源码复用（最常用）</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;   <span class="c">// 本地：相对当前目录</span>
@@ -529,7 +548,7 @@ widgets = [
       推荐目录：入口 <code class="inline">main.hn</code> + <code class="inline">libs/</code> 自有模块 + <code class="inline">data/</code> 数据；
       用 <code class="inline">hone get &lt;script.hn&gt;</code> 预下载脚本中所有 import 的模块。</p>
 
-    <h3>14.2 函数别名（alias）</h3>
+    <h3>15.2 函数别名（alias）</h3>
     <p>给已有函数起新名字再调用，原名保持不变：</p>
 <pre><code><span class="c">// 基础：alias 原名 as 新名;  之后用新名调用</span>
 <span class="k">fn</span> <span class="f">greet</span>(name) { <span class="k">return</span> <span class="s">"你好 "</span> + name; }
@@ -548,7 +567,7 @@ widgets = [
     <p>别名作用域为文件级（当前 .hn 文件全局可见），在 <code class="inline">alias</code> 语句之后即可用新名调用。
       完整示例见 <code class="inline">examples/alias_demo.hn</code>。</p>
 
-    <h3>14.3 调试复杂逻辑</h3>
+    <h3>15.3 调试复杂逻辑</h3>
     <table>
       <tr><th>工具</th><th>用途</th></tr>
       <tr><td><code class="inline">hone debug &lt;script.hn&gt;</code> + <code class="inline">breakpoint;</code></td><td>运行到断点暂停，打印当前作用域全部变量快照，Enter 继续 / Ctrl+C 退出</td></tr>
@@ -563,7 +582,7 @@ widgets = [
       <code class="inline">breakpoint;</code> 观察变量快照 → 用 try/catch 捕获运行时错误并打印
       <code class="inline">e.code / e.message / e.line</code> → 用 <code class="inline">assert</code> 固化关键不变量防止回归。</p>
 
-    <h3>14.4 性能优化</h3>
+    <h3>15.4 性能优化</h3>
     <ul>
       <li><strong>避免循环内反复 append</strong>：列表是值类型，<code class="inline">append</code> 返回新列表（整体拷贝），
         循环里 <code class="inline">l = append(l, x)</code> 是 O(n²)。累积数据时优先用 dict，或先确定规模再一次性构造</li>
@@ -577,7 +596,7 @@ widgets = [
   </section>
 
   <section id="pitfalls">
-    <h2><span class="hash">#</span>15. 已知问题与常见坑</h2>
+    <h2><span class="hash">#</span>16. 已知问题与常见坑</h2>
     <p>以下都是新手最容易踩的坑，提前看完能省不少调试时间。完整版见
       <a href="faq.html">FAQ</a> 与仓库 <code class="inline">hone.md</code> 的「FAQ 与已知问题」章节。</p>
     <table>
