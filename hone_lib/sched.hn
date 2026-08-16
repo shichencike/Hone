@@ -1,0 +1,239 @@
+// hone_lib/sched.hn - 定时任务标准库（纯 Hone 编写）
+// 用法: import "sched" from "./hone_lib/sched.hn";
+// 函数统一 sch_ 前缀。
+//
+// 设计说明：Hone 不支持函数作为值传递（Value 无函数类型），故任务动作用
+// 「命令字符串 + sys.run 执行」，与 cron 的心智模型一致，跨平台可用：
+//   sch_every(interval, cmd, tag)   每 interval 秒执行一次 cmd
+//   sch_at("HH:MM", cmd, tag)       每天 HH:MM 执行一次 cmd
+//   sch_cron(expr, cmd, tag)        按 cron 表达式执行（5 段：分 时 日 月 周）
+// 三种函数都返回任务 dict，构造后放入列表，交给 sch_run 阻塞调度：
+//   tasks = [sch_every(5, "echo hi", "t1")];
+//   tasks = sch_run(tasks, 30);   // 运行 30 秒（0 = 一直运行，Ctrl+C 退出）
+//
+// 任务 dict 结构:
+//   tag: str      任务名（仅标识）
+//   type: str     "interval" / "at" / "cron"
+//   cmd: str      到点执行的命令
+//   interval: int 间隔秒数（interval 型）
+//   hhmm: str     "HH:MM"（at 型）
+//   expr: str     cron 表达式（cron 型）
+//   next: int     下次执行时间戳（秒）
+//   count: int    已执行次数
+//
+// cron 表达式支持（5 段，空格分隔）：
+//   分(0-59) 时(0-23) 日(1-31) 月(1-12) 周(0-7，0/7=周日)
+//   字段值: * | 数字 | a-b | */n | a-b/n | 逗号列表（如 "0,15,30,45"）
+
+// ============ 工具 ============
+
+// 当前 Unix 时间戳（秒）
+fn sch_now() -> int {
+    return time.now();
+}
+
+// "HH:MM" -> 当日秒数（0-86399）
+fn sch_hhmm_to_sec(hhmm : str) -> int {
+    parts = regex.split(":", hhmm);
+    h = 0;
+    m = 0;
+    i = 0;
+    for p in parts {
+        if (i == 0) { h = to_int(p); }
+        else if (i == 1) { m = to_int(p); }
+        i = i + 1;
+    }
+    return h * 3600 + m * 60;
+}
+
+// 下一次 hhmm 对应的时间戳（已过今天该时刻则取明天）
+fn sch_next_hhmm(now : int, hhmm : str) -> int {
+    d = time.format(now, "YYYY-MM-DD");
+    t = time.parse(d + " " + hhmm + ":00");
+    if (t <= now) { t = t + 86400; }
+    return t;
+}
+
+// ============ cron 匹配 ============
+
+// 单字段匹配：pat 为 * / 数字 / a-b / */n / a-b/n / 逗号列表
+fn sch_cron_field_match(pat : str, v : int) -> bool {
+    parts = regex.split(",", pat);
+    for p in parts {
+        if (sch_cron_one(p, v)) { return true; }
+    }
+    return false;
+}
+
+// 单字段子项匹配（不含逗号）
+fn sch_cron_one(p : str, v : int) -> bool {
+    p = str_trim(p);
+    if (p == "*") { return true; }
+    if (str_contains(p, "/")) {
+        segs = regex.split("/", p);
+        base = "";
+        step = 0;
+        i = 0;
+        for s in segs {
+            if (i == 0) { base = str_trim(s); }
+            else if (i == 1) { step = to_int(str_trim(s)); }
+            i = i + 1;
+        }
+        if (step <= 0) { return false; }
+        if (!sch_cron_base(base, v)) { return false; }
+        // 步进：*/n 从 0 起，a-b/n 从 a 起（如 1-10/3 = 1,4,7,10）
+        start = sch_cron_start(base);
+        if ((v - start) % step != 0) { return false; }
+        return true;
+    }
+    return sch_cron_base(p, v);
+}
+
+// 步进基准值：a-b 取 a，其它取 0
+fn sch_cron_start(base : str) -> int {
+    if (str_contains(base, "-")) {
+        rg = regex.split("-", base);
+        i = 0;
+        for r in rg {
+            if (i == 0) { return to_int(str_trim(r)); }
+            i = i + 1;
+        }
+    }
+    return 0;
+}
+
+// 无步进部分的子项：* / a-b / 数字
+fn sch_cron_base(base : str, v : int) -> bool {
+    if (base == "*") { return true; }
+    if (str_contains(base, "-")) {
+        rg = regex.split("-", base);
+        lo = 0;
+        hi = 0;
+        i = 0;
+        for r in rg {
+            if (i == 0) { lo = to_int(str_trim(r)); }
+            else if (i == 1) { hi = to_int(str_trim(r)); }
+            i = i + 1;
+        }
+        return v >= lo && v <= hi;
+    }
+    return to_int(str_trim(base)) == v;
+}
+
+// 取时间戳的分量（年/月/日/时/分 与 cron 星期）
+fn sch_fields(now : int) {
+    fm = time.format(now, "YYYY MM DD HH mm");
+    parts = regex.split(" ", fm);
+    return {"year": to_int(sch_seg(parts, 0)), "mon": to_int(sch_seg(parts, 1)),
+            "day": to_int(sch_seg(parts, 2)), "hour": to_int(sch_seg(parts, 3)),
+            "min": to_int(sch_seg(parts, 4)), "wd": time.weekday(now) % 7};
+}
+
+// 取列表第 idx 项（无下标，遍历计数）
+fn sch_seg(l, idx : int) -> str {
+    i = 0;
+    for x in l {
+        if (i == idx) { return x; }
+        i = i + 1;
+    }
+    return "";
+}
+
+// 当前时刻是否匹配 cron 表达式
+fn sch_cron_match(expr : str, now : int) -> bool {
+    segs = regex.split("\\s+", str_trim(expr));
+    n = len(segs);
+    if (n < 5) { return false; }
+    fs = sch_fields(now);
+    return sch_cron_field_match(sch_seg(segs, 0), fs.min)
+        && sch_cron_field_match(sch_seg(segs, 1), fs.hour)
+        && sch_cron_field_match(sch_seg(segs, 2), fs.day)
+        && sch_cron_field_match(sch_seg(segs, 3), fs.mon)
+        && sch_cron_field_match(sch_seg(segs, 4), fs.wd);
+}
+
+// 取列表第 idx 项（无下标，遍历计数）
+fn sch_seg(l, idx : int) -> str {
+    i = 0;
+    for x in l {
+        if (i == idx) { return x; }
+        i = i + 1;
+    }
+    return "";
+}
+
+// cron 表达式下一次匹配的时间戳（逐分钟搜索，最多一年）
+fn sch_cron_next(expr : str, now : int) -> int {
+    t = now + 60;
+    i = 0;
+    while (i < 527040) {
+        if (sch_cron_match(expr, t)) { return t; }
+        t = t + 60;
+        i = i + 1;
+    }
+    return t;
+}
+
+// ============ 任务构造 ============
+
+// 每 interval 秒执行一次 cmd，返回任务 dict
+fn sch_every(interval : int, cmd : str, tag : str) {
+    return {"tag": tag, "type": "interval", "cmd": cmd, "interval": interval,
+            "hhmm": "", "expr": "", "next": sch_now() + interval, "count": 0};
+}
+
+// 每天 hhmm（"HH:MM"）执行一次 cmd，返回任务 dict
+fn sch_at(hhmm : str, cmd : str, tag : str) {
+    return {"tag": tag, "type": "at", "cmd": cmd, "interval": 0,
+            "hhmm": hhmm, "expr": "", "next": sch_next_hhmm(sch_now(), hhmm), "count": 0};
+}
+
+// 按 cron 表达式执行 cmd，返回任务 dict
+fn sch_cron(expr : str, cmd : str, tag : str) {
+    return {"tag": tag, "type": "cron", "cmd": cmd, "interval": 0,
+            "hhmm": "", "expr": expr, "next": sch_cron_next(expr, sch_now()), "count": 0};
+}
+
+// ============ 调度 ============
+
+// 单轮推进：执行所有到期任务，返回 {"tasks": 新列表, "ran": 本次执行数}
+// 说明：Hone 列表/字典为值语义且不支持字段赋值（obj.f = v），
+// 到期任务须重建 dict 并 append，返回新列表由调用方重新赋值：
+//   r = sch_tick(tasks, now); tasks = r.tasks;
+fn sch_tick(tasks, now : int) {
+    out = [];
+    ran = 0;
+    for t in tasks {
+        if (t.next <= now) {
+            try { sys.run(t.cmd); } catch e { }
+            ran = ran + 1;
+            nt = {"tag": t.tag, "type": t.type, "cmd": t.cmd, "interval": t.interval,
+                  "hhmm": t.hhmm, "expr": t.expr, "next": sch_next(t, now), "count": t.count + 1};
+            out = append(out, nt);
+        } else {
+            out = append(out, t);
+        }
+    }
+    return {"tasks": out, "ran": ran};
+}
+
+// 计算任务下一次执行时间
+fn sch_next(t, now : int) -> int {
+    if (t.type == "interval") { return now + t.interval; }
+    if (t.type == "at") { return sch_next_hhmm(now, t.hhmm); }
+    return sch_cron_next(t.expr, now);
+}
+
+// 阻塞调度：运行 seconds 秒（0 = 一直运行），每 0.2 秒推进一轮。
+// 返回更新后的任务列表，调用方需重新赋值：tasks = sch_run(tasks, 30);
+fn sch_run(tasks, seconds : int) {
+    end = sch_now() + seconds;
+    while (true) {
+        now = sch_now();
+        if (seconds > 0 && now >= end) { break; }
+        r = sch_tick(tasks, now);
+        tasks = r.tasks;
+        time.sleep(0.2);
+    }
+    return tasks;
+}

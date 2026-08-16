@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 标准库文档</title>
-<meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui / music / spider / process 模块，本地路径导入即可使用。">
+<meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui / music / spider / process / sched 模块，本地路径导入即可使用。">
 <meta name="theme-color" content="#0d1117">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
@@ -54,13 +54,14 @@ function toggleTheme(){
       <li><a href="#music">music 乐理模块</a></li>
       <li><a href="#spider">spider 爬虫模块</a></li>
       <li><a href="#process">process 进程模块</a></li>
+      <li><a href="#sched">sched 定时任务模块</a></li>
       <li><a href="#demo">组合示例</a></li>
     </ol>
   </div>
 
   <section id="intro">
     <h2><span class="hash">#</span>1. 概述与导入</h2>
-    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code> / <code class="inline">music_</code> / <code class="inline">sp_</code> / <code class="inline">proc_</code>），通过本地路径 import 使用：</p>
+    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code> / <code class="inline">music_</code> / <code class="inline">sp_</code> / <code class="inline">proc_</code> / <code class="inline">sch_</code>），通过本地路径 import 使用：</p>
 <pre><code><span class="c">// 本地路径导入（相对路径基于当前工作目录）</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
@@ -69,6 +70,7 @@ function toggleTheme(){
 <span class="k">import</span> <span class="s">"music"</span> <span class="k">from</span> <span class="s">"./hone_lib/music.hn"</span>; <span class="c">// 乐理：音名/音阶/和弦/调性等</span>
 <span class="k">import</span> <span class="s">"spider"</span> <span class="k">from</span> <span class="s">"./hone_lib/spider.hn"</span>; <span class="c">// 爬虫：静态直取 + 动态渲染</span>
 <span class="k">import</span> <span class="s">"process"</span> <span class="k">from</span> <span class="s">"./hone_lib/process.hn"</span>; <span class="c">// 进程：枚举/查找/结束（跨平台）</span>
+<span class="k">import</span> <span class="s">"sched"</span> <span class="k">from</span> <span class="s">"./hone_lib/sched.hn"</span>;   <span class="c">// 定时任务：间隔/时刻/cron（跨平台）</span>
 
 <span class="c">// import as：以别名导入，函数名前缀整体替换</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span> <span class="k">as</span> m;   <span class="c">// m_clamp / m_gcd ...</span></code></pre>
@@ -289,8 +291,36 @@ n = <span class="f">proc_kill_by_name</span>(<span class="s">"notepad.exe"</span
     <p><strong>跨平台差异</strong>：<code class="inline">name</code> 在 Windows 含扩展名（如 <code class="inline">chrome.exe</code>）、Unix 为命令名（如 <code class="inline">chrome</code>），请用 <code class="inline">proc_find("chrome")</code> 这类子串匹配以保证两边一致；<code class="inline">mem</code> 均为 KB；<code class="inline">cmdline</code> 仅 Unix 有值。测试脚本见 <code class="inline">examples/test_process_lib.hn</code>。</p>
   </section>
 
+  <section id="sched">
+    <h2><span class="hash">#</span>9. sched 定时任务模块</h2>
+    <p>跨平台定时任务库（纯 Hone 编写）。Hone 不支持函数作为值传递（Value 无函数类型），故任务动作用「命令字符串 + <code class="inline">sys.run</code> 执行」，与 cron 心智模型一致：<code class="inline">sch_every</code> 按间隔秒执行、<code class="inline">sch_at</code> 每天指定时刻执行、<code class="inline">sch_cron</code> 按 cron 表达式执行。三种任务构造函数返回任务 dict，放入列表后交给 <code class="inline">sch_run</code> 阻塞调度。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>sch_every(interval, cmd, tag)</code></td><td>每 interval 秒执行一次 cmd（间隔任务）</td></tr>
+      <tr><td><code>sch_at(hhmm, cmd, tag)</code></td><td>每天 <code class="inline">"HH:MM"</code> 执行一次 cmd（时刻任务）</td></tr>
+      <tr><td><code>sch_cron(expr, cmd, tag)</code></td><td>按 cron 表达式执行（5 段：分 时 日 月 周）</td></tr>
+      <tr><td><code>sch_run(tasks, seconds)</code></td><td>阻塞调度 seconds 秒（0 = 一直运行，Ctrl+C 退出），返回更新后的任务列表</td></tr>
+      <tr><td><code>sch_tick(tasks, now)</code></td><td>单轮推进：执行到期任务，返回 <code class="inline">{"tasks": 新列表, "ran": 本次执行数}</code></td></tr>
+      <tr><td><code>sch_next_hhmm(now, hhmm)</code></td><td>下一次 hhmm 对应的时间戳（已过则取明天）</td></tr>
+      <tr><td><code>sch_cron_match(expr, now)</code> / <code>sch_cron_next(expr, now)</code></td><td>当前时刻是否匹配 cron / 下次匹配时间戳</td></tr>
+      <tr><td><code>sch_now()</code> / <code>sch_hhmm_to_sec(hhmm)</code></td><td>当前时间戳 / "HH:MM" 转当日秒数</td></tr>
+    </table>
+    <p><strong>cron 表达式</strong>（5 段，空格分隔）：分(0-59) 时(0-23) 日(1-31) 月(1-12) 周(0-7，0/7=周日)；字段支持 <code class="inline">*</code>、数字、<code class="inline">a-b</code>、<code class="inline">*/n</code>、<code class="inline">a-b/n</code>、逗号列表（如 <code class="inline">0,15,30,45</code>）。</p>
+<pre><code><span class="k">import</span> <span class="s">"sched"</span> <span class="k">from</span> <span class="s">"./hone_lib/sched.hn"</span>;
+
+tasks = [
+    <span class="f">sch_every</span>(<span class="n">60</span>, <span class="s">"hone backup.hn"</span>, <span class="s">"backup"</span>),          <span class="c">// 每分钟备份</span>
+    <span class="f">sch_at</span>(<span class="s">"09:30"</span>, <span class="s">"hone report.hn"</span>, <span class="s">"daily-report"</span>),  <span class="c">// 每天 9:30</span>
+    <span class="f">sch_cron</span>(<span class="s">"0 2 * * 1"</span>, <span class="s">"hone cleanup.hn"</span>, <span class="s">"weekly"</span>), <span class="c">// 每周一凌晨 2 点</span>
+];
+<span class="f">sch_run</span>(tasks, <span class="n">0</span>);   <span class="c">// 一直运行，Ctrl+C 退出</span></code></pre>
+    <p><strong>值语义注意</strong>：Hone 列表/字典为值类型且不支持字段赋值（<code class="inline">obj.f = v</code>），
+      <code class="inline">sch_run</code> / <code class="inline">sch_tick</code> 会重建任务列表并返回，调用方需重新赋值
+      <code class="inline">tasks = sch_run(tasks, 30)</code>。测试脚本见 <code class="inline">examples/test_sched_lib.hn</code>。</p>
+  </section>
+
   <section id="demo">
-    <h2><span class="hash">#</span>9. 组合示例</h2>
+    <h2><span class="hash">#</span>10. 组合示例</h2>
 <pre><code><span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
 <span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;
