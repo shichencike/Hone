@@ -496,7 +496,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                     Ok(Value::Str(v.display()))
                 }
                 Value::Str(s) => Ok(Value::Str(s.clone())),
-                Value::List(_) | Value::Dict(_) => Ok(Value::Str(v.display())),
+                Value::List(_) | Value::Dict(_) | Value::Lambda(_) => Ok(Value::Str(v.display())),
                 Value::Null => Ok(Value::Str("null".to_string())),
             }
         }
@@ -1793,6 +1793,16 @@ fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String,
                 file,
                 src,
                 Some("pointers are opaque handles; convert to a string first, e.g. to_str(p)"),
+            ));
+        }
+        Value::Lambda(_) => {
+            return Err(err(
+                codes::TYPE_MISMATCH,
+                "cannot serialize a `fn` (lambda) value to JSON",
+                span,
+                file,
+                src,
+                Some("call the lambda to get its result, or convert to a string first, e.g. to_str(f)"),
             ));
         }
     };

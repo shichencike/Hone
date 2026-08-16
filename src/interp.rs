@@ -40,7 +40,16 @@ impl ErrorObj {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// 匿名函数值（lambda）：参数 + 函数体 + 创建时按值捕获的环境快照（闭包）。
+/// 捕获 env 按作用域外→内合并（内层同名覆盖外层），与 Env::get 语义一致。
+#[derive(Debug, Clone)]
+pub struct LambdaVal {
+    pub params: Vec<Param>,
+    pub body: Vec<Stmt>,
+    pub captured: HashMap<String, Value>,
+}
+
+#[derive(Debug, Clone)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -56,6 +65,27 @@ pub enum Value {
     Error(ErrorObj),
     /// FFI 指针（typed load 的 ptr 返回值，或库函数传入的不透明句柄）
     Ptr(usize),
+    /// 匿名函数值（lambda / 闭包）
+    Lambda(Arc<LambdaVal>),
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::List(a), Value::List(b)) => a == b,
+            (Value::Dict(a), Value::Dict(b)) => a == b,
+            (Value::Null, Value::Null) => true,
+            (Value::Error(a), Value::Error(b)) => a == b,
+            (Value::Ptr(a), Value::Ptr(b)) => a == b,
+            // lambda 无结构性相等：同一创建点的引用视为相等
+            (Value::Lambda(a), Value::Lambda(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
 }
 
 impl Value {
@@ -70,6 +100,7 @@ impl Value {
             Value::Null => "null",
             Value::Error(_) => "error",
             Value::Ptr(_) => "ptr",
+            Value::Lambda(_) => "fn",
         }
     }
 
@@ -93,15 +124,18 @@ impl Value {
             Value::Null => "null".to_string(),
             Value::Error(e) => format!("error[{}]: {}", e.code, e.message),
             Value::Ptr(p) => format!("0x{:x}", p),
+            Value::Lambda(f) => format!("fn({})", f.params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")),
         }
     }
 }
 
-/// 语句执行流程：Normal 继续；Return 携带返回值向上传播；Break 跳出最近循环。
+/// 语句执行流程：Normal 继续；Return 携带返回值向上传播；Break 跳出最近循环；
+/// Continue 跳过本次循环剩余语句，进入下一次迭代。
 enum Flow {
     Normal,
     Return(Value),
     Break,
+    Continue,
 }
 
 #[derive(Clone)]
@@ -362,6 +396,7 @@ impl Interp {
             match self.exec_stmt(env, s)? {
                 Flow::Return(v) => return Ok(Flow::Return(v)),
                 Flow::Break => return Ok(Flow::Break),
+                Flow::Continue => return Ok(Flow::Continue),
                 Flow::Normal => {}
             }
         }
@@ -389,6 +424,23 @@ impl Interp {
                 let v = self.eval_expr(env, value)?;
                 env.set_or_declare(name, v);
                 Ok(Flow::Normal)
+            }
+            Stmt::AssignOp { name, op, value, span } => {
+                let cur = env.get(name).cloned();
+                match cur {
+                    Some(cur) => {
+                        let rhs = self.eval_expr(env, value)?;
+                        let v = self.compound_assign(*op, cur, rhs, *span)?;
+                        env.set_or_declare(name, v);
+                        Ok(Flow::Normal)
+                    }
+                    None => Err(self.runtime_err(
+                        codes::UNDEFINED,
+                        format!("undefined variable `{}` (declare it before `{}` assignment)", name, op.symbol()),
+                        *span,
+                        Some("use `x = value` to declare and initialize"),
+                    )),
+                }
             }
             Stmt::Block { stmts, .. } => self.exec_block(env, stmts),
             Stmt::If { cond, then_branch, else_branch, .. } => {
@@ -436,7 +488,84 @@ impl Interp {
                     match flow? {
                         Flow::Return(v) => return Ok(Flow::Return(v)),
                         Flow::Break => break,
+                        Flow::Continue => {} // 跳过剩余语句，进入下一次迭代
                         Flow::Normal => {}
+                    }
+                }
+                Ok(Flow::Normal)
+            }
+            Stmt::DoWhile { body, cond, .. } => {
+                // do-while：先执行一次循环体，再判断条件
+                let mut body_scope = HashMap::new();
+                loop {
+                    env.scopes.push(body_scope);
+                    let flow = self.exec_stmts(env, body);
+                    body_scope = env.scopes.pop().expect("do-while body scope");
+                    body_scope.clear();
+                    match flow? {
+                        Flow::Return(v) => return Ok(Flow::Return(v)),
+                        Flow::Break => break,
+                        Flow::Continue => {} // 跳过剩余语句，直接判断条件
+                        Flow::Normal => {}
+                    }
+                    let c = self.eval_expr(env, cond)?;
+                    if let Value::Bool(b) = c {
+                        if !b {
+                            break;
+                        }
+                    } else {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("do-while condition must be `bool`, got `{}`", c.type_name()),
+                            expr_span(cond),
+                            None::<&str>,
+                        ));
+                    }
+                }
+                Ok(Flow::Normal)
+            }
+            Stmt::ForC { init, cond, step, body, .. } => {
+                // init 在循环外作用域执行一次；cond/step 与 while 同语义；
+                // 循环体复用单个作用域 HashMap
+                if let Some(i) = init {
+                    match self.exec_stmt(env, i)? {
+                        Flow::Return(v) => return Ok(Flow::Return(v)),
+                        Flow::Break | Flow::Continue | Flow::Normal => {}
+                    }
+                }
+                let mut body_scope = HashMap::new();
+                loop {
+                    if let Some(c) = cond {
+                        let cval = self.eval_expr(env, c)?;
+                        if let Value::Bool(b) = cval {
+                            if !b {
+                                break;
+                            }
+                        } else {
+                            return Err(self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                format!("for condition must be `bool`, got `{}`", cval.type_name()),
+                                expr_span(c),
+                                None::<&str>,
+                            ));
+                        }
+                    }
+                    env.scopes.push(body_scope);
+                    let flow = self.exec_stmts(env, body);
+                    body_scope = env.scopes.pop().expect("for body scope");
+                    body_scope.clear();
+                    match flow? {
+                        Flow::Return(v) => return Ok(Flow::Return(v)),
+                        Flow::Break => break,
+                        Flow::Continue => {} // 跳过剩余语句，执行 step 后进入下一轮
+                        Flow::Normal => {}
+                    }
+                    if let Some(s) = step {
+                        match self.exec_stmt(env, s)? {
+                            Flow::Return(v) => return Ok(Flow::Return(v)),
+                            Flow::Break => break,
+                            Flow::Continue | Flow::Normal => {}
+                        }
                     }
                 }
                 Ok(Flow::Normal)
@@ -466,6 +595,7 @@ impl Interp {
                             match flow? {
                                 Flow::Return(v) => return Ok(Flow::Return(v)),
                                 Flow::Break => break,
+                                Flow::Continue => {} // 跳过剩余语句，进入下一次迭代
                                 Flow::Normal => {}
                             }
                         }
@@ -487,6 +617,7 @@ impl Interp {
                             match flow? {
                                 Flow::Return(v) => return Ok(Flow::Return(v)),
                                 Flow::Break => break,
+                                Flow::Continue => {} // 跳过剩余语句，进入下一次迭代
                                 Flow::Normal => {}
                             }
                         }
@@ -513,6 +644,7 @@ impl Interp {
                 Ok(Flow::Normal)
             }
             Stmt::Break { .. } => Ok(Flow::Break),
+            Stmt::Continue { .. } => Ok(Flow::Continue),
             Stmt::Breakpoint { span } => {
                 if self.debug {
                     self.do_breakpoint(env, *span);
@@ -1065,7 +1197,7 @@ impl Interp {
 
     fn call_fn(&mut self, callee: &str, args: Vec<Value>, span: Span) -> Result<Value, ZError> {
         if let Some(f) = self.fns.get(callee).cloned() {
-            self.exec_user_fn(&f, args, span)
+            self.exec_user_fn(callee, &f, args, span)
         } else if let Some(fields) = self.structs.get(callee).cloned() {
             // 结构体构造：按字段顺序生成 dict 实例
             if fields.len() != args.len() {
@@ -1097,7 +1229,7 @@ impl Interp {
     }
 
     /// 执行用户函数/类方法体：绑定参数到新环境，执行函数体，处理 return。
-    fn exec_user_fn(&mut self, f: &FnDef, args: Vec<Value>, span: Span) -> Result<Value, ZError> {
+    fn exec_user_fn(&mut self, name: &str, f: &FnDef, args: Vec<Value>, span: Span) -> Result<Value, ZError> {
         if self.depth >= 5000 {
             return Err(self.runtime_err(
                 codes::RECURSION_DEPTH,
@@ -1106,10 +1238,31 @@ impl Interp {
                 Some("check for infinite recursion, or rewrite iteratively"),
             ));
         }
+        if args.len() > f.params.len() {
+            return Err(self.runtime_err(
+                codes::ARG_COUNT,
+                format!("`{}` expects at most {} arguments, got {}", name, f.params.len(), args.len()),
+                span,
+                Some("check the number of arguments passed"),
+            ));
+        }
         let mut call_env = Env {
             scopes: vec![HashMap::with_capacity(f.params.len())],
         };
-        for (p, v) in f.params.iter().zip(args) {
+        for (i, p) in f.params.iter().enumerate() {
+            let v = if i < args.len() {
+                args[i].clone()
+            } else if let Some(d) = &p.default {
+                // 默认表达式在调用环境求值（可引用其前面的参数）
+                self.eval_expr(&mut call_env, d)?
+            } else {
+                return Err(self.runtime_err(
+                    codes::ARG_COUNT,
+                    format!("missing argument `{}` of `{}`", p.name, name),
+                    span,
+                    Some("pass the required argument, or give the parameter a default value"),
+                ));
+            };
             call_env.declare(&p.name, v);
         }
         self.depth += 1;
@@ -1118,15 +1271,103 @@ impl Interp {
         match flow? {
             Flow::Return(v) => Ok(v),
             Flow::Normal => Ok(Value::Null),
-            // checker 已保证 break 只在循环体内，循环会捕获它，
+            // checker 已保证 break/continue 只在循环体内，循环会捕获它们，
             // 因此正常情况下不会逃逸到函数体；兜底防内部不一致
-            Flow::Break => Err(self.runtime_err(
+            Flow::Break | Flow::Continue => Err(self.runtime_err(
                 codes::SYNTAX,
-                "`break` escaped a function body (internal error)",
+                "loop control escaped a function body (internal error)",
                 span,
                 None::<&str>,
             )),
         }
+    }
+
+    /// 执行 lambda 值：环境 = 捕获快照（底层）+ 参数（上层，同名覆盖捕获值）。
+    /// return 从 lambda 返回；break/continue 在 lambda 体内非法（checker 已保证），兜底报错。
+    fn exec_lambda(&mut self, f: &LambdaVal, args: Vec<Value>, span: Span) -> Result<Value, ZError> {
+        if self.depth >= 5000 {
+            return Err(self.runtime_err(
+                codes::RECURSION_DEPTH,
+                "recursion depth exceeded (limit 5000)",
+                span,
+                Some("check for infinite recursion, or rewrite iteratively"),
+            ));
+        }
+        if args.len() > f.params.len() {
+            return Err(self.runtime_err(
+                codes::ARG_COUNT,
+                format!("lambda expects at most {} arguments, got {}", f.params.len(), args.len()),
+                span,
+                Some("pass exactly the declared number of arguments"),
+            ));
+        }
+        let mut call_env = Env {
+            scopes: vec![f.captured.clone(), HashMap::with_capacity(f.params.len())],
+        };
+        for (i, p) in f.params.iter().enumerate() {
+            let v = if i < args.len() {
+                args[i].clone()
+            } else if let Some(d) = &p.default {
+                // 默认表达式在调用环境求值（可引用前面的参数与捕获变量）
+                self.eval_expr(&mut call_env, d)?
+            } else {
+                return Err(self.runtime_err(
+                    codes::ARG_COUNT,
+                    format!("missing argument `{}`", p.name),
+                    span,
+                    Some("pass the required argument, or give the parameter a default value"),
+                ));
+            };
+            call_env.declare(&p.name, v);
+        }
+        self.depth += 1;
+        let flow = self.exec_stmts(&mut call_env, &f.body);
+        self.depth -= 1;
+        match flow? {
+            Flow::Return(v) => Ok(v),
+            Flow::Normal => Ok(Value::Null),
+            Flow::Break | Flow::Continue => Err(self.runtime_err(
+                codes::SYNTAX,
+                "loop control escaped a lambda body (internal error)",
+                span,
+                None::<&str>,
+            )),
+        }
+    }
+
+    /// 自增/自减的值运算：int 增减 1，float 增减 1.0；其他类型报错。
+    fn incdec_value(&self, op: IncOp, v: Value, span: Span) -> Result<Value, ZError> {
+        let delta: i64 = if op == IncOp::Inc { 1 } else { -1 };
+        match v {
+            Value::Int(x) => match x.checked_add(delta) {
+                Some(n) => Ok(Value::Int(n)),
+                None => Err(self.runtime_err(
+                    codes::INTEGER_OVERFLOW,
+                    "integer overflow",
+                    span,
+                    Some("the result does not fit in a 64-bit signed integer"),
+                )),
+            },
+            Value::Float(f) => Ok(Value::Float(if op == IncOp::Inc { f + 1.0 } else { f - 1.0 })),
+            other => Err(self.runtime_err(
+                codes::TYPE_MISMATCH,
+                format!("`{}` requires a numeric variable, got `{}`", op.symbol(), other.type_name()),
+                span,
+                Some("increment/decrement works on `int` / `float` variables only"),
+            )),
+        }
+    }
+
+    /// 复合赋值运行语义：`x op= y` 等价于 `x = x op y`（str 仅支持 += 拼接）。
+    fn compound_assign(&self, op: CompoundOp, cur: Value, rhs: Value, span: Span) -> Result<Value, ZError> {
+        let binop = match op {
+            CompoundOp::Add => BinOp::Add,
+            CompoundOp::Sub => BinOp::Sub,
+            CompoundOp::Mul => BinOp::Mul,
+            CompoundOp::Div => BinOp::Div,
+            CompoundOp::Mod => BinOp::Mod,
+        };
+        self.arith(binop, cur, rhs, span)
     }
 
     /// 尝试按「类名.方法名」解析类方法调用。
@@ -1135,7 +1376,7 @@ impl Interp {
         let (cls, method) = callee.split_once('.')?;
         let methods = self.classes.get(cls)?;
         match methods.get(method).cloned() {
-            Some(f) => Some(self.exec_user_fn(&f, args.to_vec(), span)),
+            Some(f) => Some(self.exec_user_fn(callee, &f, args.to_vec(), span)),
             None => Some(Err(self.runtime_err(
                 codes::UNDEFINED,
                 format!("class `{}` has no method `{}`", cls, method),
@@ -1147,7 +1388,7 @@ impl Interp {
 
     // ---------- 表达式 ----------
 
-    fn eval_expr(&mut self, env: &Env, e: &Expr) -> Result<Value, ZError> {
+    fn eval_expr(&mut self, env: &mut Env, e: &Expr) -> Result<Value, ZError> {
         match e {
             Expr::IntLit(v, _) => Ok(Value::Int(*v)),
             Expr::FloatLit(v, _) => Ok(Value::Float(*v)),
@@ -1277,17 +1518,67 @@ impl Interp {
                     Some("add a `_` wildcard arm as the fallback"),
                 ))
             }
+            Expr::IncDec { op, prefix, name, span } => {
+                let cur = env.get(name).cloned();
+                match cur {
+                    Some(cur) => {
+                        let new = self.incdec_value(*op, cur.clone(), *span)?;
+                        env.set_or_declare(name, new.clone());
+                        // 前缀返回新值（++i），后缀返回旧值（i++）
+                        Ok(if *prefix { new } else { cur })
+                    }
+                    None => Err(self.runtime_err(
+                        codes::UNDEFINED,
+                        format!("undefined variable `{}`", name),
+                        *span,
+                        Some("declare the variable before incrementing or decrementing it"),
+                    )),
+                }
+            }
+            Expr::Ternary { cond, then_expr, else_expr, span } => {
+                let c = self.eval_expr(env, cond)?;
+                if let Value::Bool(b) = c {
+                    if b {
+                        self.eval_expr(env, then_expr)
+                    } else {
+                        self.eval_expr(env, else_expr)
+                    }
+                } else {
+                    Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("ternary condition must be `bool`, got `{}`", c.type_name()),
+                        *span,
+                        None::<&str>,
+                    ))
+                }
+            }
+            Expr::Lambda { params, body, .. } => {
+                // 创建 lambda：按值捕获当前作用域的全部可见变量（外→内合并，内层覆盖外层）
+                let mut captured = HashMap::new();
+                for scope in &env.scopes {
+                    captured.extend(scope.iter().map(|(k, v)| (k.clone(), v.clone())));
+                }
+                Ok(Value::Lambda(Arc::new(LambdaVal {
+                    params: params.clone(),
+                    body: body.clone(),
+                    captured,
+                })))
+            }
             Expr::Call { callee, args, span } => {
                 let mut arg_vals = Vec::new();
                 for a in args {
                     arg_vals.push(self.eval_expr(env, a)?);
+                }
+                // 变量名调用优先解析为 lambda 值（闭包），否则走全局函数/内置/库解析
+                if let Some(Value::Lambda(f)) = env.get(callee).cloned() {
+                    return self.exec_lambda(&f, arg_vals, *span);
                 }
                 self.call_fn(callee, arg_vals, *span)
             }
         }
     }
 
-    fn eval_binary(&mut self, env: &Env, op: BinOp, lhs: &Expr, rhs: &Expr, span: Span) -> Result<Value, ZError> {
+    fn eval_binary(&mut self, env: &mut Env, op: BinOp, lhs: &Expr, rhs: &Expr, span: Span) -> Result<Value, ZError> {
         match op {
             BinOp::And => {
                 let l = self.eval_expr(env, lhs)?;
@@ -1327,6 +1618,15 @@ impl Interp {
                 let l = self.eval_expr(env, lhs)?;
                 let r = self.eval_expr(env, rhs)?;
                 self.arith(op, l, r, span)
+            }
+            BinOp::Coalesce => {
+                // a ?? b：a 为 null 时取 b，否则取 a（短路：null 时才对 b 求值）
+                let l = self.eval_expr(env, lhs)?;
+                if matches!(l, Value::Null) {
+                    self.eval_expr(env, rhs)
+                } else {
+                    Ok(l)
+                }
             }
         }
     }

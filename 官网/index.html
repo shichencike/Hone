@@ -62,6 +62,10 @@ function toggleTheme(){
       <div class="card"><h4>🔌 可嵌入可扩展</h4><p>@export 打包 C ABI 动态库（DLL/SO/DYLIB）、load 动态库调用、import 远程模块、LSP 语言服务器。</p></div>
       <div class="card"><h4>🏷 class 类与泛型</h4><p><code class="inline">class Math { fn double(x) {...} }</code> 类成员函数不进全局符号表，经 <code class="inline">类.方法(...)</code> 调用；
         <code class="inline">fn identity[T](x: T) -&gt; T</code> 泛型函数按实参自动推导，编译期擦除、运行期零成本。</p></div>
+      <div class="card"><h4>🧪 新语法 v0.6.3</h4><p><code class="inline">continue</code>、C 风格 <code class="inline">for (init; cond; step)</code>、<code class="inline">do-while</code>、
+        复合赋值 <code class="inline">+= -= *= /= %=</code>、自增自减 <code class="inline">++ --</code>、
+        三元 <code class="inline">cond ? a : b</code>、空值合并 <code class="inline">a ?? b</code>、
+        匿名函数 lambda（一等值/闭包）、函数默认参数、三引号原始字符串 <code class="inline">"""..."""</code>。</p></div>
       <div class="card"><h4>🖥 图形界面库</h4><p>纯 Hone 编写的跨平台 GUI（hone_lib/gui.hn）：浏览器渲染 + 本地 HTTP 服务器双向交互，button / label / input / select 控件开箱即用。</p></div>
       <div class="card"><h4>🎵 音乐理论库</h4><p>纯 Hone 编写的乐理标准库（hone_lib/music.hn）：音名 ↔ MIDI ↔ 频率换算、音阶与和弦生成、时值与 BPM、音程与移调、调号与调性、顺阶和声，开箱即用。</p></div>
     </div>

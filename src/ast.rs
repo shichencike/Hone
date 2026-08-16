@@ -15,6 +15,14 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
+    /// 复合赋值：x += expr;  x -= expr;  x *= expr;  x /= expr;  x %= expr;
+    /// 要求 x 已声明且类型匹配；str 仅支持 +=（字符串拼接）
+    AssignOp {
+        name: String,
+        op: CompoundOp,
+        value: Expr,
+        span: Span,
+    },
     /// 显式类型声明：int x = 10; / x : int = 10; / x : int;
     VarDecl {
         name: String,
@@ -38,6 +46,20 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// do { ... } while (cond);  先执行循环体，再判断条件
+    DoWhile {
+        body: Vec<Stmt>,
+        cond: Expr,
+        span: Span,
+    },
+    /// for (init; cond; step) { ... }  C 风格三段式循环，各段均可省略
+    ForC {
+        init: Option<Box<Stmt>>,
+        cond: Option<Expr>,
+        step: Option<Box<Stmt>>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
     /// for x in expr { ... } / for k, v in dict { ... }
     ForIn {
         /// 循环变量（列表元素 / 字典键）
@@ -54,6 +76,10 @@ pub enum Stmt {
     },
     /// break;  跳出当前 while / for 循环（checker 校验只能在循环体内）
     Break {
+        span: Span,
+    },
+    /// continue;  跳过本次循环剩余代码，进入下一次迭代（checker 校验只能在循环体内）
+    Continue {
         span: Span,
     },
     FnDef {
@@ -151,6 +177,9 @@ pub struct Param {
     pub name: String,
     pub ty: Option<TyName>,
     pub span: Span,
+    /// 默认参数值：fn f(a = 10, b = "x")  调用时可省略尾部实参。
+    /// 默认表达式在调用时求值，可引用其前面的参数（如 b = a * 2）。
+    pub default: Option<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -242,6 +271,65 @@ pub enum Expr {
         arms: Vec<(Option<Expr>, Expr)>,
         span: Span,
     },
+    /// 自增/自减表达式：i++ / i-- / ++i / --i（仅作用于已声明的变量名）
+    IncDec {
+        op: IncOp,
+        prefix: bool,
+        name: String,
+        span: Span,
+    },
+    /// 三元表达式：cond ? then_expr : else_expr
+    Ternary {
+        cond: Box<Expr>,
+        then_expr: Box<Expr>,
+        else_expr: Box<Expr>,
+        span: Span,
+    },
+    /// 匿名函数（lambda）：fn(param1, param2) { ... }
+    /// 一等值：可赋值给变量、作为参数传递、作为返回值；
+    /// 创建时按值捕获当前作用域的变量（闭包），调用经变量名进行。
+    Lambda {
+        params: Vec<Param>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IncOp {
+    Inc,
+    Dec,
+}
+
+impl IncOp {
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            IncOp::Inc => "++",
+            IncOp::Dec => "--",
+        }
+    }
+}
+
+/// 复合赋值运算符：+= -= *= /= %=
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompoundOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+}
+
+impl CompoundOp {
+    pub fn symbol(&self) -> &'static str {
+        match self {
+            CompoundOp::Add => "+=",
+            CompoundOp::Sub => "-=",
+            CompoundOp::Mul => "*=",
+            CompoundOp::Div => "/=",
+            CompoundOp::Mod => "%=",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -265,6 +353,8 @@ pub enum BinOp {
     Ge,
     And,
     Or,
+    /// a ?? b：a 为 null 时取 b，否则取 a（空值合并）
+    Coalesce,
 }
 
 impl BinOp {
@@ -283,6 +373,7 @@ impl BinOp {
             BinOp::Ge => ">=",
             BinOp::And => "&&",
             BinOp::Or => "||",
+            BinOp::Coalesce => "??",
         }
     }
 }
@@ -301,6 +392,9 @@ pub fn expr_span(e: &Expr) -> Span {
         | Expr::Call { span: s, .. }
         | Expr::Unary { span: s, .. }
         | Expr::Binary { span: s, .. }
-        | Expr::Match { span: s, .. } => *s,
+        | Expr::Match { span: s, .. }
+        | Expr::IncDec { span: s, .. }
+        | Expr::Ternary { span: s, .. }
+        | Expr::Lambda { span: s, .. } => *s,
     }
 }

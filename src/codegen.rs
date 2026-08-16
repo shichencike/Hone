@@ -218,6 +218,28 @@ impl Codegen {
                 }
                 Ok(())
             }
+            Stmt::DoWhile { body, cond, .. } => {
+                for s in body {
+                    self.collect_calls_stmt(s, reachable, seen)?;
+                }
+                self.collect_calls_expr(cond, reachable, seen)?;
+                Ok(())
+            }
+            Stmt::ForC { init, cond, step, body, .. } => {
+                if let Some(i) = init {
+                    self.collect_calls_stmt(i, reachable, seen)?;
+                }
+                if let Some(c) = cond {
+                    self.collect_calls_expr(c, reachable, seen)?;
+                }
+                if let Some(s) = step {
+                    self.collect_calls_stmt(s, reachable, seen)?;
+                }
+                for s in body {
+                    self.collect_calls_stmt(s, reachable, seen)?;
+                }
+                Ok(())
+            }
             Stmt::Return { value, .. } => match value {
                 Some(e) => self.collect_calls_expr(e, reachable, seen),
                 None => Ok(()),
@@ -255,6 +277,14 @@ impl Codegen {
         let mut param_types = Vec::new();
         let mut vt: HashMap<String, CType> = HashMap::new();
         for p in &f.params {
+            if p.default.is_some() {
+                return Err(self.zerr(
+                    codes::NOT_IMPLEMENTED,
+                    format!("default parameters are not supported in DLL builds (parameter `{}` of `{}`)", p.name, f.name),
+                    Span { line: 1, col: 1, len: 1 },
+                    Some("remove the default value, or call the function with explicit arguments"),
+                ));
+            }
             let t = p.ty.clone().map(CType::from_annot).unwrap_or(CType::Int);
             param_types.push(t);
             vt.insert(p.name.clone(), t);
@@ -290,6 +320,12 @@ impl Codegen {
                         vt.insert(name.clone(), t);
                     }
                 }
+                Stmt::AssignOp { name, value, .. } => {
+                    if !vt.contains_key(name) {
+                        let t = self.infer_expr_type(value, vt, stack)?;
+                        vt.insert(name.clone(), t);
+                    }
+                }
                 Stmt::VarDecl { name, ty, init, .. } => {
                     let annot = CType::from_annot(ty.clone());
                     if let Some(e) = init {
@@ -318,6 +354,17 @@ impl Codegen {
                     }
                 }
                 Stmt::While { body, .. } => self.infer_body_types(body, vt, stack)?,
+                Stmt::DoWhile { body, .. } => self.infer_body_types(body, vt, stack)?,
+                Stmt::ForC { init, cond, step, body, .. } => {
+                    if let Some(i) = init {
+                        self.infer_body_types(std::slice::from_ref(i.as_ref()), vt, stack)?;
+                    }
+                    if let Some(s) = step {
+                        self.infer_body_types(std::slice::from_ref(s.as_ref()), vt, stack)?;
+                    }
+                    let _ = cond;
+                    self.infer_body_types(body, vt, stack)?;
+                }
                 _ => {}
             }
         }
@@ -352,6 +399,11 @@ impl Codegen {
                     }
                 }
                 Stmt::While { body, .. } => self.return_type_stmt(body, vt, stack)?,
+                Stmt::DoWhile { body, .. } => self.return_type_stmt(body, vt, stack)?,
+                Stmt::ForC { init, cond, step, body, .. } => {
+                    let _ = (init, cond, step);
+                    self.return_type_stmt(body, vt, stack)?
+                }
                 _ => None,
             };
             if let Some(t) = t {
@@ -404,6 +456,50 @@ impl Codegen {
                 "match expressions are not supported in DLL builds",
                 *span,
                 Some("match works in interpreted mode only"),
+            )),
+            Expr::IncDec { name, span, .. } => match vt.get(name) {
+                Some(t) if t.is_num() => Ok(*t),
+                Some(t) => Err(self.zerr(
+                    codes::TYPE_MISMATCH,
+                    format!("`++`/`--` requires a numeric variable, `{}` is `{}`", name, t.c_name()),
+                    *span,
+                    Some("increment/decrement works on `int` / `float`"),
+                )),
+                None => Err(self.zerr(
+                    codes::UNDEFINED,
+                    format!("undefined variable `{}`", name),
+                    *span,
+                    Some("declare the variable before incrementing or decrementing it"),
+                )),
+            },
+            Expr::Ternary { cond, then_expr, else_expr, span } => {
+                let c = self.infer_expr_type(cond, vt, stack)?;
+                if c != CType::Bool {
+                    return Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("ternary condition must be `bool`, got `{}`", c.c_name()),
+                        *span,
+                        Some("use a boolean condition in `cond ? a : b`"),
+                    ));
+                }
+                let t = self.infer_expr_type(then_expr, vt, stack)?;
+                let e = self.infer_expr_type(else_expr, vt, stack)?;
+                if t == e {
+                    Ok(t)
+                } else {
+                    Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("ternary branches have different types: `{}` vs `{}`", t.c_name(), e.c_name()),
+                        *span,
+                        Some("make both branches the same type"),
+                    ))
+                }
+            }
+            Expr::Lambda { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "lambdas are not supported in DLL builds",
+                *span,
+                Some("lambdas work in interpreted mode only"),
             )),
             Expr::Unary { op, expr, span } => {
                 let t = self.infer_expr_type(expr, vt, stack)?;
@@ -514,6 +610,11 @@ impl Codegen {
                     ))
                 }
             }
+            BinOp::Coalesce => {
+                // a ?? b：C 侧仅 str 可为 NULL（其余类型不存在 null），
+                // 类型一律取左侧；生成时按 str 输出三元、非 str 直接取左侧
+                Ok(l)
+            }
         }
     }
 
@@ -604,6 +705,44 @@ impl Codegen {
                 }
                 Ok(())
             }
+            Stmt::AssignOp { name, op, value, span } => {
+                let (t, code) = self.gen_expr(value, ctx)?;
+                match ctx.var_types.get(name) {
+                    Some(prev) => {
+                        if *prev != t {
+                            return Err(self.zerr(
+                                codes::TYPE_MISMATCH,
+                                format!(
+                                    "type mismatch: `{}` requires `{}`, got `{}`",
+                                    op.symbol(),
+                                    prev.c_name(),
+                                    t.c_name()
+                                ),
+                                *span,
+                                Some("Hone has no implicit type conversion"),
+                            ));
+                        }
+                        if *prev == CType::Str && *op != CompoundOp::Add {
+                            return Err(self.zerr(
+                                codes::TYPE_MISMATCH,
+                                format!("`{}` cannot be applied to a `str` variable (only `+=` concatenates)", op.symbol()),
+                                *span,
+                                None::<&str>,
+                            ));
+                        }
+                        out.push_str(&format!("    {} {} {};\n", name, op.symbol(), code));
+                    }
+                    None => {
+                        return Err(self.zerr(
+                            codes::UNDEFINED,
+                            format!("undefined variable `{}` (declare it before `{}` assignment)", name, op.symbol()),
+                            *span,
+                            Some("use `x = value` to declare and initialize"),
+                        ));
+                    }
+                }
+                Ok(())
+            }
             Stmt::VarDecl { name, ty, init, span } => {
                 let annot = CType::from_annot(ty.clone());
                 if let Some(e) = init {
@@ -690,6 +829,92 @@ impl Codegen {
                 out.push_str("    }\n");
                 Ok(())
             }
+            Stmt::DoWhile { body, cond, span } => {
+                let (t, c) = self.gen_expr(cond, ctx)?;
+                if t != CType::Bool {
+                    return Err(self.zerr(
+                        codes::COND_NOT_BOOL,
+                        format!("condition must be `bool`, got `{}`", t.c_name()),
+                        *span,
+                        Some("use a comparison like `i < 10`, or a boolean variable"),
+                    ));
+                }
+                out.push_str("    do {\n");
+                for s in body {
+                    self.gen_stmt(s, ctx, ret_type, out)?;
+                }
+                out.push_str(&format!("    }} while ({});\n", c));
+                Ok(())
+            }
+            Stmt::ForC { init, cond, step, body, span } => {
+                let (init_s, cond_s, step_s) = match (init, cond, step) {
+                    (Some(i), Some(c), Some(s)) => {
+                        let (_, ic) = match i.as_ref() {
+                            Stmt::Assign { name, value, .. } => {
+                                let (t, code) = self.gen_expr(value, ctx)?;
+                                if ctx.var_types.contains_key(name) {
+                                    (t, format!("{} = {}", name, code))
+                                } else {
+                                    ctx.var_types.insert(name.clone(), t);
+                                    (t, format!("{} {} = {}", t.c_name(), name, code))
+                                }
+                            }
+                            _ => {
+                                return Err(self.zerr(
+                                    codes::NOT_IMPLEMENTED,
+                                    "for-loop init/step must be simple assignments in DLL builds",
+                                    *span,
+                                    Some("use `for (i = start; cond; i = i + 1)`"),
+                                ));
+                            }
+                        };
+                        let (ct, cc) = self.gen_expr(c, ctx)?;
+                        if ct != CType::Bool {
+                            return Err(self.zerr(
+                                codes::COND_NOT_BOOL,
+                                format!("for condition must be `bool`, got `{}`", ct.c_name()),
+                                *span,
+                                Some("use a comparison like `i < 10`, or a boolean variable"),
+                            ));
+                        }
+                        let (_, sc) = match s.as_ref() {
+                            Stmt::Assign { name, value, .. } => {
+                                let (t, code) = self.gen_expr(value, ctx)?;
+                                let _ = t;
+                                (t, format!("{} = {}", name, code))
+                            }
+                            Stmt::AssignOp { name, op, value, .. } => {
+                                let (t, code) = self.gen_expr(value, ctx)?;
+                                let _ = t;
+                                (t, format!("{} {} {}", name, op.symbol(), code))
+                            }
+                            _ => {
+                                return Err(self.zerr(
+                                    codes::NOT_IMPLEMENTED,
+                                    "for-loop init/step must be simple assignments in DLL builds",
+                                    *span,
+                                    Some("use `for (i = start; cond; i = i + 1)`"),
+                                ));
+                            }
+                        };
+                        (ic, cc, sc)
+                    }
+                    _ => {
+                        return Err(self.zerr(
+                            codes::NOT_IMPLEMENTED,
+                            "for-loops in DLL builds require init, cond and step",
+                            *span,
+                            Some("write the full `for (init; cond; step)` form"),
+                        ));
+                    }
+                };
+                out.push_str(&format!("    for ({}; {}; {}) {{\n", init_s, cond_s, step_s));
+                for s in body {
+                    self.gen_stmt(s, ctx, ret_type, out)?;
+                }
+                out.push_str("    }\n");
+                Ok(())
+            }
             Stmt::Return { value, span } => {
                 match value {
                     Some(e) => {
@@ -757,6 +982,10 @@ impl Codegen {
             }
             Stmt::FnDef { .. } => Ok(()), // 已收集
             Stmt::DebugPrint { .. } | Stmt::Breakpoint { .. } => Ok(()), // 调试/临时语句不生成 C 代码
+            Stmt::Continue { .. } => {
+                out.push_str("    continue;\n");
+                Ok(())
+            }
             other => Err(self.zerr(
                 codes::NOT_IMPLEMENTED,
                 format!("cannot translate `{:?}` to C in v0.1.0", other),
@@ -807,6 +1036,62 @@ impl Codegen {
                 "match expressions are not supported in DLL builds",
                 *span,
                 Some("match works in interpreted mode only"),
+            )),
+            Expr::IncDec { op, prefix, name, span } => {
+                let t = match ctx.var_types.get(name) {
+                    Some(t) if t.is_num() => *t,
+                    Some(t) => {
+                        return Err(self.zerr(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` requires a numeric variable, `{}` is `{}`", op.symbol(), name, t.c_name()),
+                            *span,
+                            Some("increment/decrement works on `int` / `float`"),
+                        ));
+                    }
+                    None => {
+                        return Err(self.zerr(
+                            codes::UNDEFINED,
+                            format!("undefined variable `{}`", name),
+                            *span,
+                            Some("declare the variable before incrementing or decrementing it"),
+                        ));
+                    }
+                };
+                let sym = op.symbol();
+                let code = if *prefix {
+                    format!("{}{}", sym, name)
+                } else {
+                    format!("{}{}", name, sym)
+                };
+                Ok((t, code))
+            }
+            Expr::Ternary { cond, then_expr, else_expr, span } => {
+                let (ct, cs) = self.gen_expr(cond, ctx)?;
+                if ct != CType::Bool {
+                    return Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("ternary condition must be `bool`, got `{}`", ct.c_name()),
+                        *span,
+                        Some("use a boolean condition in `cond ? a : b`"),
+                    ));
+                }
+                let (tt, ts) = self.gen_expr(then_expr, ctx)?;
+                let (et, es) = self.gen_expr(else_expr, ctx)?;
+                if tt != et {
+                    return Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("ternary branches have different types: `{}` vs `{}`", tt.c_name(), et.c_name()),
+                        *span,
+                        Some("make both branches the same type"),
+                    ));
+                }
+                Ok((tt, format!("({} ? {} : {})", cs, ts, es)))
+            }
+            Expr::Lambda { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "lambdas are not supported in DLL builds",
+                *span,
+                Some("lambdas work in interpreted mode only"),
             )),
             Expr::Unary { op, expr, span } => {
                 let (t, s) = self.gen_expr(expr, ctx)?;
@@ -879,6 +1164,14 @@ impl Codegen {
                         let sym = if *op == BinOp::And { "&&" } else { "||" };
                         Ok((CType::Bool, format!("({} {} {})", ls, sym, rs)))
                     }
+                    BinOp::Coalesce => {
+                        // a ?? b：str 可为 NULL → 三元；int/float/bool 无 null → 恒取左侧
+                        if l == CType::Str {
+                            Ok((CType::Str, format!("({} ? {} : {})", ls, ls, rs)))
+                        } else {
+                            Ok((l, ls))
+                        }
+                    }
                 }
             }
             Expr::Call { callee, args, span } => {
@@ -943,6 +1236,16 @@ fn has_return(stmts: &[Stmt]) -> bool {
                     return true;
                 }
             }
+            Stmt::DoWhile { body, .. } => {
+                if has_return(body) {
+                    return true;
+                }
+            }
+            Stmt::ForC { body, .. } => {
+                if has_return(body) {
+                    return true;
+                }
+            }
             _ => {}
         }
     }
@@ -952,13 +1255,17 @@ fn has_return(stmts: &[Stmt]) -> bool {
 fn stmt_span(s: &Stmt) -> Span {
     match s {
         Stmt::Assign { span, .. }
+        | Stmt::AssignOp { span, .. }
         | Stmt::VarDecl { span, .. }
         | Stmt::Block { span, .. }
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
+        | Stmt::DoWhile { span, .. }
+        | Stmt::ForC { span, .. }
         | Stmt::ForIn { span, .. }
         | Stmt::Return { span, .. }
         | Stmt::Break { span, .. }
+        | Stmt::Continue { span, .. }
         | Stmt::FnDef { span, .. }
         | Stmt::ExprStmt { span, .. }
         | Stmt::Breakpoint { span, .. }

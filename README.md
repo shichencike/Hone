@@ -147,6 +147,46 @@ fn pick[T](a: T, b: T, want_first: bool) -> T {
     return b;
 }
 print(pick(10, 20, false));   // 20（T=int）
+
+// C 风格 for / do-while / continue
+for (i = 0; i < 5; i = i + 1) { print(i); }   // 0 1 2 3 4
+j = 0;
+do { j = j + 1; } while (j < 3);              // 至少执行一次
+for (i = 1; i <= 5; i = i + 1) {
+    if (i % 2 == 0) { continue; }             // 跳过偶数
+    print(i);                                 // 1 3 5
+}
+
+// 复合赋值（str 仅支持 +=）与自增/自减
+x = 10; x += 5; x -= 3; x *= 2; x /= 4; x %= 4;  // x = 2
+i = 0; i++; print(i);  // 1（后缀返回旧值）
+print(++i);            // 2（前缀返回新值）
+
+// 三元表达式（右结合可嵌套）与空值合并（a 为 null 取 b）
+label = x >= 0 ? "pos" : "neg";
+fn void_fn() {}
+v = void_fn();
+print(v ?? "default");   // default（void 调用返回 null）
+
+// 函数默认参数：省略尾部实参取默认值，默认表达式可引用前面参数
+fn greet(name, greeting = "Hello") { return greeting + ", " + name + "!"; }
+print(greet("Hone"));          // Hello, Hone!
+print(greet("Hone", "Hi"));    // Hi, Hone!
+
+// 匿名函数（lambda）：一等值，按值捕获外围变量（闭包），经变量名动态调用
+double = fn(x) { return x * 2; };
+print(double(21));             // 42
+base = 10;
+adder = fn(y) { return base + y; };
+print(adder(5));               // 15（捕获 base）
+fn apply(f, v) { return f(v); }
+print(apply(fn(n: int) { return n * n; }, 6));   // 36
+
+// 三引号原始字符串：多行、不做转义处理、保留换行与缩进
+text = """line1
+line2
+    indented""";
+print(len(text));              // 24
 ```
 
 ## 内置功能
@@ -344,6 +384,11 @@ help: Hone types are locked after inference; no implicit conversion is allowed
 - `hone explain <code>` 查询错误码含义与修复建议
 - `tmp fn` 临时函数在编译时自动忽略，仅开发阶段使用
 - `debug_print(expr)` 调试输出仅在 `hone debug` 模式生效，普通模式自动跳过
+- 新语法（v0.6.3）：`continue`、C 风格 `for (init; cond; step)`、`do-while`、
+  复合赋值 `+= -= *= /= %=`（str 仅支持 `+=`）、自增/自减 `++ --`、
+  三元 `cond ? a : b`、空值合并 `a ?? b`、匿名函数 lambda（一等值/闭包，经变量名动态调用）、
+  函数默认参数（尾部省略、默认表达式可引用前面参数）、三引号原始字符串 `"""..."""`；
+  lambda 与默认参数暂不支持 `hone build --dll`（报错提示改用解释模式）
 
 ## 路线图
 

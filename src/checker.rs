@@ -70,6 +70,8 @@ struct FnInfo {
     name: String,
     params: Vec<String>,
     param_slots: Vec<usize>,
+    /// 与 params 并行的默认参数表达式（None = 无默认值，必须传参）
+    defaults: Vec<Option<Expr>>,
     ret_slot: usize,
     ret_annot: Option<Ty>,
     body: Vec<Stmt>,
@@ -190,6 +192,23 @@ impl Checker {
                 self.register_top(body)?;
                 self.global_scopes.pop();
             }
+            Stmt::DoWhile { body, .. } => {
+                self.global_scopes.push(HashMap::new());
+                self.register_top(body)?;
+                self.global_scopes.pop();
+            }
+            Stmt::ForC { init, step, body, span, .. } => {
+                self.global_scopes.push(HashMap::new());
+                if let Some(i) = init {
+                    self.register_top(std::slice::from_ref(i.as_ref()))?;
+                }
+                if let Some(s) = step {
+                    self.register_top(std::slice::from_ref(s.as_ref()))?;
+                }
+                self.register_top(body)?;
+                self.global_scopes.pop();
+                let _ = span;
+            }
             Stmt::ForIn { var, var2, body, span, .. } => {
                 self.global_scopes.push(HashMap::new());
                 self.bind_or_unify(var, None, *span)?;
@@ -254,6 +273,12 @@ impl Checker {
                     self.globals.insert(name.clone(), slot);
                 }
             }
+            Stmt::AssignOp { name, .. } => {
+                if self.globals.get(name).is_none() {
+                    let slot = self.new_slot();
+                    self.globals.insert(name.clone(), slot);
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -295,6 +320,26 @@ impl Checker {
                     self.register_fn_body(body, scopes, scope_stack)?;
                     scope_stack.pop();
                 }
+                Stmt::DoWhile { body, .. } => {
+                    let idx = scopes.len();
+                    scopes.push(HashMap::new());
+                    scope_stack.push(idx);
+                    self.register_fn_body(body, scopes, scope_stack)?;
+                    scope_stack.pop();
+                }
+                Stmt::ForC { init, step, body, .. } => {
+                    let idx = scopes.len();
+                    scopes.push(HashMap::new());
+                    scope_stack.push(idx);
+                    if let Some(i) = init {
+                        self.register_fn_body(std::slice::from_ref(i.as_ref()), scopes, scope_stack)?;
+                    }
+                    if let Some(s) = step {
+                        self.register_fn_body(std::slice::from_ref(s.as_ref()), scopes, scope_stack)?;
+                    }
+                    self.register_fn_body(body, scopes, scope_stack)?;
+                    scope_stack.pop();
+                }
                 Stmt::ForIn { var, var2, body, span, .. } => {
                     let idx = scopes.len();
                     scopes.push(HashMap::new());
@@ -324,6 +369,13 @@ impl Checker {
                     self.bind_in_stack(name, None, *span, scopes, scope_stack)?;
                 }
                 Stmt::Assign { name, .. } => {
+                    if lookup_in_stack(name, scopes, scope_stack).is_none() {
+                        let top = *scope_stack.last().unwrap();
+                        let slot = self.new_slot();
+                        scopes[top].insert(name.clone(), slot);
+                    }
+                }
+                Stmt::AssignOp { name, .. } => {
                     if lookup_in_stack(name, scopes, scope_stack).is_none() {
                         let top = *scope_stack.last().unwrap();
                         let slot = self.new_slot();
@@ -458,6 +510,8 @@ impl Checker {
         span: Span,
     ) -> Result<FnInfo, ZError> {
         let mut seen = HashSet::new();
+        let mut defaults = Vec::with_capacity(params.len());
+        let mut seen_default = false;
         for p in params {
             if !seen.insert(&p.name) {
                 return Err(self.zerr(
@@ -467,6 +521,18 @@ impl Checker {
                     Some("rename one of the parameters"),
                 ));
             }
+            // 默认参数必须连续出现在参数列表尾部（无默认值的参数不能跟在有默认值的后面）
+            if p.default.is_some() {
+                seen_default = true;
+            } else if seen_default {
+                return Err(self.zerr(
+                    codes::SYNTAX,
+                    format!("parameter `{}` of `{}` has no default but follows a defaulted parameter", p.name, name),
+                    p.span,
+                    Some("move all parameters without defaults before the first defaulted parameter"),
+                ));
+            }
+            defaults.push(p.default.clone());
         }
 
         // 类型参数 → 槽映射（泛型：T 首次出现时建槽，后续注解复用）
@@ -540,6 +606,7 @@ impl Checker {
             name: name.to_string(),
             params: params.iter().map(|p| p.name.clone()).collect(),
             param_slots,
+            defaults,
             ret_slot,
             ret_annot: ret.map(|t| Ty::from_annot(t.clone())),
             body: body.to_vec(),
@@ -604,6 +671,22 @@ impl Checker {
         self.has_return = false;
         let mut scope_stack: Vec<usize> = vec![0];
         self.check_stmts_with_scopes(&body, &mut scopes, &mut scope_stack, &param_slots, ret_slot)?;
+
+        // 默认参数表达式：在参数作用域中检查（可引用前面的参数），并与参数槽统一类型。
+        // 类型参数槽跳过统一（避免默认值锁死泛型参数）。
+        for (i, d) in f.defaults.iter().enumerate() {
+            if let Some(de) = d {
+                let res = self.check_expr_in_fn(de, &mut scopes, &mut scope_stack, &param_slots, ret_slot)?;
+                if !f.type_param_slots.contains(&param_slots[i]) {
+                    self.unify_slot(
+                        param_slots[i],
+                        res,
+                        f.span,
+                        format!("default value of parameter `{}` of `{}`", f.params[i], f.name),
+                    )?;
+                }
+            }
+        }
 
         if !self.has_return {
             let cur = self.slots[ret_slot].get();
@@ -683,6 +766,21 @@ impl Checker {
                 }
                 Ok(())
             }
+            Stmt::AssignOp { name, op, value, span } => {
+                let res = self.check_expr(value)?;
+                match self.globals.get(name) {
+                    Some(slot) => {
+                        let cur = self.slots[*slot].get().unwrap_or(Ty::Unknown);
+                        self.check_compound_assign(*slot, cur, *op, res, *span, name)
+                    }
+                    None => Err(self.zerr(
+                        codes::UNDEFINED,
+                        format!("undefined variable `{}` (declare it before `{}` assignment)", name, op.symbol()),
+                        *span,
+                        Some("use `x = value` to declare and initialize"),
+                    )),
+                }
+            }
             Stmt::Block { stmts, .. } => {
                 self.global_scopes.push(HashMap::new());
                 self.check_stmts(stmts)?;
@@ -691,7 +789,7 @@ impl Checker {
             }
             Stmt::If { cond, then_branch, else_branch, span } => {
                 let res = self.check_expr(cond)?;
-                self.require_bool(res, span)?;
+                self.require_bool(res, span, "`if` condition")?;
                 self.global_scopes.push(HashMap::new());
                 self.check_stmts(then_branch)?;
                 self.global_scopes.pop();
@@ -704,8 +802,36 @@ impl Checker {
             }
             Stmt::While { cond, body, span } => {
                 let res = self.check_expr(cond)?;
-                self.require_bool(res, span)?;
+                self.require_bool(res, span, "`while` condition")?;
                 self.global_scopes.push(HashMap::new());
+                self.loop_depth += 1;
+                self.check_stmts(body)?;
+                self.loop_depth -= 1;
+                self.global_scopes.pop();
+                Ok(())
+            }
+            Stmt::DoWhile { body, cond, span } => {
+                let res = self.check_expr(cond)?;
+                self.require_bool(res, span, "`do-while` condition")?;
+                self.global_scopes.push(HashMap::new());
+                self.loop_depth += 1;
+                self.check_stmts(body)?;
+                self.loop_depth -= 1;
+                self.global_scopes.pop();
+                Ok(())
+            }
+            Stmt::ForC { init, cond, step, body, span } => {
+                self.global_scopes.push(HashMap::new());
+                if let Some(i) = init {
+                    self.check_stmt(i)?;
+                }
+                if let Some(c) = cond {
+                    let res = self.check_expr(c)?;
+                    self.require_bool(res, span, "`for` condition")?;
+                }
+                if let Some(s) = step {
+                    self.check_stmt(s)?;
+                }
                 self.loop_depth += 1;
                 self.check_stmts(body)?;
                 self.loop_depth -= 1;
@@ -746,7 +872,18 @@ impl Checker {
                         codes::SYNTAX,
                         "`break` is only allowed inside a loop",
                         *span,
-                        Some("move the `break` into a `while` or `for` body"),
+                        Some("move the `break` into a `while`, `do-while` or `for` body"),
+                    ));
+                }
+                Ok(())
+            }
+            Stmt::Continue { span } => {
+                if self.loop_depth == 0 {
+                    return Err(self.zerr(
+                        codes::SYNTAX,
+                        "`continue` is only allowed inside a loop",
+                        *span,
+                        Some("move the `continue` into a `while`, `do-while` or `for` body"),
                     ));
                 }
                 Ok(())
@@ -847,6 +984,21 @@ impl Checker {
                 }
                 Ok(())
             }
+            Stmt::AssignOp { name, op, value, span } => {
+                let res = self.check_expr_in_fn(value, scopes, scope_stack, param_slots, ret_slot)?;
+                match lookup_in_stack(name, scopes, scope_stack) {
+                    Some(slot) => {
+                        let cur = self.slots[slot].get().unwrap_or(Ty::Unknown);
+                        self.check_compound_assign(slot, cur, *op, res, *span, name)
+                    }
+                    None => Err(self.zerr(
+                        codes::UNDEFINED,
+                        format!("undefined variable `{}` (declare it before `{}` assignment)", name, op.symbol()),
+                        *span,
+                        Some("use `x = value` to declare and initialize"),
+                    )),
+                }
+            }
             Stmt::Block { stmts, .. } => {
                 let idx = scopes.len();
                 scopes.push(HashMap::new());
@@ -858,7 +1010,7 @@ impl Checker {
             }
             Stmt::If { cond, then_branch, else_branch, span } => {
                 let res = self.check_expr_in_fn(cond, scopes, scope_stack, param_slots, ret_slot)?;
-                self.require_bool(res, span)?;
+                self.require_bool(res, span, "`if` condition")?;
                 let idx = scopes.len();
                 scopes.push(HashMap::new());
                 scope_stack.push(idx);
@@ -877,10 +1029,44 @@ impl Checker {
             }
             Stmt::While { cond, body, span } => {
                 let res = self.check_expr_in_fn(cond, scopes, scope_stack, param_slots, ret_slot)?;
-                self.require_bool(res, span)?;
+                self.require_bool(res, span, "`while` condition")?;
                 let idx = scopes.len();
                 scopes.push(HashMap::new());
                 scope_stack.push(idx);
+                self.loop_depth += 1;
+                self.check_stmts_with_scopes(body, scopes, scope_stack, param_slots, ret_slot)?;
+                self.loop_depth -= 1;
+                scope_stack.pop();
+                scopes.pop();
+                Ok(())
+            }
+            Stmt::DoWhile { body, cond, span } => {
+                let res = self.check_expr_in_fn(cond, scopes, scope_stack, param_slots, ret_slot)?;
+                self.require_bool(res, span, "`do-while` condition")?;
+                let idx = scopes.len();
+                scopes.push(HashMap::new());
+                scope_stack.push(idx);
+                self.loop_depth += 1;
+                self.check_stmts_with_scopes(body, scopes, scope_stack, param_slots, ret_slot)?;
+                self.loop_depth -= 1;
+                scope_stack.pop();
+                scopes.pop();
+                Ok(())
+            }
+            Stmt::ForC { init, cond, step, body, span } => {
+                let idx = scopes.len();
+                scopes.push(HashMap::new());
+                scope_stack.push(idx);
+                if let Some(i) = init {
+                    self.check_stmt_in_fn(i, scopes, scope_stack, param_slots, ret_slot)?;
+                }
+                if let Some(c) = cond {
+                    let res = self.check_expr_in_fn(c, scopes, scope_stack, param_slots, ret_slot)?;
+                    self.require_bool(res, span, "`for` condition")?;
+                }
+                if let Some(s) = step {
+                    self.check_stmt_in_fn(s, scopes, scope_stack, param_slots, ret_slot)?;
+                }
                 self.loop_depth += 1;
                 self.check_stmts_with_scopes(body, scopes, scope_stack, param_slots, ret_slot)?;
                 self.loop_depth -= 1;
@@ -931,7 +1117,18 @@ impl Checker {
                         codes::SYNTAX,
                         "`break` is only allowed inside a loop",
                         *span,
-                        Some("move the `break` into a `while` or `for` body"),
+                        Some("move the `break` into a `while`, `do-while` or `for` body"),
+                    ));
+                }
+                Ok(())
+            }
+            Stmt::Continue { span } => {
+                if self.loop_depth == 0 {
+                    return Err(self.zerr(
+                        codes::SYNTAX,
+                        "`continue` is only allowed inside a loop",
+                        *span,
+                        Some("move the `continue` into a `while`, `do-while` or `for` body"),
                     ));
                 }
                 Ok(())
@@ -1006,6 +1203,20 @@ impl Checker {
                 for a in args {
                     arg_tys.push(self.check_expr(a)?);
                 }
+                // 变量名调用：callee 为已声明的变量（lambda 闭包）→ 动态调用；
+                // 类型未定（lambda 为 Unknown）放行，已定且非函数则报错
+                if let Some(slot) = self.globals.get(callee) {
+                    let ty = self.slots[*slot].get().unwrap_or(Ty::Unknown);
+                    if ty == Ty::Unknown {
+                        return Ok(TyRes { ty: Ty::Unknown, slot: Some(*slot) });
+                    }
+                    return Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("`{}` is `{}`, not a function", callee, ty.name()),
+                        *span,
+                        Some("assign a lambda to the variable, or call a defined function"),
+                    ));
+                }
                 self.resolve_call(callee, &arg_tys, *span)
             }
             Expr::Match { value, arms, .. } => {
@@ -1017,6 +1228,48 @@ impl Checker {
                     }
                     self.check_expr(body)?;
                 }
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::IncDec { name, span, op, .. } => {
+                match self.globals.get(name) {
+                    Some(slot) => {
+                        let cur = self.slots[*slot].get().unwrap_or(Ty::Unknown);
+                        if cur.is_numeric() || cur == Ty::Unknown {
+                            Ok(TyRes { ty: cur, slot: Some(*slot) })
+                        } else {
+                            Err(self.zerr(
+                                codes::TYPE_MISMATCH,
+                                format!("`{}` requires a numeric variable, `{}` is `{}`", op.symbol(), name, cur.name()),
+                                *span,
+                                Some("increment/decrement works on `int` / `float`; convert the value with `to_int` / `to_float` if needed"),
+                            ))
+                        }
+                    }
+                    None => Err(self.zerr(
+                        codes::UNDEFINED,
+                        format!("undefined variable `{}`", name),
+                        *span,
+                        Some("declare the variable before incrementing or decrementing it"),
+                    )),
+                }
+            }
+            Expr::Ternary { cond, then_expr, else_expr, span } => {
+                let c = self.check_expr(cond)?;
+                self.require_bool(c, span, "ternary condition")?;
+                let t = self.check_expr(then_expr)?;
+                let e = self.check_expr(else_expr)?;
+                // 两分支类型相同则返回该类型，否则动态类型（与 match 一致）
+                if t.ty != Ty::Unknown && t.ty == e.ty {
+                    Ok(TyRes { ty: t.ty, slot: None })
+                } else {
+                    Ok(TyRes { ty: Ty::Unknown, slot: None })
+                }
+            }
+            Expr::Lambda { params, body, .. } => {
+                // 顶层 lambda：独立作用域，全局变量可见（种子为 globals 拷贝）
+                let mut scopes = vec![self.globals.clone()];
+                let mut scope_stack = vec![0usize];
+                self.check_lambda_body(params, body, &mut scopes, &mut scope_stack)?;
                 Ok(TyRes { ty: Ty::Unknown, slot: None })
             }
             Expr::Binary { op, lhs, rhs, span } => {
@@ -1084,6 +1337,19 @@ impl Checker {
                 for a in args {
                     arg_tys.push(self.check_expr_in_fn(a, scopes, scope_stack, param_slots, ret_slot)?);
                 }
+                // 变量名调用：callee 为栈中已声明的变量（lambda 闭包）→ 动态调用
+                if let Some(slot) = lookup_in_stack(callee, scopes, scope_stack) {
+                    let ty = self.slots[slot].get().unwrap_or(Ty::Unknown);
+                    if ty == Ty::Unknown {
+                        return Ok(TyRes { ty: Ty::Unknown, slot: Some(slot) });
+                    }
+                    return Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("`{}` is `{}`, not a function", callee, ty.name()),
+                        *span,
+                        Some("assign a lambda to the variable, or call a defined function"),
+                    ));
+                }
                 self.resolve_call(callee, &arg_tys, *span)
             }
             Expr::Match { value, arms, .. } => {
@@ -1094,6 +1360,45 @@ impl Checker {
                     }
                     self.check_expr_in_fn(body, scopes, scope_stack, param_slots, ret_slot)?;
                 }
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::IncDec { name, span, op, .. } => {
+                match lookup_in_stack(name, scopes, scope_stack) {
+                    Some(slot) => {
+                        let cur = self.slots[slot].get().unwrap_or(Ty::Unknown);
+                        if cur.is_numeric() || cur == Ty::Unknown {
+                            Ok(TyRes { ty: cur, slot: Some(slot) })
+                        } else {
+                            Err(self.zerr(
+                                codes::TYPE_MISMATCH,
+                                format!("`{}` requires a numeric variable, `{}` is `{}`", op.symbol(), name, cur.name()),
+                                *span,
+                                Some("increment/decrement works on `int` / `float`; convert the value with `to_int` / `to_float` if needed"),
+                            ))
+                        }
+                    }
+                    None => Err(self.zerr(
+                        codes::UNDEFINED,
+                        format!("undefined variable `{}`", name),
+                        *span,
+                        Some("declare the variable before incrementing or decrementing it"),
+                    )),
+                }
+            }
+            Expr::Ternary { cond, then_expr, else_expr, span } => {
+                let c = self.check_expr_in_fn(cond, scopes, scope_stack, param_slots, ret_slot)?;
+                self.require_bool(c, span, "ternary condition")?;
+                let t = self.check_expr_in_fn(then_expr, scopes, scope_stack, param_slots, ret_slot)?;
+                let e = self.check_expr_in_fn(else_expr, scopes, scope_stack, param_slots, ret_slot)?;
+                if t.ty != Ty::Unknown && t.ty == e.ty {
+                    Ok(TyRes { ty: t.ty, slot: None })
+                } else {
+                    Ok(TyRes { ty: Ty::Unknown, slot: None })
+                }
+            }
+            Expr::Lambda { params, body, .. } => {
+                // 函数内 lambda：推入新作用域（可捕获外围局部变量），循环深度归零
+                self.check_lambda_body(params, body, scopes, scope_stack)?;
                 Ok(TyRes { ty: Ty::Unknown, slot: None })
             }
             Expr::Binary { op, lhs, rhs, span } => {
@@ -1202,7 +1507,126 @@ impl Checker {
                 let ty = self.unify_arith(l, r, span, op)?;
                 Ok(TyRes { ty, slot: None })
             }
+            BinOp::Coalesce => {
+                // a ?? b：a 为 null 时取 b。Hone 无 null 字面量，null 仅来自 void 调用，
+                // 静态类型无法确定，放行并返回动态类型（运行期校验）
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
         }
+    }
+
+    /// 复合赋值类型检查：`x op= y` 等价于 `x = x op y`，要求 x 已声明且与 y 类型兼容。
+    /// str 仅支持 +=（字符串拼接）；其余运算符要求数字。
+    fn check_compound_assign(
+        &mut self,
+        slot: usize,
+        cur: Ty,
+        op: CompoundOp,
+        rhs: TyRes,
+        span: Span,
+        name: &str,
+    ) -> Result<(), ZError> {
+        if cur == Ty::Str {
+            if op != CompoundOp::Add {
+                return Err(self.zerr(
+                    codes::TYPE_MISMATCH,
+                    format!("`{}` cannot be applied to `str` variable `{}` (only `+=` supports str concatenation)", op.symbol(), name),
+                    span,
+                    None::<&str>,
+                ));
+            }
+            return self.unify_with(Ty::Str, rhs, span, format!("variable `{}`", name));
+        }
+        if cur == Ty::Unknown {
+            // 类型未定：按普通赋值绑定右侧类型（运行期校验由解释器保证）
+            return self.unify_slot(slot, rhs, span, format!("variable `{}`", name));
+        }
+        if !cur.is_numeric() {
+            return Err(self.zerr(
+                codes::TYPE_MISMATCH,
+                format!("`{}` requires a numeric variable, `{}` is `{}`", op.symbol(), name, cur.name()),
+                span,
+                Some(format!(
+                    "`{}` only works on `int` / `float` (and `+=` also concatenates `str`); convert the value with `to_int` / `to_float` if needed",
+                    op.symbol()
+                )),
+            ));
+        }
+        self.unify_numeric(TyRes { ty: cur, slot: Some(slot) }, rhs, span, op.symbol())?;
+        Ok(())
+    }
+
+    /// 检查 lambda 函数体：独立返回槽、独立作用域（可访问外围变量与顶层全局变量）、
+    /// 循环深度归零（break/continue 不能跨 lambda 逃逸）。
+    fn check_lambda_body(
+        &mut self,
+        params: &[Param],
+        body: &[Stmt],
+        scopes: &mut Vec<HashMap<String, usize>>,
+        scope_stack: &mut Vec<usize>,
+    ) -> Result<(), ZError> {
+        // 默认参数必须连续位于参数列表尾部
+        let mut seen_default = false;
+        for p in params {
+            if p.default.is_some() {
+                seen_default = true;
+            } else if seen_default {
+                return Err(self.zerr(
+                    codes::SYNTAX,
+                    format!("parameter `{}` has no default but follows a defaulted parameter", p.name),
+                    p.span,
+                    Some("move all parameters without defaults before the first defaulted parameter"),
+                ));
+            }
+        }
+        let ret_slot = self.new_slot();
+        let idx = scopes.len();
+        scopes.push(HashMap::new());
+        scope_stack.push(idx);
+        for p in params {
+            self.bind_in_stack(&p.name, p.ty.clone().map(Ty::from_annot), p.span, scopes, scope_stack)?;
+        }
+        // 默认参数表达式：可引用其前面的参数（lambda 作用域中检查）。
+        // 默认值类型确定 → 直接写入槽位（含 strict 阶段：默认值等价于显式类型声明，
+        // 否则 strict 阶段的全新参数槽无法获得类型，导致歧义误报）。
+        for p in params {
+            if let Some(de) = &p.default {
+                let res = self.check_expr_in_fn(de, scopes, scope_stack, &[], ret_slot)?;
+                if res.ty != Ty::Unknown {
+                    if let Some(slot) = lookup_in_stack(&p.name, scopes, scope_stack) {
+                        match self.slots[slot].get() {
+                            None => {
+                                self.slots[slot].set(Some(res.ty));
+                                self.changed = true;
+                            }
+                            Some(c) if c != res.ty => {
+                                return Err(self.zerr(
+                                    codes::TYPE_MISMATCH,
+                                    format!(
+                                        "type mismatch: default value of parameter `{}` is `{}`, but it is locked to `{}`",
+                                        p.name,
+                                        res.ty.name(),
+                                        c.name()
+                                    ),
+                                    p.span,
+                                    Some("make the default value match the parameter type"),
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        let saved_loop = self.loop_depth;
+        let saved_return = self.has_return;
+        self.loop_depth = 0;
+        let r = self.check_stmts_with_scopes(body, scopes, scope_stack, &[], ret_slot);
+        self.loop_depth = saved_loop;
+        self.has_return = saved_return;
+        scope_stack.pop();
+        scopes.pop();
+        r
     }
 
     fn require_operand_bool(&mut self, res: TyRes, op: BinOp, span: Span) -> Result<(), ZError> {
@@ -1234,7 +1658,8 @@ impl Checker {
         }
     }
 
-    fn require_bool(&mut self, res: TyRes, span: &Span) -> Result<(), ZError> {
+    /// 校验条件表达式为 bool。`what` 描述条件上下文（如 "`if` condition"），用于报错定位。
+    fn require_bool(&mut self, res: TyRes, span: &Span, what: &str) -> Result<(), ZError> {
         match res.ty {
             Ty::Bool => Ok(()),
             Ty::Unknown => {
@@ -1246,14 +1671,14 @@ impl Checker {
                 }
                 Err(self.zerr(
                     codes::COND_NOT_BOOL,
-                    "condition must be `bool`, but its type cannot be determined",
+                    format!("{} must be `bool`, but its type cannot be determined", what),
                     *span,
                     Some("the condition must explicitly evaluate to a `bool`"),
                 ))
             }
             other => Err(self.zerr(
                 codes::COND_NOT_BOOL,
-                format!("condition must be `bool`, got `{}`", other.name()),
+                format!("{} must be `bool`, got `{}`", what, other.name()),
                 *span,
                 Some("use a comparison like `x == 1`, or a boolean variable"),
             )),
@@ -1712,20 +2137,43 @@ impl Checker {
     }
 
     fn check_user_call(&mut self, f: &FnInfo, arg_tys: &[TyRes], span: Span) -> Result<TyRes, ZError> {
-        if f.param_slots.len() != arg_tys.len() {
+        // 默认参数：可省略尾部实参（最少 = 无默认值参数个数，最多 = 总参数个数）
+        let min = f.defaults.iter().filter(|d| d.is_none()).count();
+        let max = f.param_slots.len();
+        if arg_tys.len() < min || arg_tys.len() > max {
+            // 签名展示：可选参数标注 `= ...`
+            let shown: Vec<String> = f
+                .params
+                .iter()
+                .enumerate()
+                .map(|(i, p)| {
+                    if f.defaults[i].is_some() {
+                        format!("{} = ...", p)
+                    } else {
+                        p.clone()
+                    }
+                })
+                .collect();
+            let expected = if min == max {
+                min.to_string()
+            } else {
+                format!("{} to {}", min, max)
+            };
             return Err(self.zerr(
                 codes::ARG_COUNT,
                 format!(
                     "wrong number of arguments: `{}` expects {}, got {}",
                     f.name,
-                    f.param_slots.len(),
+                    expected,
                     arg_tys.len()
                 ),
                 span,
                 Some(format!(
-                    "call `{}({})`",
+                    "call `{}({})` ({} {} optional)",
                     f.name,
-                    f.params.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                    shown.join(", "),
+                    max - min,
+                    if max - min == 1 { "argument is" } else { "arguments are" }
                 )),
             ));
         }
@@ -1979,7 +2427,7 @@ impl Checker {
                         Some("form: assert(condition) or assert(condition, \"message\")"),
                     ));
                 }
-                self.require_bool(args[0], &span)?;
+                self.require_bool(args[0], &span, "`assert` condition")?;
                 if n == 2 {
                     self.expect_str(name, args, 1, span, "the assertion message")?;
                 }
@@ -2595,13 +3043,17 @@ impl Checker {
 fn stmt_span(s: &Stmt) -> Span {
     match s {
         Stmt::Assign { span, .. }
+        | Stmt::AssignOp { span, .. }
         | Stmt::VarDecl { span, .. }
         | Stmt::Block { span, .. }
         | Stmt::If { span, .. }
         | Stmt::While { span, .. }
+        | Stmt::DoWhile { span, .. }
+        | Stmt::ForC { span, .. }
         | Stmt::ForIn { span, .. }
         | Stmt::Return { span, .. }
         | Stmt::Break { span, .. }
+        | Stmt::Continue { span, .. }
         | Stmt::FnDef { span, .. }
         | Stmt::ExprStmt { span, .. }
         | Stmt::Breakpoint { span, .. }

@@ -118,6 +118,9 @@ Hone 编程语言 – 完整设计规范 v1.1
 
 · 条件分支：if (条件必须是 bool) { ... } else { ... }
 · 循环：while (条件必须是 bool) { ... }
+· do-while：do { ... } while (条件);  先执行循环体，再判断条件（至少执行一次）
+· C 风格 for：for (init; cond; step) { ... }  三段均可省略（如 for (;;) 为无限循环，配合 break 退出）
+· continue 关键字：跳过本次循环剩余语句，直接进入下一次迭代（仅循环体内合法，与 break 相对）
 · 条件表达式必须显式返回 bool，禁止隐式转换（如 if (1) 视为非法）
 
 1.5 函数定义
@@ -238,6 +241,125 @@ print(s);   // two
 print("hello world" |> len);      // 11
 print([1, 2, 3] |> len |> to_str); // "3"
 print(3 |> max(7) |> to_str);      // "7"
+
+1.11 复合赋值与自增/自减
+
+· 复合赋值：x += expr;  x -= expr;  x *= expr;  x /= expr;  x %= expr;
+  · 等价于 x = x op expr；要求 x 已声明且与右侧类型兼容
+  · str 仅支持 +=（字符串拼接），其余运算符要求数字
+· 自增/自减：i++ / i--（后缀，返回旧值）；++i / --i（前缀，返回新值）
+  · 仅作用于已声明的数值变量（int 增减 1，float 增减 1.0）
+· 示例：
+
+x = 10;
+x += 5;              // 15
+x -= 3;              // 12
+x *= 2;              // 24
+x /= 4;              // 6
+x %= 4;              // 2
+s = "Hone";
+s += "!";            // "Hone!"（字符串拼接）
+i = 0;
+i++;
+print(i);            // 1
+print(i++);          // 1（后缀返回旧值，i 变为 2）
+print(++i);          // 3（前缀返回新值）
+
+1.12 三元表达式与空值合并
+
+· 三元表达式：cond ? then_expr : else_expr
+  · cond 必须为 bool；两分支类型相同则返回该类型，否则为动态类型
+  · 右结合，可嵌套（a ? b : c ? d : e）
+· 空值合并：a ?? b
+  · 左侧为 null 时取右侧，否则取左侧；短路求值（仅左侧为 null 时才对右侧求值）
+  · Hone 无 null 字面量，null 来自 void 函数调用等占位值
+· 示例：
+
+age = 20;
+label = age >= 18 ? "adult" : "minor";   // adult
+n = -3;
+print(n > 0 ? "pos" : n < 0 ? "neg" : "zero");  // neg（右结合嵌套）
+
+fn void_fn() {
+}
+v = void_fn();
+print(v ?? "default");   // default（void 调用返回 null）
+print(42 ?? 99);         // 42（非 null 取左侧）
+
+1.13 匿名函数（lambda）
+
+· 语法：fn(参数1, 参数2) { ... }，是一等值：
+  · 可赋值给变量：f = fn(x) { return x * 2; };  调用 f(21)
+  · 可作为参数传递（高阶函数）、作为返回值返回（闭包工厂）
+  · 创建时按值捕获当前作用域可见的变量（闭包），调用时环境 = 捕获快照 + 实参
+  · 无函数名、无泛型、无 -> 返回注解；返回类型动态
+· 限制：lambda 是值，不进全局符号表；break/continue/return 只能在其自身函数体内
+· 示例：
+
+double = fn(x) {
+    return x * 2;
+};
+print(double(21));     // 42
+
+base = 10;
+adder = fn(y) {
+    return base + y;   // 捕获外围变量 base（按值）
+};
+print(adder(5));       // 15
+
+fn apply(f, v) {
+    return f(v);       // f 为 lambda 参数，经变量名动态调用
+}
+print(apply(fn(n) { return n * n; }, 6));   // 36
+
+fn make_adder(offset) {
+    return fn(z) { return z + offset; };    // 返回闭包
+}
+add5 = make_adder(5);
+print(add5(10));       // 15
+
+1.14 函数默认参数
+
+· 语法：fn 名称(参数1, 参数2 = 默认值, ...) { ... }
+  · 调用时省略的尾部实参取默认值；必选参数（无默认值）必须位于默认参数之前（否则报错）
+  · 默认表达式在调用时求值，可引用其前面的参数（如 fn f(a, b = a * 2)）
+  · 参数个数检查：最少 = 必选参数个数，最多 = 总参数个数
+  · lambda 参数同样支持默认值
+· 限制：hone build --dll 暂不支持默认参数（报错提示改用解释模式）
+· 示例：
+
+fn greet(name, greeting = "Hello") {
+    return greeting + ", " + name + "!";
+}
+print(greet("Hone"));           // Hello, Hone!
+print(greet("Hone", "Hi"));     // Hi, Hone!
+
+fn repeat_char(ch, times = 3, sep = "-") {
+    s = "";
+    for (i = 0; i < times; i = i + 1) {
+        s = s + ch;
+        if (i < times - 1) {
+            s = s + sep;
+        }
+    }
+    return s;
+}
+print(repeat_char("*"));        // *-*-*
+print(repeat_char("*", 2));     // *-*
+print(repeat_char("*", 4, "+"));// *+*+*+*
+
+1.15 三引号原始字符串
+
+· 语法："""..."""  多行原始字符串：
+  · 内容不做转义处理（\n、\t、\\ 等原样保留），可跨行
+  · 与普通字符串同值（支持 len、拼接、比较、str 函数等）
+· 示例：
+
+text = """line1
+line2
+    indented""";
+print(text);
+print(len(text));    // 24
 
 二、工具链与命令
 

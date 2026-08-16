@@ -152,6 +152,11 @@ impl Parser {
                     self.parse_decl_ts()
                 } else if self.peek2() == &Tok::Assign {
                     self.parse_assign()
+                } else if matches!(
+                    self.peek2(),
+                    Tok::PlusEq | Tok::MinusEq | Tok::StarEq | Tok::SlashEq | Tok::PercentEq
+                ) {
+                    self.parse_assign_op()
                 } else {
                     self.parse_expr_stmt()
                 }
@@ -159,11 +164,26 @@ impl Parser {
             Tok::Fn => self.parse_fn_def(),
             Tok::If => self.parse_if(),
             Tok::While => self.parse_while(),
-            Tok::For => self.parse_for_in(),
+            Tok::Do => self.parse_do_while(),
+            Tok::For => {
+                // for (init; cond; step) 为 C 风格循环；for x in ... 为遍历循环
+                if self.peek2() == &Tok::LParen {
+                    self.parse_for_c()
+                } else {
+                    self.parse_for_in()
+                }
+            }
             Tok::Return => self.parse_return(),
             Tok::Go => self.parse_go(),
             Tok::Try => self.parse_try(),
             Tok::Throw => self.parse_throw(),
+            // 语句级前缀自增/自减：++i;  --i;
+            Tok::PlusPlus | Tok::MinusMinus => self.parse_expr_stmt(),
+            Tok::Continue => {
+                let (_, span) = self.next();
+                self.expect_semi()?;
+                Ok(Stmt::Continue { span })
+            }
             Tok::Break => {
                 let (_, span) = self.next();
                 self.expect_semi()?;
@@ -190,7 +210,7 @@ impl Parser {
             other => Err(self.err_here(
                 codes::SYNTAX,
                 format!("expected a statement, found {}", other.describe()),
-                Some("statements start with an identifier, `fn`, `if`, `while`, `return`, `go`, `breakpoint` or `{`"),
+                Some("statements start with an identifier, `fn`, `if`, `while`, `do`, `for`, `return`, `go`, `break`, `continue`, `breakpoint`, `try` or `{`"),
             )),
         }
     }
@@ -275,6 +295,27 @@ impl Parser {
         Ok(Stmt::Assign { name, value, span })
     }
 
+    /// 复合赋值：x += expr;  x -= expr;  x *= expr;  x /= expr;  x %= expr;
+    fn parse_assign_op(&mut self) -> Result<Stmt, ZError> {
+        let (name_tok, span) = self.next();
+        let name = match name_tok {
+            Tok::Ident(s) => s,
+            _ => unreachable!(),
+        };
+        let (op_tok, _) = self.next();
+        let op = match op_tok {
+            Tok::PlusEq => CompoundOp::Add,
+            Tok::MinusEq => CompoundOp::Sub,
+            Tok::StarEq => CompoundOp::Mul,
+            Tok::SlashEq => CompoundOp::Div,
+            Tok::PercentEq => CompoundOp::Mod,
+            _ => unreachable!(),
+        };
+        let value = self.parse_expr()?;
+        self.expect_semi()?;
+        Ok(Stmt::AssignOp { name, op, value, span })
+    }
+
     fn parse_expr_stmt(&mut self) -> Result<Stmt, ZError> {
         let expr = self.parse_expr()?;
         let span = expr_span(&expr);
@@ -293,10 +334,37 @@ impl Parser {
         self.parse_fn_body(true)
     }
 
+    /// 匿名函数（lambda）：fn(参数1, 参数2) { ... }
+    /// 无函数名、无泛型、无 -> 返回注解；返回类型动态。
+    /// 调用时 `fn` token 已被 parse_primary 消费（span 由调用方传入）。
+    fn parse_lambda(&mut self, span: Span) -> Result<Expr, ZError> {
+        self.expect(&Tok::LParen, "`(`")?;
+        let mut params = Vec::new();
+        while !self.at(&Tok::RParen) {
+            let p = self.parse_param()?;
+            params.push(p);
+            if self.at(&Tok::Comma) {
+                self.next();
+            } else {
+                break;
+            }
+        }
+        self.expect(&Tok::RParen, "`)`")?;
+        let body = self.parse_block()?;
+        Ok(Expr::Lambda { params, body, span })
+    }
+
     fn parse_fn_body(&mut self, tmp: bool) -> Result<Stmt, ZError> {
         let (name_tok, span) = self.next();
         let name = match name_tok {
             Tok::Ident(s) => s,
+            Tok::LParen => {
+                return Err(self.err_here(
+                    codes::SYNTAX,
+                    "expected a function name after `fn`, found `(`",
+                    Some("a lambda must be assigned or passed: `f = fn(x) { ... }`, or define a named function `fn name(...) { ... }`"),
+                ))
+            }
             other => {
                 return Err(self.err_here(
                     codes::SYNTAX,
@@ -384,7 +452,14 @@ impl Parser {
                 } else {
                     None
                 };
-                Ok(Param { name: s, ty, span })
+                // 默认参数值：a = 表达式
+                let default = if self.at(&Tok::Assign) {
+                    self.next();
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
+                Ok(Param { name: s, ty, span, default })
             }
             Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr => {
                 let ty = match tok {
@@ -406,16 +481,24 @@ impl Parser {
                         ))
                     }
                 };
+                // 默认参数值：int a = 表达式
+                let default = if self.at(&Tok::Assign) {
+                    self.next();
+                    Some(self.parse_expr()?)
+                } else {
+                    None
+                };
                 Ok(Param {
                     name,
                     ty: Some(ty),
                     span,
+                    default,
                 })
             }
             other => Err(self.err_here(
                 codes::SYNTAX,
                 format!("expected a parameter, found {}", other.describe()),
-                Some("parameter form: `a`, `a : int`, or `int a`"),
+                Some("parameter form: `a`, `a : int`, `int a`, or with a default `a = 10`"),
             )),
         }
     }
@@ -468,6 +551,85 @@ impl Parser {
         self.expect(&Tok::RParen, "`)`")?;
         let body = self.parse_block()?;
         Ok(Stmt::While { cond, body, span })
+    }
+
+    /// do { ... } while (cond);
+    fn parse_do_while(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // do
+        let body = self.parse_block()?;
+        self.expect(&Tok::While, "`while`")?;
+        self.expect(&Tok::LParen, "`(`")?;
+        let cond = self.parse_expr()?;
+        self.expect(&Tok::RParen, "`)`")?;
+        self.expect_semi()?;
+        Ok(Stmt::DoWhile { body, cond, span })
+    }
+
+    /// C 风格三段式循环：for (init; cond; step) { ... }，各段均可省略
+    fn parse_for_c(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // for
+        self.expect(&Tok::LParen, "`(`")?;
+        // init 段：赋值 / 复合赋值 / 自增自减 / 表达式，或空
+        let init = if self.at(&Tok::Semi) {
+            self.next();
+            None
+        } else {
+            let s = self.parse_for_part_stmt()?;
+            self.expect(&Tok::Semi, "`;`")?;
+            Some(Box::new(s))
+        };
+        // cond 段：表达式，或空
+        let cond = if self.at(&Tok::Semi) {
+            self.next();
+            None
+        } else {
+            let e = self.parse_expr()?;
+            self.expect(&Tok::Semi, "`;`")?;
+            Some(e)
+        };
+        // step 段：赋值 / 复合赋值 / 自增自减 / 表达式，或空
+        let step = if self.at(&Tok::RParen) {
+            None
+        } else {
+            Some(Box::new(self.parse_for_part_stmt()?))
+        };
+        self.expect(&Tok::RParen, "`)`")?;
+        let body = self.parse_block()?;
+        Ok(Stmt::ForC { init, cond, step, body, span })
+    }
+
+    /// 解析 C 风格 for 的 init/step 段：识别 `x = e`、`x op= e`、`x++` / `++x`，
+    /// 其余按表达式处理（如 `x |> f`、函数调用等）。
+    fn parse_for_part_stmt(&mut self) -> Result<Stmt, ZError> {
+        let (tok, span) = self.cur().clone();
+        if let Tok::Ident(name) = tok {
+            match self.peek2() {
+                Tok::Assign => {
+                    self.next(); // 变量名
+                    self.next(); // =
+                    let value = self.parse_expr()?;
+                    return Ok(Stmt::Assign { name, value, span });
+                }
+                Tok::PlusEq | Tok::MinusEq | Tok::StarEq | Tok::SlashEq | Tok::PercentEq => {
+                    self.next(); // 变量名
+                    let (op_tok, _) = self.next();
+                    let op = match op_tok {
+                        Tok::PlusEq => CompoundOp::Add,
+                        Tok::MinusEq => CompoundOp::Sub,
+                        Tok::StarEq => CompoundOp::Mul,
+                        Tok::SlashEq => CompoundOp::Div,
+                        Tok::PercentEq => CompoundOp::Mod,
+                        _ => unreachable!(),
+                    };
+                    let value = self.parse_expr()?;
+                    return Ok(Stmt::AssignOp { name, op, value, span });
+                }
+                _ => {}
+            }
+        }
+        let e = self.parse_expr()?;
+        let espan = expr_span(&e);
+        Ok(Stmt::ExprStmt { expr: e, span: espan })
     }
 
     /// for x in expr { ... } / for k, v in dict { ... }
@@ -1035,7 +1197,7 @@ impl Parser {
     // ---------- 表达式 ----------
 
     fn parse_expr(&mut self) -> Result<Expr, ZError> {
-        let mut lhs = self.parse_or()?;
+        let mut lhs = self.parse_ternary()?;
         // 管道操作符：x |> f  →  f(x)；x |> f(a, b)  →  f(x, a, b)
         // 左侧作为第一个参数插入右侧调用，可链式：a |> f |> g  →  g(f(a))
         while self.at(&Tok::Pipe) {
@@ -1060,6 +1222,50 @@ impl Parser {
                 self.expect(&Tok::RParen, "`)`")?;
             }
             lhs = Expr::Call { callee, args, span };
+        }
+        Ok(lhs)
+    }
+
+    /// 三元表达式：cond ? then_expr : else_expr（右结合；then 分支解析完整表达式）
+    fn parse_ternary(&mut self) -> Result<Expr, ZError> {
+        let cond = self.parse_coalesce()?;
+        if self.at(&Tok::Question) {
+            let (_, span) = self.next();
+            let then_expr = self.parse_expr()?;
+            if !self.at(&Tok::Colon) {
+                let (tok, cspan) = self.cur().clone();
+                return Err(self.err_at(
+                    &cspan,
+                    codes::SYNTAX,
+                    format!("expected `:` in ternary expression, found {}", tok.describe()),
+                    Some("ternary form: `cond ? then_expr : else_expr` (e.g. `a >= 0 ? \"pos\" : \"neg\"`)"),
+                ));
+            }
+            self.next();
+            let else_expr = self.parse_expr()?;
+            Ok(Expr::Ternary {
+                cond: Box::new(cond),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr),
+                span,
+            })
+        } else {
+            Ok(cond)
+        }
+    }
+
+    /// 空值合并：a ?? b（左结合；a 为 null 时取 b）。绑定强于 || 弱于 ?:
+    fn parse_coalesce(&mut self) -> Result<Expr, ZError> {
+        let mut lhs = self.parse_or()?;
+        while self.at(&Tok::QuestionQuestion) {
+            let (_, span) = self.next();
+            let rhs = self.parse_or()?;
+            lhs = Expr::Binary {
+                op: BinOp::Coalesce,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+                span,
+            };
         }
         Ok(lhs)
     }
@@ -1205,6 +1411,26 @@ impl Parser {
                 expr: Box::new(expr),
                 span,
             })
+        } else if self.at(&Tok::PlusPlus) || self.at(&Tok::MinusMinus) {
+            // 前缀自增/自减：++i / --i
+            let (tok, span) = self.next();
+            let (name_tok, _) = self.next();
+            let name = match name_tok {
+                Tok::Ident(s) => s,
+                other => {
+                    return Err(self.err_here(
+                        codes::SYNTAX,
+                        format!("expected a variable name after `{}`, found {}", tok.describe(), other.describe()),
+                        Some("form: `++i` or `--i`"),
+                    ))
+                }
+            };
+            Ok(Expr::IncDec {
+                op: if matches!(tok, Tok::PlusPlus) { IncOp::Inc } else { IncOp::Dec },
+                prefix: true,
+                name,
+                span,
+            })
         } else {
             self.parse_primary()
         }
@@ -1218,6 +1444,10 @@ impl Parser {
             Tok::True => Ok(Expr::BoolLit(true, span)),
             Tok::False => Ok(Expr::BoolLit(false, span)),
             Tok::StrLit(s) => Ok(Expr::StrLit(s, span)),
+            // 三引号原始字符串：内容不做转义处理，与普通字符串同值
+            Tok::MultiStr(s) => Ok(Expr::StrLit(s, span)),
+            // 匿名函数（lambda）：fn(参数) { ... }
+            Tok::Fn => self.parse_lambda(span),
             // 类型关键字在表达式位置等价于类型名字符串（供 args.get 等指定期望类型）
             Tok::TInt => Ok(Expr::StrLit("int".to_string(), span)),
             Tok::TFloat => Ok(Expr::StrLit("float".to_string(), span)),
@@ -1290,15 +1520,15 @@ impl Parser {
             Tok::Match => self.parse_match(span),
             Tok::Ident(first) => {
                 let parts = self.join_dotted_parts(first, span)?;
-                if self.at(&Tok::LParen) {
+                let expr = if self.at(&Tok::LParen) {
                     self.next();
                     let args = self.parse_args()?;
                     self.expect(&Tok::RParen, "`)`")?;
-                    Ok(Expr::Call {
+                    Expr::Call {
                         callee: parts.join("."),
                         args,
                         span,
-                    })
+                    }
                 } else if parts.len() > 1 {
                     // 字段访问链：e.code / a.b.c → Field(Field(a,b),c)
                     let mut expr = Expr::Ident {
@@ -1312,13 +1542,24 @@ impl Parser {
                             span,
                         };
                     }
-                    Ok(expr)
+                    expr
                 } else {
-                    Ok(Expr::Ident {
+                    Expr::Ident {
                         name: parts[0].clone(),
                         span,
-                    })
+                    }
+                };
+                // 后缀自增/自减：i++ / i--（仅作用于裸变量名）
+                if parts.len() == 1 && (self.at(&Tok::PlusPlus) || self.at(&Tok::MinusMinus)) {
+                    let (tok, pspan) = self.next();
+                    return Ok(Expr::IncDec {
+                        op: if matches!(tok, Tok::PlusPlus) { IncOp::Inc } else { IncOp::Dec },
+                        prefix: false,
+                        name: parts[0].clone(),
+                        span: pspan,
+                    });
                 }
+                Ok(expr)
             }
             other => Err(self.err_here(
                 codes::SYNTAX,

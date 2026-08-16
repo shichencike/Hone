@@ -162,6 +162,42 @@ function toggleTheme(){
       不支持嵌套作用域遮蔽，重复定义直接报错。模块函数会带前缀
       （如 <code class="inline">math_clamp</code>），命名时加前缀或分类可避免冲突。</div>
   </details>
+
+  <details class="faq-item">
+    <summary>为什么对字符串用 <code>-=</code> / <code>*=</code> 报错？</summary>
+    <div class="faq-a">字符串只支持 <code class="inline">+=</code>（拼接），
+      其余复合赋值（<code class="inline">-= *= /= %=</code>）只适用于数值（int / float）。
+      需要其它字符串变换请用 <code class="inline">str_replace</code> / <code class="inline">str_trim</code> 等字符串函数。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 lambda 里写 <code>break</code> / <code>continue</code> 报「只能出现在循环内」？</summary>
+    <div class="faq-a">lambda 是<strong>独立的函数体</strong>，循环控制（<code class="inline">break</code> /
+      <code class="inline">continue</code>）不能跨 lambda 边界作用于外层循环。
+      需要在 lambda 内提前结束逻辑时，用条件判断（<code class="inline">if</code>）代替。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 lambda 内修改捕获的变量，原变量没有变化？</summary>
+    <div class="faq-a">Hone 是<strong>值语义</strong>：lambda 创建时<strong>按值捕获</strong>外围变量
+      （捕获的是当时的副本），闭包内修改不会影响创建处的变量。
+      需要跨调用共享/回传状态时，改用函数参数传值并返回结果。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 <code>f()</code> 报「missing argument」？</summary>
+    <div class="faq-a">默认参数只能<strong>省略尾部实参</strong>：必选参数（无默认值）必须位于参数列表
+      前方，调用时也必须提供。若中间参数被跳过或必选参数缺失，会报参数个数 / 缺参错误。
+      给参数补上默认值（<code class="inline">fn f(a, b = 10)</code>）即可省略调用。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary><code>""</code> 和 <code>"""..."""</code> 有什么区别？</summary>
+    <div class="faq-a"><code class="inline">""</code> 是空字符串（普通字符串）；
+      <code class="inline">"""..."""</code> 是<strong>三引号原始字符串</strong>：多行书写、
+      内容不做转义处理（<code class="inline">\n</code>、<code class="inline">\t</code> 原样保留）、
+      保留换行与缩进。两者同值，可正常用于拼接、比较与字符串函数。</div>
+  </details>
 </main>
 
 <footer>
