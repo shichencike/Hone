@@ -52,12 +52,14 @@ function toggleTheme(){
       <li><strong>read_int(prompt?)</strong> / <strong>read_float(prompt?)</strong>：读取一行并解析为
         <code>int</code> / <code>float</code>，格式非法分别抛 <code>error[H006]</code> / <code>error[H007]</code></li>
       <li>新增错误码 <strong>H306</strong>（标准输入读取失败 / EOF）及 <code>hone explain H306</code> 说明</li>
-      <li>新增示例 <code>examples/input_demo.hn</code>（input / read_int / read_float / EOF try-catch 演示）</li>
+      <li>新增示例 <code>examples/input_demo.hn</code>（input / read_int / read_float / EOF try-catch 演示）、
+        <code>examples/input_default_demo.hn</code>（输入默认值 / EOF 降级演示）</li>
     </ul>
     <h4>文档</h4>
     <ul>
-      <li>README（内置功能 + 错误码表）、hone.md（3.1 基础内置函数、5.2 错误码）、
-        官网 docs.html / stdlib.html / changelog.html 同步更新</li>
+      <li>README（内置功能 + 错误码表）、hone.md（3.1 基础内置函数、3.1.1 输入默认值教程、5.2 错误码）、
+        官网 docs.html（§8 内置函数参考 + 输入默认值教程）/ stdlib.html / changelog.html /
+        examples.html（5.15 输入默认值示例）/ index.html 同步更新</li>
     </ul>
   </div>
 

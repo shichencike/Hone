@@ -461,6 +461,33 @@ resp = <span class="f">http_post</span>(<span class="s">"http://httpbin.org/post
 <span class="f">plugin.unload</span>(<span class="s">"pl"</span>);                       <span class="c">// 注销</span></code></pre>
   </div>
 
+  <div class="example">
+    <div class="title">5.15 标准输入与默认值（EOF 降级）</div>
+    <div class="note">input / read_int / read_float 从 stdin 读取；EOF 抛 H306、数字格式错抛 H006/H007，用 try-catch 包装实现默认值（期望输出：管道喂入 "Bob\n25\n" → 你好, Bob! / 明年你 26 岁）</div>
+<pre><code><span class="k">fn</span> <span class="f">ask</span>(prompt, fallback) {
+    <span class="k">try</span> {
+        <span class="k">return</span> <span class="f">input</span>(prompt);
+    } <span class="k">catch</span> e {
+        <span class="k">return</span> fallback;   <span class="c">// H306 EOF → 默认值</span>
+    }
+}
+name = <span class="f">ask</span>(<span class="s">"姓名: "</span>, <span class="s">"匿名"</span>);
+<span class="f">print</span>(<span class="s">"你好, "</span> + name + <span class="s">"!"</span>);
+
+<span class="k">fn</span> <span class="f">ask_int</span>(prompt, fallback) {
+    <span class="k">try</span> {
+        <span class="k">return</span> <span class="f">read_int</span>(prompt);
+    } <span class="k">catch</span> e {
+        <span class="k">return</span> fallback;   <span class="c">// H006 格式错 / H306 EOF → 默认值</span>
+    }
+}
+age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span class="n">0</span>);
+<span class="f">print</span>(<span class="s">"明年你 "</span> + <span class="f">to_str</span>(age + <span class="n">1</span>) + <span class="s">" 岁"</span>);
+
+<span class="c">// 完整示例：examples/input_demo.hn；EOF 也可用 ?? 空值合并？——不行，</span>
+<span class="c">// input 在 EOF 抛错误而非返回 null，?? 只对 null 值生效，必须 try-catch</span></code></pre>
+  </div>
+
   <h3><span class="hash">#</span>6. 并发</h3>
 
   <div class="example">

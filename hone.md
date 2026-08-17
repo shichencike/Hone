@@ -405,6 +405,37 @@ hone --help / --version 帮助信息 / 版本信息
 · json_parse(str) → value：将 JSON 字符串解析为 Hone 值（自动映射为 int/float/bool/str）
 · json_stringify(value) → str：将 Hone 值序列化为 JSON 字符串
 
+3.1.1 输入默认值（EOF 降级）
+
+input / read_int / read_float 在 EOF（管道关闭 / Ctrl+Z / Ctrl+D）时抛 error[H306]，
+read_int / read_float 在格式非法时抛 error[H006] / error[H007]。它们不返回 null，
+因此不能直接用 `??` 空值合并兜底；给输入设默认值的标准做法是用 try-catch 包装：
+
+fn ask(prompt, fallback) {
+    try {
+        return input(prompt);
+    } catch e {
+        return fallback;   // H306 EOF → 返回默认值
+    }
+}
+name = ask("姓名: ", "匿名");
+print("你好, " + name + "!");
+
+数字输入同理（一个 catch 同时兜住格式错误 H006/H007 与 EOF H306）：
+
+fn ask_int(prompt, fallback) {
+    try {
+        return read_int(prompt);
+    } catch e {
+        return fallback;   // H006 格式错 / H306 EOF → 返回默认值
+    }
+}
+age = ask_int("年龄: ", 0);
+print("明年你 " + to_str(age + 1) + " 岁");
+
+· 注意：`??` 空值合并只对 null 值生效（如 void 函数调用占位值）；
+  input 在 EOF 是抛错误而不是返回 null，必须用 try-catch 捕获后降级。
+
 3.2 sys 模块（系统功能封装）
 
 内置常用系统 API 封装（Windows 优先，其他平台尽力模拟或报错）：

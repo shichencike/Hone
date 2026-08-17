@@ -442,6 +442,35 @@ p = <span class="f">Point</span>(<span class="n">3</span>, <span class="n">2.5</
       <tr><td>指针类</td><td><code>ptr.alloc</code> <code>ptr.free</code> <code>ptr.is_null</code> <code>ptr.is_valid</code> <code>ptr.size</code> <code>ptr.read_int/float/byte</code> <code>ptr.write_int/float/byte</code>（分配表跟踪防野指针，H304/H305）</td></tr>
       <tr><td>插件系统</td><td><code>plugin.load</code> <code>plugin.has</code> <code>plugin.list</code> <code>plugin.unload</code>（运行期动态注册，调用走 C ABI 通道）</td></tr>
     </table>
+    <h3>输入默认值（EOF 降级）</h3>
+    <p><code class="inline">input</code> / <code class="inline">read_int</code> / <code class="inline">read_float</code>
+      在 EOF（管道关闭 / Ctrl+Z / Ctrl+D）时抛 <code class="inline">error[H306]</code>，
+      <code class="inline">read_int</code> / <code class="inline">read_float</code> 格式非法时抛
+      <code class="inline">error[H006]</code> / <code class="inline">error[H007]</code>。
+      它们<strong>不返回 null</strong>，因此不能直接用 <code class="inline">??</code> 空值合并兜底；
+      给输入设默认值的标准做法是用 try-catch 包装：</p>
+<pre><code><span class="k">fn</span> <span class="f">ask</span>(prompt, fallback) {
+    <span class="k">try</span> {
+        <span class="k">return</span> <span class="f">input</span>(prompt);
+    } <span class="k">catch</span> e {
+        <span class="k">return</span> fallback;   <span class="c">// H306 EOF → 返回默认值</span>
+    }
+}
+name = <span class="f">ask</span>(<span class="s">"姓名: "</span>, <span class="s">"匿名"</span>);
+<span class="f">print</span>(<span class="s">"你好, "</span> + name + <span class="s">"!"</span>);
+
+<span class="c">// 数字输入同理：一个 catch 同时兜住格式错误 H006/H007 与 EOF H306</span>
+<span class="k">fn</span> <span class="f">ask_int</span>(prompt, fallback) {
+    <span class="k">try</span> {
+        <span class="k">return</span> <span class="f">read_int</span>(prompt);
+    } <span class="k">catch</span> e {
+        <span class="k">return</span> fallback;   <span class="c">// H006 格式错 / H306 EOF → 返回默认值</span>
+    }
+}
+age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span class="n">0</span>);
+<span class="f">print</span>(<span class="s">"明年你 "</span> + <span class="f">to_str</span>(age + <span class="n">1</span>) + <span class="s">" 岁"</span>);</code></pre>
+    <p>注意：<code class="inline">??</code> 空值合并只对 null 值生效（如 void 函数调用占位值）；
+      input 在 EOF 是抛错误而不是返回 null，必须用 try-catch 捕获后降级。</p>
   </section>
 
   <section id="integ">

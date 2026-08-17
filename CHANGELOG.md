@@ -8,11 +8,12 @@
 - **`read_int(prompt?)` / `read_float(prompt?)`**：读取一行并解析为 `int` / `float`，
   格式非法分别抛 `error[H006]` / `error[H007]`
 - 新增错误码 **H306**（标准输入读取失败 / EOF），`hone explain H306` 可查说明
-- 新增示例 `examples/input_demo.hn`（input / read_int / read_float / EOF try-catch 演示）
+- 新增示例 `examples/input_demo.hn`（input / read_int / read_float / EOF try-catch 演示）、
+  `examples/input_default_demo.hn`（输入默认值 / EOF 降级演示）
 
 ### 文档
-- README（内置功能 + 错误码表）、hone.md（3.1 基础内置函数、5.2 错误码）、
-  官网 docs.html / stdlib.html / changelog.html / index.html 同步更新
+- README（内置功能 + 错误码表）、hone.md（3.1 基础内置函数、3.1.1 输入默认值教程、5.2 错误码）、
+  官网 docs.html（§8 内置函数参考 + 输入默认值教程）/ stdlib.html / changelog.html / examples.html（5.15 输入默认值示例）/ index.html 同步更新
 
 ## [v0.6.3] - 2026-08-16
 
