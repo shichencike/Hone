@@ -99,7 +99,8 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
       <tr><td><code>hone build --exe &lt;file.hn&gt;</code></td><td>打包独立可执行文件（解释器+脚本自释放）</td></tr>
       <tr><td><code>hone bind &lt;header.h&gt;</code></td><td>从 C 头文件生成 typed load 签名块（FFI 自动绑定）</td></tr>
       <tr><td><code>hone explain &lt;code&gt;</code></td><td>查询错误码含义与修复建议</td></tr>
-      <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存</td></tr>
+      <tr><td><code>hone get</code></td><td>读取 hone.json 清单批量下载模块（类似 package.json / Cargo.toml）</td></tr>
+      <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存，同时写入 hone.json 清单</td></tr>
       <tr><td><code>hone test [目录]</code></td><td>扫描并运行 *.test.hn 测试（配合 assert 断言，汇总 PASS/FAIL）</td></tr>
       <tr><td><code>hone build --script &lt;file.hn&gt;</code></td><td>生成仅脚本压缩包 .hzp（不内嵌解释器，用 hone run 执行）</td></tr>
       <tr><td><code>hone self-update [url]</code></td><td>下载最新 hone 二进制并替换当前程序</td></tr>

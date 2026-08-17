@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.6.5] - 2026-08-17
+
+### 新增（模块清单 hone.json）
+- **模块清单 `hone.json`**（类似 package.json / Cargo.toml）：项目根目录集中声明
+  `name` / `version` / `modules` 依赖（模块名 → 源码 URL 或本地路径）
+- `hone get`（不带参数）：读取当前目录 `hone.json` 清单，批量下载全部模块到 ~/.hone/cache/
+- `hone get <module> <url>`：下载单个模块并自动写入 / 更新 `hone.json` 清单
+  （新建时 name 取目录名、version 默认 0.1.0）
+- 模块 URL 非 http/https 开头按本地路径处理，直接读取源码（不联网），便于同仓库共享 hone_lib 等模块；
+  清单缺失报 `error[H404]`、JSON 语法错误报 `error[H005]`、modules 为空报 `error[H005]`
+
+### 文档
+- hone.md（4.3.1 模块清单教程、工具链命令、进阶章节）、README（命令与导入章节）、
+  官网 docs.html（§15 工具链）/ index.html（快速开始命令表）/ changelog.html（v0.6.5 条目）同步更新
+
 ## [v0.6.4] - 2026-08-17
 
 ### 新增（标准输入函数）

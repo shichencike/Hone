@@ -39,7 +39,8 @@ hone fmt [-w] <file.hn>   # 代码格式化（Tab 缩进/运算符空格/大括�
 hone build --dll <file.hn> # 打包 C ABI 动态库（int/float/bool/str 类型映射，需系统 C 编译器）
 hone build --exe <file.hn> # 将脚本与解释器打包为自释放独立可执行文件（[-o <out>] [--icon <ico>]）
 hone explain <code>       # 查询错误码含义（如 hone explain H201）
-hone get <module> <url>   # 下载模块依赖并缓存到 ~/.hn/cache/
+hone get                  # 读取当前目录 hone.json 清单，批量下载全部模块（类似 package.json / Cargo.toml）
+hone get <module> <url>   # 下载模块依赖并缓存到 ~/.hn/cache/，并写入/更新 hone.json 清单
 hone get <script.hn>      # 预下载脚本中所有 import 声明的模块
 hone upgrade [-w] <file.hn> # 按映射表自动迁移旧版本语法（-w 覆盖写）
 hone lsp                  # 启动语言服务器（补全/诊断，LSP over stdio）
@@ -262,7 +263,9 @@ p("via alias");
 ```
 
 - `import` 底层基于 TCP（复用 `http_get`），模块解析后其函数合并进全局符号表，顶层语句在独立作用域执行
-- `hone get` 可预先下载模块（`hone get <module> <url>`）或扫描脚本内所有 `import` 声明批量预下载
+- `hone get` 可预先下载模块：`hone get <module> <url>`（并写入 hone.json 清单）、
+  `hone get <script.hn>`（扫描脚本内所有 `import` 声明批量预下载）、
+  `hone get`（读取当前目录 hone.json 清单批量下载全部模块）
 - `load` 依赖 `libloading`（纯 Rust，无 C 编译）；被调用库需导出 `#[no_mangle] pub extern "C" fn` 形式的
   int64 函数；已加载的库不跨 `go` 线程（懒加载路径与别名可克隆）
 - `load` 签名块（typed FFI）：`load "lib" as m { fn f(a: int, b: str) -> ptr; ... }` 显式声明

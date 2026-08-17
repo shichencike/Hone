@@ -375,7 +375,8 @@ hone build --exe <script.hn> 打包独立可执行文件（解释器 + 脚本自
 hone build --script <script.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）
 hone bind <header.h> 从 C 头文件生成 typed load 签名块（FFI 自动绑定）
 hone debug <script.hn> 断点调试模式（支持 breakpoint 关键字）
-hone get <module> 远程下载模块依赖并缓存到本地
+hone get 读取当前目录 hone.json 清单并批量下载全部模块（类似 package.json / Cargo.toml 的依赖清单）
+hone get <module> <url> 下载单个模块并缓存到本地，同时写入/更新 hone.json 清单
 hone self-update [url] 从 URL 下载最新 hone 二进制并替换当前程序（也可用环境变量 HONE_UPDATE_URL）
 hone explain <code> 查看错误码解释与修复建议（如 hone explain H201）
 hone lsp 启动语言服务器（代码补全、跳转定义）
@@ -846,6 +847,24 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · 后续运行直接使用缓存，不重复下载
 · 底层基于 TCP/TLS，由 http_get 实现下载（模块源 URL 支持 http:// 与 https://）
 
+4.3.1 模块清单 hone.json（类似 package.json / Cargo.toml）
+
+· 项目根目录放一个 hone.json 即可集中声明模块依赖，形如：
+
+{
+  "name": "myapp",          // 项目名（新建清单时自动取目录名）
+  "version": "0.1.0",       // 项目版本
+  "modules": {              // 模块依赖：模块名 → 源码 URL（或本地路径）
+    "math_mod": "https://example.com/math_mod.hn",
+    "gui":     "./hone_lib/gui.hn"
+  }
+}
+
+· hone get（不带参数）：读取当前目录 hone.json，批量下载全部模块到 ~/.hone/cache/
+· hone get <module> <url>：下载单个模块，并把 (module, url) 追加写入 hone.json（已存在则更新其 URL）
+· 清单缺失报 error[H404]，JSON 语法错误报 error[H005]，modules 为空报 error[H005]
+· 模块 URL 非 http/https 开头时按本地路径处理，直接读取源码（不联网），便于同仓库共享 hone_lib 等模块
+
 4.4 别名（Alias）
 
 · 支持 as 子句：load "path" as lib;
@@ -1166,6 +1185,7 @@ Hone 单文件即可运行，但项目变大后建议拆分模块。三种复用
   · import "模块名" from "./路径/x.hn"; // 本地：相对当前工作目录直接读取，不写缓存
   · import "模块名" from "URL" as 别名; // 别名：模块函数前缀替换为别名前缀（见下）
   · hone get <script.hn>               // 预下载脚本中所有 import 声明的模块
+  · hone get                           // 按 hone.json 清单批量下载全部模块（见 4.3.1）
 · load / load lazy 动态库（C ABI 复用，见 4.1）：
   · load "绝对路径";                    // 调用 C 库函数（需绝对路径，或与脚本同目录的库名）
   · load lazy "绝对路径";               // 函数级懒加载，按需加载依赖链

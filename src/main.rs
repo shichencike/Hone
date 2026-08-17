@@ -363,7 +363,8 @@ fn print_help() {
     println!("  hone build --dll <file.hn> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
     println!("  hone build --exe <file.hn> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
     println!("  hone build --script <file.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）");
-    println!("  hone get <module> <url>  下载模块依赖并缓存到 ~/.hone/cache/");
+    println!("  hone get                   读取当前目录 hone.json 清单，批量下载全部模块");
+    println!("  hone get <module> <url>  下载模块依赖并缓存到 ~/.hone/cache/，并写入 hone.json 清单");
     println!("  hone get <script.hn>     预下载脚本中所有 import 声明的模块");
     println!("  hone self-update [url]   从 URL 下载最新 hone 二进制并替换当前程序（需管理员/写权限）");
     println!("  hone lsp                 启动语言服务器（补全/诊断，LSP over stdio）");
@@ -790,10 +791,37 @@ fn run_cc(cc: &str, cfile: &str, out: &str) -> Result<(), ZError> {
     }
 }
 
-/// hone get <module> <url> | hone get <script.hn>
-/// 远程下载模块依赖并缓存到 ~/.hone/cache/（进度条 \r 显示）。
+/// hone get [<module> <url>] [<script.hn>]
+/// 模块依赖管理：
+///   hone get                读取当前目录 hone.json 清单，批量下载全部模块到 ~/.hone/cache/
+///   hone get <module> <url> 下载单个模块，并把 (module, url) 追加写入 hone.json 清单
+///   hone get <script.hn>    预下载脚本中所有 import 声明的模块
 fn cmd_get(args: &[String]) -> Result<(), ZError> {
     match args.len() {
+        0 => {
+            // 读取 hone.json 模块清单，批量下载
+            let manifest_path = "hone.json";
+            let text = std::fs::read_to_string(manifest_path).map_err(|e| {
+                ZError::plain(
+                    codes::NOT_FOUND,
+                    format!("cannot read `{}`: {}", manifest_path, e),
+                    Some("create a hone.json manifest first: `hone get <module> <url>`"),
+                )
+            })?;
+            let modules = parse_manifest_modules(&text)?;
+            if modules.is_empty() {
+                return Err(ZError::plain(
+                    codes::SYNTAX,
+                    format!("no modules found in `{}`", manifest_path),
+                    Some("add entries under `\"modules\": { \"name\": \"url\" }`"),
+                ));
+            }
+            for (name, url) in &modules {
+                fetch_and_cache(name, url)?;
+            }
+            println!("共下载 {} 个模块", modules.len());
+            Ok(())
+        }
         1 => {
             // 扫描脚本中的 import 声明并预下载
             let path = &args[0];
@@ -818,14 +846,84 @@ fn cmd_get(args: &[String]) -> Result<(), ZError> {
         }
         2 => {
             fetch_and_cache(&args[0], &args[1])?;
+            // 追加写入 hone.json 清单（模块已存在则更新其 URL）
+            append_manifest(&args[0], &args[1])?;
             Ok(())
         }
         _ => Err(ZError::plain(
             codes::SYNTAX,
-            "usage: `hone get <module> <url>` or `hone get <script.hn>`",
+            "usage: `hone get` | `hone get <module> <url>` | `hone get <script.hn>`",
             Some("run `hone --help` for usage"),
         )),
     }
+}
+
+/// 解析 hone.json 清单中的模块映射（{"modules": {name: url}}），返回排序后的 (name, url) 列表。
+fn parse_manifest_modules(text: &str) -> Result<Vec<(String, String)>, ZError> {
+    let v: serde_json::Value = serde_json::from_str(text).map_err(|e| {
+        ZError::plain(codes::SYNTAX, format!("invalid hone.json: {}", e), Some("fix the JSON syntax"))
+    })?;
+    let mut out = Vec::new();
+    if let Some(modules) = v.get("modules").and_then(|m| m.as_object()) {
+        for (name, url) in modules {
+            match url.as_str() {
+                Some(u) => out.push((name.clone(), u.to_string())),
+                None => {
+                    return Err(ZError::plain(
+                        codes::SYNTAX,
+                        format!("module `{}` in hone.json must map to a URL string", name),
+                        None::<&str>,
+                    ))
+                }
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// 把 (name, url) 追加进当前目录 hone.json 的 modules 映射（已存在则更新其 URL）；文件不存在则新建清单。
+fn append_manifest(name: &str, url: &str) -> Result<(), ZError> {
+    let manifest_path = "hone.json";
+    let (proj_name, version, modules) = if std::path::Path::new(manifest_path).exists() {
+        let text = std::fs::read_to_string(manifest_path).map_err(|e| {
+            ZError::plain(codes::NOT_FOUND, format!("cannot read `{}`: {}", manifest_path, e), None::<&str>)
+        })?;
+        let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+            ZError::plain(codes::SYNTAX, format!("invalid hone.json: {}", e), Some("fix the JSON syntax"))
+        })?;
+        let n = v.get("name").and_then(|x| x.as_str()).unwrap_or("").to_string();
+        let ver = v.get("version").and_then(|x| x.as_str()).unwrap_or("0.1.0").to_string();
+        let mut mods = parse_manifest_modules(&text)?;
+        mods.retain(|(k, _)| k != name);
+        mods.push((name.to_string(), url.to_string()));
+        mods.sort();
+        (n, ver, mods)
+    } else {
+        // 新建清单：name 取当前目录名，version 默认 0.1.0
+        let dir = std::env::current_dir()
+            .map(|d| d.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default())
+            .unwrap_or_default();
+        (dir, "0.1.0".to_string(), vec![(name.to_string(), url.to_string())])
+    };
+
+    let mut modules_map = serde_json::Map::new();
+    for (k, u) in &modules {
+        modules_map.insert(k.clone(), serde_json::Value::String(u.clone()));
+    }
+    let manifest = serde_json::json!({
+        "name": proj_name,
+        "version": version,
+        "modules": serde_json::Value::Object(modules_map),
+    });
+    let json = serde_json::to_string_pretty(&manifest).map_err(|e| {
+        ZError::plain(codes::SYNTAX, format!("cannot serialize hone.json: {}", e), None::<&str>)
+    })?;
+    std::fs::write(manifest_path, json + "\n").map_err(|e| {
+        ZError::plain(codes::NOT_FOUND, format!("cannot write `{}`: {}", manifest_path, e), None::<&str>)
+    })?;
+    println!("已写入 {}: {} -> {}", manifest_path, name, url);
+    Ok(())
 }
 
 fn collect_imports(stmts: &[ast::Stmt], out: &mut Vec<(String, String)>) {
@@ -846,6 +944,7 @@ fn collect_imports(stmts: &[ast::Stmt], out: &mut Vec<(String, String)>) {
 }
 
 /// 下载模块并写入缓存 ~/.hone/cache/<name>.hn（已缓存则跳过）。
+/// URL 非 http/https 开头时视为本地路径，直接读取源码（不联网）。
 fn fetch_and_cache(name: &str, url: &str) -> Result<(), ZError> {
     let cache_file = interp::hone_cache_dir().join(format!("{}.hn", name));
     if cache_file.exists() {
@@ -853,11 +952,19 @@ fn fetch_and_cache(name: &str, url: &str) -> Result<(), ZError> {
         println!("已缓存: {} ({} 字节)", name, size);
         return Ok(());
     }
-    print!("\r[hone get] 下载 `{}` ...", name);
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    let span = lexer::Span { line: 1, col: 1, len: 1 };
-    let code = builtins::http_request(url, "GET", None, span, name, "")?;
-    println!();
+    let code = if url.starts_with("http://") || url.starts_with("https://") {
+        print!("\r[hone get] 下载 `{}` ...", name);
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+        let span = lexer::Span { line: 1, col: 1, len: 1 };
+        let code = builtins::http_request(url, "GET", None, span, name, "")?;
+        println!();
+        code
+    } else {
+        // 本地路径：直接读取模块源码
+        std::fs::read_to_string(url).map_err(|e| {
+            ZError::plain(codes::NOT_FOUND, format!("cannot read local module `{}`: {}", url, e), Some("check the path"))
+        })?
+    };
     if let Some(dir) = cache_file.parent() {
         std::fs::create_dir_all(dir)
             .map_err(|e| ZError::plain(codes::NOT_FOUND, format!("cannot create cache dir: {}", e), None::<&str>))?;

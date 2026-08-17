@@ -533,7 +533,8 @@ age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span cl
       <tr><td><code>hone test [目录]</code></td><td>递归扫描 <code>*.test.hn</code> 运行测试并汇总 PASS/FAIL（配合 <code>assert</code> 断言，失败退出码非 0）</td></tr>
       <tr><td><code>hone bind &lt;header.h&gt;</code></td><td>从 C 头文件离线生成 typed load 签名块（输出到 stdout，unsupported 原型列为注释）</td></tr>
       <tr><td><code>hone explain &lt;code&gt;</code></td><td>查看错误码解释与修复建议（如 <code>hone explain H201</code>）</td></tr>
-      <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存到 ~/.hone/cache/（也支持扫描脚本 import 批量预下载）</td></tr>
+      <tr><td><code>hone get</code></td><td>读取当前目录 <code>hone.json</code> 清单，批量下载全部模块（类似 package.json / Cargo.toml 的依赖清单）</td></tr>
+      <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存到 ~/.hone/cache/，同时写入/更新 hone.json 清单（也支持扫描脚本 import 批量预下载）</td></tr>
       <tr><td><code>hone self-update [url]</code></td><td>从 URL（或环境变量 <code>HONE_UPDATE_URL</code>）下载最新 hone 二进制并替换当前程序，魔数校验防误下载</td></tr>
       <tr><td><code>hone lsp</code></td><td>语言服务器（补全/诊断/hover，LSP over stdio）</td></tr>
       <tr><td><code>hone poop &lt;file.hn&gt;</code></td><td>屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
@@ -674,7 +675,9 @@ tasks = [
     <p>模块函数以「模块名_」为前缀注册（如 <code class="inline">math_clamp</code>、<code class="inline">coll_sum</code>），
       <code class="inline">as 别名</code>可整体替换前缀。函数名全局唯一、不支持嵌套遮蔽，命名加前缀避免冲突。
       推荐目录：入口 <code class="inline">main.hn</code> + <code class="inline">libs/</code> 自有模块 + <code class="inline">data/</code> 数据；
-      用 <code class="inline">hone get &lt;script.hn&gt;</code> 预下载脚本中所有 import 的模块。</p>
+      用 <code class="inline">hone get &lt;script.hn&gt;</code> 预下载脚本中所有 import 的模块，
+      或在项目根目录放 <code class="inline">hone.json</code> 清单（name / version / modules），用
+      <code class="inline">hone get</code> 批量下载全部模块（见 §15 工具链）。</p>
 
     <h3>16.2 函数别名（alias）</h3>
     <p>给已有函数起新名字再调用，原名保持不变：</p>
