@@ -192,6 +192,24 @@ function toggleTheme(){
   </details>
 
   <details class="faq-item">
+    <summary>为什么 <code>input()</code> 在管道 / 无输入时报错？怎么给输入设默认值？</summary>
+    <div class="faq-a"><code class="inline">input</code> / <code class="inline">read_int</code> / <code class="inline">read_float</code>
+      在 EOF（管道关闭 / Ctrl+Z / Ctrl+D）时抛 <code class="inline">error[H306]</code>，
+      <code class="inline">read_int</code> / <code class="inline">read_float</code> 格式非法时抛
+      <code class="inline">error[H006]</code> / <code class="inline">error[H007]</code>。
+      它们<strong>不返回 null</strong>，所以 <code class="inline">??</code> 空值合并兜不住；
+      给输入设默认值的标准做法是用 try-catch 包装：</div>
+    <div class="faq-a"><pre><code><span class="k">fn</span> <span class="f">ask</span>(prompt, fallback) {
+    <span class="k">try</span> { <span class="k">return</span> <span class="f">input</span>(prompt); }
+    <span class="k">catch</span> e { <span class="k">return</span> fallback; }   <span class="c">// H306 EOF → 默认值</span>
+}
+name = <span class="f">ask</span>(<span class="s">"姓名: "</span>, <span class="s">"匿名"</span>);</code></pre>
+      数字输入同理（一个 catch 同时兜住 H006/H007 与 H306），完整示例见
+      <code class="inline">examples/input_default_demo.hn</code> 与
+      <a href="docs.html#builtins">手册 §8 输入默认值教程</a>。</div>
+  </details>
+
+  <details class="faq-item">
     <summary><code>""</code> 和 <code>"""..."""</code> 有什么区别？</summary>
     <div class="faq-a"><code class="inline">""</code> 是空字符串（普通字符串）；
       <code class="inline">"""..."""</code> 是<strong>三引号原始字符串</strong>：多行书写、
