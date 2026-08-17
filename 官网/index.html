@@ -60,7 +60,8 @@ function toggleTheme(){
       <div class="card"><h4>🛠 内置工具箱</h4><p>文件、HTTP、JSON、时间、随机、字符串、数学、系统 API 开箱即用。<br>新增：日志、路径、参数解析、环境变量、键值存储、正则、哈希、UUID、时间解析、标准输入（input / read_int / read_float）。</p></div>
       <div class="card"><h4>🧩 集合类型</h4><p>列表 <code class="inline">[1, 2, 3]</code>、字典 <code class="inline">{"k": v}</code> 开箱即用：<code class="inline">for-in</code> 遍历、<code class="inline">f"..."</code> 字符串插值、append / contains / keys / values 等集合函数。</p></div>
       <div class="card"><h4>⚡ 多线程与调试</h4><p><code class="inline">go task(1);</code> 一行启动线程；<code class="inline">breakpoint;</code> 断点；<code class="inline">debug_print</code> 调试输出；<code class="inline">tmp fn</code> 临时函数开发时自动忽略。</p></div>
-      <div class="card"><h4>🔌 可嵌入可扩展</h4><p>@export 打包 C ABI 动态库（DLL/SO/DYLIB）、load 动态库调用、import 远程模块、LSP 语言服务器。</p></div>
+      <div class="card"><h4>🔌 可嵌入可扩展</h4><p>@export 打包 C ABI 动态库（DLL/SO/DYLIB）、load 动态库调用、import 远程模块、LSP 语言服务器。
+        <a href="docs.html#manifest">模块清单 hone.json</a> 一条命令拉齐全部依赖（类似 package.json / Cargo.toml）。</p></div>
       <div class="card"><h4>🏷 class 类与泛型</h4><p><code class="inline">class Math { fn double(x) {...} }</code> 类成员函数不进全局符号表，经 <code class="inline">类.方法(...)</code> 调用；
         <code class="inline">fn identity[T](x: T) -&gt; T</code> 泛型函数按实参自动推导，编译期擦除、运行期零成本。</p></div>
       <div class="card"><h4>🧪 新语法 v0.6.3</h4><p><code class="inline">continue</code>、C 风格 <code class="inline">for (init; cond; step)</code>、<code class="inline">do-while</code>、

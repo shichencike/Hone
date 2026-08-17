@@ -504,7 +504,29 @@ age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span cl
 
  <span class="c">// hone bind：离线从头文件生成签名块，粘贴进脚本即可</span>
  <span class="c">// hone bind path/to/hone_lib.h  →  输出 load 签名块到 stdout</span></code></pre>
-    <p><strong>typed FFI（v0.4+）</strong>：签名块内 <code class="inline">fn</code> 声明仅描述 C 函数 ABI，不定义 Hone 函数体。
+<h3 id="manifest">模块清单 hone.json（类似 package.json / Cargo.toml）</h3>
+<p>项目根目录放一个 <code class="inline">hone.json</code>，即可集中声明全部模块依赖（含元信息），
+  换机器 / 分享项目时用一条命令拉齐所有模块：</p>
+<pre><code>{
+<span class="s">"name"</span>: <span class="s">"myapp"</span>,      <span class="c">// 项目名（新建清单时自动取目录名）</span>
+<span class="s">"version"</span>: <span class="s">"0.1.0"</span>,   <span class="c">// 项目版本</span>
+<span class="s">"modules"</span>: {        <span class="c">// 模块依赖：模块名 → 源码 URL（或本地路径）</span>
+    <span class="s">"math_mod"</span>: <span class="s">"https://example.com/math_mod.hn"</span>,
+    <span class="s">"gui"</span>:     <span class="s">"./hone_lib/gui.hn"</span>
+}
+}</code></pre>
+<p>用法：</p>
+<ul>
+  <li><code class="inline">hone get</code>（不带参数）：读取当前目录 <code class="inline">hone.json</code>，
+    批量下载全部模块到 <code class="inline">~/.hone/cache/</code>（已缓存则跳过）</li>
+  <li><code class="inline">hone get &lt;module&gt; &lt;url&gt;</code>：下载单个模块，
+    并把 (module, url) 追加写入 <code class="inline">hone.json</code>（已存在则更新其 URL；清单不存在则自动新建）</li>
+  <li><code class="inline">hone get &lt;script.hn&gt;</code>：扫描脚本内所有 <code class="inline">import</code> 声明批量预下载</li>
+</ul>
+<p>要点：模块 URL 非 http/https 开头按<strong>本地路径</strong>处理，直接读取源码（不联网），
+  便于同仓库共享 <code class="inline">hone_lib/</code> 等模块；
+  清单缺失报 <code class="inline">error[H404]</code>，JSON 语法错误 / modules 为空报 <code class="inline">error[H005]</code>。</p>
+<p><strong>typed FFI（v0.4+）</strong>：签名块内 <code class="inline">fn</code> 声明仅描述 C 函数 ABI，不定义 Hone 函数体。
       支持类型映射：<code class="inline">int</code> → int64_t、<code class="inline">float</code> → double、<code class="inline">bool</code> → C bool、
       <code class="inline">str</code> → const char*、<code class="inline">ptr</code> → void*；返回类型额外支持 <code class="inline">void</code>；
       参数最多 8 个，回调 <code class="inline">fn(...)</code> 与可变参数 <code class="inline">...</code> 暂不支持。
