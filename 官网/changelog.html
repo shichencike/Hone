@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 更新日志</title>
-<meta name="description" content="Hone 编程语言更新日志：v0.6.2 process 进程检测与 sched 定时任务标准库、v0.6.1 解释器深度优化与 alias 别名增强、v0.6.0 class 类与泛型、标准库大规模扩展（csv/yaml/sqlite/smtp/ws 等）、v0.4.0 typed FFI 与头文件绑定等版本记录。">
+<meta name="description" content="Hone 编程语言更新日志：v0.6.4 标准输入函数（input/read_int/read_float）、v0.6.3 新语法（continue/C 风格 for/do-while/复合赋值/lambda/默认参数/原始字符串）、v0.6.2 process 进程检测与 sched 定时任务标准库、v0.6.1 解释器深度优化与 alias 别名增强、v0.6.0 class 类与泛型、标准库大规模扩展（csv/yaml/sqlite/smtp/ws 等）、v0.4.0 typed FFI 与头文件绑定等版本记录。">
 <meta name="theme-color" content="#0d1117">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
@@ -41,6 +41,25 @@ function toggleTheme(){
 <main>
   <h2><span class="hash">#</span>更新日志</h2>
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
+
+  <div class="release">
+    <span class="ver-tag">v0.6.4</span><span class="date">2026-08-17</span>
+    <h4>新增（标准输入函数）</h4>
+    <ul>
+      <li><strong>input(prompt?)</strong>：从标准输入读取一行返回 <code>str</code>（去除行尾换行），
+        可选提示文本（须为 <code>str</code>，如 <code>input("请输入名字: ")</code>）；EOF（管道关闭 / Ctrl+Z / Ctrl+D）抛
+        <code>error[H306]</code>，可用 try-catch 捕获降级</li>
+      <li><strong>read_int(prompt?)</strong> / <strong>read_float(prompt?)</strong>：读取一行并解析为
+        <code>int</code> / <code>float</code>，格式非法分别抛 <code>error[H006]</code> / <code>error[H007]</code></li>
+      <li>新增错误码 <strong>H306</strong>（标准输入读取失败 / EOF）及 <code>hone explain H306</code> 说明</li>
+      <li>新增示例 <code>examples/input_demo.hn</code>（input / read_int / read_float / EOF try-catch 演示）</li>
+    </ul>
+    <h4>文档</h4>
+    <ul>
+      <li>README（内置功能 + 错误码表）、hone.md（3.1 基础内置函数、5.2 错误码）、
+        官网 docs.html / stdlib.html / changelog.html 同步更新</li>
+    </ul>
+  </div>
 
   <div class="release">
     <span class="ver-tag">v0.6.3</span><span class="date">2026-08-16</span>

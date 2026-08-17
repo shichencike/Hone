@@ -161,6 +161,9 @@ pub fn is_builtin(name: &str) -> bool {
             | "to_str"
             | "to_int"
             | "to_float"
+            | "input"
+            | "read_int"
+            | "read_float"
             | "read_file"
             | "write_file"
             | "file_exists"
@@ -575,6 +578,64 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                     file,
                     src,
                     Some("`to_float` accepts `int`, `float` or a numeric `str`"),
+                )),
+            }
+        }
+        // input / read_int / read_float：从标准输入读取一行。
+        // 可选的第一个参数为提示文本（必须为 str），EOF（Ctrl+Z / 管道关闭）抛 H306。
+        "input" | "read_int" | "read_float" => {
+            if args.len() > 1 {
+                return Err(arg_err(name, 1, args.len(), span, file, src));
+            }
+            if let Some(p) = args.get(0) {
+                let prompt = as_str(p, 0, name, span, file, src)?;
+                print!("{}", prompt);
+                std::io::stdout().flush().ok();
+            }
+            let mut line = String::new();
+            match std::io::stdin().read_line(&mut line) {
+                Ok(0) => Err(err(
+                    codes::INPUT_EOF,
+                    "reached end of input (EOF) while reading a line from stdin",
+                    span,
+                    file,
+                    src,
+                    Some("no more input available: the pipe was closed or Ctrl+Z was pressed; use try-catch to handle it"),
+                )),
+                Ok(_) => {
+                    // 去掉行尾换行（兼容 \n 与 \r\n）
+                    let text = line.trim_end_matches(['\r', '\n']).to_string();
+                    match name {
+                        "input" => Ok(Value::Str(text)),
+                        "read_int" => text.trim().parse::<i64>().map(Value::Int).map_err(|_| {
+                            err(
+                                codes::STR_TO_INT,
+                                format!("cannot parse `{}` as an integer", text),
+                                span,
+                                file,
+                                src,
+                                Some("`read_int` expects a line containing a plain integer, e.g. 42"),
+                            )
+                        }),
+                        _ => text.trim().parse::<f64>().map(Value::Float).map_err(|_| {
+                            err(
+                                codes::STR_TO_FLOAT,
+                                format!("cannot parse `{}` as a float", text),
+                                span,
+                                file,
+                                src,
+                                Some("`read_float` expects a line containing a number, e.g. 3.14"),
+                            )
+                        }),
+                    }
+                }
+                Err(e) => Err(err(
+                    codes::SYSCALL,
+                    format!("failed to read a line from stdin: {}", e),
+                    span,
+                    file,
+                    src,
+                    Some("check whether stdin is available (e.g. not redirected from a closed device)"),
                 )),
             }
         }

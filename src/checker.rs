@@ -2441,6 +2441,26 @@ impl Checker {
                 self.arg_count(name, n, 1, span)?;
                 Ok(TyRes { ty: Ty::Float, slot: None })
             }
+            // input / read_int / read_float：0-1 个参数（可选提示文本），从标准输入读取
+            "input" | "read_int" | "read_float" => {
+                if n > 1 {
+                    return Err(self.zerr(
+                        codes::ARG_COUNT,
+                        format!("wrong number of arguments: `{}` expects 0-1 (optional prompt), got {}", name, n),
+                        span,
+                        Some("form: `input()` or `input(\"prompt\")`; prompt must be a string"),
+                    ));
+                }
+                if n == 1 {
+                    self.expect_str(name, args, 0, span, "the optional prompt")?;
+                }
+                let ty = match name {
+                    "input" => Ty::Str,
+                    "read_int" => Ty::Int,
+                    _ => Ty::Float,
+                };
+                Ok(TyRes { ty, slot: None })
+            }
             "read_file" | "http_get" => {
                 self.arg_count(name, n, 1, span)?;
                 self.expect_str(name, args, 0, span, "the URL/path")?;
@@ -3108,6 +3128,9 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "to_str",
         "to_int",
         "to_float",
+        "input",
+        "read_int",
+        "read_float",
         "read_file",
         "write_file",
         "file_exists",

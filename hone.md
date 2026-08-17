@@ -392,6 +392,9 @@ hone --help / --version 帮助信息 / 版本信息
 3.1 基础内置函数（直接可用，无需导入）
 
 · print(value)：输出到标准输出，自动换行
+· input(prompt?) → str：从标准输入读取一行（去除行尾换行），可选提示文本（须为 str）；EOF（管道关闭 / Ctrl+Z / Ctrl+D）报 error[H306]
+· read_int(prompt?) → int：读取一行并解析为整数，格式非法报 error[H006]
+· read_float(prompt?) → float：读取一行并解析为浮点数，格式非法报 error[H007]
 · read_file(path) → str：读取文本文件内容
 · write_file(path, content)：写入文本文件
 · file_exists(path) → bool：检查文件是否存在
@@ -869,6 +872,7 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · H303：权限不足
 · H304：野指针（未分配/已释放/重复释放/空指针，ptr 类）
 · H305：指针越界访问（超出 ptr.alloc 分配大小）
+· H306：标准输入读取失败/EOF（input / read_int / read_float）
 · H401：文件不存在
 · H402：文件权限不足
 · H403：文件被占用/锁定

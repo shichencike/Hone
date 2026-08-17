@@ -192,6 +192,8 @@ print(len(text));              // 24
 ## 内置功能
 
 - 基础：`print` `len` `type_of` `read_file` `write_file` `file_exists`
+- 标准输入：`input(prompt?)` 读取一行返回 str（EOF 报 H306）、`read_int(prompt?)` 读取并解析为 int（格式错报 H006）、
+  `read_float(prompt?)` 读取并解析为 float（格式错报 H007）
 - 集合：`append(list, x)` `contains(list, x)` `index_of(list, x)`（找不到返回 -1）、
   `keys(dict)` `values(dict)` `has_key(dict, k)`；`to_str` 输出 `[a, b]` / `{k: v}`
 - 类型判断：`is_int` `is_float` `is_str` `is_bool` `is_list` `is_dict` `is_null`
@@ -333,6 +335,7 @@ help: Hone types are locked after inference; no implicit conversion is allowed
 | H600 | 用户主动抛出（throw） |
 | H200 | 网络请求失败 |
 | H300 | 系统调用失败 |
+| H306 | 标准输入读取失败/EOF |
 | H404 | 文件或库不存在 |
 | H999 | 尚未实现 |
 
@@ -351,6 +354,7 @@ help: Hone types are locked after inference; no implicit conversion is allowed
 | 系统/DLL | H301 | DLL 加载失败 |
 | 系统/DLL | H302 | DLL 参数校验失败 |
 | 系统/DLL | H303 | 权限不足 |
+| 系统/DLL | H306 | 标准输入读取失败/EOF（input / read_int / read_float） |
 | 文件 | H401 | 文件不存在 |
 | 文件 | H402 | 文件权限不足 |
 | 文件 | H403 | 文件被占用/锁定 |

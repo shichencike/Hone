@@ -1,5 +1,19 @@
 # Changelog
 
+## [v0.6.4] - 2026-08-17
+
+### 新增（标准输入函数）
+- **`input(prompt?)`**：从标准输入读取一行返回 `str`（去除行尾换行），可选提示文本（须为 `str`，
+  如 `input("请输入名字: ")`）；EOF（管道关闭 / Ctrl+Z / Ctrl+D）抛 `error[H306]`，可用 try-catch 捕获降级
+- **`read_int(prompt?)` / `read_float(prompt?)`**：读取一行并解析为 `int` / `float`，
+  格式非法分别抛 `error[H006]` / `error[H007]`
+- 新增错误码 **H306**（标准输入读取失败 / EOF），`hone explain H306` 可查说明
+- 新增示例 `examples/input_demo.hn`（input / read_int / read_float / EOF try-catch 演示）
+
+### 文档
+- README（内置功能 + 错误码表）、hone.md（3.1 基础内置函数、5.2 错误码）、
+  官网 docs.html / stdlib.html / changelog.html / index.html 同步更新
+
 ## [v0.6.3] - 2026-08-16
 
 ### 新增（新语法）

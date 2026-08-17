@@ -145,6 +145,7 @@ pub mod codes {
     pub const PERMISSION: &str = "H303"; // 权限不足
     pub const PTR_INVALID: &str = "H304"; // 野指针：未分配/已释放/空指针
     pub const PTR_OOB: &str = "H305"; // 指针越界访问
+    pub const INPUT_EOF: &str = "H306"; // 标准输入读取失败/EOF
     // --- H400 区段：文件细分 ---
     pub const FILE_NOT_FOUND: &str = "H401"; // 文件不存在
     pub const FILE_PERMISSION: &str = "H402"; // 文件权限不足
@@ -184,6 +185,7 @@ pub fn explain(code: &str) -> Option<&'static str> {
         "H303" => "权限不足：操作被系统拒绝（文件、注册表等）。\n  修复：以管理员身份运行，或调整文件/注册表权限。",
         "H304" => "野指针：指针未分配、已释放（use-after-free）、重复释放（double-free）或为空。\n  修复：只读写/释放由 ptr.alloc 返回且尚未 ptr.free 的指针；外部 FFI 句柄由库管理。",
         "H305" => "指针越界访问：读写区间超出 ptr.alloc 分配的大小。\n  修复：用 ptr.size(p) 查询分配大小，检查偏移是否在 0..size 内。",
+        "H306" => "标准输入读取失败或到达 EOF（input / read_int / read_float）：管道关闭、Ctrl+Z（Windows）/ Ctrl+D（Unix）或设备错误。\n  修复：确认 stdin 有输入来源；在非交互环境（如管道）下先提供输入，或用 try-catch 捕获后走默认值/降级逻辑。",
         "H401" => "文件不存在：读取或写入的目标文件不存在。\n  修复：确认路径拼写，或先调用 write_file / file_exists 处理。",
         "H402" => "文件权限不足：无权限读取或写入该文件。\n  修复：检查文件只读属性与运行用户权限。",
         "H403" => "文件被占用/锁定：文件正被其他进程独占（Windows 常见）。\n  修复：关闭占用进程，稍后重试；可用 try-catch 配合重试。",
