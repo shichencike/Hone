@@ -537,6 +537,7 @@ age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span cl
       <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存到 ~/.hone/cache/，同时写入/更新 hone.json 清单（也支持扫描脚本 import 批量预下载）</td></tr>
       <tr><td><code>hone self-update [url]</code></td><td>从 URL（或环境变量 <code>HONE_UPDATE_URL</code>）下载最新 hone 二进制并替换当前程序，魔数校验防误下载</td></tr>
       <tr><td><code>hone lsp</code></td><td>语言服务器（补全/诊断/hover，LSP over stdio）</td></tr>
+      <tr><td><code>hone prof &lt;file.hn&gt;</code></td><td>剖析模式运行脚本，统计每个用户函数的总耗时 / 调用次数 / 平均耗时，按总耗时降序输出热点表格</td></tr>
       <tr><td><code>hone poop &lt;file.hn&gt;</code></td><td>屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
     </table>
   </section>
@@ -706,6 +707,7 @@ tasks = [
       <tr><td><code class="inline">tmp fn 名称() { }</code></td><td>临时函数，编译时自动忽略，适合开发期草稿</td></tr>
       <tr><td><code class="inline">hone explain H201</code></td><td>查看任意错误码的含义与修复建议</td></tr>
       <tr><td><code class="inline">hone poop &lt;file.hn&gt;</code></td><td>输出 if 嵌套深度与圈复杂度，定位「屎山」热点</td></tr>
+      <tr><td><code class="inline">hone prof &lt;file.hn&gt;</code></td><td>剖析模式运行，输出函数级热点报告（总耗时 / 调用次数 / 平均耗时），量化优化收益</td></tr>
       <tr><td><code class="inline">hone test [目录]</code></td><td>递归扫描 <code class="inline">*.test.hn</code>，配合 <code class="inline">assert(条件[, 消息])</code> 汇总 PASS/FAIL</td></tr>
       <tr><td><code class="inline">hone run --restart=3 --backoff=1,3,10 --restart-on=H200,H401</code></td><td>崩溃自动重启（仅对可重入错误）；<code class="inline">--resume</code> 从上次 db 检查点继续</td></tr>
     </table>
@@ -722,7 +724,8 @@ tasks = [
       <li><strong>热点计算交给 C</strong>：瓶颈函数用 <code class="inline">load</code> 调用 C 库（FFI），或用 <code class="inline">hone build --dll</code> 导出后由 C 调用</li>
       <li><strong>并行化</strong>：<code class="inline">go 函数名(参数);</code> 启动独立线程（值传递、不共享变量），
         适合可拆分的独立任务；线程间通信走文件 / HTTP / db</li>
-      <li><strong>先用 hone poop 找热点</strong>：优先优化嵌套最深、圈复杂度最高的函数；优化前先用 hone test 固化行为</li>
+      <li><strong>先用 hone prof 找热点</strong>：剖析模式输出各函数总耗时排名，优先优化耗时最长的；
+        再配合 hone poop 评估嵌套与圈复杂度；优化前先用 hone test 固化行为</li>
     </ul>
   </section>
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## [v0.6.6] - 2026-08-17
+
+### 新增（性能分析）
+- **`hone prof <script.hn>`**：以剖析模式运行脚本，统计每个用户函数的
+  总耗时 / 调用次数 / 平均耗时（纳秒级计时），按总耗时降序输出控制台表格
+- lambda 调用统一归入 `(lambda)` 条目；未调用任何用户函数时提示 `(未调用任何用户函数)`
+- 剖析仅在 prof 模式下启用（`Interp.prof = None` 关闭），普通运行零开销
+- 示例：`hone prof examples/fib.hn` 找出热点函数后，配合 `hone poop` 评估复杂度优先优化
+
+### 文档
+- hone.md（工具链命令）、README（命令清单）、
+  官网 docs.html（§15 工具链）/ index.html（快速开始命令表）/ changelog.html（v0.6.6 条目）同步更新
+
 ## [v0.6.5] - 2026-08-17
 
 ### 新增（模块清单 hone.json）

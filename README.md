@@ -44,6 +44,7 @@ hone get <module> <url>   # 下载模块依赖并缓存到 ~/.hn/cache/，并写
 hone get <script.hn>      # 预下载脚本中所有 import 声明的模块
 hone upgrade [-w] <file.hn> # 按映射表自动迁移旧版本语法（-w 覆盖写）
 hone lsp                  # 启动语言服务器（补全/诊断，LSP over stdio）
+hone prof <file.hn>       # 剖析模式运行脚本，输出函数级热点报告（总耗时/调用次数/平均耗时）
 hone poop <file.hn>       # 屎山检测——分析 if 嵌套深度和圈复杂度
 hone --help               # 帮助
 hone --version            # 版本

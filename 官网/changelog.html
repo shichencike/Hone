@@ -44,6 +44,23 @@ function toggleTheme(){
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
 
   <div class="release">
+    <span class="ver-tag">v0.6.6</span><span class="date">2026-08-17</span>
+    <h4>新增（性能分析）</h4>
+    <ul>
+      <li><strong><code>hone prof &lt;script.hn&gt;</code></strong>：以剖析模式运行脚本，统计每个用户函数的
+        总耗时 / 调用次数 / 平均耗时（纳秒级计时），按总耗时降序输出控制台表格</li>
+      <li>lambda 调用统一归入 <code>(lambda)</code> 条目；未调用任何用户函数时提示
+        <code>(未调用任何用户函数)</code>；剖析仅在 prof 模式下启用，普通运行零开销</li>
+      <li>用法：<code>hone prof examples/fib.hn</code> 找出热点函数，配合 <code>hone poop</code> 评估复杂度优先优化</li>
+    </ul>
+    <h4>文档</h4>
+    <ul>
+      <li>hone.md（工具链命令）、README（命令清单）、
+        官网 docs.html（§15 工具链）/ index.html（快速开始命令表）/ changelog.html（v0.6.6 条目）同步更新</li>
+    </ul>
+  </div>
+
+  <div class="release">
     <span class="ver-tag">v0.6.5</span><span class="date">2026-08-17</span>
     <h4>新增（模块清单 hone.json）</h4>
     <ul>

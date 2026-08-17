@@ -121,6 +121,7 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
         "bind" => cmd_bind(&args[1..]),
         "build" => cmd_build(&args[1..]),
         "get" => cmd_get(&args[1..]),
+        "prof" => cmd_prof(&args[1..]),
         "self-update" => cmd_self_update(&args[1..]),
         "lsp" => lsp::run_lsp(),
         "poop" => cmd_poop(&args[1..]),
@@ -366,6 +367,7 @@ fn print_help() {
     println!("  hone get                   读取当前目录 hone.json 清单，批量下载全部模块");
     println!("  hone get <module> <url>  下载模块依赖并缓存到 ~/.hone/cache/，并写入 hone.json 清单");
     println!("  hone get <script.hn>     预下载脚本中所有 import 声明的模块");
+    println!("  hone prof <script.hn>    以剖析模式运行脚本，输出函数级热点报告（总耗时/调用次数/平均耗时）");
     println!("  hone self-update [url]   从 URL 下载最新 hone 二进制并替换当前程序（需管理员/写权限）");
     println!("  hone lsp                 启动语言服务器（补全/诊断，LSP over stdio）");
     println!("  hone --help              显示帮助");
@@ -1205,6 +1207,45 @@ fn cmd_poop(args: &[String]) -> Result<(), ZError> {
         println!("  评级: ✅ 代码质量良好，继续保持！");
     }
     Ok(())
+}
+
+/// hone prof <script.hn>：以剖析模式运行脚本，输出函数级热点报告。
+fn cmd_prof(args: &[String]) -> Result<(), ZError> {
+    let path = args.get(0).ok_or_else(|| {
+        ZError::plain(
+            codes::SYNTAX,
+            "missing file: `hone prof <script.hn>`",
+            Some("pass a .hn script to profile, e.g. `hone prof fib.hn`"),
+        )
+    })?;
+    let src = std::fs::read_to_string(path).map_err(|e| {
+        ZError::plain(codes::NOT_FOUND, format!("cannot read `{}`: {}", path, e), Some("check the path"))
+    })?;
+    let program = parser::Parser::parse(path, &src)?;
+    checker::Checker::check(&program, path, &src)?;
+    let data = interp::run_prof(&program, path, &src)?;
+    print_prof_report(&data);
+    Ok(())
+}
+
+/// 打印函数级剖析报告：按总耗时降序的表格（函数 / 调用次数 / 总耗时 / 平均耗时）。
+fn print_prof_report(data: &interp::ProfData) {
+    if data.is_empty() {
+        println!("(未调用任何用户函数)");
+        return;
+    }
+    let rows = data.sorted();
+    println!("函数级热点报告（按总耗时降序）:");
+    println!("  {:<24} {:>10} {:>14} {:>14}", "函数", "调用次数", "总耗时", "平均耗时");
+    for (name, calls, total_ns, avg_ns) in &rows {
+        println!(
+            "  {:<24} {:>10} {:>12.3}ms {:>12.3}ms",
+            name,
+            calls,
+            *total_ns as f64 / 1_000_000.0,
+            *avg_ns as f64 / 1_000_000.0
+        );
+    }
 }
 
 /// 分析源码中的 if 嵌套深度和圈复杂度

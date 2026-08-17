@@ -180,6 +180,43 @@ impl Env {
     }
 }
 
+/// profiler 单函数统计：调用次数与累计耗时（纳秒）。
+#[derive(Clone, Copy, Default)]
+struct ProfEntry {
+    calls: u64,
+    total_ns: u128,
+}
+
+/// hone prof 收集到的函数级剖析数据（可按总耗时降序排序）。
+pub struct ProfData {
+    entries: HashMap<String, ProfEntry>,
+}
+
+impl ProfData {
+    fn from_map(entries: HashMap<String, ProfEntry>) -> Self {
+        ProfData { entries }
+    }
+
+    /// 是否有任何用户函数被调用。
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// 按总耗时降序返回 (函数名, 调用次数, 总耗时纳秒, 平均耗时纳秒)。
+    pub fn sorted(&self) -> Vec<(String, u64, u128, u128)> {
+        let mut v: Vec<(String, u64, u128, u128)> = self
+            .entries
+            .iter()
+            .map(|(k, e)| {
+                let avg = if e.calls > 0 { e.total_ns / e.calls as u128 } else { 0 };
+                (k.clone(), e.calls, e.total_ns, avg)
+            })
+            .collect();
+        v.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| b.1.cmp(&a.1)));
+        v
+    }
+}
+
 pub struct Interp {
     pub file: String,
     pub src: String,
@@ -200,6 +237,8 @@ pub struct Interp {
     /// 类定义：类名 → (方法名 → FnDef)。成员函数不进全局 fns 表，
     /// 只能经 `类.方法(...)` 调用（call_fn 按限定名解析）。
     classes: HashMap<String, HashMap<String, Arc<FnDef>>>,
+    /// profiler 统计表（None = 未启用剖析，减少热路径开销）
+    prof: Option<HashMap<String, ProfEntry>>,
 }
 
 /// load 加载的 C ABI 库函数签名约定：全 int64 参数（不足补 0，x64 ABI 安全）。
@@ -268,6 +307,22 @@ macro_rules! ffi_dispatch {
 
 /// 运行整个程序。debug 为 true 时 breakpoint; 生效。
 pub fn run(program: &Program, file: &str, src: &str, debug: bool) -> Result<(), ZError> {
+    run_impl(program, file, src, debug, false).map(|_| ())
+}
+
+/// 以 profiler 模式运行脚本：返回函数级剖析数据（总耗时 / 调用次数 / 平均耗时）。
+pub fn run_prof(program: &Program, file: &str, src: &str) -> Result<ProfData, ZError> {
+    run_impl(program, file, src, false, true)?
+        .ok_or_else(|| ZError::plain(codes::SYSCALL, "profiler data unavailable", None::<&str>))
+}
+
+fn run_impl(
+    program: &Program,
+    file: &str,
+    src: &str,
+    debug: bool,
+    prof: bool,
+) -> Result<Option<ProfData>, ZError> {
     let mut ip = Interp {
         file: file.to_string(),
         src: src.to_string(),
@@ -280,13 +335,14 @@ pub fn run(program: &Program, file: &str, src: &str, debug: bool) -> Result<(), 
         alias_map: HashMap::new(),
         structs: HashMap::new(),
         classes: HashMap::new(),
+        prof: if prof { Some(HashMap::new()) } else { None },
     };
     ip.collect_fns(&program.stmts)?;
     ip.collect_structs(&program.stmts);
     ip.collect_classes(&program.stmts);
     let mut env = Env::new();
     ip.exec_stmts(&mut env, &program.stmts)?;
-    Ok(())
+    Ok(ip.prof.map(ProfData::from_map))
 }
 
 impl Interp {
@@ -782,6 +838,7 @@ impl Interp {
                 alias_map,
                 structs,
                 classes,
+                prof: None,
             };
             if let Err(err) = t.call_fn(&callee, arg_vals, span) {
                 eprintln!("{}", err);
@@ -1266,8 +1323,14 @@ impl Interp {
             call_env.declare(&p.name, v);
         }
         self.depth += 1;
+        let t0 = if self.prof.is_some() { Some(std::time::Instant::now()) } else { None };
         let flow = self.exec_stmts(&mut call_env, &f.body);
         self.depth -= 1;
+        if let (Some(t0), Some(prof)) = (t0, self.prof.as_mut()) {
+            let entry = prof.entry(name.to_string()).or_default();
+            entry.calls += 1;
+            entry.total_ns += t0.elapsed().as_nanos();
+        }
         match flow? {
             Flow::Return(v) => Ok(v),
             Flow::Normal => Ok(Value::Null),
@@ -1321,8 +1384,15 @@ impl Interp {
             call_env.declare(&p.name, v);
         }
         self.depth += 1;
+        let t0 = if self.prof.is_some() { Some(std::time::Instant::now()) } else { None };
         let flow = self.exec_stmts(&mut call_env, &f.body);
         self.depth -= 1;
+        if let (Some(t0), Some(prof)) = (t0, self.prof.as_mut()) {
+            // lambda 无名字，统一归入 "(lambda)" 条目
+            let entry = prof.entry("(lambda)".to_string()).or_default();
+            entry.calls += 1;
+            entry.total_ns += t0.elapsed().as_nanos();
+        }
         match flow? {
             Flow::Return(v) => Ok(v),
             Flow::Normal => Ok(Value::Null),
