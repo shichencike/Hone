@@ -13,7 +13,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::builtins::TLS;
+use crate::builtins::{ReadWrite, tls_connect_fallback, tls_upgrade_fallback};
 use crate::error::codes;
 use crate::error::ZError;
 use crate::interp::Value;
@@ -54,7 +54,7 @@ fn as_int(v: &Value, arg: usize, span: Span, file: &str, src: &str) -> Result<i6
 /// 连接抽象：明文 TCP 或 TLS（STARTTLS 需要从明文升级，故用枚举持有底层流）。
 enum Conn {
     Plain(TcpStream),
-    Tls(rustls::StreamOwned<rustls::ClientConnection, TcpStream>),
+    Tls(Box<dyn ReadWrite>),
 }
 
 impl Read for Conn {
@@ -84,73 +84,33 @@ impl Write for Conn {
 /// 建立到 host:port 的 TCP 连接；use_tls=true 时立即做 TLS 握手。
 fn connect(host: &str, port: u16, use_tls: bool, timeout_secs: u64, span: Span, file: &str, src: &str) -> Result<Conn, ZError> {
     let addr = format!("{}:{}", host, port);
-    let tcp = TcpStream::connect(&addr).map_err(|e| {
-        zerr(
-            codes::NETWORK,
-            format!("connect {}: {}", addr, e),
-            span,
-            file,
-            src,
-            Some("check the host/port or your network"),
-        )
-    })?;
-    tcp.set_read_timeout(Some(Duration::from_secs(timeout_secs))).ok();
-    tcp.set_write_timeout(Some(Duration::from_secs(timeout_secs))).ok();
     if !use_tls {
+        let tcp = TcpStream::connect(&addr).map_err(|e| {
+            zerr(
+                codes::NETWORK,
+                format!("connect {}: {}", addr, e),
+                span,
+                file,
+                src,
+                Some("check the host/port or your network"),
+            )
+        })?;
+        tcp.set_read_timeout(Some(Duration::from_secs(timeout_secs))).ok();
+        tcp.set_write_timeout(Some(Duration::from_secs(timeout_secs))).ok();
         return Ok(Conn::Plain(tcp));
     }
-    let connector = match TLS.as_ref() {
-        Ok(c) => c.clone(),
-        Err(e) => {
-            return Err(zerr(codes::NETWORK, format!("TLS init failed: {}", e), span, file, src, None::<&str>))
-        }
-    };
-    let server_name = match rustls::pki_types::ServerName::try_from(host.to_string()) {
-        Ok(n) => n,
-        Err(e) => {
-            return Err(zerr(codes::NETWORK, format!("invalid hostname `{}`: {}", host, e), span, file, src, None::<&str>))
-        }
-    };
-    match rustls::ClientConnection::new(connector, server_name) {
-        Ok(conn) => Ok(Conn::Tls(rustls::StreamOwned::new(conn, tcp))),
-        Err(e) => Err(zerr(
-            codes::NETWORK,
-            format!("TLS handshake with {} failed: {}", host, e),
-            span,
-            file,
-            src,
-            Some("the server certificate may be invalid or self-signed"),
-        )),
-    }
+    // TLS：内置根证书优先，证书校验失败自动回退系统根证书 + 用户 CA（builtins 统一实现）
+    let stream = tls_connect_fallback(host, &addr, timeout_secs, span, file, src)?;
+    Ok(Conn::Tls(stream))
 }
 
 /// 将明文连接升级为 TLS（STARTTLS 用）。失败返回原连接语义的错误。
 fn upgrade_tls(conn: Conn, host: &str, span: Span, file: &str, src: &str) -> Result<Conn, ZError> {
     match conn {
         Conn::Plain(tcp) => {
-            let connector = match TLS.as_ref() {
-                Ok(c) => c.clone(),
-                Err(e) => {
-                    return Err(zerr(codes::NETWORK, format!("TLS init failed: {}", e), span, file, src, None::<&str>))
-                }
-            };
-            let server_name = match rustls::pki_types::ServerName::try_from(host.to_string()) {
-                Ok(n) => n,
-                Err(e) => {
-                    return Err(zerr(codes::NETWORK, format!("invalid hostname `{}`: {}", host, e), span, file, src, None::<&str>))
-                }
-            };
-            match rustls::ClientConnection::new(connector, server_name) {
-                Ok(conn) => Ok(Conn::Tls(rustls::StreamOwned::new(conn, tcp))),
-                Err(e) => Err(zerr(
-                    codes::NETWORK,
-                    format!("TLS handshake with {} failed: {}", host, e),
-                    span,
-                    file,
-                    src,
-                    Some("the server certificate may be invalid or self-signed"),
-                )),
-            }
+            // 同一 TCP 上升级：内置根证书优先，失败回退系统根证书 + 用户 CA（尽力而为）
+            let stream = tls_upgrade_fallback(host, tcp, span, file, src)?;
+            Ok(Conn::Tls(stream))
         }
         tls => Ok(tls),
     }

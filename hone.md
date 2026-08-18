@@ -493,7 +493,8 @@ hone --help / --version 帮助信息 / 版本信息
 · file_exists(path) → bool：检查文件是否存在
 · len(value) → int：返回字符串长度（字节数）、列表/字典元素个数
 · type_of(value) → str：返回变量类型名称（"int"、"float"、"bool"、"str"、"list"、"dict"、"null"、"error"、"ptr"）
-· http_get(url) → str：发送 HTTP GET 请求，返回响应体（支持 http:// 与 https://，TLS 为纯 Rust 实现、内置 Mozilla 根证书）
+· http_get(url) → str：发送 HTTP GET 请求，返回响应体（支持 http:// 与 https://，TLS 为纯 Rust 实现、内置 Mozilla 根证书，
+  校验失败自动回退系统根证书，可经 HONE_CA_BUNDLE / ~/.hn/ca.pem 信任私有 CA 的根证书与中间证书）
 · http_post(url, body) → str：发送 HTTP POST 请求（body 为字符串，支持 http:// 与 https://）
 · json_parse(str) → value：将 JSON 字符串解析为 Hone 值（自动映射为 int/float/bool/str）
 · json_stringify(value) → str：将 Hone 值序列化为 JSON 字符串
@@ -813,6 +814,14 @@ print(to_str(regex.split("[,;]", "a,b;c"))); // ["a","b","c"]
   · headers：自定义请求头 dict（可覆盖 User-Agent / Content-Type）
   · body：请求体字符串（method 为 POST 等时常用）
   · timeout：超时秒数（int/float，默认 15）
+
+· TLS 根证书回退机制（https:// 与 wss:// 自动生效）：
+  · 优先内置 Mozilla 根证书（webpki-roots，编译进二进制）；证书校验失败时自动重连，
+    回退到系统根证书（Windows ROOT 证书库 / Linux·Termux 系统 CA bundle），防内置根证书过期
+  · 用户信任根：HONE_CA_BUNDLE 环境变量指定 PEM 文件（缺省 ~/.hn/ca.pem），
+    其中的根证书与中间证书均可信任（私有 CA / 自签名场景）
+  · 中间证书注入：用户 CA 文件中的中间证书参与链构建，服务器即使不随链发送中间证书也能验证
+  · 覆盖 http_get / http_post / http.request、smtp.send（隐式 TLS 与 STARTTLS）、ws.request（wss://）
 
 示例：
 

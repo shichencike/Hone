@@ -1,5 +1,31 @@
 # Changelog
 
+## [v0.6.8] - 2026-08-18
+
+### 新增（新语法）
+- **多返回值**：`return a, b, ...;` 一次返回多个值，运行时打包为列表，由解构赋值接收
+- **解构赋值**：列表 `a, b = [1, 2]` 按位置绑定；字典 `{a, b} = dict` / 改名 `{a: x, b: y} = dict` 按键取出
+- **列表/字典推导式**：`[expr for x in iter (if cond)]` 与 `{key: value for ...}` 一行生成集合
+  （字典推导式键必须为 str，动态键用 to_str 转换）
+- **可选链 `?.`**：`a?.b` 在 a 为 null 时短路返回 null，可链式 `a?.b?.c`；混合链 `a?.b.c` 与 JS 语义一致
+- 新增示例 `examples/new_syntax_demo.hn`（44 项断言全部通过）
+
+### 新增（TLS 根证书回退）
+- **系统根证书回退**：内置 Mozilla 根证书校验失败时自动重连，回退到系统根证书
+  （Windows ROOT 证书库 / Linux·Termux 系统 CA bundle，Termux 额外扫描 Android cacerts 目录），
+  防内置根证书过期导致 https/wss 无法连接
+- **用户信任根**：`HONE_CA_BUNDLE` 环境变量指定 PEM 文件（缺省 `~/.hn/ca.pem`），
+  可信任私有 CA 的**根证书与中间证书**（自签名 / 内网证书场景）
+- **中间证书注入**：用户 CA 文件中的中间证书参与链构建（自定义 rustls ServerCertVerifier），
+  服务器即使不随链发送中间证书也能完成验证
+- 覆盖 `http_get` / `http_post` / `http.request`、`smtp.send`（隐式 TLS 与 STARTTLS）、`ws.request`（wss://）
+- 新增依赖 `rustls-webpki`（链构建）与 winapi `wincrypt`（Windows 证书库枚举）
+- 新增端到端测试 `tests/tls_fallback.sh`（本地 CA 链 5 项断言全部通过）
+
+### 文档
+- hone.md（1.16-1.19 新语法、3.22 TLS 回退说明）、README、
+  官网 docs.html（§7.7 新语法、内置函数参考 TLS 说明）/ tutorial.html（可选链交叉引用）/ changelog.html（v0.6.8 条目）同步更新
+
 ## [v0.6.6] - 2026-08-17
 
 ### 新增（性能分析）

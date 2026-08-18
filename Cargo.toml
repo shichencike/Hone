@@ -34,7 +34,9 @@ flate2 = "1"
 # TLS：rustls + rustls-rustcrypto（纯 Rust，无 C 依赖），Windows/Linux/Termux 跨平台一致
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
 rustls-rustcrypto = "0.0.2-alpha"
+# 证书链构建（自定义验证器注入中间证书用；与 rustls 同版本树）
+rustls-webpki = "0.103"
 webpki-roots = "0.26"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["winuser", "winbase", "winreg", "synchapi", "errhandlingapi", "winnt"] }
+winapi = { version = "0.3", features = ["winuser", "winbase", "winreg", "synchapi", "errhandlingapi", "winnt", "wincrypt"] }

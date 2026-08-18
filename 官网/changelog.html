@@ -44,6 +44,35 @@ function toggleTheme(){
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
 
   <div class="release">
+    <span class="ver-tag">v0.6.8</span><span class="date">2026-08-18</span>
+    <h4>新增（新语法）</h4>
+    <ul>
+      <li><strong>多返回值</strong>：<code>return a, b, ...;</code> 一次返回多个值，运行时打包为列表，
+        由解构赋值 <code>a, b = f()</code> 接收</li>
+      <li><strong>解构赋值</strong>：列表 <code>a, b = [1, 2]</code> 按位置绑定；
+        字典 <code>{a, b} = dict</code> / 改名 <code>{a: x, b: y} = dict</code> 按键取出</li>
+      <li><strong>列表/字典推导式</strong>：<code>[expr for x in iter (if cond)]</code> 与
+        <code>{key: value for ...}</code> 一行生成集合（字典键必须为 str）</li>
+      <li><strong>可选链 <code>?.</code></strong>：<code>a?.b</code> 在 a 为 null 时短路返回 null，
+        可链式 <code>a?.b?.c</code>；混合链 <code>a?.b.c</code> 与 JS 语义一致</li>
+    </ul>
+    <h4>新增（TLS 根证书回退）</h4>
+    <ul>
+      <li>内置根证书校验失败自动回退<strong>系统根证书</strong>（Windows ROOT 证书库 / LinuxTermux 系统 CA bundle），
+        防内置根证书过期导致 https/wss 无法连接</li>
+      <li>用户信任根：<code>HONE_CA_BUNDLE</code> / <code>~/.hn/ca.pem</code>，可信任私有 CA 的
+        <strong>根证书与中间证书</strong>；中间证书注入链构建，服务器不随链发送也能验证</li>
+      <li>覆盖 <code>http_get</code> / <code>http_post</code> / <code>http.request</code>、
+        <code>smtp.send</code>（隐式 TLS / STARTTLS）、<code>ws.request</code>（wss://）</li>
+    </ul>
+    <h4>文档</h4>
+    <ul>
+      <li>hone.md（1.16-1.19 新语法、3.22 TLS 回退）、官网 docs.html（§7.7 新语法、§8 TLS 说明）/
+        tutorial.html（可选链交叉引用）/ changelog.html（v0.6.8 条目）同步更新</li>
+    </ul>
+  </div>
+
+  <div class="release">
     <span class="ver-tag">v0.6.7</span><span class="date">2026-08-18</span>
     <h4>新增（交互式解释器）</h4>
     <ul>

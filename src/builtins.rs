@@ -1496,6 +1496,474 @@ pub(crate) static TLS: LazyLock<Result<std::sync::Arc<rustls::ClientConfig>, Str
     Ok(std::sync::Arc::new(config))
 });
 
+/// 回退 TLS 配置：系统根证书（Windows ROOT 证书库 / Linux·Termux 系统 CA bundle）
+/// + 用户自定义信任根（HONE_CA_BUNDLE 环境变量指定文件，缺省 ~/.hn/ca.pem）。
+/// 惰性构建：仅当内置根证书（webpki-roots）校验失败时才首次访问，常态零开销。
+/// 验证器为自定义实现：信任锚 = 系统根证书 + 用户 CA 文件证书（根/中间均可），
+/// 且用户 CA 文件中的中间证书会注入链构建（服务器不随链发送也能验证）。
+pub(crate) static SYSTEM_TLS: LazyLock<Result<std::sync::Arc<rustls::ClientConfig>, String>> = LazyLock::new(|| {
+    let mut roots = rustls::RootCertStore::empty();
+    load_system_roots(&mut roots)?;
+    // 用户 CA 文件：根证书与中间证书均可信任（全部加入信任锚）
+    let user_certs = load_user_ca_certs();
+    for der in &user_certs {
+        let _ = roots.add(der.clone());
+    }
+    let provider = rustls_rustcrypto::provider();
+    let verifier = TrustFileVerifier {
+        roots: std::sync::Arc::new(roots),
+        extra: user_certs,
+        supported: provider.signature_verification_algorithms,
+    };
+    let config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(provider))
+        .with_safe_default_protocol_versions()
+        .map_err(|e| e.to_string())?
+        .dangerous()
+        .with_custom_certificate_verifier(std::sync::Arc::new(verifier))
+        .with_no_client_auth();
+    Ok(std::sync::Arc::new(config))
+});
+
+/// 回退验证器：信任锚 = 系统根证书 + 用户 CA 文件证书；
+/// 用户 CA 文件中的中间证书注入链构建（根证书与中间证书均可信任）。
+struct TrustFileVerifier {
+    roots: std::sync::Arc<rustls::RootCertStore>,
+    /// 用户 CA 文件中的证书：同时作为信任锚与注入链构建的中间证书
+    extra: Vec<rustls::pki_types::CertificateDer<'static>>,
+    /// 支持的签名验证算法（来自 rustls-rustcrypto provider，内部为 'static 引用）
+    supported: rustls::crypto::WebPkiSupportedAlgorithms,
+}
+
+impl std::fmt::Debug for TrustFileVerifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrustFileVerifier")
+            .field("trust_anchors", &self.roots.len())
+            .field("extra_intermediates", &self.extra.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl rustls::client::danger::ServerCertVerifier for TrustFileVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &rustls::pki_types::CertificateDer<'_>,
+        intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        let cert = webpki::EndEntityCert::try_from(end_entity)
+            .map_err(|_| rustls::Error::InvalidCertificate(rustls::CertificateError::BadEncoding))?;
+        // 服务端随链发送的中间证书 + 用户配置的中间证书，一起参与链构建
+        let mut chain = Vec::with_capacity(intermediates.len() + self.extra.len());
+        chain.extend(intermediates.iter().cloned());
+        chain.extend(self.extra.iter().cloned());
+        cert.verify_for_usage(
+            self.supported.all,
+            &self.roots.roots,
+            &chain,
+            now,
+            webpki::KeyUsage::server_auth(),
+            None,
+            None,
+        )
+        .map_err(|_| rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer))?;
+        // 主机名校验（与内置验证器一致）
+        cert.verify_is_valid_for_subject_name(server_name)
+            .map_err(|_| rustls::Error::InvalidCertificate(rustls::CertificateError::NotValidForName))?;
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls12_signature(message, cert, dss, &self.supported)?;
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(message, cert, dss, &self.supported)?;
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.supported.supported_schemes()
+    }
+}
+
+/// 从 PEM 文本中提取全部证书（-----BEGIN CERTIFICATE----- ... -----END CERTIFICATE-----）。
+/// 系统 CA bundle 与用户 CA 文件共用。
+fn parse_pem_certs(pem: &str) -> Vec<rustls::pki_types::CertificateDer<'static>> {
+    use base64::Engine;
+    let mut out = Vec::new();
+    let mut in_cert = false;
+    let mut b64 = String::new();
+    for line in pem.lines() {
+        let t = line.trim();
+        if t.starts_with("-----BEGIN") {
+            in_cert = true;
+            b64.clear();
+        } else if t.starts_with("-----END") {
+            if in_cert && !b64.is_empty() {
+                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&b64) {
+                    out.push(rustls::pki_types::CertificateDer::from(bytes));
+                }
+            }
+            in_cert = false;
+        } else if in_cert {
+            b64.push_str(t);
+        }
+    }
+    out
+}
+
+/// 加载系统根证书到证书库。
+/// Windows：枚举系统 ROOT 证书库（机器级，系统自动更新，防内置根证书过期）；
+/// Linux/Termux：读取常见 CA bundle 文件，Termux 额外扫描 Android cacerts 目录。
+fn load_system_roots(roots: &mut rustls::RootCertStore) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::ptr::null;
+        use winapi::um::wincrypt::*;
+        // 打开系统 ROOT 证书库（CertOpenSystemStoreW 打开机器级存储）
+        let name: Vec<u16> = "ROOT\0".encode_utf16().collect();
+        let store = unsafe { CertOpenSystemStoreW(0, name.as_ptr()) };
+        if store.is_null() {
+            return Err("cannot open the Windows ROOT certificate store".into());
+        }
+        let mut ctx: *const CERT_CONTEXT = null();
+        unsafe {
+            loop {
+                ctx = CertEnumCertificatesInStore(store, ctx);
+                if ctx.is_null() {
+                    break;
+                }
+                let c = &*ctx;
+                let der = std::slice::from_raw_parts(c.pbCertEncoded, c.cbCertEncoded as usize).to_vec();
+                let _ = roots.add(rustls::pki_types::CertificateDer::from(der));
+            }
+            CertCloseStore(store, 0);
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        // 常见系统 CA bundle 路径（取第一个存在的）
+        const BUNDLES: &[&str] = &[
+            "/etc/ssl/certs/ca-certificates.crt", // Debian/Ubuntu
+            "/etc/ssl/cert.pem",                  // Alpine / BSD
+            "/etc/pki/tls/certs/ca-bundle.crt",   // RHEL/Fedora
+            "/etc/ssl/ca-bundle.pem",             // openSUSE
+            "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+        ];
+        for p in BUNDLES {
+            if let Ok(pem) = std::fs::read_to_string(p) {
+                for der in parse_pem_certs(&pem) {
+                    let _ = roots.add(der);
+                }
+                return Ok(());
+            }
+        }
+        // Termux/Android：/system/etc/security/cacerts/*.0（哈希命名的 PEM 文件）
+        if let Ok(rd) = std::fs::read_dir("/system/etc/security/cacerts") {
+            let mut found = false;
+            for e in rd.flatten() {
+                if let Ok(pem) = std::fs::read_to_string(e.path()) {
+                    for der in parse_pem_certs(&pem) {
+                        let _ = roots.add(der);
+                        found = true;
+                    }
+                }
+            }
+            if found {
+                return Ok(());
+            }
+        }
+        Err("no system CA bundle found (looked in /etc/ssl/certs and /system/etc/security/cacerts)".into())
+    }
+}
+
+/// 读取用户自定义信任证书（信任私有 CA 的根证书与中间证书，即「信任根证书 / 中间证书」）。
+/// 路径：HONE_CA_BUNDLE 环境变量优先，缺省 ~/.hn/ca.pem（家目录依 HOME / USERPROFILE）。
+/// 返回 PEM 中的全部证书；由 SYSTEM_TLS 同时用作信任锚与注入链构建的中间证书。
+fn load_user_ca_certs() -> Vec<rustls::pki_types::CertificateDer<'static>> {
+    let explicit = std::env::var("HONE_CA_BUNDLE").ok();
+    let path = match &explicit {
+        Some(p) => p.clone(),
+        None => {
+            let home = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .unwrap_or_default();
+            format!("{}/.hn/ca.pem", home)
+        }
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(pem) => {
+            let certs = parse_pem_certs(&pem);
+            if certs.is_empty() {
+                if explicit.is_some() {
+                    eprintln!("[hone] warning: no certificates found in `{}`", path);
+                }
+            }
+            certs
+        }
+        Err(_) => {
+            // 缺省路径不存在是常见情况，静默；显式配置却读不到则提示
+            if explicit.is_some() {
+                eprintln!("[hone] warning: cannot read HONE_CA_BUNDLE file `{}`", path);
+            }
+            Vec::new()
+        }
+    }
+}
+
+/// 握手失败信息：code=错误码（供调用方分类），reason=完整错误描述，
+/// hint=帮助提示，cert=是否为证书校验失败（决定是否触发系统根证书回退）。
+struct TlsFail {
+    code: &'static str,
+    reason: String,
+    hint: Option<&'static str>,
+    cert: bool,
+}
+
+/// 用指定 TLS 配置显式完成握手（complete_io 驱动，失败可在调用方回退重试）。
+/// 失败时归还 TCP 连接（同一连接上可用新配置重试，STARTTLS 场景需要）。
+fn tls_handshake_once(
+    config: &std::sync::Arc<rustls::ClientConfig>,
+    host: &str,
+    server_name: &rustls::pki_types::ServerName<'static>,
+    tcp: TcpStream,
+) -> Result<rustls::StreamOwned<rustls::ClientConnection, TcpStream>, (TlsFail, TcpStream)> {
+    let conn = match rustls::ClientConnection::new(config.clone(), server_name.clone()) {
+        Ok(c) => c,
+        Err(e) => {
+            let f = TlsFail {
+                code: codes::NETWORK,
+                reason: format!("TLS handshake with {} failed: {}", host, e),
+                hint: None,
+                cert: false,
+            };
+            return Err((f, tcp));
+        }
+    };
+    let mut owned = rustls::StreamOwned::new(conn, tcp);
+    loop {
+        if !owned.conn.is_handshaking() {
+            break;
+        }
+        match owned.conn.complete_io(&mut owned.sock) {
+            Ok(_) => {}
+            Err(e) => {
+                // 证书校验失败（InvalidCertificate）→ 标记 cert，触发系统根证书回退
+                let cert = matches!(
+                    e.get_ref().and_then(|r| r.downcast_ref::<rustls::Error>()),
+                    Some(rustls::Error::InvalidCertificate(_))
+                );
+                let f = TlsFail {
+                    code: codes::NETWORK,
+                    reason: format!("TLS handshake with {} failed: {}", host, e),
+                    hint: if cert {
+                        Some("the server certificate is not trusted by the built-in roots")
+                    } else {
+                        None
+                    },
+                    cert,
+                };
+                return Err((f, owned.sock));
+            }
+        }
+    }
+    Ok(owned)
+}
+
+/// 建立 TCP + 指定配置的 TLS 连接（显式握手完成后再返回，避免惰性握手掩盖证书错误）。
+/// 连接失败按 io::ErrorKind 细分错误码（超时/拒绝/DNS）。
+fn tls_connect_with(
+    host: &str,
+    server_name: &rustls::pki_types::ServerName<'static>,
+    addr: &str,
+    timeout_secs: u64,
+    config: &std::sync::Arc<rustls::ClientConfig>,
+) -> Result<Box<dyn ReadWrite>, TlsFail> {
+    let tcp = match TcpStream::connect(addr) {
+        Ok(t) => t,
+        Err(e) => {
+            let (code, hint): (&'static str, Option<&'static str>) = match e.kind() {
+                std::io::ErrorKind::TimedOut => (codes::NET_TIMEOUT, Some("the connection timed out")),
+                std::io::ErrorKind::ConnectionRefused => (codes::NET_CONN_REFUSED, Some("the connection was refused")),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::AddrNotAvailable => {
+                    (codes::NET_DNS, Some("DNS resolution failed"))
+                }
+                _ => (codes::NETWORK, Some("check the host/port or your network")),
+            };
+            let f = TlsFail {
+                code,
+                reason: format!("connect {}: {}", addr, e),
+                hint,
+                cert: false,
+            };
+            return Err(f);
+        }
+    };
+    tcp.set_read_timeout(Some(Duration::from_secs(timeout_secs))).ok();
+    tcp.set_write_timeout(Some(Duration::from_secs(timeout_secs))).ok();
+    match tls_handshake_once(config, host, server_name, tcp) {
+        Ok(owned) => Ok(Box::new(owned)),
+        Err((f, _tcp)) => Err(f),
+    }
+}
+
+/// 建立 TLS 连接（https、wss、SMTPS 隐式 TLS 共用）：
+/// 内置根证书（webpki-roots）优先；证书校验失败时自动重连，
+/// 回退到系统根证书 + 用户自定义 CA（HONE_CA_BUNDLE 或 ~/.hn/ca.pem，即「信任根证书」）。
+pub(crate) fn tls_connect_fallback(
+    host: &str,
+    addr: &str,
+    timeout_secs: u64,
+    span: Span,
+    file: &str,
+    src: &str,
+) -> Result<Box<dyn ReadWrite>, ZError> {
+    let server_name = match rustls::pki_types::ServerName::try_from(host.to_string()) {
+        Ok(n) => n,
+        Err(e) => {
+            return Err(err(
+                codes::NETWORK,
+                format!("invalid hostname `{}`: {}", host, e),
+                span,
+                file,
+                src,
+                None::<&str>,
+            ))
+        }
+    };
+    let primary = match TLS.as_ref() {
+        Ok(c) => c.clone(),
+        Err(e) => {
+            return Err(err(
+                codes::NETWORK,
+                format!("TLS init failed: {}", e),
+                span,
+                file,
+                src,
+                None::<&str>,
+            ))
+        }
+    };
+    match tls_connect_with(host, &server_name, addr, timeout_secs, &primary) {
+        Ok(s) => Ok(s),
+        Err(f) if f.cert => {
+            // 内置根证书校验失败 → 回退系统根证书 + 用户 CA（重新建立连接再握手）
+            let system = match SYSTEM_TLS.as_ref() {
+                Ok(c) => c.clone(),
+                Err(msg) => {
+                    return Err(err(
+                        codes::NETWORK,
+                        format!(
+                            "{} (built-in roots rejected the certificate; system roots unavailable: {})",
+                            f.reason, msg
+                        ),
+                        span,
+                        file,
+                        src,
+                        Some("add the server's root CA to ~/.hn/ca.pem (or set HONE_CA_BUNDLE) to trust it"),
+                    ))
+                }
+            };
+            match tls_connect_with(host, &server_name, addr, timeout_secs, &system) {
+                Ok(s) => Ok(s),
+                Err(f2) => Err(err(
+                    codes::NETWORK,
+                    format!("{} (rejected by both built-in and system roots)", f2.reason),
+                    span,
+                    file,
+                    src,
+                    Some("for a private/self-signed CA, add its root certificate to ~/.hn/ca.pem (or set HONE_CA_BUNDLE)"),
+                )),
+            }
+        }
+        Err(f) => Err(err(f.code, f.reason, span, file, src, f.hint)),
+    }
+}
+
+/// 在既有 TCP 连接上完成 TLS 升级（SMTP STARTTLS 用，无法重连）：
+/// 内置根证书优先；证书校验失败时在同一连接上用系统根证书 + 用户 CA 重试一次（尽力而为）。
+pub(crate) fn tls_upgrade_fallback(
+    host: &str,
+    tcp: TcpStream,
+    span: Span,
+    file: &str,
+    src: &str,
+) -> Result<Box<dyn ReadWrite>, ZError> {
+    let server_name = match rustls::pki_types::ServerName::try_from(host.to_string()) {
+        Ok(n) => n,
+        Err(e) => {
+            return Err(err(
+                codes::NETWORK,
+                format!("invalid hostname `{}`: {}", host, e),
+                span,
+                file,
+                src,
+                None::<&str>,
+            ))
+        }
+    };
+    let primary = match TLS.as_ref() {
+        Ok(c) => c.clone(),
+        Err(e) => {
+            return Err(err(
+                codes::NETWORK,
+                format!("TLS init failed: {}", e),
+                span,
+                file,
+                src,
+                None::<&str>,
+            ))
+        }
+    };
+    match tls_handshake_once(&primary, host, &server_name, tcp) {
+        Ok(owned) => Ok(Box::new(owned)),
+        Err((f, tcp)) if f.cert => {
+            let system = match SYSTEM_TLS.as_ref() {
+                Ok(c) => c.clone(),
+                Err(msg) => {
+                    return Err(err(
+                        codes::NETWORK,
+                        format!(
+                            "{} (built-in roots rejected the certificate; system roots unavailable: {})",
+                            f.reason, msg
+                        ),
+                        span,
+                        file,
+                        src,
+                        Some("add the server's root CA to ~/.hn/ca.pem (or set HONE_CA_BUNDLE) to trust it"),
+                    ))
+                }
+            };
+            match tls_handshake_once(&system, host, &server_name, tcp) {
+                Ok(owned) => Ok(Box::new(owned)),
+                Err((f2, _tcp)) => Err(err(
+                    codes::NETWORK,
+                    format!("{} (rejected by both built-in and system roots)", f2.reason),
+                    span,
+                    file,
+                    src,
+                    Some("for a private/self-signed CA, add its root certificate to ~/.hn/ca.pem (or set HONE_CA_BUNDLE)"),
+                )),
+            }
+        }
+        Err((f, _tcp)) => Err(err(f.code, f.reason, span, file, src, f.hint)),
+    }
+}
+
 /// 发送 HTTP 请求（默认超时 15 秒、无自定义头）。供 http_request / http_get_bytes 复用。
 fn http_fetch_raw(
     url: &str,
@@ -1559,52 +2027,14 @@ fn http_fetch_opts(
     };
     let addr = format!("{}:{}", host, port);
 
-    let tcp = TcpStream::connect(&addr).map_err(|e| net_err("connect", e))?;
-    tcp.set_read_timeout(Some(Duration::from_secs(timeout_secs))).ok();
-    tcp.set_write_timeout(Some(Duration::from_secs(timeout_secs))).ok();
-
-    // https 时做 TLS 握手（webpki-roots 内置 Mozilla 根证书验证）
+    // https 时走 TLS：内置根证书优先，证书校验失败自动回退系统根证书 + 用户 CA（信任根证书）；
+    // http 走明文 TCP
     let mut stream: Box<dyn ReadWrite> = if use_tls {
-        let connector = match TLS.as_ref() {
-            Ok(c) => c.clone(),
-            Err(e) => {
-                return Err(err(
-                    codes::NETWORK,
-                    format!("TLS init failed: {}", e),
-                    span,
-                    file,
-                    src,
-                    None::<&str>,
-                ));
-            }
-        };
-        let server_name = match rustls::pki_types::ServerName::try_from(host.to_string()) {
-            Ok(n) => n,
-            Err(e) => {
-                return Err(err(
-                    codes::NETWORK,
-                    format!("invalid hostname `{}`: {}", host, e),
-                    span,
-                    file,
-                    src,
-                    None::<&str>,
-                ));
-            }
-        };
-        match rustls::ClientConnection::new(connector, server_name) {
-            Ok(conn) => Box::new(rustls::StreamOwned::new(conn, tcp)),
-            Err(e) => {
-                return Err(err(
-                    codes::NETWORK,
-                    format!("TLS handshake with {} failed: {}", host, e),
-                    span,
-                    file,
-                    src,
-                    Some("the server certificate may be invalid or self-signed"),
-                ));
-            }
-        }
+        tls_connect_fallback(host, &addr, timeout_secs, span, file, src)?
     } else {
+        let tcp = TcpStream::connect(&addr).map_err(|e| net_err("connect", e))?;
+        tcp.set_read_timeout(Some(Duration::from_secs(timeout_secs))).ok();
+        tcp.set_write_timeout(Some(Duration::from_secs(timeout_secs))).ok();
         Box::new(tcp)
     };
 

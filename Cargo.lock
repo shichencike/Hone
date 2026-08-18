@@ -486,6 +486,7 @@ dependencies = [
  "regex",
  "rustls",
  "rustls-rustcrypto",
+ "rustls-webpki 0.103.13",
  "serde_json",
  "sha1",
  "sha2",

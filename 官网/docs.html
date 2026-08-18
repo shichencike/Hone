@@ -507,6 +507,15 @@ v = <span class="f">void_fn</span>();
       <tr><td>指针类</td><td><code>ptr.alloc</code> <code>ptr.free</code> <code>ptr.is_null</code> <code>ptr.is_valid</code> <code>ptr.size</code> <code>ptr.read_int/float/byte</code> <code>ptr.write_int/float/byte</code>（分配表跟踪防野指针，H304/H305）</td></tr>
       <tr><td>插件系统</td><td><code>plugin.load</code> <code>plugin.has</code> <code>plugin.list</code> <code>plugin.unload</code>（运行期动态注册，调用走 C ABI 通道）</td></tr>
     </table>
+    <h3>TLS 根证书回退（https / wss / smtp）</h3>
+    <p>所有 TLS 连接（<code class="inline">http_get</code> <code class="inline">http_post</code>
+      <code class="inline">http.request</code>、<code class="inline">ws.request</code> 的 wss://、
+      <code class="inline">smtp.send</code>）优先使用内置 Mozilla 根证书（webpki-roots）；
+      证书校验失败时自动重连，回退到<strong>系统根证书</strong>
+      （Windows ROOT 证书库 / LinuxTermux 系统 CA bundle），防止内置根证书过期导致连接失败。
+      私有 CA 场景可经 <code class="inline">HONE_CA_BUNDLE</code> 环境变量（缺省
+      <code class="inline">~/.hn/ca.pem</code>）信任 PEM 文件中的<strong>根证书与中间证书</strong>；
+      中间证书会注入链构建，服务器即使不随链发送中间证书也能完成验证。</p>
     <h3>输入默认值（EOF 降级）</h3>
     <p><code class="inline">input</code> / <code class="inline">read_int</code> / <code class="inline">read_float</code>
       在 EOF（管道关闭 / Ctrl+Z / Ctrl+D）时抛 <code class="inline">error[H306]</code>，
