@@ -116,6 +116,9 @@ ratio = <span class="f">args.get</span>(<span class="s">"ratio"</span>, <span cl
     <p><code class="inline">a ?? b</code> 空值合并只对 <strong>null 值</strong>生效——比如 void 函数调用的占位值。
       而 <code class="inline">input</code> 在 EOF 时<strong>抛错误而不是返回 null</strong>，
       所以 <code class="inline">input(...) ?? "匿名"</code> 不会生效，必须用 try-catch 捕获后降级。</p>
+    <p>补充：与 <code class="inline">??</code> 同属 null 语义的还有<strong>可选链</strong>
+      <code class="inline">a?.b</code>（a 为 null 时短路返回 null，可链式并与 <code class="inline">??</code> 组合），
+      详见手册 <a href="docs.html#lang-new">§7.7 多返回值 · 解构赋值 · 推导式 · 可选链</a>。</p>
   </section>
 
   <section id="full">

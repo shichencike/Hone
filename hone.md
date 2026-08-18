@@ -361,6 +361,97 @@ line2
 print(text);
 print(len(text));    // 24
 
+1.16 多返回值（return a, b, ...）
+
+· 语法：return expr1, expr2, ...;  一个函数可一次返回多个值
+  · 多值在运行时打包为列表，由解构赋值接收：a, b = f();
+  · 仍支持单值 return expr; 与空 return;（返回 null）
+  · 不解构时（x = f();）拿到打包后的列表
+  · 各返回值不做类型强制统一（打包后为动态类型）
+· 限制：hone build --dll 暂不支持多返回值（C ABI 无法表达，报错提示改用解释模式）
+· 示例：
+
+fn divmod(a, b) {
+    return a / b, a % b;
+}
+q, r = divmod(10, 3);
+print(q);   // 3
+print(r);   // 1
+
+fn minmax(a, b) {
+    if (a < b) { return a, b; }
+    return b, a;
+}
+lo, hi = minmax(7, 2);
+print(lo);   // 2
+print(hi);   // 7
+
+packed = divmod(8, 3);
+print(packed);   // [2, 2]（不解构时拿到打包列表）
+
+1.17 解构赋值（a, b = [1, 2] / {a, b} = dict）
+
+· 列表解构：a, b = expr;  右侧为列表（或多返回值），按位置依次绑定变量
+  · 元素不足报错（可被 try/catch 捕获）；多余元素忽略
+  · 典型用途：交换 a, b = [b, a];
+· 字典解构：{a, b} = expr;  右侧为字典，按键取出同名变量
+  · 改名形式：{a: x, b: y} = expr;  等价于 x = dict["a"]、y = dict["b"]
+  · 键缺失报错（可被 try/catch 捕获）
+· 目标变量未声明则隐式声明，已声明则覆盖；元素类型动态（不做静态强制）
+· 示例：
+
+a, b = [1, 2];          // a=1, b=2
+first, second = [9, 8, 7];  // 多余元素忽略：first=9, second=8
+
+user = {"name": "hone", "age": 7};
+{name, age} = user;           // name="hone", age=7
+{name: n, age: a} = user;     // 改名：n="hone", a=7
+
+q, r = divmod(17, 5);         // 与多返回值配合：q=3, r=2
+
+1.18 列表/字典推导式
+
+· 列表推导式：[表达式 for 变量 in 集合 (if 条件)]
+  · 对集合逐元素绑定变量，求值表达式并收集为列表；if 可选，过滤不满足的元素
+  · 集合为列表时单变量绑定元素；为字典时可用双变量（k, v 分别为键、值）
+· 字典推导式：{键表达式: 值表达式 for 变量 in 集合 (if 条件)}
+  · 键必须求值为 str（与字典字面量键为字符串的约束一致，动态键用 to_str 转换）
+· 循环变量为推导式内的局部变量，作用域不泄漏到外部
+· 示例：
+
+nums = [1, 2, 3, 4, 5];
+dbl = [x * 2 for x in nums];              // [2, 4, 6, 8, 10]
+evens = [x for x in nums if x % 2 == 0];  // [2, 4]
+
+grades = {"alice": 90, "bob": 85};
+passed = [k for k, v in grades if v >= 90];   // ["alice"]
+rev = {to_str(v): k for k, v in grades};      // {"90": "alice", "85": "bob"}
+
+1.19 可选链（?.）
+
+· 语法：obj?.field
+  · obj 为 null 时短路返回 null，不再访问 field；否则等价于 obj.field
+  · 可链式：a?.b?.c（其中任一环节为 null 即得 null）
+  · 作用于任何表达式结果：f()?.x
+  · 与空值合并配合：a?.b ?? "默认值"
+· 混合链：a?.b.c（`?.` 只短路其后一个字段，继续的普通字段访问在 null 上仍报错，与 JS 语义一致）
+· 注意：obj 非 null 但字段不存在时仍报错（与普通字段访问一致）；
+  Hone 无 null 字面量，null 来自 void 函数调用等占位值
+· 限制：hone build --dll 暂不支持可选链（报错提示改用解释模式）
+· 示例：
+
+fn get_user() {
+    return {"name": "hone", "age": 7};
+}
+print(get_user()?.name);   // hone
+
+fn void_fn() {
+}
+v = void_fn();
+print(v?.name);            // null（短路）
+print(v?.a?.b);            // null（链式短路）
+print(v?.name ?? "匿名");  // 匿名（与空值合并配合）
+
 二、工具链与命令
 
 Hone 提供完整的命令行工具链，所有功能集成在单文件 hone（或 hone.exe）中：

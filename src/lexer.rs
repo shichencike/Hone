@@ -78,6 +78,8 @@ pub enum Tok {
     /// 三元表达式 `?` 与空值合并 `??`
     Question,
     QuestionQuestion,
+    /// 可选链 `?.`（obj 为 null 时短路返回 null）
+    QuestionDot,
     /// 三引号原始字符串 """..."""（保留换行，不做转义处理）
     MultiStr(String),
     Colon,
@@ -162,6 +164,7 @@ impl Tok {
             Tok::MinusMinus => "`--`".into(),
             Tok::Question => "`?`".into(),
             Tok::QuestionQuestion => "`??`".into(),
+            Tok::QuestionDot => "`?.`".into(),
             Tok::MultiStr(_) => "triple-quoted string".into(),
             Tok::Colon => "`:`".into(),
             Tok::Arrow => "`->`".into(),
@@ -457,6 +460,9 @@ impl Lexer {
                 if self.peek() == Some('?') {
                     self.bump();
                     Tok::QuestionQuestion
+                } else if self.peek() == Some('.') {
+                    self.bump();
+                    Tok::QuestionDot
                 } else {
                     Tok::Question
                 }

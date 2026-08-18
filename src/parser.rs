@@ -165,6 +165,9 @@ impl Parser {
                     self.parse_decl_ts()
                 } else if self.peek2() == &Tok::Assign {
                     self.parse_assign()
+                } else if self.peek2() == &Tok::Comma {
+                    // a, b = expr;  列表解构赋值
+                    self.parse_destruct_assign()
                 } else if matches!(
                     self.peek2(),
                     Tok::PlusEq | Tok::MinusEq | Tok::StarEq | Tok::SlashEq | Tok::PercentEq
@@ -207,7 +210,14 @@ impl Parser {
                 self.expect_semi()?;
                 Ok(Stmt::Breakpoint { span })
             }
-            Tok::LBrace => self.parse_block_stmt(),
+            Tok::LBrace => {
+                // 语句起始 `{`：先探测 `{a, b} = ...` 字典解构模式，否则按代码块解析
+                if self.scan_dict_destruct() {
+                    self.parse_dict_destruct()
+                } else {
+                    self.parse_block_stmt()
+                }
+            }
             Tok::Semi => {
                 self.next();
                 self.parse_stmt()
@@ -306,6 +316,122 @@ impl Parser {
         let value = self.parse_expr()?;
         self.expect_semi()?;
         Ok(Stmt::Assign { name, value, span })
+    }
+
+    /// a, b = expr;  列表解构赋值：右侧为列表（或多返回值），按位置依次绑定变量。
+    fn parse_destruct_assign(&mut self) -> Result<Stmt, ZError> {
+        let (name_tok, span) = self.next();
+        let name = match name_tok {
+            Tok::Ident(s) => s,
+            _ => unreachable!(),
+        };
+        let mut targets = Vec::new();
+        let mut cur = name;
+        loop {
+            targets.push((cur, None)); // 列表解构：无字典键，按位置取
+            if self.at(&Tok::Comma) {
+                self.next();
+                let (t2, tspan) = self.next();
+                cur = match t2 {
+                    Tok::Ident(s) => s,
+                    other => {
+                        return Err(self.err_at(
+                            &tspan,
+                            codes::SYNTAX,
+                            format!("expected a variable name in destructuring, found {}", other.describe()),
+                            Some("form: `a, b = [1, 2]`"),
+                        ))
+                    }
+                };
+            } else {
+                break;
+            }
+        }
+        self.expect(&Tok::Assign, "`=`")?;
+        let value = self.parse_expr()?;
+        self.expect_semi()?;
+        Ok(Stmt::DestructAssign { targets, value, span })
+    }
+
+    /// 探测语句起始的 `{` 是否为字典解构模式：`{ident [, ident]*} =` 或 `{ident: ident [, ...]} =`。
+    /// 只有 `}` 后紧跟 `=` 才判定为解构，否则回退为代码块解析。
+    fn scan_dict_destruct(&self) -> bool {
+        let mut i = self.pos + 1; // 跳过 {
+        let mut depth = 1usize;
+        while i < self.toks.len() {
+            match &self.toks[i].0 {
+                Tok::Ident(_) | Tok::Comma | Tok::Colon => i += 1,
+                Tok::LBrace => {
+                    depth += 1;
+                    i += 1;
+                }
+                Tok::RBrace => {
+                    depth -= 1;
+                    i += 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => return false,
+            }
+        }
+        if depth != 0 {
+            return false;
+        }
+        matches!(self.toks.get(i).map(|(t, _)| t), Some(Tok::Assign))
+    }
+
+    /// {a, b} = expr;  字典解构赋值：右侧为字典，按键取出。
+    /// {a, b} 形式绑定同名变量；{a: x, b: y} 形式可改名（x = dict["a"]）。
+    fn parse_dict_destruct(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // {
+        let mut targets = Vec::new();
+        loop {
+            let (kt, kspan) = self.next();
+            let key = match kt {
+                Tok::Ident(k) => k,
+                other => {
+                    return Err(self.err_at(
+                        &kspan,
+                        codes::SYNTAX,
+                        format!("expected a dict key name in `{{...}} = ...`, found {}", other.describe()),
+                        Some("form: `{a, b} = dict` or `{a: x, b: y} = dict`"),
+                    ))
+                }
+            };
+            // 可选改名：{a: x} → x = dict["a"]
+            let var = if self.at(&Tok::Colon) {
+                self.next();
+                let (vt, vspan) = self.next();
+                match vt {
+                    Tok::Ident(v) => v,
+                    other => {
+                        return Err(self.err_at(
+                            &vspan,
+                            codes::SYNTAX,
+                            format!("expected a variable name after `:`, found {}", other.describe()),
+                            Some("form: `{a: x}` binds `x` to the dict key `a`"),
+                        ))
+                    }
+                }
+            } else {
+                key.clone()
+            };
+            targets.push((var, Some(key)));
+            if self.at(&Tok::Comma) {
+                self.next();
+                if self.at(&Tok::RBrace) {
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+        self.expect(&Tok::RBrace, "`}`")?;
+        self.expect(&Tok::Assign, "`=`")?;
+        let value = self.parse_expr()?;
+        self.expect_semi()?;
+        Ok(Stmt::DestructAssign { targets, value, span })
     }
 
     /// 复合赋值：x += expr;  x -= expr;  x *= expr;  x /= expr;  x %= expr;
@@ -681,15 +807,62 @@ impl Parser {
         Ok(Stmt::ForIn { var, var2, iter, body, span })
     }
 
+    /// 推导式子句：for var [, var2] in iter [if cond]（列表/字典推导式共用）。
+    fn parse_comp_clause(&mut self) -> Result<(String, Option<String>, Expr, Option<Expr>), ZError> {
+        self.expect(&Tok::For, "`for`")?;
+        let (v1t, _) = self.next();
+        let var = match v1t {
+            Tok::Ident(v) => v,
+            other => {
+                return Err(self.err_here(
+                    codes::SYNTAX,
+                    format!("expected a loop variable in comprehension, found {}", other.describe()),
+                    Some("form: `[x * 2 for x in nums if x > 0]`"),
+                ))
+            }
+        };
+        // 可选第二变量：{k: v for k, v in dict}
+        let mut var2 = None;
+        if self.at(&Tok::Comma) {
+            self.next();
+            let (v2t, _) = self.next();
+            var2 = match v2t {
+                Tok::Ident(v) => Some(v),
+                other => {
+                    return Err(self.err_here(
+                        codes::SYNTAX,
+                        format!("expected a second loop variable in comprehension, found {}", other.describe()),
+                        Some("form: `{k: v for k, v in dict}`"),
+                    ))
+                }
+            };
+        }
+        self.expect(&Tok::In, "`in`")?;
+        let iter = self.parse_expr()?;
+        // 可选过滤：if cond
+        let cond = if self.at(&Tok::If) {
+            self.next();
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+        Ok((var, var2, iter, cond))
+    }
+
+    /// return; / return expr; / return a, b, ...;
+    /// 多返回值以逗号分隔，运行时打包为列表，由解构赋值 `a, b = f()` 接收。
     fn parse_return(&mut self) -> Result<Stmt, ZError> {
         let (_, span) = self.next(); // return
-        let value = if self.at(&Tok::Semi) {
-            None
-        } else {
-            Some(self.parse_expr()?)
-        };
+        let mut values = Vec::new();
+        if !self.at(&Tok::Semi) {
+            values.push(self.parse_expr()?);
+            while self.at(&Tok::Comma) {
+                self.next();
+                values.push(self.parse_expr()?);
+            }
+        }
         self.expect_semi()?;
-        Ok(Stmt::Return { value, span })
+        Ok(Stmt::Return { values, span })
     }
 
     /// try { body } catch e { handler }
@@ -1450,6 +1623,53 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ZError> {
+        // 先解析原子表达式（字面量/标识符/调用/括号等），再处理可选链后缀 ?.
+        let mut expr = self.parse_primary_atom()?;
+        while self.at(&Tok::QuestionDot) {
+            let (_, span) = self.next();
+            let (ftok, fspan) = self.next();
+            let field = match ftok {
+                Tok::Ident(s) => s,
+                other => {
+                    return Err(self.err_at(
+                        &fspan,
+                        codes::SYNTAX,
+                        format!("expected an identifier after `?.`, found {}", other.describe()),
+                        Some("optional chaining form: `a?.b`"),
+                    ))
+                }
+            };
+            expr = Expr::OptionalField {
+                obj: Box::new(expr),
+                field,
+                span,
+            };
+            // 可选链后可继续普通字段访问：a?.b.c（与 JS 语义一致，? 只短路其后一个字段）
+            while self.at(&Tok::Dot) {
+                let (_, dspan) = self.next();
+                let (dtok, dfspan) = self.next();
+                let f2 = match dtok {
+                    Tok::Ident(s) => s,
+                    other => {
+                        return Err(self.err_at(
+                            &dfspan,
+                            codes::SYNTAX,
+                            format!("expected an identifier after `.`, found {}", other.describe()),
+                            Some("field access form: `a?.b.c`"),
+                        ))
+                    }
+                };
+                expr = Expr::Field {
+                    obj: Box::new(expr),
+                    field: f2,
+                    span: dspan,
+                };
+            }
+        }
+        Ok(expr)
+    }
+
+    fn parse_primary_atom(&mut self) -> Result<Expr, ZError> {
         let (tok, span) = self.next();
         match tok {
             Tok::IntLit(v) => Ok(Expr::IntLit(v, span)),
@@ -1484,25 +1704,71 @@ impl Parser {
                 Ok(Expr::FStr(segs, span))
             }
             Tok::LBracket => {
-                // 列表字面量 [a, b, c]
-                let mut items = Vec::new();
-                while !self.at(&Tok::RBracket) {
+                // 列表字面量 [a, b, c] 或列表推导式 [elem for x in iter [if cond]]
+                if self.at(&Tok::RBracket) {
+                    self.next();
+                    return Ok(Expr::ListLit(Vec::new(), span));
+                }
+                let first = self.parse_expr()?;
+                if self.at(&Tok::For) {
+                    let (var, var2, iter, cond) = self.parse_comp_clause()?;
+                    self.expect(&Tok::RBracket, "`]`")?;
+                    return Ok(Expr::ListComp {
+                        elem: Box::new(first),
+                        var,
+                        var2,
+                        iter: Box::new(iter),
+                        cond: cond.map(Box::new),
+                        span,
+                    });
+                }
+                let mut items = vec![first];
+                while self.at(&Tok::Comma) {
+                    self.next();
                     items.push(self.parse_expr()?);
-                    if self.at(&Tok::Comma) {
-                        self.next();
-                    } else {
-                        break;
-                    }
                 }
                 self.expect(&Tok::RBracket, "`]`")?;
                 Ok(Expr::ListLit(items, span))
             }
             Tok::LBrace => {
-                // 字典字面量 {"key": value, ...}（键必须为字符串字面量）
-                let mut entries = Vec::new();
-                while !self.at(&Tok::RBrace) {
+                // 字典字面量 {"key": value, ...} 或字典推导式 {key: value for k, v in iter [if cond]}
+                let key_expr = self.parse_expr()?;
+                self.expect(&Tok::Colon, "`:`")?;
+                let v = self.parse_expr()?;
+                if self.at(&Tok::For) {
+                    let (var, var2, iter, cond) = self.parse_comp_clause()?;
+                    self.expect(&Tok::RBrace, "`}`")?;
+                    return Ok(Expr::DictComp {
+                        key: Box::new(key_expr),
+                        value: Box::new(v),
+                        var,
+                        var2,
+                        iter: Box::new(iter),
+                        cond: cond.map(Box::new),
+                        span,
+                    });
+                }
+                // 普通字典字面量：键必须为字符串字面量
+                let key_span = expr_span(&key_expr);
+                let key = match key_expr {
+                    Expr::StrLit(k, _) => k,
+                    _ => {
+                        return Err(self.err_at(
+                            &key_span,
+                            codes::SYNTAX,
+                            "dict keys must be string literals (use a dict comprehension for dynamic keys: `{k: v for ...}`)",
+                            Some("form: {\"key\": value, ...}"),
+                        ))
+                    }
+                };
+                let mut entries = vec![(key, v)];
+                while self.at(&Tok::Comma) {
+                    self.next();
+                    if self.at(&Tok::RBrace) {
+                        break; // 尾逗号
+                    }
                     let (key_tok, kspan) = self.next();
-                    let key = match key_tok {
+                    let k2 = match key_tok {
                         Tok::StrLit(k) => k,
                         other => {
                             return Err(self.err_at(
@@ -1514,13 +1780,8 @@ impl Parser {
                         }
                     };
                     self.expect(&Tok::Colon, "`:`")?;
-                    let v = self.parse_expr()?;
-                    entries.push((key, v));
-                    if self.at(&Tok::Comma) {
-                        self.next();
-                    } else {
-                        break;
-                    }
+                    let v2 = self.parse_expr()?;
+                    entries.push((k2, v2));
                 }
                 self.expect(&Tok::RBrace, "`}`")?;
                 Ok(Expr::DictLit(entries, span))

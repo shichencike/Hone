@@ -520,6 +520,74 @@ impl Interp {
                 env.set_or_declare(name, v);
                 Ok(Flow::Normal)
             }
+            Stmt::DestructAssign { targets, value, span } => {
+                let v = self.eval_expr(env, value)?;
+                let is_dict = targets.iter().all(|(_, k)| k.is_some());
+                match v {
+                    // 列表解构：按位置依次绑定
+                    Value::List(items) => {
+                        if is_dict {
+                            return Err(self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                "dict destructuring `{...} =` requires a dict value, got a list",
+                                *span,
+                                Some("use `a, b = list` for list destructuring"),
+                            ));
+                        }
+                        if items.len() < targets.len() {
+                            return Err(self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                format!(
+                                    "destructuring a list of {} element(s) into {} variable(s)",
+                                    items.len(),
+                                    targets.len()
+                                ),
+                                *span,
+                                Some("the list must have at least as many elements as the variables"),
+                            ));
+                        }
+                        for (i, (name, _)) in targets.iter().enumerate() {
+                            env.set_or_declare(name, items[i].clone());
+                        }
+                        Ok(Flow::Normal)
+                    }
+                    // 字典解构：按键取出
+                    Value::Dict(entries) => {
+                        if !is_dict {
+                            return Err(self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                "list destructuring `a, b =` requires a list value, got a dict",
+                                *span,
+                                Some("use `{a, b} = dict` for dict destructuring"),
+                            ));
+                        }
+                        for (name, key) in targets {
+                            let key = key.as_deref().expect("dict destructure target carries a key");
+                            match entries.iter().find(|(k, _)| k == key) {
+                                Some((_, val)) => env.set_or_declare(name, val.clone()),
+                                None => {
+                                    return Err(self.runtime_err(
+                                        codes::UNDEFINED,
+                                        format!("dict has no key `{}` for destructuring", key),
+                                        *span,
+                                        Some("check the key name, or the dict value being destructured"),
+                                    ))
+                                }
+                            }
+                        }
+                        Ok(Flow::Normal)
+                    }
+                    other => Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!(
+                            "destructuring requires a list or dict value, got `{}`",
+                            other.type_name()
+                        ),
+                        *span,
+                        Some("destructure a list with `a, b = [..]` or a dict with `{a, b} = dict`"),
+                    )),
+                }
+            }
             Stmt::AssignOp { name, op, value, span } => {
                 let cur = env.get(name).cloned();
                 match cur {
@@ -726,12 +794,21 @@ impl Interp {
                     )),
                 }
             }
-            Stmt::Return { value, .. } => {
-                let v = match value {
-                    Some(e) => self.eval_expr(env, e)?,
-                    None => Value::Null,
-                };
-                Ok(Flow::Return(v))
+            Stmt::Return { values, .. } => {
+                // 多返回值：return a, b, ...; 打包为列表，由解构赋值 `a, b = f()` 接收
+                if values.len() > 1 {
+                    let mut packed = Vec::new();
+                    for e in values {
+                        packed.push(self.eval_expr(env, e)?);
+                    }
+                    Ok(Flow::Return(Value::List(packed)))
+                } else {
+                    let v = match values.first() {
+                        Some(e) => self.eval_expr(env, e)?,
+                        None => Value::Null,
+                    };
+                    Ok(Flow::Return(v))
+                }
             }
             Stmt::FnDef { .. } => Ok(Flow::Normal), // 已扁平化注册
             Stmt::ExprStmt { expr, .. } => {
@@ -1520,6 +1597,104 @@ impl Interp {
                 }
                 Ok(Value::Dict(vals))
             }
+            Expr::ListComp { elem, var, var2, iter, cond, span } => {
+                let it = self.eval_expr(env, iter)?;
+                let mut out = Vec::new();
+                match it {
+                    // 列表推导式：单变量绑定元素
+                    Value::List(items) => {
+                        if var2.is_some() {
+                            return Err(self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                "comprehension `for k, v in` requires a dict, got a list",
+                                *span,
+                                Some("comprehend over lists with a single variable: `for x in list`"),
+                            ));
+                        }
+                        for item in items {
+                            env.scopes.push(HashMap::new());
+                            env.declare(var, item);
+                            let pass = self.comp_cond(env, cond.as_deref())?;
+                            if pass {
+                                out.push(self.eval_expr(env, elem)?);
+                            }
+                            env.scopes.pop();
+                        }
+                    }
+                    // 字典推导式来源：var=键，var2=值（可选）
+                    Value::Dict(entries) => {
+                        for (k, v) in entries {
+                            env.scopes.push(HashMap::new());
+                            env.declare(var, Value::Str(k));
+                            if let Some(v2) = var2 {
+                                env.declare(v2, v);
+                            }
+                            let pass = self.comp_cond(env, cond.as_deref())?;
+                            if pass {
+                                out.push(self.eval_expr(env, elem)?);
+                            }
+                            env.scopes.pop();
+                        }
+                    }
+                    other => {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("comprehension requires a list or dict, got `{}`", other.type_name()),
+                            expr_span(iter),
+                            Some("comprehend over a list with `for x in list` or a dict with `for k, v in dict`"),
+                        ))
+                    }
+                }
+                Ok(Value::List(out))
+            }
+            Expr::DictComp { key, value, var, var2, iter, cond, span } => {
+                let it = self.eval_expr(env, iter)?;
+                let mut out = Vec::new();
+                match it {
+                    Value::List(items) => {
+                        if var2.is_some() {
+                            return Err(self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                "comprehension `for k, v in` requires a dict, got a list",
+                                *span,
+                                Some("comprehend over lists with a single variable: `for x in list`"),
+                            ));
+                        }
+                        for item in items {
+                            env.scopes.push(HashMap::new());
+                            env.declare(var, item);
+                            let pass = self.comp_cond(env, cond.as_deref())?;
+                            if pass {
+                                out.push(self.comp_pair(env, key, value, *span)?);
+                            }
+                            env.scopes.pop();
+                        }
+                    }
+                    Value::Dict(entries) => {
+                        for (k, v) in entries {
+                            env.scopes.push(HashMap::new());
+                            env.declare(var, Value::Str(k));
+                            if let Some(v2) = var2 {
+                                env.declare(v2, v);
+                            }
+                            let pass = self.comp_cond(env, cond.as_deref())?;
+                            if pass {
+                                out.push(self.comp_pair(env, key, value, *span)?);
+                            }
+                            env.scopes.pop();
+                        }
+                    }
+                    other => {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("comprehension requires a list or dict, got `{}`", other.type_name()),
+                            expr_span(iter),
+                            Some("comprehend over a list with `for x in list` or a dict with `for k, v in dict`"),
+                        ))
+                    }
+                }
+                Ok(Value::Dict(out))
+            }
             Expr::FStr(segs, _) => {
                 let mut out = String::new();
                 for seg in segs {
@@ -1544,45 +1719,15 @@ impl Interp {
             },
             Expr::Field { obj, field, span } => {
                 let v = self.eval_expr(env, obj)?;
-                match v {
-                    Value::Dict(entries) => {
-                        // struct 实例 / dict 字段访问：按键查找
-                        match entries.iter().find(|(k, _)| k == field) {
-                            Some((_, val)) => Ok(val.clone()),
-                            None => Err(self.runtime_err(
-                                codes::UNDEFINED,
-                                format!("unknown field `{}` (dict/struct has {})", field,
-                                    entries.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")),
-                                *span,
-                                Some("check the field name, or the struct definition"),
-                            )),
-                        }
-                    }
-                    Value::Error(e) => match field.as_str() {
-                        "code" => Ok(Value::Str(e.code.to_string())),
-                        "message" => Ok(Value::Str(e.message.clone())),
-                        "file" => Ok(Value::Str(e.file.clone())),
-                        "context" => Ok(Value::Str(e.context.clone())),
-                        "line" => Ok(Value::Int(e.line as i64)),
-                        "col" => Ok(Value::Int(e.col as i64)),
-                        other => Err(self.runtime_err(
-                            codes::UNDEFINED,
-                            format!("unknown error field `{}`", other),
-                            *span,
-                            Some("error fields: code, message, file, line, col, context"),
-                        )),
-                    },
-                    other => Err(self.runtime_err(
-                        codes::TYPE_MISMATCH,
-                        format!(
-                            "field access `.{}` requires an `error` value, got `{}`",
-                            field,
-                            other.type_name()
-                        ),
-                        *span,
-                        Some("only error values (catch variables) support field access"),
-                    )),
+                self.field_value(v, field, *span)
+            }
+            Expr::OptionalField { obj, field, span } => {
+                let v = self.eval_expr(env, obj)?;
+                // 可选链：obj 为 null 时短路返回 null，否则同普通字段访问
+                if let Value::Null = v {
+                    return Ok(Value::Null);
                 }
+                self.field_value(v, field, *span)
             }
             Expr::Unary { op, expr, span } => {
                 let v = self.eval_expr(env, expr)?;
@@ -1687,6 +1832,84 @@ impl Interp {
                 }
                 self.call_fn(callee, arg_vals, *span)
             }
+        }
+    }
+
+    /// 推导式过滤条件求值：无 cond 视为通过；cond 必须求值为 bool。
+    fn comp_cond(&mut self, env: &mut Env, cond: Option<&Expr>) -> Result<bool, ZError> {
+        match cond {
+            None => Ok(true),
+            Some(c) => match self.eval_expr(env, c)? {
+                Value::Bool(b) => Ok(b),
+                other => Err(self.runtime_err(
+                    codes::TYPE_MISMATCH,
+                    format!("comprehension `if` condition must be `bool`, got `{}`", other.type_name()),
+                    expr_span(c),
+                    None::<&str>,
+                )),
+            },
+        }
+    }
+
+    /// 字典推导式单对 (键, 值)：键必须求值为 str（与字典字面量键为字符串的约束一致）。
+    fn comp_pair(&mut self, env: &mut Env, key: &Expr, value: &Expr, span: Span) -> Result<(String, Value), ZError> {
+        let k = self.eval_expr(env, key)?;
+        let v = self.eval_expr(env, value)?;
+        let ks = match k {
+            Value::Str(s) => s,
+            other => {
+                return Err(self.runtime_err(
+                    codes::TYPE_MISMATCH,
+                    format!("dict comprehension keys must be `str`, got `{}`", other.type_name()),
+                    expr_span(key),
+                    Some("convert the key with `to_str(...)`"),
+                ))
+            }
+        };
+        let _ = span;
+        Ok((ks, v))
+    }
+
+    /// 字段访问核心：dict/struct 按键取字段，error 取错误属性；其他类型报错。
+    /// Field 与 OptionalField（?.）共用；可选链在调用方先做 null 短路。
+    fn field_value(&self, v: Value, field: &str, span: Span) -> Result<Value, ZError> {
+        match v {
+            Value::Dict(entries) => {
+                // struct 实例 / dict 字段访问：按键查找
+                match entries.iter().find(|(k, _)| k == field) {
+                    Some((_, val)) => Ok(val.clone()),
+                    None => Err(self.runtime_err(
+                        codes::UNDEFINED,
+                        format!(
+                            "unknown field `{}` (dict/struct has {})",
+                            field,
+                            entries.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")
+                        ),
+                        span,
+                        Some("check the field name, or the struct definition"),
+                    )),
+                }
+            }
+            Value::Error(e) => match field {
+                "code" => Ok(Value::Str(e.code.to_string())),
+                "message" => Ok(Value::Str(e.message.clone())),
+                "file" => Ok(Value::Str(e.file.clone())),
+                "context" => Ok(Value::Str(e.context.clone())),
+                "line" => Ok(Value::Int(e.line as i64)),
+                "col" => Ok(Value::Int(e.col as i64)),
+                other => Err(self.runtime_err(
+                    codes::UNDEFINED,
+                    format!("unknown error field `{}`", other),
+                    span,
+                    Some("error fields: code, message, file, line, col, context"),
+                )),
+            },
+            other => Err(self.runtime_err(
+                codes::TYPE_MISMATCH,
+                format!("field access `.{}` requires an `error` value, got `{}`", field, other.type_name()),
+                span,
+                Some("only error values (catch variables) support field access"),
+            )),
         }
     }
 

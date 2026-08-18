@@ -15,6 +15,13 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
+    /// 解构赋值：a, b = [1, 2]（列表，按位置）或 {a, b} = dict / {a: x, b: y} = dict（字典，按键）。
+    /// 每个目标 = (变量名, 字典键)；列表解构键为 None，字典解构键为 Some(键名)。
+    DestructAssign {
+        targets: Vec<(String, Option<String>)>,
+        value: Expr,
+        span: Span,
+    },
     /// 复合赋值：x += expr;  x -= expr;  x *= expr;  x /= expr;  x %= expr;
     /// 要求 x 已声明且类型匹配；str 仅支持 +=（字符串拼接）
     AssignOp {
@@ -70,8 +77,10 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// return; / return expr; / return a, b, ...;
+    /// 多返回值（return a, b, ...）打包为列表，由解构赋值 `a, b = f()` 接收
     Return {
-        value: Option<Expr>,
+        values: Vec<Expr>,
         span: Span,
     },
     /// break;  跳出当前 while / for 循环（checker 校验只能在循环体内）
@@ -257,10 +266,32 @@ pub enum Expr {
     ListLit(Vec<Expr>, Span),
     /// 字典字面量 {"key": value, ...}（键为字符串）
     DictLit(Vec<(String, Expr)>, Span),
+    /// 列表推导式 [elem for x in iter [if cond]]：对 iter 逐元素求 elem，可选 if 过滤。
+    /// var2 为字典遍历时的值变量（for k, v in dict）。
+    ListComp {
+        elem: Box<Expr>,
+        var: String,
+        var2: Option<String>,
+        iter: Box<Expr>,
+        cond: Option<Box<Expr>>,
+        span: Span,
+    },
+    /// 字典推导式 {key: value for k, v in iter [if cond]}：键/值表达式按迭代元素求值，键必须为 str。
+    DictComp {
+        key: Box<Expr>,
+        value: Box<Expr>,
+        var: String,
+        var2: Option<String>,
+        iter: Box<Expr>,
+        cond: Option<Box<Expr>>,
+        span: Span,
+    },
     /// 插值字符串 f"..."：文字段与代码段交替（代码段已解析为表达式）
     FStr(Vec<FStrSeg>, Span),
     /// 字段访问：obj.field（如 e.code、e.message）
     Field { obj: Box<Expr>, field: String, span: Span },
+    /// 可选链字段访问：obj?.field（obj 为 null 时短路返回 null，否则同 Field）
+    OptionalField { obj: Box<Expr>, field: String, span: Span },
     Unary { op: UnOp, expr: Box<Expr>, span: Span },
     Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr>, span: Span },
     Call { callee: String, args: Vec<Expr>, span: Span },
@@ -386,9 +417,12 @@ pub fn expr_span(e: &Expr) -> Span {
         | Expr::StrLit(_, s)
         | Expr::ListLit(_, s)
         | Expr::DictLit(_, s)
+        | Expr::ListComp { span: s, .. }
+        | Expr::DictComp { span: s, .. }
         | Expr::FStr(_, s)
         | Expr::Ident { span: s, .. }
         | Expr::Field { span: s, .. }
+        | Expr::OptionalField { span: s, .. }
         | Expr::Call { span: s, .. }
         | Expr::Unary { span: s, .. }
         | Expr::Binary { span: s, .. }

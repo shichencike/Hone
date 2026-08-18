@@ -279,6 +279,14 @@ impl Checker {
                     self.globals.insert(name.clone(), slot);
                 }
             }
+            Stmt::DestructAssign { targets, .. } => {
+                for (name, _) in targets {
+                    if self.globals.get(name).is_none() {
+                        let slot = self.new_slot();
+                        self.globals.insert(name.clone(), slot);
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -380,6 +388,15 @@ impl Checker {
                         let top = *scope_stack.last().unwrap();
                         let slot = self.new_slot();
                         scopes[top].insert(name.clone(), slot);
+                    }
+                }
+                Stmt::DestructAssign { targets, .. } => {
+                    for (name, _) in targets {
+                        if lookup_in_stack(name, scopes, scope_stack).is_none() {
+                            let top = *scope_stack.last().unwrap();
+                            let slot = self.new_slot();
+                            scopes[top].insert(name.clone(), slot);
+                        }
                     }
                 }
                 _ => {}
@@ -766,6 +783,14 @@ impl Checker {
                 }
                 Ok(())
             }
+            Stmt::DestructAssign { targets, value, span } => {
+                // 解构目标元素类型动态，仅检查右侧表达式合法并确保变量已声明
+                let _res = self.check_expr(value)?;
+                for (name, _) in targets {
+                    self.bind_or_unify(name, None, *span)?;
+                }
+                Ok(())
+            }
             Stmt::AssignOp { name, op, value, span } => {
                 let res = self.check_expr(value)?;
                 match self.globals.get(name) {
@@ -984,6 +1009,13 @@ impl Checker {
                 }
                 Ok(())
             }
+            Stmt::DestructAssign { targets, value, span } => {
+                let _res = self.check_expr_in_fn(value, scopes, scope_stack, param_slots, ret_slot)?;
+                for (name, _) in targets {
+                    self.bind_in_stack(name, None, *span, scopes, scope_stack)?;
+                }
+                Ok(())
+            }
             Stmt::AssignOp { name, op, value, span } => {
                 let res = self.check_expr_in_fn(value, scopes, scope_stack, param_slots, ret_slot)?;
                 match lookup_in_stack(name, scopes, scope_stack) {
@@ -1091,15 +1123,22 @@ impl Checker {
                 scopes.pop();
                 Ok(())
             }
-            Stmt::Return { value, span } => {
+            Stmt::Return { values, span } => {
                 self.has_return = true;
-                match value {
-                    Some(e) => {
-                        let res = self.check_expr_in_fn(e, scopes, scope_stack, param_slots, ret_slot)?;
-                        self.unify_slot(ret_slot, res, *span, "the function's return type".to_string())?;
+                if values.len() > 1 {
+                    // 多返回值：打包为列表返回，不做返回类型强制统一（由解构赋值接收）
+                    for e in values {
+                        self.check_expr_in_fn(e, scopes, scope_stack, param_slots, ret_slot)?;
                     }
-                    None => {
-                        self.unify_slot_ty(ret_slot, Ty::Void, *span, "the function's return type".to_string())?;
+                } else {
+                    match values.first() {
+                        Some(e) => {
+                            let res = self.check_expr_in_fn(e, scopes, scope_stack, param_slots, ret_slot)?;
+                            self.unify_slot(ret_slot, res, *span, "the function's return type".to_string())?;
+                        }
+                        None => {
+                            self.unify_slot_ty(ret_slot, Ty::Void, *span, "the function's return type".to_string())?;
+                        }
                     }
                 }
                 Ok(())
@@ -1281,6 +1320,15 @@ impl Checker {
                 let res = self.check_expr(obj)?;
                 self.check_field(res, field, *span)
             }
+            Expr::OptionalField { obj, field, span } => {
+                let res = self.check_expr(obj)?;
+                // 可选链：obj 可为 null/void（短路返回 null），类型未知/void 时放行
+                if res.ty == Ty::Unknown || res.ty == Ty::Void {
+                    Ok(TyRes { ty: Ty::Unknown, slot: None })
+                } else {
+                    self.check_field(res, field, *span)
+                }
+            }
             Expr::Unary { op, expr, span } => {
                 let res = self.check_expr(expr)?;
                 self.check_unary(*op, res, *span)
@@ -1299,6 +1347,38 @@ impl Checker {
                 for (_, v) in entries {
                     self.check_expr(v)?;
                 }
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::ListComp { elem, var, var2, iter, cond, .. } => {
+                self.check_expr(iter)?;
+                // 循环变量绑定到推导式作用域，elem/cond 可引用
+                self.global_scopes.push(HashMap::new());
+                self.bind_or_unify(var, None, expr_span(e))?;
+                if let Some(v2) = var2 {
+                    self.bind_or_unify(v2, None, expr_span(e))?;
+                }
+                if let Some(c) = cond {
+                    let res = self.check_expr(c)?;
+                    self.require_bool(res, &expr_span(c), "comprehension `if` condition")?;
+                }
+                self.check_expr(elem)?;
+                self.global_scopes.pop();
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::DictComp { key, value, var, var2, iter, cond, .. } => {
+                self.check_expr(iter)?;
+                self.global_scopes.push(HashMap::new());
+                self.bind_or_unify(var, None, expr_span(e))?;
+                if let Some(v2) = var2 {
+                    self.bind_or_unify(v2, None, expr_span(e))?;
+                }
+                if let Some(c) = cond {
+                    let res = self.check_expr(c)?;
+                    self.require_bool(res, &expr_span(c), "comprehension `if` condition")?;
+                }
+                self.check_expr(key)?;
+                self.check_expr(value)?;
+                self.global_scopes.pop();
                 Ok(TyRes { ty: Ty::Unknown, slot: None })
             }
             Expr::FStr(segs, _) => {
@@ -1410,6 +1490,15 @@ impl Checker {
                 let res = self.check_expr_in_fn(obj, scopes, scope_stack, param_slots, ret_slot)?;
                 self.check_field(res, field, *span)
             }
+            Expr::OptionalField { obj, field, span } => {
+                let res = self.check_expr_in_fn(obj, scopes, scope_stack, param_slots, ret_slot)?;
+                // 可选链：obj 可为 null/void（短路返回 null），类型未知/void 时放行
+                if res.ty == Ty::Unknown || res.ty == Ty::Void {
+                    Ok(TyRes { ty: Ty::Unknown, slot: None })
+                } else {
+                    self.check_field(res, field, *span)
+                }
+            }
             Expr::Unary { op, expr, span } => {
                 let res = self.check_expr_in_fn(expr, scopes, scope_stack, param_slots, ret_slot)?;
                 self.check_unary(*op, res, *span)
@@ -1428,6 +1517,44 @@ impl Checker {
                 for (_, v) in entries {
                     self.check_expr_in_fn(v, scopes, scope_stack, param_slots, ret_slot)?;
                 }
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::ListComp { elem, var, var2, iter, cond, .. } => {
+                self.check_expr_in_fn(iter, scopes, scope_stack, param_slots, ret_slot)?;
+                // 循环变量绑定到推导式作用域，elem/cond 可引用（与 for-in 一致）
+                let idx = scopes.len();
+                scopes.push(HashMap::new());
+                scope_stack.push(idx);
+                self.bind_in_stack(var, None, expr_span(e), scopes, scope_stack)?;
+                if let Some(v2) = var2 {
+                    self.bind_in_stack(v2, None, expr_span(e), scopes, scope_stack)?;
+                }
+                if let Some(c) = cond {
+                    let res = self.check_expr_in_fn(c, scopes, scope_stack, param_slots, ret_slot)?;
+                    self.require_bool(res, &expr_span(c), "comprehension `if` condition")?;
+                }
+                self.check_expr_in_fn(elem, scopes, scope_stack, param_slots, ret_slot)?;
+                scope_stack.pop();
+                scopes.pop();
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::DictComp { key, value, var, var2, iter, cond, .. } => {
+                self.check_expr_in_fn(iter, scopes, scope_stack, param_slots, ret_slot)?;
+                let idx = scopes.len();
+                scopes.push(HashMap::new());
+                scope_stack.push(idx);
+                self.bind_in_stack(var, None, expr_span(e), scopes, scope_stack)?;
+                if let Some(v2) = var2 {
+                    self.bind_in_stack(v2, None, expr_span(e), scopes, scope_stack)?;
+                }
+                if let Some(c) = cond {
+                    let res = self.check_expr_in_fn(c, scopes, scope_stack, param_slots, ret_slot)?;
+                    self.require_bool(res, &expr_span(c), "comprehension `if` condition")?;
+                }
+                self.check_expr_in_fn(key, scopes, scope_stack, param_slots, ret_slot)?;
+                self.check_expr_in_fn(value, scopes, scope_stack, param_slots, ret_slot)?;
+                scope_stack.pop();
+                scopes.pop();
                 Ok(TyRes { ty: Ty::Unknown, slot: None })
             }
             Expr::FStr(segs, _) => {
@@ -3064,6 +3191,7 @@ fn stmt_span(s: &Stmt) -> Span {
     match s {
         Stmt::Assign { span, .. }
         | Stmt::AssignOp { span, .. }
+        | Stmt::DestructAssign { span, .. }
         | Stmt::VarDecl { span, .. }
         | Stmt::Block { span, .. }
         | Stmt::If { span, .. }

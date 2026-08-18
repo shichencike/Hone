@@ -240,10 +240,12 @@ impl Codegen {
                 }
                 Ok(())
             }
-            Stmt::Return { value, .. } => match value {
-                Some(e) => self.collect_calls_expr(e, reachable, seen),
-                None => Ok(()),
-            },
+            Stmt::Return { values, .. } => {
+                for e in values {
+                    self.collect_calls_expr(e, reachable, seen)?;
+                }
+                Ok(())
+            }
             Stmt::ExprStmt { expr, .. } => self.collect_calls_expr(expr, reachable, seen),
             _ => Ok(()),
         }
@@ -376,8 +378,19 @@ impl Codegen {
         let mut ret: Option<CType> = None;
         for s in stmts {
             let t = match s {
-                Stmt::Return { value: Some(e), .. } => Some(self.infer_expr_type(e, vt, stack)?),
-                Stmt::Return { value: None, .. } => Some(CType::Void),
+                // 多返回值无法映射到 C ABI，DLL 构建中报错（return_type_stmt 后续阶段会提示）
+                Stmt::Return { values, .. } if values.len() > 1 => {
+                    return Err(self.zerr(
+                        codes::NOT_IMPLEMENTED,
+                        "multi-value `return a, b, ...` is not supported in DLL builds",
+                        stmt_span(s),
+                        Some("return a single value, or pack the values into a list"),
+                    ))
+                }
+                Stmt::Return { values, .. } => match values.first() {
+                    Some(e) => Some(self.infer_expr_type(e, vt, stack)?),
+                    None => Some(CType::Void),
+                },
                 Stmt::Block { stmts, .. } => self.return_type_stmt(stmts, vt, stack)?,
                 Stmt::If { then_branch, else_branch, .. } => {
                     let a = self.return_type_stmt(then_branch, vt, stack)?;
@@ -500,6 +513,14 @@ impl Codegen {
                 "lambdas are not supported in DLL builds",
                 *span,
                 Some("lambdas work in interpreted mode only"),
+            )),
+            Expr::ListComp { span, .. }
+            | Expr::DictComp { span, .. }
+            | Expr::OptionalField { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "comprehensions and optional chaining are not supported in DLL builds",
+                *span,
+                Some("these features work in interpreted mode only"),
             )),
             Expr::Unary { op, expr, span } => {
                 let t = self.infer_expr_type(expr, vt, stack)?;
@@ -915,8 +936,8 @@ impl Codegen {
                 out.push_str("    }\n");
                 Ok(())
             }
-            Stmt::Return { value, span } => {
-                match value {
+            Stmt::Return { values, span } => {
+                match values.first() {
                     Some(e) => {
                         let (t, code) = self.gen_expr(e, ctx)?;
                         if t != ret_type {
@@ -1093,6 +1114,14 @@ impl Codegen {
                 *span,
                 Some("lambdas work in interpreted mode only"),
             )),
+            Expr::ListComp { span, .. }
+            | Expr::DictComp { span, .. }
+            | Expr::OptionalField { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "comprehensions and optional chaining are not supported in DLL builds",
+                *span,
+                Some("these features work in interpreted mode only"),
+            )),
             Expr::Unary { op, expr, span } => {
                 let (t, s) = self.gen_expr(expr, ctx)?;
                 match op {
@@ -1256,6 +1285,7 @@ fn stmt_span(s: &Stmt) -> Span {
     match s {
         Stmt::Assign { span, .. }
         | Stmt::AssignOp { span, .. }
+        | Stmt::DestructAssign { span, .. }
         | Stmt::VarDecl { span, .. }
         | Stmt::Block { span, .. }
         | Stmt::If { span, .. }

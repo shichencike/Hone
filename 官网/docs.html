@@ -406,6 +406,70 @@ p = <span class="f">Point</span>(<span class="n">3</span>, <span class="n">2.5</
       完整示例见 <code class="inline">examples/class_test.hn</code>。</p>
   </section>
 
+  <section id="lang-new">
+    <h2><span class="hash">#</span>7.7 多返回值 · 解构赋值 · 推导式 · 可选链</h2>
+    <p><strong>多返回值</strong>：<code class="inline">return a, b, ...;</code> 一个函数可一次返回多个值，
+      运行时打包为列表，由解构赋值接收；不解构时（<code class="inline">x = f();</code>）拿到打包后的列表。
+      仍支持单值 return 与空 return（返回 null）；<code class="inline">hone build --dll</code> 暂不支持：</p>
+<pre><code><span class="k">fn</span> <span class="f">divmod</span>(a, b) {
+    <span class="k">return</span> a / b, a % b;
+}
+q, r = <span class="f">divmod</span>(<span class="n">10</span>, <span class="n">3</span>);
+<span class="f">print</span>(q);   <span class="c">// 3</span>
+<span class="f">print</span>(r);   <span class="c">// 1</span>
+
+<span class="k">fn</span> <span class="f">minmax</span>(a, b) {
+    <span class="k">if</span> (a &lt; b) { <span class="k">return</span> a, b; }
+    <span class="k">return</span> b, a;
+}
+lo, hi = <span class="f">minmax</span>(<span class="n">7</span>, <span class="n">2</span>);
+<span class="f">print</span>(lo);   <span class="c">// 2</span>
+<span class="f">print</span>(hi);   <span class="c">// 7</span>
+
+packed = <span class="f">divmod</span>(<span class="n">8</span>, <span class="n">3</span>);
+<span class="f">print</span>(packed);   <span class="c">// [2, 2]（不解构时拿到打包列表）</span></code></pre>
+    <p><strong>解构赋值</strong>：列表解构 <code class="inline">a, b = [1, 2]</code> 按位置依次绑定变量
+      （元素不足报错、多余元素忽略，典型用途 <code class="inline">a, b = [b, a];</code> 交换）；
+      字典解构 <code class="inline">{a, b} = dict</code> 按键取出同名变量，改名形式
+      <code class="inline">{a: x, b: y} = dict</code>（等价 <code class="inline">x = dict["a"]</code>），键缺失报错：</p>
+<pre><code>a, b = [<span class="n">1</span>, <span class="n">2</span>];          <span class="c">// a=1, b=2</span>
+first, second = [<span class="n">9</span>, <span class="n">8</span>, <span class="n">7</span>];  <span class="c">// 多余元素忽略：first=9, second=8</span>
+
+user = {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"age"</span>: <span class="n">7</span>};
+{name, age} = user;           <span class="c">// name="hone", age=7</span>
+{name: n, age: a} = user;     <span class="c">// 改名：n="hone", a=7</span>
+
+q, r = <span class="f">divmod</span>(<span class="n">17</span>, <span class="n">5</span>);     <span class="c">// 与多返回值配合：q=3, r=2</span></code></pre>
+    <p><strong>列表/字典推导式</strong>：<code class="inline">[表达式 for 变量 in 集合 (if 条件)]</code> 与
+      <code class="inline">{键: 值 for 变量 in 集合 (if 条件)}</code>，一行生成集合。
+      集合为列表时单变量绑定元素，为字典时双变量（k、v 分别为键、值）；
+      字典推导式的键必须求值为 <code class="inline">str</code>（动态键用 <code class="inline">to_str</code> 转换）：</p>
+<pre><code>nums = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>];
+dbl = [x * <span class="n">2</span> <span class="k">for</span> x <span class="k">in</span> nums];              <span class="c">// [2, 4, 6, 8, 10]</span>
+evens = [x <span class="k">for</span> x <span class="k">in</span> nums <span class="k">if</span> x % <span class="n">2</span> == <span class="n">0</span>];  <span class="c">// [2, 4]</span>
+
+grades = {<span class="s">"alice"</span>: <span class="n">90</span>, <span class="s">"bob"</span>: <span class="n">85</span>};
+passed = [k <span class="k">for</span> k, v <span class="k">in</span> grades <span class="k">if</span> v &gt;= <span class="n">90</span>];   <span class="c">// ["alice"]</span>
+rev = {<span class="f">to_str</span>(v): k <span class="k">for</span> k, v <span class="k">in</span> grades};      <span class="c">// {"90": "alice", "85": "bob"}</span></code></pre>
+    <p><strong>可选链 <code class="inline">?.</code></strong>：<code class="inline">a?.b</code> 在 a 为 null 时
+      短路返回 null，否则等价普通字段访问；可链式 <code class="inline">a?.b?.c</code>，可与空值合并配合
+      <code class="inline">a?.b ?? "默认值"</code>。混合链 <code class="inline">a?.b.c</code> 中
+      <code class="inline">?.</code> 只短路其后一个字段，继续的普通字段访问在 null 上仍报错（与 JS 一致）。
+      obj 非 null 但字段不存在时同样报错；Hone 无 null 字面量，null 来自 void 函数调用等占位值；
+      <code class="inline">hone build --dll</code> 暂不支持：</p>
+<pre><code><span class="k">fn</span> <span class="f">get_user</span>() {
+    <span class="k">return</span> {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"age"</span>: <span class="n">7</span>};
+}
+<span class="f">print</span>(<span class="f">get_user</span>()?.name);   <span class="c">// hone</span>
+
+<span class="k">fn</span> <span class="f">void_fn</span>() {
+}
+v = <span class="f">void_fn</span>();
+<span class="f">print</span>(v?.name);             <span class="c">// null（短路）</span>
+<span class="f">print</span>(v?.a?.b);             <span class="c">// null（链式短路）</span>
+<span class="f">print</span>(v?.name ?? <span class="s">"匿名"</span>);  <span class="c">// 匿名（与空值合并配合）</span></code></pre>
+  </section>
+
   <section id="builtins">
     <h2><span class="hash">#</span>8. 内置函数参考</h2>
     <p>全部开箱即用，无需导入：</p>
