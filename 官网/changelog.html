@@ -44,6 +44,25 @@ function toggleTheme(){
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
 
   <div class="release">
+    <span class="ver-tag">v0.6.7</span><span class="date">2026-08-18</span>
+    <h4>新增（交互式解释器）</h4>
+    <ul>
+      <li><strong><code>hone repl</code></strong>：进入 Python 式交互环境——表达式自动回显、
+        未闭合大括号自动续行（<code>...</code> 提示）、语句省略结尾 <code>;</code> 自动补全、
+        跨输入共享变量与函数定义</li>
+      <li>特殊命令：<code>exit()</code> / <code>quit()</code> / <code>.exit</code> / <code>.quit</code> 退出，
+        <code>.vars</code> 查看已定义变量与函数，<code>.help</code> 内置帮助，Ctrl+D / Ctrl+Z 结束输入</li>
+      <li>REPL 不做静态类型检查（跨行变量无法增量检查），类型错误在运行期报出；
+        裸字面量（如 <code>1+1</code>）按单表达式解析回显</li>
+    </ul>
+    <h4>文档</h4>
+    <ul>
+      <li>官网 docs.html（§10 工具链：命令表 + hone repl 使用指南）、index.html（快速开始命令表）、
+        changelog.html（v0.6.7 条目）同步更新</li>
+    </ul>
+  </div>
+
+  <div class="release">
     <span class="ver-tag">v0.6.6</span><span class="date">2026-08-17</span>
     <h4>新增（性能分析）</h4>
     <ul>

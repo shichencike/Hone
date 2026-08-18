@@ -559,9 +559,42 @@ age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span cl
       <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存到 ~/.hone/cache/，同时写入/更新 hone.json 清单（也支持扫描脚本 import 批量预下载）</td></tr>
       <tr><td><code>hone self-update [url]</code></td><td>从 URL（或环境变量 <code>HONE_UPDATE_URL</code>）下载最新 hone 二进制并替换当前程序，魔数校验防误下载</td></tr>
       <tr><td><code>hone lsp</code></td><td>语言服务器（补全/诊断/hover，LSP over stdio）</td></tr>
+      <tr><td><code>hone repl</code></td><td>交互式解释器（Python 式：表达式自动回显、多行续行、.vars 查看变量 / .help 帮助 / .exit 退出）</td></tr>
       <tr><td><code>hone prof &lt;file.hn&gt;</code></td><td>剖析模式运行脚本，统计每个用户函数的总耗时 / 调用次数 / 平均耗时，按总耗时降序输出热点表格</td></tr>
       <tr><td><code>hone poop &lt;file.hn&gt;</code></td><td>屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
     </table>
+    <h3>交互式解释器 hone repl</h3>
+    <p><code class="inline">hone repl</code> 启动 Python 式交互环境：逐行执行、自动回显表达式结果，
+      跨输入共享变量与函数定义，适合快速实验、验证语法与调试算法。</p>
+    <ul>
+      <li><strong>表达式回显</strong>：输入表达式自动打印其值（void 调用不回显 <code class="inline">null</code>）</li>
+      <li><strong>多行续行</strong>：函数 / if / while 等未闭合大括号时显示 <code class="inline">...</code> 续行提示</li>
+      <li><strong>自动补分号</strong>：语句省略结尾 <code class="inline">;</code> 也能执行；裸字面量（如 <code class="inline">1+1</code>）按单表达式解析</li>
+      <li><strong>跨行状态</strong>：变量与函数定义在后续输入中持续有效；不做静态类型检查，类型错误在运行期报出</li>
+    </ul>
+    <table>
+      <tr><th>特殊命令</th><th>作用</th></tr>
+      <tr><td><code class="inline">exit()</code> / <code class="inline">quit()</code> / <code class="inline">.exit</code> / <code class="inline">.quit</code></td><td>退出交互模式</td></tr>
+      <tr><td><code class="inline">.vars</code></td><td>列出当前已定义变量与函数</td></tr>
+      <tr><td><code class="inline">.help</code></td><td>显示内置帮助</td></tr>
+      <tr><td><code class="inline">Ctrl+D</code>（Unix）/ <code class="inline">Ctrl+Z</code>（Windows）</td><td>结束输入并退出</td></tr>
+    </table>
+<pre><code>$ hone repl
+<span class="c">&gt;&gt;&gt; </span><span class="n">1</span> + <span class="n">1</span>
+<span class="n">2</span>
+<span class="c">&gt;&gt;&gt; </span>x = <span class="n">10</span>
+<span class="c">&gt;&gt;&gt; </span>x * <span class="n">2</span>
+<span class="n">20</span>
+<span class="c">&gt;&gt;&gt; </span><span class="k">fn</span> <span class="f">fib</span>(n) {
+...     <span class="k">if</span> (n &lt;= <span class="n">1</span>) { <span class="k">return</span> n; }
+...     <span class="k">return</span> <span class="f">fib</span>(n - <span class="n">1</span>) + <span class="f">fib</span>(n - <span class="n">2</span>);
+... }
+<span class="c">&gt;&gt;&gt; </span><span class="f">fib</span>(<span class="n">10</span>)
+<span class="n">55</span>
+<span class="c">&gt;&gt;&gt; </span>.vars
+x = <span class="n">10</span>
+fn fib
+<span class="c">&gt;&gt;&gt; </span><span class="f">exit</span>()</code></pre>
   </section>
 
   <section id="errors">
