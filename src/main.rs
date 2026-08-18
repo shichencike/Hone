@@ -19,6 +19,7 @@ mod parser;
 mod pluginmod;
 mod plotmod;
 mod ptrmod;
+mod repl;
 mod srvmod;
 mod sqlitemod;
 mod statmod;
@@ -125,6 +126,7 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
         "self-update" => cmd_self_update(&args[1..]),
         "lsp" => lsp::run_lsp(),
         "poop" => cmd_poop(&args[1..]),
+        "repl" => repl::run_repl(&args[1..]),
         "explain" => {
             let code = args
                 .get(1)
@@ -370,6 +372,7 @@ fn print_help() {
     println!("  hone prof <script.hn>    以剖析模式运行脚本，输出函数级热点报告（总耗时/调用次数/平均耗时）");
     println!("  hone self-update [url]   从 URL 下载最新 hone 二进制并替换当前程序（需管理员/写权限）");
     println!("  hone lsp                 启动语言服务器（补全/诊断，LSP over stdio）");
+    println!("  hone repl                交互式解释器（Python 式：表达式回显/多行输入/.vars）");
     println!("  hone --help              显示帮助");
     println!("  hone --version           显示版本");
     println!();

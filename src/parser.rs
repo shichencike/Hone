@@ -65,6 +65,19 @@ impl Parser {
         Ok(Program { stmts })
     }
 
+    /// REPL 用：把整段源码当作"单个表达式语句"解析（如 `1+1`、`[1,2]`），
+    /// 供交互模式在普通语句解析失败时回退使用。src 需以 `;` 结尾。
+    pub fn parse_expr_stmt_src(file: &str, src: &str) -> Result<Stmt, ZError> {
+        let toks = Lexer::new(file, src).tokenize()?;
+        let mut p = Parser {
+            file: file.to_string(),
+            src: src.to_string(),
+            toks,
+            pos: 0,
+        };
+        p.parse_expr_stmt()
+    }
+
     // ---------- 基础工具 ----------
 
     fn cur(&self) -> &(Tok, Span) {

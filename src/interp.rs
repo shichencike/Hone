@@ -131,7 +131,7 @@ impl Value {
 
 /// 语句执行流程：Normal 继续；Return 携带返回值向上传播；Break 跳出最近循环；
 /// Continue 跳过本次循环剩余语句，进入下一次迭代。
-enum Flow {
+pub enum Flow {
     Normal,
     Return(Value),
     Break,
@@ -144,15 +144,26 @@ struct FnDef {
     body: Vec<Stmt>,
 }
 
-struct Env {
+pub struct Env {
     scopes: Vec<HashMap<String, Value>>,
 }
 
 impl Env {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Env {
             scopes: vec![HashMap::new()],
         }
+    }
+
+    /// REPL 用：列出当前作用域已定义变量（名 → 显示值），按名排序。
+    pub fn vars(&self) -> Vec<(String, String)> {
+        let mut v: Vec<(String, String)> = self
+            .scopes
+            .last()
+            .map(|m| m.iter().map(|(k, val)| (k.clone(), val.display())).collect())
+            .unwrap_or_default();
+        v.sort_by(|a, b| a.0.cmp(&b.0));
+        v
     }
 
     fn get(&self, name: &str) -> Option<&Value> {
@@ -239,6 +250,8 @@ pub struct Interp {
     classes: HashMap<String, HashMap<String, Arc<FnDef>>>,
     /// profiler 统计表（None = 未启用剖析，减少热路径开销）
     prof: Option<HashMap<String, ProfEntry>>,
+    /// REPL 最近一次表达式语句的值（Python 式回显用）
+    last_expr: Option<Value>,
 }
 
 /// load 加载的 C ABI 库函数签名约定：全 int64 参数（不足补 0，x64 ABI 安全）。
@@ -323,20 +336,10 @@ fn run_impl(
     debug: bool,
     prof: bool,
 ) -> Result<Option<ProfData>, ZError> {
-    let mut ip = Interp {
-        file: file.to_string(),
-        src: src.to_string(),
-        fns: HashMap::new(),
-        debug,
-        depth: 0,
-        libs: HashMap::new(),
-        lazy_libs: HashMap::new(),
-        ffi_sigs: HashMap::new(),
-        alias_map: HashMap::new(),
-        structs: HashMap::new(),
-        classes: HashMap::new(),
-        prof: if prof { Some(HashMap::new()) } else { None },
-    };
+    let mut ip = Interp::new(file, src, debug);
+    if prof {
+        ip.prof = Some(HashMap::new());
+    }
     ip.collect_fns(&program.stmts)?;
     ip.collect_structs(&program.stmts);
     ip.collect_classes(&program.stmts);
@@ -346,8 +349,44 @@ fn run_impl(
 }
 
 impl Interp {
+    /// 新建解释器（REPL 复用：跨输入保持函数表与已加载库等状态）。
+    pub fn new(file: &str, src: &str, debug: bool) -> Self {
+        Interp {
+            file: file.to_string(),
+            src: src.to_string(),
+            fns: HashMap::new(),
+            debug,
+            depth: 0,
+            libs: HashMap::new(),
+            lazy_libs: HashMap::new(),
+            ffi_sigs: HashMap::new(),
+            alias_map: HashMap::new(),
+            structs: HashMap::new(),
+            classes: HashMap::new(),
+            prof: None,
+            last_expr: None,
+        }
+    }
+
+    /// REPL 用：最近一次表达式语句的值（Python 式回显）。
+    pub fn last_expr(&self) -> Option<&Value> {
+        self.last_expr.as_ref()
+    }
+
+    /// REPL 用：当前已注册的用户函数名（.vars 展示用）。
+    pub fn fn_names(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.fns.keys().cloned().collect();
+        v.sort();
+        v
+    }
+
+    /// REPL 用：开始执行新一轮输入前清空回显值。
+    pub fn reset_last_expr(&mut self) {
+        self.last_expr = None;
+    }
+
     /// 收集所有函数定义（含嵌套，扁平化注册；解释执行时 FnDef 语句为 no-op）。
-    fn collect_fns(&mut self, stmts: &[Stmt]) -> Result<(), ZError> {
+    pub fn collect_fns(&mut self, stmts: &[Stmt]) -> Result<(), ZError> {
         for stmt in stmts {
             match stmt {
                 Stmt::FnDef { name, params, body, tmp, .. } => {
@@ -377,7 +416,7 @@ impl Interp {
     }
 
     /// 收集所有结构体定义（含嵌套），扁平化注册；解释执行时 StructDef 语句为 no-op。
-    fn collect_structs(&mut self, stmts: &[Stmt]) {
+    pub fn collect_structs(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
             match stmt {
                 Stmt::StructDef { name, fields, .. } => {
@@ -403,7 +442,7 @@ impl Interp {
 
     /// 收集所有类定义（含嵌套），注册到 classes 表（类名 → 方法名 → FnDef）。
     /// 成员函数不进入全局 fns 表，只能经 `类.方法(...)` 调用。
-    fn collect_classes(&mut self, stmts: &[Stmt]) {
+    pub fn collect_classes(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
             match stmt {
                 Stmt::ClassDef { name, methods, .. } => {
@@ -447,7 +486,7 @@ impl Interp {
 
     // ---------- 语句 ----------
 
-    fn exec_stmts(&mut self, env: &mut Env, stmts: &[Stmt]) -> Result<Flow, ZError> {
+    pub fn exec_stmts(&mut self, env: &mut Env, stmts: &[Stmt]) -> Result<Flow, ZError> {
         for s in stmts {
             match self.exec_stmt(env, s)? {
                 Flow::Return(v) => return Ok(Flow::Return(v)),
@@ -696,7 +735,9 @@ impl Interp {
             }
             Stmt::FnDef { .. } => Ok(Flow::Normal), // 已扁平化注册
             Stmt::ExprStmt { expr, .. } => {
-                self.eval_expr(env, expr)?;
+                let v = self.eval_expr(env, expr)?;
+                // REPL 回显用：记录最近一次表达式语句的值
+                self.last_expr = Some(v);
                 Ok(Flow::Normal)
             }
             Stmt::Break { .. } => Ok(Flow::Break),
@@ -839,6 +880,7 @@ impl Interp {
                 structs,
                 classes,
                 prof: None,
+                last_expr: None,
             };
             if let Err(err) = t.call_fn(&callee, arg_vals, span) {
                 eprintln!("{}", err);
