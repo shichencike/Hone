@@ -1294,7 +1294,8 @@ Hone 单文件即可运行，但项目变大后建议拆分模块。三种复用
 · use 命名空间：调用 Rust 宿主注册的原生函数（如 use std_io;）
 
 import 的函数名前缀规则：模块内函数以「模块名_」为前缀注册
-（例如 hone_lib/math.hn 中的 clamp → math_clamp，见 examples/test_hone_lib.hn）；
+（例如 hone_lib/math.hn 中的 clamp → math_clamp，见 examples/test_hone_lib.hn；
+hone_lib/img.hn 中的 new → img_new、to_ppm → img_to_ppm，见 examples/test_img_lib.hn）；
 使用 as 别名后，模块名前缀整体替换为别名前缀。
 
 推荐的项目目录结构：

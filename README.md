@@ -313,6 +313,29 @@ gui_run("Hone GUI 演示", widgets);
 - `on_event` 返回值按 JSON 协议解释：`{"update": [[元素id, 新文本], ...]}` 更新元素文本、`{"alert": "消息"}` 弹窗提示、其他文本显示在页面底部状态栏
 - 底层 `server.*` API（见 `examples/server_demo.hn`）：`server.listen(port)` 启动后台监听线程（0=自动分配，返回实际端口）、`server.poll()` 取出排队请求（返回 JSON 数组）、`server.respond(id, body)` 发送响应体；后台线程只做 TCP 收发与排队，脚本在主线程轮询响应，与解释器单线程模型兼容；进程内自测：`hone examples/server_selftest.hn`
 
+## 图片库（hone_lib/img.hn）
+
+纯 Hone 编写的图片标准库，像素网格 + 绘图/滤镜/变换 + PPM P3 / SVG 读写。
+运行示例：`hone examples/test_img_lib.hn`（生成 `examples/img_test.ppm` 与 `examples/img_test.svg`）。
+
+```hn
+import "img" from "./hone_lib/img.hn";
+
+// 图像 = {"w": 宽, "h": 高, "rows": [[[r,g,b],...],...]}
+im = img_new(64, 64, 255, 255, 255);        // 白色画布
+im = img_rect(im, 8, 8, 40, 40, 255, 0, 0); // 红色实心矩形
+im = img_circle(im, 32, 32, 16, 0, 0, 255); // 蓝色实心圆
+im = img_grayscale(im);                     // 灰度滤镜
+img_save_ppm(im, "out.ppm");                // 保存 PPM P3
+img_save_svg(im, "out.svg", 4);             // 保存 SVG（每像素放大 4 倍）
+```
+
+- 创建/绘图：`img_new` / `img_fill` / `img_rect` / `img_line` / `img_circle` / `img_gradient_h` / `img_gradient_v` / `img_checker` / `img_noise`
+- 滤镜：`img_grayscale` / `img_invert` / `img_brightness` / `img_contrast` / `img_threshold`
+- 变换：`img_flip_h` / `img_flip_v` / `img_rotate90` / `img_crop` / `img_scale`
+- 读写：`img_to_ppm` / `img_save_ppm` / `img_from_ppm` / `img_load_ppm` / `img_to_svg` / `img_save_svg`
+- 说明：Hone 的 str 无法承载二进制，故不支持 PNG/BMP 等二进制格式，采用文本格式 PPM P3（GIMP/ImageMagick 可查看）与 SVG（浏览器直接打开）；列表为值类型、索引赋值整体拷贝，绘图/滤镜适合 ≤128×128 的小图
+
 ## 错误报告格式
 
 ```

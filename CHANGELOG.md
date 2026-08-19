@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.7.1] - 2026-08-19
+
+### 新增
+- **hone_lib/img.hn 图片标准库**（纯 Hone 编写）：像素网格 `{"w","h","rows"}` 表示 +
+  创建/绘图（`img_new`、`img_fill`、`img_rect`、`img_line`、`img_circle`、`img_gradient_h/v`、
+  `img_checker`、`img_noise`）+ 滤镜（`img_grayscale`、`img_invert`、`img_brightness`、
+  `img_contrast`、`img_threshold`）+ 变换（`img_flip_h/v`、`img_rotate90`、`img_crop`、
+  `img_scale`）+ PPM P3 读写（`img_to_ppm`、`img_save_ppm`、`img_from_ppm`、`img_load_ppm`）
+  与 SVG 输出（`img_to_svg`、`img_save_svg`）；示例：`examples/test_img_lib.hn`
+- 说明：Hone 的 str 无法承载二进制，故采用文本格式 PPM P3 与 SVG，不支持 PNG/BMP；
+  列表为值类型，绘图/滤镜适合 ≤128×128 的小图
+
 ## [v0.7.0] - 2026-08-19
 
 ### 工具链增强
