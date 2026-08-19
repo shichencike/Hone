@@ -78,6 +78,34 @@ impl Parser {
         p.parse_expr_stmt()
     }
 
+    /// 调试器用：解析单个表达式（如 `p x + 1`），供断点提示中的即时求值。
+    pub(crate) fn parse_expr_src(file: &str, src: &str) -> Result<Expr, ZError> {
+        let toks = Lexer::new(file, src).tokenize()?;
+        if toks.is_empty() {
+            return Err(ZError::plain(
+                codes::SYNTAX,
+                "empty expression",
+                Some("type an expression, e.g. `x + 1`"),
+            ));
+        }
+        let mut p = Parser {
+            file: file.to_string(),
+            src: src.to_string(),
+            toks,
+            pos: 0,
+        };
+        let e = p.parse_expr()?;
+        // next() 把 pos 钳制在 len-1：完全消费时 pos == len-1，剩余未消费则 pos < len-1
+        if p.pos < p.toks.len() - 1 {
+            return Err(p.err_here(
+                codes::SYNTAX,
+                "unexpected trailing tokens after expression",
+                None::<&str>,
+            ));
+        }
+        Ok(e)
+    }
+
     // ---------- 基础工具 ----------
 
     fn cur(&self) -> &(Tok, Span) {
@@ -173,6 +201,9 @@ impl Parser {
                     Tok::PlusEq | Tok::MinusEq | Tok::StarEq | Tok::SlashEq | Tok::PercentEq
                 ) {
                     self.parse_assign_op()
+                } else if self.peek2() == &Tok::LBracket {
+                    // a[i] = x;  列表索引赋值（读 a[i] 走表达式后缀解析）
+                    self.parse_index_stmt()
                 } else {
                     self.parse_expr_stmt()
                 }
@@ -207,8 +238,18 @@ impl Parser {
             }
             Tok::Breakpoint => {
                 let (_, span) = self.next();
+                // 条件断点：breakpoint if (expr);
+                let cond = if self.peek() == &Tok::If {
+                    self.next();
+                    self.expect(&Tok::LParen, "`(`")?;
+                    let e = self.parse_expr()?;
+                    self.expect(&Tok::RParen, "`)`")?;
+                    Some(Box::new(e))
+                } else {
+                    None
+                };
                 self.expect_semi()?;
-                Ok(Stmt::Breakpoint { span })
+                Ok(Stmt::Breakpoint { span, cond })
             }
             Tok::LBrace => {
                 // 语句起始 `{`：先探测 `{a, b} = ...` 字典解构模式，否则按代码块解析
@@ -316,6 +357,41 @@ impl Parser {
         let value = self.parse_expr()?;
         self.expect_semi()?;
         Ok(Stmt::Assign { name, value, span })
+    }
+
+    /// a[i] = x;  列表索引赋值；a[i];  索引表达式语句。
+    /// 变量须先声明为列表，支持链式索引目标（m[i][j] = x），下标越界/非列表在运行时报错。
+    fn parse_index_stmt(&mut self) -> Result<Stmt, ZError> {
+        let (name_tok, span) = self.next();
+        let name = match name_tok {
+            Tok::Ident(s) => s,
+            _ => unreachable!(),
+        };
+        // 链式索引目标：a[i][j]... 逐层包装为 Expr::Index
+        let mut target = Expr::Ident { name, span };
+        loop {
+            if self.at(&Tok::LBracket) {
+                self.next();
+                let idx = self.parse_expr()?;
+                self.expect(&Tok::RBracket, "`]`")?;
+                target = Expr::Index {
+                    obj: Box::new(target),
+                    index: Box::new(idx),
+                    span,
+                };
+            } else {
+                break;
+            }
+        }
+        if self.at(&Tok::Assign) {
+            self.next();
+            let value = self.parse_expr()?;
+            self.expect_semi()?;
+            Ok(Stmt::IndexAssign { target, value, span })
+        } else {
+            self.expect_semi()?;
+            Ok(Stmt::ExprStmt { expr: target, span })
+        }
     }
 
     /// a, b = expr;  列表解构赋值：右侧为列表（或多返回值），按位置依次绑定变量。
@@ -1623,9 +1699,21 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ZError> {
-        // 先解析原子表达式（字面量/标识符/调用/括号等），再处理可选链后缀 ?.
+        // 先解析原子表达式（字面量/标识符/调用/括号等），再处理后缀：可选链 ?. 与索引 [i]
         let mut expr = self.parse_primary_atom()?;
-        while self.at(&Tok::QuestionDot) {
+        while self.at(&Tok::QuestionDot) || self.at(&Tok::LBracket) {
+            // 索引访问：a[i]（可链式 a[i][j]）
+            if self.at(&Tok::LBracket) {
+                let (_, ispan) = self.next();
+                let idx = self.parse_expr()?;
+                self.expect(&Tok::RBracket, "`]`")?;
+                expr = Expr::Index {
+                    obj: Box::new(expr),
+                    index: Box::new(idx),
+                    span: ispan,
+                };
+                continue;
+            }
             let (_, span) = self.next();
             let (ftok, fspan) = self.next();
             let field = match ftok {

@@ -191,21 +191,31 @@ impl Env {
     }
 }
 
-/// profiler 单函数统计：调用次数与累计耗时（纳秒）。
+/// profiler 单函数统计：调用次数、累计耗时（纳秒）、自耗时（不含子调用，纳秒）。
 #[derive(Clone, Copy, Default)]
 struct ProfEntry {
     calls: u64,
     total_ns: u128,
+    self_ns: u128,
 }
 
-/// hone prof 收集到的函数级剖析数据（可按总耗时降序排序）。
+/// profiler 调用栈帧：入口时间 + 子调用累计耗时，用于计算自耗时（独占时间）。
+struct ProfFrame {
+    name: String,
+    start: std::time::Instant,
+    children_ns: u128,
+}
+
+/// hone prof 收集到的函数级剖析数据（可按总耗时降序排序，含调用图）。
 pub struct ProfData {
     entries: HashMap<String, ProfEntry>,
+    /// 调用图边：调用方 → 被调方 → 次数
+    edges: HashMap<(String, String), u64>,
 }
 
 impl ProfData {
-    fn from_map(entries: HashMap<String, ProfEntry>) -> Self {
-        ProfData { entries }
+    fn from_map(entries: HashMap<String, ProfEntry>, edges: HashMap<(String, String), u64>) -> Self {
+        ProfData { entries, edges }
     }
 
     /// 是否有任何用户函数被调用。
@@ -213,17 +223,38 @@ impl ProfData {
         self.entries.is_empty()
     }
 
-    /// 按总耗时降序返回 (函数名, 调用次数, 总耗时纳秒, 平均耗时纳秒)。
-    pub fn sorted(&self) -> Vec<(String, u64, u128, u128)> {
-        let mut v: Vec<(String, u64, u128, u128)> = self
+    /// 按总耗时降序返回 (函数名, 调用次数, 总耗时纳秒, 平均耗时纳秒, 自耗时纳秒)。
+    pub fn sorted(&self) -> Vec<(String, u64, u128, u128, u128)> {
+        let mut v: Vec<(String, u64, u128, u128, u128)> = self
             .entries
             .iter()
             .map(|(k, e)| {
                 let avg = if e.calls > 0 { e.total_ns / e.calls as u128 } else { 0 };
-                (k.clone(), e.calls, e.total_ns, avg)
+                (k.clone(), e.calls, e.total_ns, avg, e.self_ns)
             })
             .collect();
         v.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| b.1.cmp(&a.1)));
+        v
+    }
+
+    /// 所有函数的累计总耗时（嵌套调用重复计入，用于占比分母）。
+    pub fn total_ns(&self) -> u128 {
+        self.entries.values().map(|e| e.total_ns).sum()
+    }
+
+    /// 所有函数的累计调用次数。
+    pub fn total_calls(&self) -> u64 {
+        self.entries.values().map(|e| e.calls).sum()
+    }
+
+    /// 调用图边（调用方 → 被调方 → 次数），按次数降序。
+    pub fn edges(&self) -> Vec<(String, String, u64)> {
+        let mut v: Vec<(String, String, u64)> = self
+            .edges
+            .iter()
+            .map(|((a, b), c)| (a.clone(), b.clone(), *c))
+            .collect();
+        v.sort_by(|x, y| y.2.cmp(&x.2));
         v
     }
 }
@@ -252,6 +283,12 @@ pub struct Interp {
     prof: Option<HashMap<String, ProfEntry>>,
     /// REPL 最近一次表达式语句的值（Python 式回显用）
     last_expr: Option<Value>,
+    /// 调试模式：监视变量名（每次断点自动打印当前值）
+    watch: Vec<String>,
+    /// profiler 调用栈（prof 模式）：入口时间 + 子调用累计，用于自耗时
+    prof_stack: Vec<ProfFrame>,
+    /// profiler 调用图边（调用方 → 被调方 → 次数）
+    prof_edges: HashMap<(String, String), u64>,
 }
 
 /// load 加载的 C ABI 库函数签名约定：全 int64 参数（不足补 0，x64 ABI 安全）。
@@ -344,9 +381,23 @@ fn run_impl(
     ip.collect_structs(&program.stmts);
     ip.collect_classes(&program.stmts);
     let mut env = Env::new();
-    ip.exec_stmts(&mut env, &program.stmts)?;
-    Ok(ip.prof.map(ProfData::from_map))
+    let exec = ip.exec_stmts(&mut env, &program.stmts);
+    // 无论执行结果如何都取出剖析数据（DEBUG_QUIT 也需返回）
+    let data = ip
+        .prof
+        .take()
+        .map(|p| ProfData::from_map(p, std::mem::take(&mut ip.prof_edges)));
+    match exec {
+        Ok(_) => {}
+        // 调试器用户主动退出：正常结束，不打印错误
+        Err(e) if e.code == DEBUG_QUIT => return Ok(data),
+        Err(e) => return Err(e),
+    }
+    Ok(data)
 }
+
+/// 调试器用户主动退出时使用的特殊错误码（run_impl 捕获后正常结束，不打印错误）。
+const DEBUG_QUIT: &'static str = "H909";
 
 impl Interp {
     /// 新建解释器（REPL 复用：跨输入保持函数表与已加载库等状态）。
@@ -365,6 +416,9 @@ impl Interp {
             classes: HashMap::new(),
             prof: None,
             last_expr: None,
+            watch: Vec::new(),
+            prof_stack: Vec::new(),
+            prof_edges: HashMap::new(),
         }
     }
 
@@ -518,6 +572,12 @@ impl Interp {
             Stmt::Assign { name, value, .. } => {
                 let v = self.eval_expr(env, value)?;
                 env.set_or_declare(name, v);
+                Ok(Flow::Normal)
+            }
+            Stmt::IndexAssign { target, value, span } => {
+                // 索引赋值：沿索引链更新容器（列表为值类型，克隆后写回基变量）
+                let v = self.eval_expr(env, value)?;
+                self.set_index_value(env, target, v, *span)?;
                 Ok(Flow::Normal)
             }
             Stmt::DestructAssign { targets, value, span } => {
@@ -819,9 +879,16 @@ impl Interp {
             }
             Stmt::Break { .. } => Ok(Flow::Break),
             Stmt::Continue { .. } => Ok(Flow::Continue),
-            Stmt::Breakpoint { span } => {
+            Stmt::Breakpoint { span, cond } => {
                 if self.debug {
-                    self.do_breakpoint(env, *span);
+                    // 条件断点：仅当条件为 true 时暂停
+                    let hit = match cond {
+                        Some(c) => matches!(self.eval_expr(env, c)?, Value::Bool(true)),
+                        None => true,
+                    };
+                    if hit {
+                        self.do_breakpoint(env, *span)?;
+                    }
                 }
                 Ok(Flow::Normal)
             }
@@ -901,21 +968,93 @@ impl Interp {
 
     // ---------- 断点 ----------
 
-    fn do_breakpoint(&self, env: &Env, span: Span) {
-        println!("[Hone Debug] 断点触发 -> {}:{}", self.file, span.line);
-        println!("--- 变量快照 ---");
-        let mut seen: HashSet<String> = HashSet::new();
-        for scope in env.scopes.iter().rev() {
-            for (k, v) in scope {
-                if seen.insert(k.clone()) {
-                    println!("{} : {} = {}", k, v.type_name(), v.display());
+    /// 调试断点：打印位置、监视变量与变量快照，进入交互提示。
+    /// 命令：Enter/c 继续、q 退出调试、l 重列变量、p <expr> 即时求值、
+    ///       w <name> 监视变量、u <name> 取消监视、h 帮助。
+    /// 用户选择退出时返回 Err(DEBUG_QUIT)，由 run_impl 捕获后正常结束。
+    fn do_breakpoint(&mut self, env: &mut Env, span: Span) -> Result<(), ZError> {
+        let mut show_snapshot = true;
+        loop {
+            println!("[Hone Debug] 断点触发 -> {}:{}", self.file, span.line);
+            if !self.watch.is_empty() {
+                println!("--- 监视变量 ---");
+                for name in &self.watch {
+                    match env.get(name) {
+                        Some(v) => println!("{} : {} = {}", name, v.type_name(), v.display()),
+                        None => println!("{} : (未定义)", name),
+                    }
                 }
             }
+            if show_snapshot {
+                println!("--- 变量快照 ---");
+                let mut seen: HashSet<String> = HashSet::new();
+                for scope in env.scopes.iter().rev() {
+                    for (k, v) in scope {
+                        if seen.insert(k.clone()) {
+                            println!("{} : {} = {}", k, v.type_name(), v.display());
+                        }
+                    }
+                }
+                show_snapshot = false;
+            }
+            print!("[dbg] c=继续 q=退出 l=列表 p=<expr>求值 w=<name>监视 u=<name>取消 h=帮助> ");
+            let _ = io::stdout().flush();
+            let mut line = String::new();
+            if io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
+                return Ok(()); // EOF 视为继续
+            }
+            let cmd = line.trim();
+            if cmd.is_empty() || cmd == "c" || cmd == "continue" {
+                return Ok(());
+            }
+            match cmd {
+                "q" | "quit" | "exit" => {
+                    return Err(ZError::plain(DEBUG_QUIT, "debugger quit by user", None::<&str>))
+                }
+                "l" | "list" => {
+                    show_snapshot = true;
+                    continue;
+                }
+                "h" | "help" => {
+                    println!("  Enter/c 继续执行；q 退出调试；l 重列变量快照；p <expr> 求值表达式；w <name> 监视变量；u <name> 取消监视");
+                    continue;
+                }
+                _ => {}
+            }
+            if let Some(rest) = cmd.strip_prefix("p ") {
+                match crate::parser::Parser::parse_expr_src("<dbg>", rest) {
+                    Ok(expr) => match self.eval_expr(env, &expr) {
+                        Ok(v) => println!("{} = {}", rest, v.display()),
+                        Err(e) => println!("求值失败: {}: {}", e.code, e.msg),
+                    },
+                    Err(e) => println!("解析失败: {}: {}", e.code, e.msg),
+                }
+                continue;
+            }
+            if let Some(name) = cmd.strip_prefix("w ") {
+                let name = name.trim().to_string();
+                if name.is_empty() {
+                    println!("用法: w <变量名>");
+                } else if !self.watch.contains(&name) {
+                    self.watch.push(name.clone());
+                    println!("已加入监视: {}", name);
+                } else {
+                    println!("已在监视列表中: {}", name);
+                }
+                continue;
+            }
+            if let Some(name) = cmd.strip_prefix("u ") {
+                let name = name.trim().to_string();
+                if let Some(idx) = self.watch.iter().position(|x| *x == name) {
+                    self.watch.remove(idx);
+                    println!("已取消监视: {}", name);
+                } else {
+                    println!("未在监视列表: {}", name);
+                }
+                continue;
+            }
+            println!("未知命令 `{}`（h 查看帮助）", cmd);
         }
-        print!("按 Enter 继续 (Ctrl+C 退出)...");
-        let _ = io::stdout().flush();
-        let mut line = String::new();
-        let _ = io::stdin().read_line(&mut line);
     }
 
     // ---------- go 多线程 ----------
@@ -958,6 +1097,9 @@ impl Interp {
                 classes,
                 prof: None,
                 last_expr: None,
+                watch: Vec::new(),
+                prof_stack: Vec::new(),
+                prof_edges: HashMap::new(),
             };
             if let Err(err) = t.call_fn(&callee, arg_vals, span) {
                 eprintln!("{}", err);
@@ -1442,13 +1584,37 @@ impl Interp {
             call_env.declare(&p.name, v);
         }
         self.depth += 1;
-        let t0 = if self.prof.is_some() { Some(std::time::Instant::now()) } else { None };
+        // profiler：记录调用图边并入栈；无论执行结果如何都必须出栈结算
+        let prof_enabled = self.prof.is_some();
+        if prof_enabled {
+            if let Some(caller) = self.prof_stack.last() {
+                *self
+                    .prof_edges
+                    .entry((caller.name.clone(), name.to_string()))
+                    .or_insert(0) += 1;
+            }
+            self.prof_stack.push(ProfFrame {
+                name: name.to_string(),
+                start: std::time::Instant::now(),
+                children_ns: 0,
+            });
+        }
         let flow = self.exec_stmts(&mut call_env, &f.body);
         self.depth -= 1;
-        if let (Some(t0), Some(prof)) = (t0, self.prof.as_mut()) {
-            let entry = prof.entry(name.to_string()).or_default();
-            entry.calls += 1;
-            entry.total_ns += t0.elapsed().as_nanos();
+        if prof_enabled {
+            if let Some(frame) = self.prof_stack.pop() {
+                let elapsed = frame.start.elapsed().as_nanos();
+                if let Some(prof) = self.prof.as_mut() {
+                    let entry = prof.entry(frame.name.clone()).or_default();
+                    entry.calls += 1;
+                    entry.total_ns += elapsed;
+                    entry.self_ns += elapsed.saturating_sub(frame.children_ns);
+                }
+                // 把本次调用的墙钟耗时累计到父帧的子调用耗时（父帧此时在栈顶）
+                if let Some(top) = self.prof_stack.last_mut() {
+                    top.children_ns += elapsed;
+                }
+            }
         }
         match flow? {
             Flow::Return(v) => Ok(v),
@@ -1576,6 +1742,114 @@ impl Interp {
     }
 
     // ---------- 表达式 ----------
+
+    /// 索引赋值：把 target（a[i] 或 m[i][j]...）更新为 value。
+    /// 列表为值类型：每层克隆后写回基变量，保持拷贝语义（b = a 后改 a 不影响 b）。
+    fn set_index_value(&mut self, env: &mut Env, target: &Expr, value: Value, span: Span) -> Result<(), ZError> {
+        let Expr::Index { obj, index, span: ispan } = target else {
+            return Err(self.runtime_err(
+                codes::TYPE_MISMATCH,
+                "invalid index assignment target",
+                span,
+                Some("index assignment target must be `a[i]` or `m[i][j]`"),
+            ));
+        };
+        let span = *ispan; // 解引用：Span 为 Copy，后续统一按值传递
+        let i = match self.eval_expr(env, index)? {
+            Value::Int(x) => x,
+            other => {
+                return Err(self.runtime_err(
+                    codes::TYPE_MISMATCH,
+                    format!("list index must be an int, got `{}`", other.type_name()),
+                    span,
+                    Some("use an integer expression as the index, e.g. `a[0] = x`"),
+                ));
+            }
+        };
+        let cur = self.eval_expr(env, obj)?; // 当前层容器（列表）
+        let items = match cur {
+            Value::List(items) => items,
+            other => {
+                return Err(self.runtime_err(
+                    codes::TYPE_MISMATCH,
+                    format!("cannot index a value of type `{}`", other.type_name()),
+                    span,
+                    Some("index assignment is supported on lists, e.g. `a[0] = x`"),
+                ));
+            }
+        };
+        if i < 0 || (i as usize) >= items.len() {
+            return Err(self.runtime_err(
+                codes::TYPE_MISMATCH,
+                format!("index {} out of bounds (list length {})", i, items.len()),
+                span,
+                Some("check the index against `len(list)`"),
+            ));
+        }
+        let mut new_items = items.clone();
+        new_items[i as usize] = value;
+        match obj.as_ref() {
+            // 基变量：写回环境
+            Expr::Ident { name, .. } => {
+                env.set_or_declare(name, Value::List(new_items));
+                Ok(())
+            }
+            // 内层仍是索引：把更新后的容器作为新值递归写回
+            inner @ Expr::Index { .. } => self.set_index_value(env, inner, Value::List(new_items), span),
+            _ => Err(self.runtime_err(
+                codes::TYPE_MISMATCH,
+                "invalid index assignment target",
+                span,
+                Some("index assignment target must be `a[i]` or `m[i][j]`"),
+            )),
+        }
+    }
+
+    /// 索引取值：列表按下标取元素；字符串按下标取单个字符（越界/非容器报错）。
+    fn index_value(&self, v: Value, idx: Value, span: Span) -> Result<Value, ZError> {
+        let i = match idx {
+            Value::Int(x) => x,
+            other => {
+                return Err(self.runtime_err(
+                    codes::TYPE_MISMATCH,
+                    format!("list index must be an int, got `{}`", other.type_name()),
+                    span,
+                    Some("use an integer expression as the index, e.g. `a[0]`, `a[i]`"),
+                ));
+            }
+        };
+        match v {
+            Value::List(items) => {
+                if i < 0 || (i as usize) >= items.len() {
+                    return Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("index {} out of bounds (list length {})", i, items.len()),
+                        span,
+                        Some("check the index against `len(list)`"),
+                    ));
+                }
+                Ok(items[i as usize].clone())
+            }
+            Value::Str(s) => {
+                let chars: Vec<char> = s.chars().collect();
+                if i < 0 || (i as usize) >= chars.len() {
+                    return Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("index {} out of bounds (string length {})", i, chars.len()),
+                        span,
+                        Some("check the index against `len(str)`"),
+                    ));
+                }
+                Ok(Value::Str(chars[i as usize].to_string()))
+            }
+            other => Err(self.runtime_err(
+                codes::TYPE_MISMATCH,
+                format!("cannot index a value of type `{}`", other.type_name()),
+                span,
+                Some("indexing is supported on lists and strings, e.g. `a[0]`, `s[1]`"),
+            )),
+        }
+    }
 
     fn eval_expr(&mut self, env: &mut Env, e: &Expr) -> Result<Value, ZError> {
         match e {
@@ -1728,6 +2002,11 @@ impl Interp {
                     return Ok(Value::Null);
                 }
                 self.field_value(v, field, *span)
+            }
+            Expr::Index { obj, index, span } => {
+                let v = self.eval_expr(env, obj)?;
+                let idx = self.eval_expr(env, index)?;
+                self.index_value(v, idx, *span)
             }
             Expr::Unary { op, expr, span } => {
                 let v = self.eval_expr(env, expr)?;

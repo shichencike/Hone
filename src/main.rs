@@ -61,10 +61,24 @@ fn main() -> ExitCode {
         }
     }
 
-    match run_cli(&args) {
-        Ok(()) => ExitCode::SUCCESS,
+    // 大栈线程：debug 构建（未优化、栈帧巨大）在 Windows 主线程默认 1MB 栈下，
+    // 递归脚本（如 bench/fib.hn 的 fib(26)，深度仅 ~20 层）即会栈溢出；
+    // 把全部命令逻辑放到 64MB 栈的专用线程上执行（虚拟内存预留，不影响常驻内存）。
+    match std::thread::Builder::new()
+        .name("hone-main".to_string())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || run_cli(&args))
+    {
+        Ok(handle) => match handle.join() {
+            Ok(Ok(())) => ExitCode::SUCCESS,
+            Ok(Err(e)) => {
+                eprintln!("{}", e);
+                ExitCode::FAILURE
+            }
+            Err(_) => ExitCode::FAILURE, // 子线程 panic：panic hook 已输出详情
+        },
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("cannot spawn worker thread: {}", e);
             ExitCode::FAILURE
         }
     }
@@ -118,6 +132,7 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
             run_file(path, true)
         }
         "fmt" => cmd_fmt(&args[1..]),
+        "doc" => cmd_doc(&args[1..]),
         "test" => cmd_test(&args[1..]),
         "bind" => cmd_bind(&args[1..]),
         "build" => cmd_build(&args[1..]),
@@ -362,7 +377,8 @@ fn print_help() {
     println!("  hone explain <code>       查看错误码解释（如 `hone explain H201`）");
     println!("  hone bind <header.h>      从 C 头文件生成 FFI 签名块（typed load 用）");
     println!("  hone debug <script.hn>   断点调试模式（breakpoint 关键字生效）");
-    println!("  hone fmt [-w] <file.hn>  代码格式化（统一 Tab 缩进、运算符空格、大括号位置；-w 覆盖写）");
+    println!("  hone fmt [-w|-c] <file.hn>  代码格式化（Tab 缩进/运算符空格/大括号；-w 覆盖写，-c 只检查差异）");
+    println!("  hone doc <file.hn>        从 fn/class 定义与上方 `//` 注释生成 Markdown API 文档");
     println!("  hone build --dll <file.hn> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
     println!("  hone build --exe <file.hn> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
     println!("  hone build --script <file.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）");
@@ -1095,30 +1111,48 @@ fn cmd_self_update(args: &[String]) -> Result<(), ZError> {
     }
 }
 
-/// hone fmt [-w] <file.hn>...：格式化到 stdout，或 -w 覆盖写入源文件。
+/// hone fmt [-w|-c] <file.hn>...：格式化到 stdout；-w 覆盖写入；-c 只检查差异（CI 用）。
 fn cmd_fmt(args: &[String]) -> Result<(), ZError> {
     let mut overwrite = false;
+    let mut check = false;
     let mut files = Vec::new();
     for a in args {
-        if a == "-w" || a == "--write" {
-            overwrite = true;
-        } else {
-            files.push(a.clone());
+        match a.as_str() {
+            "-w" | "--write" => overwrite = true,
+            "-c" | "--check" => check = true,
+            _ => files.push(a.clone()),
         }
     }
     if files.is_empty() {
         return Err(ZError::plain(
             codes::SYNTAX,
-            "missing file: `hone fmt [-w] <file.hn>...`",
+            "missing file: `hone fmt [-w|-c] <file.hn>...`",
             Some("pass one or more .hn files, e.g. `hone fmt -w *.hn`"),
         ));
     }
+    if overwrite && check {
+        return Err(ZError::plain(
+            codes::SYNTAX,
+            "`-w` and `-c` are mutually exclusive",
+            Some("use `-w` to rewrite files, or `-c` to only report differences"),
+        ));
+    }
+    let mut dirty = 0usize;
+    let mut total = 0usize;
     for f in files {
         let src = std::fs::read_to_string(&f).map_err(|e| {
             ZError::plain(codes::NOT_FOUND, format!("cannot read `{}`: {}", f, e), Some("check the path"))
         })?;
         let formatted = fmt::format(&src)?;
-        if overwrite {
+        total += 1;
+        if check {
+            if formatted == src {
+                println!("OK         {}", f);
+            } else {
+                println!("NEEDS FMT  {}", f);
+                dirty += 1;
+            }
+        } else if overwrite {
             std::fs::write(&f, formatted).map_err(|e| {
                 ZError::plain(codes::NOT_FOUND, format!("cannot write `{}`: {}", f, e), Some("check the path"))
             })?;
@@ -1126,7 +1160,133 @@ fn cmd_fmt(args: &[String]) -> Result<(), ZError> {
             print!("{}", formatted);
         }
     }
+    if check {
+        println!();
+        if dirty > 0 {
+            println!("{} of {} file(s) need formatting", dirty, total);
+            return Err(ZError::plain(
+                codes::SYNTAX,
+                format!("{} file(s) not formatted (run `hone fmt -w` to fix)", dirty),
+                Some("run `hone fmt -w <file>...` to apply formatting"),
+            ));
+        }
+        println!("all {} file(s) formatted", total);
+    }
     Ok(())
+}
+
+/// hone doc <file.hn>：扫描函数/类定义及其上方 `//` 注释，生成 Markdown API 文档。
+fn cmd_doc(args: &[String]) -> Result<(), ZError> {
+    let path = args.get(0).ok_or_else(|| {
+        ZError::plain(
+            codes::SYNTAX,
+            "missing file: `hone doc <file.hn>`",
+            Some("pass a .hn script, e.g. `hone doc mylib.hn`"),
+        )
+    })?;
+    let src = std::fs::read_to_string(path).map_err(|e| {
+        ZError::plain(codes::NOT_FOUND, format!("cannot read `{}`: {}", path, e), Some("check the path"))
+    })?;
+    // 语法校验：doc 工具要求输入是合法脚本
+    parser::Parser::parse(path, &src)?;
+
+    let lines: Vec<&str> = src.lines().collect();
+    let mut fns: Vec<(String, String, Vec<String>)> = Vec::new(); // (名, 签名, 文档行)
+    let mut classes: Vec<(String, Vec<String>)> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim_start();
+        // 收集紧邻上方的连续 // 注释（空行或其它代码会中断注释块）
+        let mut doc: Vec<String> = Vec::new();
+        let mut j = i;
+        while j > 0 {
+            let prev = lines[j - 1].trim_start();
+            if let Some(c) = prev.strip_prefix("//") {
+                doc.insert(0, c.trim().to_string());
+                j -= 1;
+            } else {
+                break;
+            }
+        }
+        let is_fn = trimmed.starts_with("fn ") || trimmed.starts_with("tmp fn ");
+        let is_class = trimmed.starts_with("class ");
+        if is_fn || is_class {
+            let (name, sig) = collect_def_sig(&lines, i);
+            if is_class {
+                classes.push((name, doc));
+            } else {
+                fns.push((name, sig, doc));
+            }
+        }
+        i += 1;
+    }
+
+    println!("# {} — API 文档", path);
+    println!();
+    println!("> 由 `hone doc` 生成：{} 个函数，{} 个类。", fns.len(), classes.len());
+    if !fns.is_empty() {
+        println!();
+        println!("## 函数");
+        for (name, sig, doc) in &fns {
+            println!();
+            println!("### `fn {}`", name);
+            println!("```hn");
+            println!("{}", sig);
+            println!("```");
+            if doc.is_empty() {
+                println!("_（无注释）_");
+            } else {
+                for d in doc {
+                    println!("{}", d);
+                }
+            }
+        }
+    }
+    if !classes.is_empty() {
+        println!();
+        println!("## 类");
+        for (name, doc) in &classes {
+            println!();
+            println!("### `class {}`", name);
+            if doc.is_empty() {
+                println!("_（无注释）_");
+            } else {
+                for d in doc {
+                    println!("{}", d);
+                }
+            }
+        }
+    }
+    println!();
+    Ok(())
+}
+
+/// 收集函数/类定义签名：从定义行起拼接到包含 `{` 的行（支持多行签名）。
+fn collect_def_sig(lines: &[&str], start: usize) -> (String, String) {
+    let mut sig = String::new();
+    let mut name = String::new();
+    for l in lines.iter().skip(start) {
+        let t = l.trim();
+        if name.is_empty() {
+            let body = t
+                .strip_prefix("tmp fn ")
+                .or_else(|| t.strip_prefix("fn "))
+                .or_else(|| t.strip_prefix("class "))
+                .unwrap_or(t)
+                .trim_start();
+            name = body.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+        }
+        if !sig.is_empty() {
+            sig.push(' ');
+        }
+        sig.push_str(t);
+        if t.contains('{') {
+            break;
+        }
+    }
+    // 去掉尾部 `{` 与多余空格
+    let sig = sig.trim().trim_end_matches('{').trim_end().to_string();
+    (name, sig)
 }
 
 /// hone test [目录]：递归扫描 `*.test.hn` 测试文件，逐个运行并汇总结果。
@@ -1231,23 +1391,44 @@ fn cmd_prof(args: &[String]) -> Result<(), ZError> {
     Ok(())
 }
 
-/// 打印函数级剖析报告：按总耗时降序的表格（函数 / 调用次数 / 总耗时 / 平均耗时）。
+/// 打印函数级剖析报告：占比/调用次数/总耗时/自耗时/平均耗时 + 总览 + 调用图。
 fn print_prof_report(data: &interp::ProfData) {
     if data.is_empty() {
         println!("(未调用任何用户函数)");
         return;
     }
     let rows = data.sorted();
+    let total_ns = data.total_ns() as f64;
+    let total_calls = data.total_calls();
     println!("函数级热点报告（按总耗时降序）:");
-    println!("  {:<24} {:>10} {:>14} {:>14}", "函数", "调用次数", "总耗时", "平均耗时");
-    for (name, calls, total_ns, avg_ns) in &rows {
+    println!(
+        "  {:<24} {:>8} {:>7} {:>12} {:>12} {:>12}",
+        "函数", "调用次数", "占比", "总耗时", "自耗时", "平均耗时"
+    );
+    for (name, calls, total, avg, self_ns) in &rows {
+        let pct = if total_ns > 0.0 { *total as f64 / total_ns * 100.0 } else { 0.0 };
         println!(
-            "  {:<24} {:>10} {:>12.3}ms {:>12.3}ms",
+            "  {:<24} {:>8} {:>6.1}% {:>10.3}ms {:>10.3}ms {:>10.3}ms",
             name,
             calls,
-            *total_ns as f64 / 1_000_000.0,
-            *avg_ns as f64 / 1_000_000.0
+            pct,
+            *total as f64 / 1_000_000.0,
+            *self_ns as f64 / 1_000_000.0,
+            *avg as f64 / 1_000_000.0
         );
+    }
+    println!(
+        "  总耗时 {:.3}ms，总调用 {} 次（占比按总耗时计，自耗时不含子调用）",
+        total_ns / 1_000_000.0,
+        total_calls
+    );
+    // 调用图
+    let edges = data.edges();
+    if !edges.is_empty() {
+        println!("调用图（调用方 → 被调方 → 次数，按次数降序）:");
+        for (a, b, n) in &edges {
+            println!("  {} → {} × {}", a, b, n);
+        }
     }
 }
 

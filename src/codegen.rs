@@ -464,6 +464,12 @@ impl Codegen {
                 expr_span(e),
                 Some("these features work in interpreted mode only"),
             )),
+            Expr::Index { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "index access is not supported in DLL builds",
+                *span,
+                Some("index access (`a[i]`) works in interpreted mode only"),
+            )),
             Expr::Match { span, .. } => Err(self.zerr(
                 codes::NOT_IMPLEMENTED,
                 "match expressions are not supported in DLL builds",
@@ -1003,6 +1009,12 @@ impl Codegen {
             }
             Stmt::FnDef { .. } => Ok(()), // 已收集
             Stmt::DebugPrint { .. } | Stmt::Breakpoint { .. } => Ok(()), // 调试/临时语句不生成 C 代码
+            Stmt::IndexAssign { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "index assignment is not supported in DLL builds",
+                *span,
+                Some("index assignment (`a[i] = x`) works in interpreted mode only"),
+            )),
             Stmt::Continue { .. } => {
                 out.push_str("    continue;\n");
                 Ok(())
@@ -1051,6 +1063,12 @@ impl Codegen {
                 "list/dict literals and f-strings are not supported in DLL builds",
                 expr_span(e),
                 Some("these features work in interpreted mode only"),
+            )),
+            Expr::Index { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "index access is not supported in DLL builds",
+                *span,
+                Some("index access (`a[i]`) works in interpreted mode only"),
             )),
             Expr::Match { span, .. } => Err(self.zerr(
                 codes::NOT_IMPLEMENTED,
@@ -1284,6 +1302,7 @@ fn has_return(stmts: &[Stmt]) -> bool {
 fn stmt_span(s: &Stmt) -> Span {
     match s {
         Stmt::Assign { span, .. }
+        | Stmt::IndexAssign { span, .. }
         | Stmt::AssignOp { span, .. }
         | Stmt::DestructAssign { span, .. }
         | Stmt::VarDecl { span, .. }

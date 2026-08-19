@@ -34,14 +34,32 @@ function toggleTheme(){
     <a href="stdlib.html">标准库</a>
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
   </nav>
-  <span class="ver">v0.6.1</span>
+  <span class="ver">v0.7.0</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
 <main>
   <h2><span class="hash">#</span>更新日志</h2>
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
+
+  <div class="release">
+    <span class="ver-tag">v0.7.0</span><span class="date">2026-08-19</span>
+    <h4>工具链增强</h4>
+    <ul>
+      <li><strong>LSP 增强</strong>：上下文感知补全（<code>time.</code> 等模块成员 / 文档变量 / 用户函数）、
+        悬停文档（内置函数签名+说明）、跳转定义、文档大纲，serverInfo 升至 0.2.0</li>
+      <li><strong>调试器增强</strong>：条件断点 <code>breakpoint if (expr);</code>（条件为 bool 才暂停）；
+        断点提示支持交互命令 <code>c</code> 继续 / <code>q</code> 退出 / <code>p &lt;expr&gt;</code> 即时求值 /
+        <code>w &lt;name&gt;</code> 监视变量 / <code>u &lt;name&gt;</code> 取消监视</li>
+      <li><strong>prof 剖析增强</strong>：新增自耗时（排除子调用）与占比列、调用图输出、总览行</li>
+      <li><strong>fmt 格式化增强</strong>：新增 <code>-c/--check</code> 检查模式（逐文件报告差异，CI 友好），与 <code>-w</code> 互斥</li>
+      <li><strong>新增 <code>hone doc</code> 工具</strong>：扫描 fn/class 定义及其上方 <code>//</code> 注释，生成 Markdown API 文档</li>
+      <li><strong>修复</strong>：debug 构建主线程栈溢出——改为 64MB 栈专用线程执行命令逻辑，
+        递归脚本（如 <code>fib(26)</code>）在 debug 构建下恢复正常</li>
+    </ul>
+  </div>
 
   <div class="release">
     <span class="ver-tag">v0.6.8</span><span class="date">2026-08-18</span>
@@ -336,12 +354,13 @@ function toggleTheme(){
     <a href="stdlib.html">标准库</a>
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
     <a href="changelog.html">更新日志</a>
     <a href="faq.html">FAQ</a>
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.6.1 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.7.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

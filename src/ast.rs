@@ -15,6 +15,13 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
+    /// a[i] = x;  列表索引赋值：变量须先声明为列表，下标越界/非列表在运行时报错。
+    /// target 为索引链表达式（如 a[i]、m[i][j]），基变量为链底 Ident。
+    IndexAssign {
+        target: Expr,
+        value: Expr,
+        span: Span,
+    },
     /// 解构赋值：a, b = [1, 2]（列表，按位置）或 {a, b} = dict / {a: x, b: y} = dict（字典，按键）。
     /// 每个目标 = (变量名, 字典键)；列表解构键为 None，字典解构键为 Some(键名)。
     DestructAssign {
@@ -110,8 +117,11 @@ pub enum Stmt {
         expr: Expr,
         span: Span,
     },
+    /// breakpoint;  或  breakpoint if (expr);  断点（hone debug 模式下生效）
     Breakpoint {
         span: Span,
+        /// 条件断点：仅当条件为 true 时暂停（None = 无条件）
+        cond: Option<Box<Expr>>,
     },
     /// @export 函数名;  标记导出到 C ABI 动态库
     Export {
@@ -292,6 +302,8 @@ pub enum Expr {
     Field { obj: Box<Expr>, field: String, span: Span },
     /// 可选链字段访问：obj?.field（obj 为 null 时短路返回 null，否则同 Field）
     OptionalField { obj: Box<Expr>, field: String, span: Span },
+    /// 索引访问：a[i]（列表按下标取元素；下标越界/非列表在运行时报错）
+    Index { obj: Box<Expr>, index: Box<Expr>, span: Span },
     Unary { op: UnOp, expr: Box<Expr>, span: Span },
     Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr>, span: Span },
     Call { callee: String, args: Vec<Expr>, span: Span },
@@ -423,6 +435,7 @@ pub fn expr_span(e: &Expr) -> Span {
         | Expr::Ident { span: s, .. }
         | Expr::Field { span: s, .. }
         | Expr::OptionalField { span: s, .. }
+        | Expr::Index { span: s, .. }
         | Expr::Call { span: s, .. }
         | Expr::Unary { span: s, .. }
         | Expr::Binary { span: s, .. }

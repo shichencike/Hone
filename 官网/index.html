@@ -34,8 +34,9 @@ function toggleTheme(){
     <a href="stdlib.html">标准库</a>
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
   </nav>
-  <span class="ver">v0.6.1</span>
+  <span class="ver">v0.7.0</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
@@ -47,6 +48,7 @@ function toggleTheme(){
     <div class="btns">
       <a class="btn primary" href="docs.html">阅读文档</a>
       <a class="btn" href="examples.html">查看示例</a>
+      <a class="btn" href="perf.html">性能基准</a>
       <a class="btn" href="#quickstart">快速开始</a>
     </div>
   </div>
@@ -70,6 +72,8 @@ function toggleTheme(){
         匿名函数 lambda（一等值/闭包）、函数默认参数、三引号原始字符串 <code class="inline">"""..."""</code>。</p></div>
       <div class="card"><h4>🖥 图形界面库</h4><p>纯 Hone 编写的跨平台 GUI（hone_lib/gui.hn）：浏览器渲染 + 本地 HTTP 服务器双向交互，button / label / input / select 控件开箱即用。</p></div>
       <div class="card"><h4>🎵 音乐理论库</h4><p>纯 Hone 编写的乐理标准库（hone_lib/music.hn）：音名 ↔ MIDI ↔ 频率换算、音阶与和弦生成、时值与 BPM、音程与移调、调号与调性、顺阶和声，开箱即用。</p></div>
+      <div class="card"><h4>⚡ 性能实测</h4><p>与 Python 3.12、Rust 1.97 的 <strong>9 维度</strong>同机对比（递归 / 纯循环 / 浮点 / 字符串拼接 / 列表 / 字典 / 排序），
+        真实测量数据 + 测试环境 + 时间戳，脚本可复现。→ <a href="perf.html">查看性能基准</a></p></div>
     </div>
   </section>
 
@@ -139,12 +143,13 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
     <a href="stdlib.html">标准库</a>
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
     <a href="changelog.html">更新日志</a>
     <a href="faq.html">FAQ</a>
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.6.1 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.7.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

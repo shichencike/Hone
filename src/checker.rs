@@ -783,6 +783,58 @@ impl Checker {
                 }
                 Ok(())
             }
+            Stmt::IndexAssign { target, value, span } => {
+                // 索引赋值：变量必须先声明（不能经索引声明新变量），且须为列表（类型动态）。
+                // 沿索引链找到基变量，校验各层索引为 int。
+                let mut cur_expr = target;
+                let base_slot = loop {
+                    match cur_expr {
+                        Expr::Index { obj, index, .. } => {
+                            let i = self.check_expr(index)?;
+                            if !matches!(i.ty, Ty::Unknown | Ty::Int) {
+                                return Err(self.zerr(
+                                    codes::TYPE_MISMATCH,
+                                    format!("list index must be an int, got `{}`", i.ty.name()),
+                                    *span,
+                                    Some("use an integer expression as the index, e.g. `a[0]`, `a[i]`"),
+                                ));
+                            }
+                            cur_expr = obj;
+                        }
+                        Expr::Ident { name, span: nspan } => match self.globals.get(name) {
+                            Some(s) => break *s,
+                            None => {
+                                return Err(self.zerr(
+                                    codes::UNDEFINED,
+                                    format!("cannot index-assign to undeclared variable `{}`", name),
+                                    *nspan,
+                                    Some("declare the list first, e.g. `a = [1, 2, 3];`"),
+                                ));
+                            }
+                        },
+                        _ => {
+                            return Err(self.zerr(
+                                codes::TYPE_MISMATCH,
+                                "invalid index assignment target",
+                                *span,
+                                Some("index assignment target must be `a[i]` or `m[i][j]`"),
+                            ));
+                        }
+                    }
+                };
+                let cur = self.slots[base_slot].get().unwrap_or(Ty::Unknown);
+                if cur != Ty::Unknown {
+                    return Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("cannot index a value of type `{}`", cur.name()),
+                        *span,
+                        Some("index assignment is supported on lists, e.g. `a[0] = x`"),
+                    ));
+                }
+                // 元素类型动态：仅校验右侧表达式合法，不约束列表变量类型
+                let _v = self.check_expr(value)?;
+                Ok(())
+            }
             Stmt::DestructAssign { targets, value, span } => {
                 // 解构目标元素类型动态，仅检查右侧表达式合法并确保变量已声明
                 let _res = self.check_expr(value)?;
@@ -913,7 +965,20 @@ impl Checker {
                 }
                 Ok(())
             }
-            Stmt::Breakpoint { .. } => Ok(()),
+            Stmt::Breakpoint { cond, span } => {
+                if let Some(c) = cond {
+                    let t = self.check_expr(c)?;
+                    if !matches!(t.ty, Ty::Bool) {
+                        return Err(self.zerr(
+                            codes::TYPE_MISMATCH,
+                            "`breakpoint if` condition must be a bool",
+                            *span,
+                            Some("write a boolean expression, e.g. `breakpoint if (x > 5);`"),
+                        ));
+                    }
+                }
+                Ok(())
+            }
             Stmt::Export { name, span } => {
                 if !self.fns.contains_key(name) {
                     return Err(self.zerr(
@@ -1007,6 +1072,58 @@ impl Checker {
                         scopes[top].insert(name.clone(), slot);
                     }
                 }
+                Ok(())
+            }
+            Stmt::IndexAssign { target, value, span } => {
+                // 索引赋值：变量必须先声明，且须为列表（类型动态）。
+                // 沿索引链找到基变量，校验各层索引为 int。
+                let mut cur_expr = target;
+                let base_slot = loop {
+                    match cur_expr {
+                        Expr::Index { obj, index, .. } => {
+                            let i = self.check_expr_in_fn(index, scopes, scope_stack, param_slots, ret_slot)?;
+                            if !matches!(i.ty, Ty::Unknown | Ty::Int) {
+                                return Err(self.zerr(
+                                    codes::TYPE_MISMATCH,
+                                    format!("list index must be an int, got `{}`", i.ty.name()),
+                                    *span,
+                                    Some("use an integer expression as the index, e.g. `a[0]`, `a[i]`"),
+                                ));
+                            }
+                            cur_expr = obj;
+                        }
+                        Expr::Ident { name, span: nspan } => match lookup_in_stack(name, scopes, scope_stack) {
+                            Some(s) => break s,
+                            None => {
+                                return Err(self.zerr(
+                                    codes::UNDEFINED,
+                                    format!("cannot index-assign to undeclared variable `{}`", name),
+                                    *nspan,
+                                    Some("declare the list first, e.g. `a = [1, 2, 3];`"),
+                                ));
+                            }
+                        },
+                        _ => {
+                            return Err(self.zerr(
+                                codes::TYPE_MISMATCH,
+                                "invalid index assignment target",
+                                *span,
+                                Some("index assignment target must be `a[i]` or `m[i][j]`"),
+                            ));
+                        }
+                    }
+                };
+                let cur = self.slots[base_slot].get().unwrap_or(Ty::Unknown);
+                if cur != Ty::Unknown {
+                    return Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("cannot index a value of type `{}`", cur.name()),
+                        *span,
+                        Some("index assignment is supported on lists, e.g. `a[0] = x`"),
+                    ));
+                }
+                // 元素类型动态：仅校验右侧表达式合法，不约束列表变量类型
+                let _v = self.check_expr_in_fn(value, scopes, scope_stack, param_slots, ret_slot)?;
                 Ok(())
             }
             Stmt::DestructAssign { targets, value, span } => {
@@ -1172,7 +1289,20 @@ impl Checker {
                 }
                 Ok(())
             }
-            Stmt::Breakpoint { .. } => Ok(()),
+            Stmt::Breakpoint { cond, span } => {
+                if let Some(c) = cond {
+                    let t = self.check_expr(c)?;
+                    if !matches!(t.ty, Ty::Bool) {
+                        return Err(self.zerr(
+                            codes::TYPE_MISMATCH,
+                            "`breakpoint if` condition must be a bool",
+                            *span,
+                            Some("write a boolean expression, e.g. `breakpoint if (x > 5);`"),
+                        ));
+                    }
+                }
+                Ok(())
+            }
             Stmt::Export { .. } => Ok(()), // @export 只在顶层检查
             Stmt::Import { span, .. } => {
                 self.has_external = true;
@@ -1221,6 +1351,34 @@ impl Checker {
                 let res = self.check_expr_in_fn(value, scopes, scope_stack, param_slots, ret_slot)?;
                 self.check_throw_value(res, *span)
             }
+        }
+    }
+
+    /// 索引访问类型检查：a[i]（列表/字符串按下标取元素；下标必须为 int）。
+    fn check_index(&mut self, obj: TyRes, index: TyRes, span: Span) -> Result<TyRes, ZError> {
+        // 下标必须为 int（Unknown 放行：动态值）
+        match index.ty {
+            Ty::Unknown | Ty::Int => {}
+            other => {
+                return Err(self.zerr(
+                    codes::TYPE_MISMATCH,
+                    format!("list index must be an int, got `{}`", other.name()),
+                    span,
+                    Some("use an integer expression as the index, e.g. `a[0]`, `a[i]`"),
+                ));
+            }
+        }
+        match obj.ty {
+            // 字符串按下标取单个字符（返回 str）
+            Ty::Str => Ok(TyRes { ty: Ty::Str, slot: None }),
+            // 列表/动态值：元素类型动态，返回 Unknown
+            Ty::Unknown => Ok(TyRes { ty: Ty::Unknown, slot: None }),
+            other => Err(self.zerr(
+                codes::TYPE_MISMATCH,
+                format!("cannot index a value of type `{}`", other.name()),
+                span,
+                Some("indexing is supported on lists and strings, e.g. `a[0]`, `s[1]`"),
+            )),
         }
     }
 
@@ -1328,6 +1486,11 @@ impl Checker {
                 } else {
                     self.check_field(res, field, *span)
                 }
+            }
+            Expr::Index { obj, index, span } => {
+                let o = self.check_expr(obj)?;
+                let i = self.check_expr(index)?;
+                self.check_index(o, i, *span)
             }
             Expr::Unary { op, expr, span } => {
                 let res = self.check_expr(expr)?;
@@ -1498,6 +1661,11 @@ impl Checker {
                 } else {
                     self.check_field(res, field, *span)
                 }
+            }
+            Expr::Index { obj, index, span } => {
+                let o = self.check_expr_in_fn(obj, scopes, scope_stack, param_slots, ret_slot)?;
+                let i = self.check_expr_in_fn(index, scopes, scope_stack, param_slots, ret_slot)?;
+                self.check_index(o, i, *span)
             }
             Expr::Unary { op, expr, span } => {
                 let res = self.check_expr_in_fn(expr, scopes, scope_stack, param_slots, ret_slot)?;
@@ -3190,6 +3358,7 @@ impl Checker {
 fn stmt_span(s: &Stmt) -> Span {
     match s {
         Stmt::Assign { span, .. }
+        | Stmt::IndexAssign { span, .. }
         | Stmt::AssignOp { span, .. }
         | Stmt::DestructAssign { span, .. }
         | Stmt::VarDecl { span, .. }

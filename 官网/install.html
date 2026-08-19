@@ -34,8 +34,9 @@ function toggleTheme(){
     <a href="stdlib.html">标准库</a>
     <a href="install.html" class="active">安装</a>
     <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
   </nav>
-  <span class="ver">v0.6.1</span>
+  <span class="ver">v0.7.0</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
@@ -61,7 +62,7 @@ function toggleTheme(){
     <h3>Windows（PowerShell 5.1+）</h3>
 <pre><code>irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex</code></pre>
     <p>优先使用系统自带的 <code class="inline">curl.exe</code> 下载（更快、支持续传与重试），强制 TLS 1.2，安装到 <code class="inline">%LOCALAPPDATA%\hone\bin</code> 并幂等加入用户 PATH（新开的终端生效）；<code class="inline">HONE_UNINSTALL=1</code> 可卸载。</p>
-    <p>指定版本：<code class="inline">HONE_VERSION=v0.6.1 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code>（Windows 同理，先 <code class="inline">$env:HONE_VERSION = "v0.6.1"</code>）。</p>
+    <p>指定版本：<code class="inline">HONE_VERSION=v0.7.0 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code>（Windows 同理，先 <code class="inline">$env:HONE_VERSION = "v0.7.0"</code>）。</p>
     <p><strong>镜像源（国内加速）</strong>：脚本默认先走<strong>ghproxy.net 前缀代理</strong>，失败自动回退官方 GitHub，无需任何配置。
       也可用环境变量 <code class="inline">HONE_MIRROR</code> 指定其他镜像，或设 <code class="inline">HONE_MIRROR=off</code> 强制只用官方源：</p>
 <pre><code><span class="c"># 直接从镜像拉取脚本（国内直连，无需加速器）</span>
@@ -116,12 +117,13 @@ hone hello.hn    <span class="c">// Hello, Hone!</span></code></pre>
     <a href="stdlib.html">标准库</a>
     <a href="install.html">安装</a>
     <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
     <a href="changelog.html">更新日志</a>
     <a href="faq.html">FAQ</a>
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.6.1 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.7.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>
