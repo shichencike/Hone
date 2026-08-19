@@ -788,10 +788,37 @@ tasks = [
     <p>函数：<code class="inline">sch_every</code> <code class="inline">sch_at</code> <code class="inline">sch_cron</code> <code class="inline">sch_run</code> <code class="inline">sch_tick</code> <code class="inline">sch_next_hhmm</code> <code class="inline">sch_cron_match</code> <code class="inline">sch_cron_next</code> <code class="inline">sch_now</code> <code class="inline">sch_hhmm_to_sec</code>。cron 为 5 段表达式（分 时 日 月 周），字段支持 <code class="inline">*</code> / 数字 / <code class="inline">a-b</code> / <code class="inline">*/n</code> / <code class="inline">a-b/n</code> / 逗号列表。注意列表/字典是值语义，<code class="inline">sch_run</code> 返回重建后的任务列表需重新赋值。完整函数表与测试脚本见 <a href="stdlib.html#sched">标准库 · sched 定时任务模块</a>。</p>
   </section>
 
-  <section id="advanced">
-    <h2><span class="hash">#</span>16. 进阶用法（多文件 / 调试 / 性能）</h2>
+  <section id="img">
+    <h2><span class="hash">#</span>16. 图片库（hone_lib/img.hn）</h2>
+    <p>纯 Hone 编写的图片标准库：像素网格 + 绘图/滤镜/变换 + PPM P3 / SVG 读写。
+      图像表示为 dict <code class="inline">{"w": 宽, "h": 高, "rows": [[[r,g,b],...],...]}</code>，
+      <code class="inline">rows[y][x]</code> 为像素（各通道 0-255，原点在左上角）。
+      Hone 的 str 无法承载二进制（见手册 §3.19），故采用文本格式：<strong>PPM P3</strong>
+      （ASCII 光栅，GIMP/ImageMagick 可查看）与 <strong>SVG</strong>（文本矢量，浏览器直接打开），不支持 PNG/BMP。
+      列表为值类型、索引赋值整体拷贝，绘图/滤镜适合 ≤128×128 的小图。</p>
+<pre><code><span class="k">import</span> <span class="s">"img"</span> <span class="k">from</span> <span class="s">"./hone_lib/img.hn"</span>;
 
-    <h3>16.1 多文件项目组织</h3>
+im = <span class="f">img_new</span>(<span class="n">64</span>, <span class="n">64</span>, <span class="n">255</span>, <span class="n">255</span>, <span class="n">255</span>);         <span class="c">// 白色画布</span>
+im = <span class="f">img_rect</span>(im, <span class="n">8</span>, <span class="n">8</span>, <span class="n">40</span>, <span class="n">40</span>, <span class="n">255</span>, <span class="n">0</span>, <span class="n">0</span>);  <span class="c">// 红色实心矩形</span>
+im = <span class="f">img_circle</span>(im, <span class="n">32</span>, <span class="n">32</span>, <span class="n">16</span>, <span class="n">0</span>, <span class="n">0</span>, <span class="n">255</span>);  <span class="c">// 蓝色实心圆</span>
+im = <span class="f">img_grayscale</span>(im);                          <span class="c">// 灰度滤镜</span>
+<span class="f">img_save_ppm</span>(im, <span class="s">"out.ppm"</span>);                    <span class="c">// 保存 PPM P3</span>
+<span class="f">img_save_svg</span>(im, <span class="s">"out.svg"</span>, <span class="n">4</span>);              <span class="c">// 保存 SVG（每像素放大 4 倍）</span></code></pre>
+    <p>函数：创建/基础 <code class="inline">img_new</code> <code class="inline">img_fill</code> <code class="inline">img_get</code> <code class="inline">img_set</code> <code class="inline">img_size</code>；
+      绘图 <code class="inline">img_rect</code> <code class="inline">img_line</code> <code class="inline">img_circle</code>
+      <code class="inline">img_gradient_h/v</code> <code class="inline">img_checker</code> <code class="inline">img_noise</code>；
+      滤镜 <code class="inline">img_grayscale</code> <code class="inline">img_invert</code> <code class="inline">img_brightness</code>
+      <code class="inline">img_contrast</code> <code class="inline">img_threshold</code>；
+      变换 <code class="inline">img_flip_h/v</code> <code class="inline">img_rotate90</code> <code class="inline">img_crop</code> <code class="inline">img_scale</code>；
+      读写 <code class="inline">img_to_ppm</code> <code class="inline">img_save_ppm</code> <code class="inline">img_from_ppm</code>
+      <code class="inline">img_load_ppm</code> <code class="inline">img_to_svg</code> <code class="inline">img_save_svg</code>。
+      完整函数表与测试脚本见 <a href="stdlib.html#img">标准库 · img 图片模块</a>。</p>
+  </section>
+
+  <section id="advanced">
+    <h2><span class="hash">#</span>17. 进阶用法（多文件 / 调试 / 性能）</h2>
+
+    <h3>17.1 多文件项目组织</h3>
     <p>单文件即可运行，项目变大后建议拆分模块。三种复用方式：</p>
 <pre><code><span class="c">// import：.hn 源码复用（最常用）</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;   <span class="c">// 本地：相对当前目录</span>
@@ -809,7 +836,7 @@ tasks = [
       或在项目根目录放 <code class="inline">hone.json</code> 清单（name / version / modules），用
       <code class="inline">hone get</code> 批量下载全部模块（见 §15 工具链）。</p>
 
-    <h3>16.2 函数别名（alias）</h3>
+    <h3>17.2 函数别名（alias）</h3>
     <p>给已有函数起新名字再调用，原名保持不变：</p>
 <pre><code><span class="c">// 基础：alias 原名 as 新名;  之后用新名调用</span>
 <span class="k">fn</span> <span class="f">greet</span>(name) { <span class="k">return</span> <span class="s">"你好 "</span> + name; }
@@ -828,7 +855,7 @@ tasks = [
     <p>别名作用域为文件级（当前 .hn 文件全局可见），在 <code class="inline">alias</code> 语句之后即可用新名调用。
       完整示例见 <code class="inline">examples/alias_demo.hn</code>。</p>
 
-    <h3>16.3 调试复杂逻辑</h3>
+    <h3>17.3 调试复杂逻辑</h3>
     <table>
       <tr><th>工具</th><th>用途</th></tr>
       <tr><td><code class="inline">hone debug &lt;script.hn&gt;</code> + <code class="inline">breakpoint;</code></td><td>运行到断点暂停，打印当前作用域全部变量快照，Enter 继续 / Ctrl+C 退出</td></tr>
@@ -844,7 +871,7 @@ tasks = [
       <code class="inline">breakpoint;</code> 观察变量快照 → 用 try/catch 捕获运行时错误并打印
       <code class="inline">e.code / e.message / e.line</code> → 用 <code class="inline">assert</code> 固化关键不变量防止回归。</p>
 
-    <h3>16.4 性能优化</h3>
+    <h3>17.4 性能优化</h3>
     <ul>
       <li><strong>避免循环内反复 append</strong>：列表是值类型，<code class="inline">append</code> 返回新列表（整体拷贝），
         循环里 <code class="inline">l = append(l, x)</code> 是 O(n²)。累积数据时优先用 dict，或先确定规模再一次性构造</li>
@@ -859,7 +886,7 @@ tasks = [
   </section>
 
   <section id="pitfalls">
-    <h2><span class="hash">#</span>17. 已知问题与常见坑</h2>
+    <h2><span class="hash">#</span>18. 已知问题与常见坑</h2>
     <p>以下都是新手最容易踩的坑，提前看完能省不少调试时间。完整版见
       <a href="faq.html">FAQ</a> 与仓库 <code class="inline">hone.md</code> 的「FAQ 与已知问题」章节。</p>
     <table>

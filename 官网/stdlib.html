@@ -63,7 +63,7 @@ function toggleTheme(){
 
   <section id="intro">
     <h2><span class="hash">#</span>1. 概述与导入</h2>
-    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code> / <code class="inline">music_</code> / <code class="inline">sp_</code> / <code class="inline">proc_</code> / <code class="inline">sch_</code>），通过本地路径 import 使用：</p>
+    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code> / <code class="inline">music_</code> / <code class="inline">sp_</code> / <code class="inline">proc_</code> / <code class="inline">sch_</code> / <code class="inline">img_</code>），通过本地路径 import 使用：</p>
 <pre><code><span class="c">// 本地路径导入（相对路径基于当前工作目录）</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
@@ -73,6 +73,7 @@ function toggleTheme(){
 <span class="k">import</span> <span class="s">"spider"</span> <span class="k">from</span> <span class="s">"./hone_lib/spider.hn"</span>; <span class="c">// 爬虫：静态直取 + 动态渲染</span>
 <span class="k">import</span> <span class="s">"process"</span> <span class="k">from</span> <span class="s">"./hone_lib/process.hn"</span>; <span class="c">// 进程：枚举/查找/结束（跨平台）</span>
 <span class="k">import</span> <span class="s">"sched"</span> <span class="k">from</span> <span class="s">"./hone_lib/sched.hn"</span>;   <span class="c">// 定时任务：间隔/时刻/cron（跨平台）</span>
+<span class="k">import</span> <span class="s">"img"</span> <span class="k">from</span> <span class="s">"./hone_lib/img.hn"</span>;     <span class="c">// 图片：绘图/滤镜/变换 + PPM/SVG</span>
 
 <span class="c">// import as：以别名导入，函数名前缀整体替换</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span> <span class="k">as</span> m;   <span class="c">// m_clamp / m_gcd ...</span></code></pre>
@@ -322,8 +323,44 @@ tasks = [
       <code class="inline">tasks = sch_run(tasks, 30)</code>。测试脚本见 <code class="inline">examples/test_sched_lib.hn</code>。</p>
   </section>
 
+  <section id="img">
+    <h2><span class="hash">#</span>10. img 图片模块</h2>
+    <p>图片标准库（纯 Hone 编写）：像素网格 + 绘图/滤镜/变换 + PPM P3 / SVG 读写。
+      图像表示为 dict <code class="inline">{"w": 宽, "h": 高, "rows": [[[r,g,b],...],...]}</code>，
+      <code class="inline">rows[y][x]</code> 为像素（各通道 0-255，原点在左上角）。
+      Hone 的 str 无法承载二进制，故采用文本格式：<strong>PPM P3</strong>（ASCII 光栅，GIMP/ImageMagick 可查看）与
+      <strong>SVG</strong>（文本矢量，浏览器直接打开），不支持 PNG/BMP。
+      列表为值类型、索引赋值整体拷贝，绘图/滤镜适合 ≤128×128 的小图。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>img_new(w, h, r, g, b)</code> / <code>img_fill(img, r, g, b)</code></td><td>新建 w×h 画布（填充色）/ 全图填充，返回新图像</td></tr>
+      <tr><td><code>img_get(img, x, y)</code> / <code>img_set(img, x, y, r, g, b)</code></td><td>取像素 [r,g,b]（越界返回黑）/ 设像素（越界忽略）</td></tr>
+      <tr><td><code>img_size(img)</code></td><td>图像尺寸 → <code class="inline">[宽, 高]</code></td></tr>
+      <tr><td><code>img_rect(img, x0, y0, x1, y1, r, g, b)</code> / <code>img_line(img, x0, y0, x1, y1, r, g, b)</code></td><td>实心矩形（自动裁剪到画布内）/ 直线（Bresenham）</td></tr>
+      <tr><td><code>img_circle(img, cx, cy, rad, r, g, b)</code></td><td>实心圆（距离平方比较，rad≤0 画单点）</td></tr>
+      <tr><td><code>img_gradient_h(img, c1, c2)</code> / <code>img_gradient_v(img, c1, c2)</code></td><td>水平 / 垂直渐变（c1、c2 为 [r,g,b] 列表）</td></tr>
+      <tr><td><code>img_checker(img, cell, c1, c2)</code> / <code>img_noise(img)</code></td><td>棋盘格（cell 为格边长）/ 随机噪点</td></tr>
+      <tr><td><code>img_grayscale(img)</code> / <code>img_invert(img)</code> / <code>img_brightness(img, delta)</code></td><td>灰度 / 反色 / 亮度调整（±255，自动裁剪）</td></tr>
+      <tr><td><code>img_contrast(img, factor)</code> / <code>img_threshold(img, t)</code></td><td>对比度（float factor，1 不变）/ 二值化（亮度 &lt; t 置黑）</td></tr>
+      <tr><td><code>img_flip_h(img)</code> / <code>img_flip_v(img)</code> / <code>img_rotate90(img)</code></td><td>水平镜像 / 垂直镜像 / 顺时针旋转 90°</td></tr>
+      <tr><td><code>img_crop(img, x0, y0, x1, y1)</code> / <code>img_scale(img, nw, nh)</code></td><td>裁剪区域 / 最近邻缩放</td></tr>
+      <tr><td><code>img_to_ppm(img)</code> / <code>img_save_ppm(img, path)</code></td><td>转 PPM P3 文本 / 保存为 .ppm 文件</td></tr>
+      <tr><td><code>img_from_ppm(text)</code> / <code>img_load_ppm(path)</code></td><td>解析 PPM P3 文本 / 读取 .ppm 文件 → 图像</td></tr>
+      <tr><td><code>img_to_svg(img, scale)</code> / <code>img_save_svg(img, path, scale)</code></td><td>转 SVG 文本（每像素一个 rect，scale 为放大倍数）/ 保存为 .svg</td></tr>
+    </table>
+<pre><code><span class="k">import</span> <span class="s">"img"</span> <span class="k">from</span> <span class="s">"./hone_lib/img.hn"</span>;
+
+im = <span class="f">img_new</span>(<span class="n">64</span>, <span class="n">64</span>, <span class="n">255</span>, <span class="n">255</span>, <span class="n">255</span>);         <span class="c">// 白色画布</span>
+im = <span class="f">img_rect</span>(im, <span class="n">8</span>, <span class="n">8</span>, <span class="n">40</span>, <span class="n">40</span>, <span class="n">255</span>, <span class="n">0</span>, <span class="n">0</span>);  <span class="c">// 红色实心矩形</span>
+im = <span class="f">img_circle</span>(im, <span class="n">32</span>, <span class="n">32</span>, <span class="n">16</span>, <span class="n">0</span>, <span class="n">0</span>, <span class="n">255</span>);  <span class="c">// 蓝色实心圆</span>
+im = <span class="f">img_grayscale</span>(im);                          <span class="c">// 灰度滤镜</span>
+<span class="f">img_save_ppm</span>(im, <span class="s">"out.ppm"</span>);                    <span class="c">// 保存 PPM P3</span>
+<span class="f">img_save_svg</span>(im, <span class="s">"out.svg"</span>, <span class="n">4</span>);              <span class="c">// 保存 SVG（每像素放大 4 倍）</span></code></pre>
+    <p>测试脚本见 <code class="inline">examples/test_img_lib.hn</code>（35 项断言，生成 <code class="inline">examples/img_test.ppm</code> 与 <code class="inline">examples/img_test.svg</code>，浏览器打开 SVG 可预览）。</p>
+  </section>
+
   <section id="demo">
-    <h2><span class="hash">#</span>10. 组合示例</h2>
+    <h2><span class="hash">#</span>11. 组合示例</h2>
 <pre><code><span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
 <span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;

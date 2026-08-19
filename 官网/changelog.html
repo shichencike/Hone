@@ -45,6 +45,25 @@ function toggleTheme(){
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
 
   <div class="release">
+    <span class="ver-tag">v0.7.1</span><span class="date">2026-08-19</span>
+    <h4>新增</h4>
+    <ul>
+      <li><strong>图片标准库 <code>hone_lib/img.hn</code></strong>（纯 Hone 编写）：像素网格
+        <code>{"w","h","rows"}</code> 表示 + 创建/绘图（<code>img_new</code>、<code>img_fill</code>、
+        <code>img_rect</code>、<code>img_line</code>、<code>img_circle</code>、
+        <code>img_gradient_h/v</code>、<code>img_checker</code>、<code>img_noise</code>）+
+        滤镜（<code>img_grayscale</code>、<code>img_invert</code>、<code>img_brightness</code>、
+        <code>img_contrast</code>、<code>img_threshold</code>）+ 变换（<code>img_flip_h/v</code>、
+        <code>img_rotate90</code>、<code>img_crop</code>、<code>img_scale</code>）+
+        PPM P3 读写（<code>img_to_ppm</code>、<code>img_save_ppm</code>、<code>img_from_ppm</code>、
+        <code>img_load_ppm</code>）与 SVG 输出（<code>img_to_svg</code>、<code>img_save_svg</code>）；
+        示例 <code>examples/test_img_lib.hn</code>（35 项断言），详见 <a href="stdlib.html#img">标准库 · img 图片模块</a></li>
+      <li>说明：Hone 的 str 无法承载二进制，故采用文本格式 PPM P3 与 SVG，不支持 PNG/BMP；
+        列表为值类型，绘图/滤镜适合 ≤128×128 的小图</li>
+    </ul>
+  </div>
+
+  <div class="release">
     <span class="ver-tag">v0.7.0</span><span class="date">2026-08-19</span>
     <h4>工具链增强</h4>
     <ul>
