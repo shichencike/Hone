@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -21,6 +22,36 @@ use crate::lexer::Span;
 
 /// 全局键值存储（db.set / db.get）
 static KV_STORE: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// SSE 长连接句柄注册表（http.sse_open / http.sse_next / http.sse_close）。
+/// 句柄从 1 递增；连接保持到 sse_close 显式关闭（或脚本退出时随进程回收）。
+/// 流式语义：sse_next 返回下一个 SSE 事件的 data 内容（多行 data 以 \n 拼接），
+/// 流结束（EOF 或收到 `data: [DONE]`）返回空串 ""，调用方据此退出循环。
+struct SseConn {
+    /// 已建立的连接流（请求已发送，等待响应体）
+    stream: Box<dyn ReadWrite>,
+    /// 已解包（chunked 已还原）但尚未按行消费的字节
+    pending: Vec<u8>,
+    /// 当前 SSE 事件累积的 data 行
+    data: Vec<String>,
+    /// 底层流已 EOF
+    eof: bool,
+    /// 响应为 chunked 传输编码（AI API 流式常见），需要边读边解包
+    chunked: bool,
+    /// chunked：块大小行缓冲
+    ch_line: Vec<u8>,
+    /// chunked：当前块剩余字节数
+    ch_remaining: usize,
+    /// chunked：块数据读完后需消费的尾部 \r\n
+    ch_after_data: bool,
+    /// chunked：已读到终止块（0\r\n）
+    ch_done: bool,
+    /// 底层读缓冲（减少逐字节 syscall）
+    rdbuf: [u8; 8192],
+}
+
+static SSE_CONNS: LazyLock<Mutex<HashMap<i64, SseConn>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static SSE_NEXT_ID: AtomicI64 = AtomicI64::new(1);
 
 /// --resume 持久化目标：(状态文件路径, 脚本内容哈希)。启用后 db.set 自动落盘。
 static STATE_FILE: Mutex<Option<(PathBuf, String)>> = Mutex::new(None);
@@ -185,6 +216,9 @@ pub fn is_builtin(name: &str) -> bool {
             | "http_get"
             | "http_post"
             | "http.request"
+            | "http.sse_open"
+            | "http.sse_next"
+            | "http.sse_close"
             | "smtp.send"
             | "ws.request"
             | "json_parse"
@@ -901,6 +935,141 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             }
             Ok(Value::Str(text))
         }
+        "http.sse_open" => {
+            // 打开 SSE 长连接：http.sse_open(url, {method?, headers?, body?, timeout?}) -> int 句柄
+            let url = as_str(&args[0], 0, name, span, file, src)?;
+            let opts = &args[1];
+            let mut method = "GET";
+            let mut body: Option<String> = None;
+            let mut headers: Vec<(String, String)> = Vec::new();
+            let mut timeout: u64 = 60;
+            match opts {
+                Value::Dict(entries) => {
+                    for (k, v) in entries {
+                        match k.as_str() {
+                            "method" => method = as_str(v, 0, name, span, file, src)?,
+                            "body" => body = Some(as_str(v, 0, name, span, file, src)?.to_string()),
+                            "headers" => {
+                                if let Value::Dict(hdrs) = v {
+                                    for (hk, hv) in hdrs {
+                                        let hv_s = as_str(hv, 0, name, span, file, src)?;
+                                        headers.push((hk.clone(), hv_s.to_string()));
+                                    }
+                                } else {
+                                    return Err(err(
+                                        codes::TYPE_MISMATCH,
+                                        "`http.sse_open` headers must be a dict of strings",
+                                        span,
+                                        file,
+                                        src,
+                                        Some("pass {\"headers\": {\"Authorization\": \"...\"}}"),
+                                    ));
+                                }
+                            }
+                            "timeout" => {
+                                timeout = match v {
+                                    Value::Int(i) if *i >= 0 => *i as u64,
+                                    Value::Float(f) if *f >= 0.0 => *f as u64,
+                                    _ => {
+                                        return Err(err(
+                                            codes::TYPE_MISMATCH,
+                                            "`http.sse_open` timeout must be a non-negative number (seconds)",
+                                            span,
+                                            file,
+                                            src,
+                                            Some("pass an int or float number of seconds"),
+                                        ))
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                other => {
+                    return Err(err(
+                        codes::TYPE_MISMATCH,
+                        format!("`http.sse_open` expects a dict of options, got `{}`", other.type_name()),
+                        span,
+                        file,
+                        src,
+                        Some("form: http.sse_open(url, {method, headers, body, timeout})"),
+                    ))
+                }
+            }
+            let header_refs: Vec<(&str, &str)> = headers.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+            let (stream, leftover, chunked) = http_sse_connect(url, method, body.as_deref(), &header_refs, timeout, span, file, src)?;
+            let id = SSE_NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            SSE_CONNS.lock().unwrap().insert(
+                id,
+                SseConn {
+                    stream,
+                    pending: leftover,
+                    data: Vec::new(),
+                    eof: false,
+                    chunked,
+                    ch_line: Vec::new(),
+                    ch_remaining: 0,
+                    ch_after_data: false,
+                    ch_done: false,
+                    rdbuf: [0u8; 8192],
+                },
+            );
+            Ok(Value::Int(id))
+        }
+        "http.sse_next" => {
+            // 读取下一个 SSE 事件的 data 载荷；流结束返回 ""（调用方退出循环）
+            let handle = match args.get(0) {
+                Some(Value::Int(h)) => *h,
+                Some(other) => {
+                    return Err(err(
+                        codes::TYPE_MISMATCH,
+                        format!("`http.sse_next` expects an int handle, got `{}`", other.type_name()),
+                        span,
+                        file,
+                        src,
+                        Some("pass the handle returned by `http.sse_open`"),
+                    ))
+                }
+                None => return Err(arg_err(name, 1, 0, span, file, src)),
+            };
+            let mut conns = SSE_CONNS.lock().unwrap();
+            let conn = match conns.get_mut(&handle) {
+                Some(c) => c,
+                None => {
+                    return Err(err(
+                        codes::NETWORK,
+                        format!("unknown SSE handle {}", handle),
+                        span,
+                        file,
+                        src,
+                        Some("the handle may already be closed; check `http.sse_open` returned a valid handle"),
+                    ))
+                }
+            };
+            match sse_read_event(conn, span, file, src) {
+                Ok(Some(data)) => Ok(Value::Str(data)),
+                Ok(None) => Ok(Value::Str(String::new())),
+                Err(e) => Err(e),
+            }
+        }
+        "http.sse_close" => {
+            let handle = match args.get(0) {
+                Some(Value::Int(h)) => *h,
+                Some(other) => {
+                    return Err(err(
+                        codes::TYPE_MISMATCH,
+                        format!("`http.sse_close` expects an int handle, got `{}`", other.type_name()),
+                        span,
+                        file,
+                        src,
+                        Some("pass the handle returned by `http.sse_open`"),
+                    ))
+                }
+                None => return Err(arg_err(name, 1, 0, span, file, src)),
+            };
+            Ok(Value::Bool(SSE_CONNS.lock().unwrap().remove(&handle).is_some()))
+        }
         // 网络与通信（netmod 模块实现，SMTP 发邮件 / WebSocket 请求）
         "smtp.send" | "ws.request" => {
             crate::netmod::call(name, &args, span, file, src)
@@ -1477,9 +1646,11 @@ fn random_float() -> f64 {
 
 // ---------- http（std::net + rustls 实现，支持 http:// 与 https://） ----------
 
-/// 统一读写抽象：TcpStream 与 TlsStream 共用（netmod 等模块复用）
-pub(crate) trait ReadWrite: Read + Write {}
-impl<T: Read + Write> ReadWrite for T {}
+/// 统一读写抽象：TcpStream 与 TlsStream 共用（netmod 等模块复用）。
+/// Send 约束：http.sse_* 长连接句柄需存入全局注册表（LazyLock<Mutex<...>>），
+/// 要求 trait 对象可跨线程移动（TcpStream 与 rustls StreamOwned 均满足）。
+pub(crate) trait ReadWrite: Read + Write + Send {}
+impl<T: Read + Write + Send> ReadWrite for T {}
 
 /// TLS 配置：rustls + rustls-rustcrypto（纯 Rust 实现，无 C 依赖），
 /// Windows/Linux/Termux 跨平台一致，webpki-roots 内置 Mozilla 根证书
@@ -2108,6 +2279,303 @@ fn http_fetch_opts(
         ));
     }
     Ok((head, body))
+}
+
+/// 建立 SSE 长连接：发送请求、读取并校验响应头（非 2xx 报错），返回
+/// (连接流, 响应头之后已多读的字节, 是否为 chunked 传输编码)。
+/// 流保持打开，由 sse_read_event 逐事件消费。
+fn http_sse_connect(
+    url: &str,
+    method: &str,
+    body: Option<&str>,
+    headers: &[(&str, &str)],
+    timeout_secs: u64,
+    span: Span,
+    file: &str,
+    src: &str,
+) -> Result<(Box<dyn ReadWrite>, Vec<u8>, bool), ZError> {
+    // 按错误类型细分网络错误：超时 / 连接拒绝 / DNS 失败 / 其他
+    let net_err = |act: &str, e: std::io::Error| {
+        let (code, hint): (&'static str, &'static str) = match e.kind() {
+            std::io::ErrorKind::TimedOut => (codes::NET_TIMEOUT, "the request timed out"),
+            std::io::ErrorKind::ConnectionRefused => (codes::NET_CONN_REFUSED, "the connection was refused"),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::AddrNotAvailable => {
+                (codes::NET_DNS, "DNS resolution failed")
+            }
+            _ => (codes::NETWORK, "check the URL or your network connection"),
+        };
+        err(code, format!("{}: {}: {}", act, url, e), span, file, src, Some(hint))
+    };
+
+    // 解析协议：http:// 走明文 TCP，https:// 走 TLS
+    let (use_tls, rest) = if let Some(r) = url.strip_prefix("https://") {
+        (true, r)
+    } else if let Some(r) = url.strip_prefix("http://") {
+        (false, r)
+    } else {
+        return Err(err(
+            codes::NETWORK,
+            format!("{}: URL must start with `http://` or `https://`", url),
+            span,
+            file,
+            src,
+            Some("prefix the URL with `http://` or `https://`"),
+        ));
+    };
+    let default_port = if use_tls { 443 } else { 80 };
+    let (host_port, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, "/"),
+    };
+    let (host, port) = match host_port.find(':') {
+        Some(i) => (&host_port[..i], host_port[i + 1..].parse::<u16>().unwrap_or(default_port)),
+        None => (host_port, default_port),
+    };
+    let addr = format!("{}:{}", host, port);
+
+    // https 时走 TLS：内置根证书优先，证书校验失败自动回退系统根证书 + 用户 CA（信任根证书）；
+    // http 走明文 TCP
+    let mut stream: Box<dyn ReadWrite> = if use_tls {
+        tls_connect_fallback(host, &addr, timeout_secs, span, file, src)?
+    } else {
+        let tcp = TcpStream::connect(&addr).map_err(|e| net_err("connect", e))?;
+        tcp.set_read_timeout(Some(Duration::from_secs(timeout_secs))).ok();
+        tcp.set_write_timeout(Some(Duration::from_secs(timeout_secs))).ok();
+        Box::new(tcp)
+    };
+
+    // Host 头：非默认端口时带上端口
+    let host_header = if port == default_port {
+        host.to_string()
+    } else {
+        format!("{}:{}", host, port)
+    };
+
+    // 请求头构造：默认头 + 自定义头（可覆盖 User-Agent / Content-Type）
+    let mut head = format!(
+        "{} {} HTTP/1.1\r\nHost: {}\r\n",
+        method, path, host_header
+    );
+    let mut has_ua = false;
+    let mut has_ct = false;
+    for (k, v) in headers {
+        let lower = k.to_ascii_lowercase();
+        if lower == "user-agent" {
+            has_ua = true;
+        }
+        if lower == "content-type" {
+            has_ct = true;
+        }
+        head.push_str(&format!("{}: {}\r\n", k, v));
+    }
+    if !has_ua {
+        head.push_str("User-Agent: hone/0.1.0\r\n");
+    }
+    let tail = match body {
+        Some(b) => {
+            if !has_ct {
+                head.push_str("Content-Type: text/plain\r\n");
+            }
+            head.push_str(&format!("Content-Length: {}\r\n", b.len()));
+            b.as_bytes().to_vec()
+        }
+        None => Vec::new(),
+    };
+    // SSE 长连接：显式要求保持连接，服务端流式推送事件
+    head.push_str("Connection: keep-alive\r\n\r\n");
+    stream.write_all(head.as_bytes()).map_err(|e| net_err("write", e))?;
+    if !tail.is_empty() {
+        stream.write_all(&tail).map_err(|e| net_err("write", e))?;
+    }
+
+    // 只读取响应头（到空行分隔），校验状态行；多余字节属于响应体，返回给调用方
+    let mut head_buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let head_end = loop {
+        if let Some(pos) = head_buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            break pos + 4;
+        }
+        let n = stream.read(&mut chunk).map_err(|e| net_err("read", e))?;
+        if n == 0 {
+            break head_buf.len();
+        }
+        head_buf.extend_from_slice(&chunk[..n]);
+    };
+    let head_text = String::from_utf8_lossy(&head_buf[..head_end.min(head_buf.len())]).into_owned();
+
+    // 状态行检查
+    let status_line = head_text.lines().next().unwrap_or("");
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(0);
+    if !(200..300).contains(&status) {
+        return Err(err(
+            codes::NET_HTTP_STATUS,
+            format!("{}: HTTP status {}", url, status),
+            span,
+            file,
+            src,
+            Some("the server returned an error status"),
+        ));
+    }
+
+    let leftover = if head_end < head_buf.len() {
+        head_buf[head_end..].to_vec()
+    } else {
+        Vec::new()
+    };
+    let chunked = head_text.to_lowercase().contains("transfer-encoding: chunked");
+    Ok((stream, leftover, chunked))
+}
+
+/// 从连接流读取并解包（chunked 时）数据，追加到 pending。返回是否读到新数据。
+/// chunked 状态机：块大小行（hex）→ 块数据 → 块尾 \r\n → 下一块；0 块结束。
+fn sse_fill(conn: &mut SseConn) -> Result<bool, std::io::Error> {
+    if !conn.chunked {
+        let n = conn.stream.read(&mut conn.rdbuf)?;
+        if n == 0 {
+            conn.eof = true;
+            return Ok(false);
+        }
+        conn.pending.extend_from_slice(&conn.rdbuf[..n]);
+        return Ok(true);
+    }
+    // chunked：逐块解包
+    loop {
+        if conn.ch_remaining > 0 {
+            let want = conn.ch_remaining.min(conn.rdbuf.len());
+            let n = conn.stream.read(&mut conn.rdbuf[..want])?;
+            if n == 0 {
+                conn.eof = true;
+                return Ok(false);
+            }
+            conn.pending.extend_from_slice(&conn.rdbuf[..n]);
+            conn.ch_remaining -= n;
+            if conn.ch_remaining == 0 {
+                conn.ch_after_data = true; // 块数据读完，需消费块尾 \r\n
+            }
+            return Ok(true);
+        }
+        if conn.ch_after_data {
+            // 消费块尾 \r\n
+            let mut crlf = [0u8; 2];
+            let mut got = 0;
+            while got < 2 {
+                let n = conn.stream.read(&mut crlf[got..])?;
+                if n == 0 {
+                    conn.eof = true;
+                    return Ok(false);
+                }
+                got += n;
+            }
+            conn.ch_after_data = false;
+            continue;
+        }
+        if conn.ch_done {
+            conn.eof = true;
+            return Ok(false);
+        }
+        // 读块大小行（到 \n，最多 64 字节）
+        conn.ch_line.clear();
+        let mut byte = [0u8; 1];
+        loop {
+            let n = conn.stream.read(&mut byte)?;
+            if n == 0 {
+                conn.eof = true;
+                return Ok(false);
+            }
+            if byte[0] == b'\n' {
+                break;
+            }
+            conn.ch_line.push(byte[0]);
+            if conn.ch_line.len() > 64 {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "chunk size line too long"));
+            }
+        }
+        let size_str = String::from_utf8_lossy(&conn.ch_line);
+        let size = usize::from_str_radix(size_str.trim().trim_end_matches(';'), 16)
+            .or_else(|_| {
+                // 形如 "4;ext" 的分块扩展，取分号前部分
+                let base = size_str.split(';').next().unwrap_or("").trim();
+                usize::from_str_radix(base, 16)
+            })
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid chunk size"))?;
+        if size == 0 {
+            conn.ch_done = true;
+            continue; // 终止块，下一次循环置 eof
+        }
+        conn.ch_remaining = size;
+    }
+}
+
+/// 读取下一个 SSE 事件的 data 载荷（多行 data 以 \n 拼接）；流结束返回 None。
+/// 忽略 event:/id:/注释等行；`data: [DONE]` 视为流结束。
+fn sse_read_event(conn: &mut SseConn, span: Span, file: &str, src: &str) -> Result<Option<String>, ZError> {
+    loop {
+        // 先在已缓冲的 pending 中按行消费
+        let mut consumed = 0usize;
+        let mut scan = 0usize;
+        while scan < conn.pending.len() {
+            if conn.pending[scan] == b'\n' {
+                let mut line = conn.pending[consumed..scan].to_vec();
+                consumed = scan + 1;
+                if line.last() == Some(&b'\r') {
+                    line.pop();
+                }
+                let text = String::from_utf8_lossy(&line).into_owned();
+                if text.is_empty() {
+                    // 空行 = 事件结束
+                    conn.pending.drain(..consumed);
+                    if !conn.data.is_empty() {
+                        let out = conn.data.join("\n");
+                        conn.data.clear();
+                        return Ok(Some(out));
+                    }
+                    consumed = 0;
+                    scan = 0;
+                    continue;
+                }
+                if let Some(payload) = text.strip_prefix("data:") {
+                    let payload = payload.strip_prefix(' ').unwrap_or(payload);
+                    if payload == "[DONE]" {
+                        conn.pending.drain(..consumed);
+                        let out = conn.data.join("\n");
+                        conn.data.clear();
+                        return Ok(if out.is_empty() { None } else { Some(out) });
+                    }
+                    conn.data.push(payload.to_string());
+                }
+                // 其他行（event: / id: / :注释）忽略
+            }
+            scan += 1;
+        }
+        // pending 已消费完，读更多数据
+        conn.pending.drain(..consumed);
+        match sse_fill(conn) {
+            Ok(true) => continue,
+            Ok(false) => {
+                // 流结束：若还有未终止的事件数据，返回之
+                if !conn.data.is_empty() {
+                    let out = conn.data.join("\n");
+                    conn.data.clear();
+                    return Ok(Some(out));
+                }
+                return Ok(None);
+            }
+            Err(e) => {
+                return Err(err(
+                    codes::NETWORK,
+                    format!("sse read: {}", e),
+                    span,
+                    file,
+                    src,
+                    Some("the SSE stream was interrupted"),
+                ))
+            }
+        }
+    }
 }
 
 /// 发送 HTTP 请求（interp 的 import 模块下载复用），返回响应体文本。

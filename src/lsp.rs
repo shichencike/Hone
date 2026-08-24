@@ -254,6 +254,9 @@ fn builtin_doc(name: &str) -> Option<(&'static str, &'static str)> {
         ("min", "min(a, b)", "最小值"),
         ("http_get", "http_get(url)", "HTTP GET 请求（支持 http/https）"),
         ("http_post", "http_post(url, body)", "HTTP POST 请求"),
+        ("http.sse_open", "http.sse_open(url, opts)", "打开 SSE 长连接，返回句柄"),
+        ("http.sse_next", "http.sse_next(handle)", "读取下一个 SSE 事件 data（结束返回空串）"),
+        ("http.sse_close", "http.sse_close(handle)", "关闭 SSE 连接"),
         ("json_parse", "json_parse(s)", "解析 JSON"),
         ("json_stringify", "json_stringify(x)", "序列化 JSON（标量）"),
     ];

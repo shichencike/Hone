@@ -2779,6 +2779,18 @@ impl Checker {
                 self.expect_any(name, args, 1, span, "an options dict {method, headers, body, timeout}")?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
+            "http.sse_open" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the URL")?;
+                self.expect_any(name, args, 1, span, "an options dict {method, headers, body, timeout}")?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
+            "http.sse_next" | "http.sse_close" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_int(name, args, 0, span, "the SSE handle from `http.sse_open`")?;
+                let ty = if name == "http.sse_next" { Ty::Str } else { Ty::Bool };
+                Ok(TyRes { ty, slot: None })
+            }
             "smtp.send" => {
                 self.arg_count(name, n, 3, span)?;
                 self.expect_str(name, args, 0, span, "the SMTP host")?;
@@ -3449,6 +3461,9 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "http_get",
         "http_post",
         "http.request",
+        "http.sse_open",
+        "http.sse_next",
+        "http.sse_close",
         "smtp.send",
         "ws.request",
         "json_parse",
