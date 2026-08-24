@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 标准库文档</title>
-<meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui / music / spider / process / sched 模块，本地路径导入即可使用。">
+<meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui / music / spider / process / sched / img / ai 模块，本地路径导入即可使用。">
 <meta name="theme-color" content="#0d1117">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
@@ -57,13 +57,15 @@ function toggleTheme(){
       <li><a href="#spider">spider 爬虫模块</a></li>
       <li><a href="#process">process 进程模块</a></li>
       <li><a href="#sched">sched 定时任务模块</a></li>
+      <li><a href="#img">img 图片模块</a></li>
+      <li><a href="#ai">ai AI 编程助手模块</a></li>
       <li><a href="#demo">组合示例</a></li>
     </ol>
   </div>
 
   <section id="intro">
     <h2><span class="hash">#</span>1. 概述与导入</h2>
-    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code> / <code class="inline">music_</code> / <code class="inline">sp_</code> / <code class="inline">proc_</code> / <code class="inline">sch_</code> / <code class="inline">img_</code>），通过本地路径 import 使用：</p>
+    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code> / <code class="inline">music_</code> / <code class="inline">sp_</code> / <code class="inline">proc_</code> / <code class="inline">sch_</code> / <code class="inline">img_</code> / <code class="inline">ai_</code>），通过本地路径 import 使用：</p>
 <pre><code><span class="c">// 本地路径导入（相对路径基于当前工作目录）</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
@@ -74,6 +76,7 @@ function toggleTheme(){
 <span class="k">import</span> <span class="s">"process"</span> <span class="k">from</span> <span class="s">"./hone_lib/process.hn"</span>; <span class="c">// 进程：枚举/查找/结束（跨平台）</span>
 <span class="k">import</span> <span class="s">"sched"</span> <span class="k">from</span> <span class="s">"./hone_lib/sched.hn"</span>;   <span class="c">// 定时任务：间隔/时刻/cron（跨平台）</span>
 <span class="k">import</span> <span class="s">"img"</span> <span class="k">from</span> <span class="s">"./hone_lib/img.hn"</span>;     <span class="c">// 图片：绘图/滤镜/变换 + PPM/SVG</span>
+<span class="k">import</span> <span class="s">"ai"</span> <span class="k">from</span> <span class="s">"./hone_lib/ai.hn"</span>;      <span class="c">// AI 编程助手：对话/生成/审查/修复/工具调用</span>
 
 <span class="c">// import as：以别名导入，函数名前缀整体替换</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span> <span class="k">as</span> m;   <span class="c">// m_clamp / m_gcd ...</span></code></pre>
@@ -84,7 +87,8 @@ function toggleTheme(){
       <code class="inline">diff.*</code>（文本对比）与 <code class="inline">regex.*</code>（find/groups/split）、
       <code class="inline">glob.*</code>（文件匹配）与 <code class="inline">temp.*</code>（临时文件/目录）、
       <code class="inline">plot.*</code>（SVG 图表）与 <code class="inline">yaml.*</code>（YAML 解析/序列化）、
-      <code class="inline">http.request</code>（超时/自定义 Header）、<code class="inline">smtp.send</code>（发邮件）、
+      <code class="inline">http.request</code>（超时/自定义 Header）、<code class="inline">http.sse_open</code> / <code class="inline">http.sse_next</code> / <code class="inline">http.sse_close</code>（SSE 流式读取，AI 流式输出用）、
+      <code class="inline">smtp.send</code>（发邮件）、
       <code class="inline">ws.request</code>（WebSocket）、<code class="inline">sqlite.*</code>（SQLite 封装，运行时加载系统库）、
       <code class="inline">ptr.*</code>（指针类，分配表跟踪防野指针）、<code class="inline">plugin.*</code>（插件系统，运行期动态注册）、
       <code class="inline">server.*</code>（本地 HTTP 服务器）、<code class="inline">args.*</code>（命令行参数，支持类型转换与默认值）、
@@ -359,8 +363,43 @@ im = <span class="f">img_grayscale</span>(im);                          <span cl
     <p>测试脚本见 <code class="inline">examples/test_img_lib.hn</code>（35 项断言，生成 <code class="inline">examples/img_test.ppm</code> 与 <code class="inline">examples/img_test.svg</code>，浏览器打开 SVG 可预览）。</p>
   </section>
 
+  <section id="ai">
+    <h2><span class="hash">#</span>11. ai AI 编程助手模块</h2>
+    <p>AI 编程助手标准库（纯 Hone 编写，需 v0.7+）：对接 OpenAI Chat Completions 协议，默认连接本地 Ollama（<code class="inline">http://localhost:11434/v1</code>），配置 API Key 后自动切换远程服务（DeepSeek / Kimi / 通义 / OpenAI 等兼容端点）。提供对话补全、代码生成、代码审查、错误解释、自动修复五大功能，以及「AI 自主调用工具」的代理循环（可执行终端命令 / 读写文件）。流式输出基于解释器新增的 <code class="inline">http.sse_open</code> / <code class="inline">http.sse_next</code> / <code class="inline">http.sse_close</code> 内置函数。</p>
+    <p><strong>配置优先级</strong>（高 → 低）：环境变量 <code class="inline">HN_AI_KEY</code> / <code class="inline">HN_AI_BASE</code> / <code class="inline">HN_AI_MODEL</code> → 配置文件 <code class="inline">~/.hn/ai.json</code>（<code class="inline">{"base": ..., "key": ..., "model": ...}</code>）→ 默认值（Ollama 本地 + <code class="inline">qwen2.5-coder:7b</code>）。函数级 <code class="inline">opts</code> 可再覆盖：<code class="inline">model</code> / <code class="inline">base</code> / <code class="inline">key</code> / <code class="inline">stream</code> / <code class="inline">temperature</code> / <code class="inline">max_tokens</code> / <code class="inline">timeout</code>。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>ai_chat(messages, opts)</code></td><td>对话补全；<code class="inline">opts.stream=true</code> 时 SSE 逐字输出并返回完整文本</td></tr>
+      <tr><td><code>ai_generate(prompt, opts)</code></td><td>按自然语言描述生成 Hone 代码</td></tr>
+      <tr><td><code>ai_review(code, opts)</code></td><td>代码审查：返回问题与改进建议</td></tr>
+      <tr><td><code>ai_explain(err, opts)</code></td><td>解释 Hone 错误码 / 报错信息并给修复建议</td></tr>
+      <tr><td><code>ai_fix(code, err, opts)</code></td><td>报错信息 + 源码 → 修复后的完整代码</td></tr>
+      <tr><td><code>ai_agent(prompt, opts)</code></td><td>工具调用代理：AI 自主决定是否调用工具完成任务（上限 10 轮防死循环）</td></tr>
+      <tr><td><code>ai_config()</code></td><td>返回生效配置 <code class="inline">{"base", "key", "model"}</code></td></tr>
+      <tr><td><code>ai_tools()</code> / <code>ai_run_tool(name, args)</code></td><td>工具定义列表（OpenAI function calling 格式）/ 直接执行工具</td></tr>
+    </table>
+    <p><strong>工具集</strong>（ai_agent 内置，可经 ai_run_tool 单独调用）：<code class="inline">run_shell</code>（执行终端命令）、<code class="inline">read_file</code>（读文件）、<code class="inline">write_file</code>（写文件）、<code class="inline">list_dir</code>（列目录）。Hone 不支持函数作为值传递，流式输出由库内部 <code class="inline">print</code> 逐字显示，同时返回完整文本。</p>
+<pre><code><span class="k">import</span> <span class="s">"ai"</span> <span class="k">from</span> <span class="s">"./hone_lib/ai.hn"</span>;
+
+<span class="c">// 1. 代码生成（默认连接本地 Ollama）</span>
+code = <span class="f">ai_generate</span>(<span class="s">"写一个 Hone 函数，计算斐波那契数列第 n 项"</span>);
+<span class="f">print</span>(code);
+
+<span class="c">// 2. 流式对话（SSE 逐字输出，仍返回完整回复）</span>
+msgs = [{<span class="s">"role"</span>: <span class="s">"user"</span>, <span class="s">"content"</span>: <span class="s">"用一句话介绍 Hone"</span>}];
+full = <span class="f">ai_chat</span>(msgs, {<span class="s">"stream"</span>: <span class="k">true</span>});
+
+<span class="c">// 3. 工具调用代理：AI 自主执行终端命令完成多步任务</span>
+r = <span class="f">ai_agent</span>(<span class="s">"列出当前目录的 .hn 文件，并告诉我有多少个"</span>);
+<span class="f">print</span>(r);
+
+<span class="c">// 4. 远程 API（配置了 HN_AI_BASE / HN_AI_KEY 后自动生效，可再按函数覆盖）</span>
+<span class="c">//    print(ai_generate("...", {"base": "https://api.deepseek.com/v1", "model": "deepseek-chat"}));</span></code></pre>
+    <p>完整演示见 <code class="inline">examples/ai_demo.hn</code>；SSE 流式冒烟测试见 <code class="inline">hone_lib/test/sse_smoke.hn</code>（配合本地 <code class="inline">hone_lib/test/mock_sse.py</code>）。</p>
+  </section>
+
   <section id="demo">
-    <h2><span class="hash">#</span>11. 组合示例</h2>
+    <h2><span class="hash">#</span>12. 组合示例</h2>
 <pre><code><span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
 <span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;
