@@ -1,0 +1,1345 @@
+// hone_lib/pet.hn - 桌宠标准库（Windows：Hone 驱动 + PowerShell 透明置顶窗）
+// 用法: import "pet" from "./hone_lib/pet.hn";
+// 函数统一 pet_ 前缀。
+//
+// 架构（Hone 无原生窗口 API，见 hone.md sys 模块）：
+//   1. pet_init 生成动画帧（PPM P3 文本，48×48，8fps 默认）与 pet_window.ps1 脚本；
+//   2. PowerShell 脚本创建无边框 / 透明（品红键）/ 置顶小窗，每 100ms 轮询状态文件渲染；
+//   3. Hone 每 tick 写 state.json（当前帧 / 位置 / 气泡文本 / 退出标志），并轮询
+//      events.json 读取 PowerShell 上报的鼠标事件（点击 / 双击 / 拖拽 / 右键菜单）；
+//   4. 行为状态机全在 Hone 侧：idle / walk / sleep / happy / surprise，
+//      含台词气泡、整点报时、系统资源播报（CPU/内存）。
+//
+// 依赖内置：sys.run / sys.get_screen_size / sys.beep / sys.get_env / time / random /
+//           read_file / write_file / json_parse / json_stringify / regex / str_*
+// 限制规避：无 mkdir 内置（目录用 sys.run 创建）、无 null（用 "" 哨兵）、
+//           无空 dict 字面量、块级作用域（if 内变量先声明）、无 d["k"] 索引（遍历）。
+//
+// 典型用法:
+//   import "pet" from "./hone_lib/pet.hn";
+//   cfg = {"pal": 0, "scale": 2, "sleep_after": 60};
+//   pet_run(cfg);                       // 阻塞运行（Ctrl+C 或右键菜单退出）
+//   // 或非阻塞: st = pet_init(cfg); while (true) { st = pet_tick(st); time.sleep(0.125); }
+
+// ============ 通用辅助 ============
+
+// 限制 v 到 [lo, hi]
+fn pet_clamp(v : int, lo : int, hi : int) -> int {
+    if (v < lo) { return lo; }
+    if (v > hi) { return hi; }
+    return v;
+}
+
+// 0..n-1 的整数列表（无 range 内置，n<=0 返回空列表）
+fn pet_range(n : int) {
+    r = [];
+    i = 0;
+    while (i < n) {
+        r = append(r, i);
+        i = i + 1;
+    }
+    return r;
+}
+
+// 取列表第 idx 项（无下标越界保护，越界返回 ""）
+fn pet_at(l, idx : int) {
+    i = 0;
+    for x in l {
+        if (i == idx) { return x; }
+        i = i + 1;
+    }
+    return "";
+}
+
+// 按键取字典值（Hone 无 d["k"] 索引语法，遍历实现；键不存在返回 ""）
+fn pet_dict_get(d, key : str) {
+    for k, v in d {
+        if (k == key) { return v; }
+    }
+    return "";
+}
+
+// 随机闭区间整数 [lo, hi]
+fn pet_rand(lo : int, hi : int) -> int {
+    return random.int(lo, hi);
+}
+
+// 随机取列表元素（空列表返回 ""）
+fn pet_pick(l) {
+    n = len(l);
+    if (n <= 0) { return ""; }
+    return pet_at(l, pet_rand(0, n - 1));
+}
+
+// 判断字典是否含键
+fn pet_dict_has(d, key : str) -> bool {
+    for k, v in d {
+        if (k == key) { return true; }
+    }
+    return false;
+}
+
+// 用户 cfg 取 int 配置项（缺省用 def）
+fn pet_cfg_int(user, key : str, def : int) -> int {
+    if (pet_dict_has(user, key)) { return pet_dict_get(user, key); }
+    return def;
+}
+
+// 用户 cfg 取 float 配置项（缺省用 def）
+fn pet_cfg_float(user, key : str, def : float) -> float {
+    if (pet_dict_has(user, key)) { return pet_dict_get(user, key); }
+    return def;
+}
+
+// 用户 cfg 取 bool 配置项（缺省用 def）
+fn pet_cfg_bool(user, key : str, def : bool) -> bool {
+    if (pet_dict_has(user, key)) { return pet_dict_get(user, key); }
+    return def;
+}
+
+// 用户 cfg 取 str 配置项（缺省用 def）
+fn pet_cfg_str(user, key : str, def : str) -> str {
+    if (pet_dict_has(user, key)) { return pet_dict_get(user, key); }
+    return def;
+}
+
+// 合并用户配置与默认值，返回完整配置 dict。
+// 说明：Hone dict 为值语义且不支持空 dict 字面量，无法动态重建，只能按已知键逐一取值。
+// 配置键：
+//   pal          int   调色板（0 橘猫 / 1 黑猫 / 2 白猫）
+//   scale        int   显示缩放（精灵 48×48 × scale，默认 2 → 窗口 96×96）
+//   speed        int   移动速度（px/tick，默认 2）
+//   tick         float 主循环 tick 秒数（默认 0.125 = 8fps）
+//   sleep_after  int   无操作多少秒后入睡（默认 120）
+//   wander       int   自动游荡触发间隔秒（默认 10，0 = 不游荡）
+//   bubble       int   随机台词触发间隔秒（默认 25，0 = 不随机说话）
+//   mute         bool  静音（关闭 beep/报时声音）
+//   show_bubble  bool  是否显示气泡（右键菜单可切换）
+//   hourly       bool  整点报时开关（默认 true）
+//   res_report   int   系统资源播报间隔秒（默认 300，0 = 关闭）
+//   lines_file   str   自定义台词 JSON 文件（默认 "" 用内置台词）
+//   frames_dir   str   外部 PPM 帧目录（默认 "" 用内置像素猫；目录内需有
+//                      idle_0.ppm idle_1.ppm walk_0.ppm walk_1.ppm sleep_0.ppm
+//                      happy_0.ppm happy_1.ppm surprise_0.ppm，48×48 品红背景）
+//   start_x      int   初始 X（默认 -1 = 屏幕底部中央）
+//   start_y      int   初始 Y（默认 -1 = 屏幕底部中央）
+//   workdir      str   工作目录（默认 %TEMP%/hone_pet，存帧/状态/事件/PS 脚本）
+fn pet_cfg(user) {
+    pal = pet_cfg_int(user, "pal", 0);
+    scale = pet_cfg_int(user, "scale", 2);
+    if (scale < 1) { scale = 1; }
+    speed = pet_cfg_int(user, "speed", 2);
+    if (speed < 1) { speed = 1; }
+    tick = pet_cfg_float(user, "tick", 0.125);
+    if (tick < 0.02) { tick = 0.02; }
+    sleep_after = pet_cfg_int(user, "sleep_after", 120);
+    wander = pet_cfg_int(user, "wander", 10);
+    bubble = pet_cfg_int(user, "bubble", 25);
+    mute = pet_cfg_bool(user, "mute", false);
+    show_bubble = pet_cfg_bool(user, "show_bubble", true);
+    hourly = pet_cfg_bool(user, "hourly", true);
+    res_report = pet_cfg_int(user, "res_report", 300);
+    lines_file = pet_cfg_str(user, "lines_file", "");
+    frames_dir = pet_cfg_str(user, "frames_dir", "");
+    start_x = pet_cfg_int(user, "start_x", -1);
+    start_y = pet_cfg_int(user, "start_y", -1);
+    workdir = pet_cfg_str(user, "workdir", "");
+    return {"pal": pal, "scale": scale, "speed": speed, "tick": tick,
+            "sleep_after": sleep_after, "wander": wander, "bubble": bubble,
+            "mute": mute, "show_bubble": show_bubble, "hourly": hourly,
+            "res_report": res_report, "lines_file": lines_file,
+            "frames_dir": frames_dir, "start_x": start_x, "start_y": start_y,
+            "workdir": workdir};
+}
+
+// ============ 绘图原语 ============
+// 图像表示与 img.hn 一致: {"w": 宽, "h": 高, "rows": [[[r,g,b],...],...]}
+// 性能说明: 列表是值类型，单像素修改整体拷贝 O(w*h)，本库仅在 48×48 小帧上绘图。
+
+// 三数最小值
+fn pet_min3(a : int, b : int, c : int) -> int {
+    m = a;
+    if (b < m) { m = b; }
+    if (c < m) { m = c; }
+    return m;
+}
+
+// 三数最大值
+fn pet_max3(a : int, b : int, c : int) -> int {
+    m = a;
+    if (b > m) { m = b; }
+    if (c > m) { m = c; }
+    return m;
+}
+
+// 新建 w×h 画布，填充颜色 (r,g,b)
+fn pet_new(w : int, h : int, r : int, g : int, b : int) {
+    xs = pet_range(w);
+    ys = pet_range(h);
+    rows = [[[r, g, b] for x in xs] for y in ys];
+    return {"w": w, "h": h, "rows": rows};
+}
+
+// 取像素 [r,g,b]；越界返回 [0,0,0]
+fn pet_get(img, x : int, y : int) {
+    if (x < 0 || x >= img.w || y < 0 || y >= img.h) {
+        return [0, 0, 0];
+    }
+    return img.rows[y][x];
+}
+
+// 设像素，返回新图像；越界忽略（原样返回）
+fn pet_set(img, x : int, y : int, r : int, g : int, b : int) {
+    if (x < 0 || x >= img.w || y < 0 || y >= img.h) {
+        return img;
+    }
+    rows = img.rows;
+    rows[y][x] = [r, g, b];
+    return {"w": img.w, "h": img.h, "rows": rows};
+}
+
+// 实心矩形（含边界）
+fn pet_rect(img, x0 : int, y0 : int, x1 : int, y1 : int, r : int, g : int, b : int) {
+    out = img;
+    y = y0;
+    while (y <= y1) {
+        x = x0;
+        while (x <= x1) {
+            out = pet_set(out, x, y, r, g, b);
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    return out;
+}
+
+// 直线（Bresenham 算法）
+fn pet_line(img, x0 : int, y0 : int, x1 : int, y1 : int, r : int, g : int, b : int) {
+    out = img;
+    dx = abs(x1 - x0);
+    dy = abs(y1 - y0);
+    sx = 1;
+    sy = 1;
+    if (x0 > x1) { sx = -1; }
+    if (y0 > y1) { sy = -1; }
+    err = dx - dy;
+    out = pet_set(out, x0, y0, r, g, b);
+    while (x0 != x1 || y0 != y1) {
+        e2 = 2 * err;
+        if (e2 > -dy) {
+            err = err - dy;
+            x0 = x0 + sx;
+        }
+        if (e2 < dx) {
+            err = err + dx;
+            y0 = y0 + sy;
+        }
+        out = pet_set(out, x0, y0, r, g, b);
+    }
+    return out;
+}
+
+// 实心圆（距离平方比较，无 sqrt 内置；rad<=0 画单个点）
+fn pet_circle(img, cx : int, cy : int, rad : int, r : int, g : int, b : int) {
+    out = img;
+    if (rad <= 0) {
+        return pet_set(out, cx, cy, r, g, b);
+    }
+    r2 = rad * rad;
+    y = cy - rad;
+    while (y <= cy + rad) {
+        x = cx - rad;
+        while (x <= cx + rad) {
+            d = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+            if (d <= r2) {
+                out = pet_set(out, x, y, r, g, b);
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    return out;
+}
+
+// 实心椭圆（整数判定 (dx/rx)²+(dy/ry)²<=1，交叉相乘避免浮点）
+fn pet_ellipse(img, cx : int, cy : int, rx : int, ry : int, r : int, g : int, b : int) {
+    out = img;
+    if (rx <= 0 || ry <= 0) {
+        return pet_set(out, cx, cy, r, g, b);
+    }
+    a2 = rx * rx;
+    b2 = ry * ry;
+    y = cy - ry;
+    while (y <= cy + ry) {
+        x = cx - rx;
+        while (x <= cx + rx) {
+            dx = x - cx;
+            dy = y - cy;
+            if (dx * dx * b2 + dy * dy * a2 <= a2 * b2) {
+                out = pet_set(out, x, y, r, g, b);
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    return out;
+}
+
+// 实心三角形（重心坐标判定；三个顶点任意顺序均可）
+fn pet_tri(img, x0 : int, y0 : int, x1 : int, y1 : int, x2 : int, y2 : int, r : int, g : int, b : int) {
+    out = img;
+    minx = pet_min3(x0, x1, x2);
+    maxx = pet_max3(x0, x1, x2);
+    miny = pet_min3(y0, y1, y2);
+    maxy = pet_max3(y0, y1, y2);
+    y = miny;
+    while (y <= maxy) {
+        x = minx;
+        while (x <= maxx) {
+            // 重心坐标：w0/w1/w2 同号（均 >=0 或均 <=0）则在三角形内
+            w0 = (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0);
+            w1 = (x2 - x1) * (y - y1) - (y2 - y1) * (x - x1);
+            w2 = (x0 - x2) * (y - y2) - (y0 - y2) * (x - x2);
+            if ((w0 >= 0 && w1 >= 0 && w2 >= 0) || (w0 <= 0 && w1 <= 0 && w2 <= 0)) {
+                out = pet_set(out, x, y, r, g, b);
+            }
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    return out;
+}
+
+// 水平镜像（左右翻转）
+fn pet_flip_h(img) {
+    w = img.w;
+    h = img.h;
+    rows = [[img.rows[y][w - 1 - x] for x in pet_range(w)] for y in pet_range(h)];
+    return {"w": w, "h": h, "rows": rows};
+}
+
+// 图像 → PPM P3 文本（PowerShell 窗口脚本解析渲染）
+fn pet_to_ppm(img) -> str {
+    s = "P3\n" + to_str(img.w) + " " + to_str(img.h) + "\n255\n";
+    for row in img.rows {
+        for px in row {
+            s = s + to_str(px[0]) + " " + to_str(px[1]) + " " + to_str(px[2]) + "\n";
+        }
+    }
+    return s;
+}
+
+// 图像 → 保存为 PPM P3 文件
+fn pet_save_ppm(img, path : str) {
+    write_file(path, pet_to_ppm(img));
+}
+
+// ============ 像素判定（单遍推导式帧构建用） ============
+// 性能说明：pet_set 单像素修改为 O(w*h) 整体拷贝，48×48 逐像素绘图不可行；
+// 帧构建改为「每像素纯判定函数」一次算出色值，O(1) 每像素，总 O(w*h)。
+
+// 点是否在椭圆内（整数平方比较，避免浮点/开方）
+fn pet_px_ellipse(x : int, y : int, cx : int, cy : int, rx : int, ry : int) -> bool {
+    dx = x - cx;
+    dy = y - cy;
+    return dx * dx * ry * ry + dy * dy * rx * rx <= rx * rx * ry * ry;
+}
+
+// 点是否在圆内
+fn pet_px_circle(x : int, y : int, cx : int, cy : int, r : int) -> bool {
+    dx = x - cx;
+    dy = y - cy;
+    return dx * dx + dy * dy <= r * r;
+}
+
+// 点是否在三角形内（叉积同号判定；边/顶点视为在内）
+fn pet_px_tri(x : int, y : int, x0 : int, y0 : int, x1 : int, y1 : int, x2 : int, y2 : int) -> bool {
+    d1 = (x - x0) * (y1 - y0) - (y - y0) * (x1 - x0);
+    d2 = (x - x1) * (y2 - y1) - (y - y1) * (x2 - x1);
+    d3 = (x - x2) * (y0 - y2) - (y - y2) * (x0 - x2);
+    neg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+    pos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+    return !(neg && pos);
+}
+
+// 点到线段距离是否 <= t（浮点投影；t 为线宽半径）
+fn pet_px_line(x : int, y : int, x0 : int, y0 : int, x1 : int, y1 : int, t : int) -> bool {
+    // 纯整数：点到线段距离判定（交叉相乘避免浮点/开方）
+    // t 为线宽半径（像素）：t=1 细线、t=2 粗线
+    vx = x1 - x0;
+    vy = y1 - y0;
+    wx = x - x0;
+    wy = y - y0;
+    num = wx * vx + wy * vy;
+    den = vx * vx + vy * vy;
+    if (den == 0) {
+        return wx * wx + wy * wy <= t * t + t;
+    }
+    if (num <= 0) {
+        // 投影在 A 点外侧：按端圆判定
+        return wx * wx + wy * wy <= t * t + t;
+    }
+    if (num >= den) {
+        // 投影在 B 点外侧
+        ex = x - x1;
+        ey = y - y1;
+        return ex * ex + ey * ey <= t * t + t;
+    }
+    // 中段：|cross| <= t*|v|  ⟺  cross² <= t²*den
+    cross = vx * wy - vy * wx;
+    return cross * cross <= t * t * den;
+}
+
+// ============ 像素猫调色板 ============
+// 3 套配色（右键菜单「换装」循环切换）：0 橘猫 / 1 黑猫 / 2 白猫
+
+fn pet_palette(i : int) {
+    if (i == 1) {
+        return {"body": [70, 70, 80], "belly": [150, 150, 165], "dark": [40, 40, 48],
+                "ear": [110, 110, 125], "eye": [120, 200, 120], "nose": [200, 140, 150],
+                "line": [25, 25, 30]};
+    }
+    if (i == 2) {
+        return {"body": [245, 245, 250], "belly": [255, 255, 255], "dark": [205, 205, 215],
+                "ear": [255, 220, 225], "eye": [90, 170, 220], "nose": [235, 150, 160],
+                "line": [150, 150, 160]};
+    }
+    return {"body": [240, 150, 60], "belly": [255, 235, 200], "dark": [190, 105, 30],
+            "ear": [250, 200, 170], "eye": [70, 130, 80], "nose": [240, 130, 140],
+            "line": [110, 70, 40]};
+}
+
+// ============ 像素猫主判定 ============
+// 24×24 内部几何（构建后 2× 最近邻放大到 48×48 输出）。
+// 性能：Hone 函数调用开销大（实测 4608 次调用含子判定 ~4s），故判定全部内联
+// （椭圆/圆/三角/线段判定公式直接展开），无子函数调用。
+// 姿态 pose:
+//   idle0     待机睁眼（默认）
+//   idle1     眨眼（闭眼）
+//   walk0    走路帧 A（身体下压）
+//   walk1    走路帧 B（身体回位）
+//   sleep0    睡觉（闭眼 + 头顶 Z + 蹲低）
+//   happy0    被摸开心帧 A（跳起 + 眯眼笑）
+//   happy1    被摸开心帧 B
+//   surprise0 惊讶（大圆眼 + 张嘴）
+// 背景品红 (255,0,255) = 窗口透明键。
+// 判定顺序（顶层优先）：眼睛 → 睡觉Z → 胡须 → 嘴 → 鼻子 → 腮红 → 耳朵 → 头 →
+// 爪 → 肚皮 → 身体 → 尾巴 → 背景
+
+fn pet_px(pal, pose : str, x : int, y : int) {
+    // 姿态参数解析
+    dy = 0;
+    eye = 0;
+    mouth = 0;
+    zz = false;
+    if (pose == "idle1") { eye = 1; }
+    if (pose == "walk0") { eye = 1; dy = 1; }
+    if (pose == "walk1") { eye = 1; dy = 0; }
+    if (pose == "sleep0") { eye = 1; dy = 1; zz = true; }
+    if (pose == "happy0") { eye = 2; dy = -1; mouth = 1; }
+    if (pose == "happy1") { eye = 2; dy = 0; mouth = 1; }
+    if (pose == "surprise0") { eye = 3; mouth = 1; }
+
+    body = pal.body;
+    belly = pal.belly;
+    ear = pal.ear;
+    eye_c = pal.eye;
+    nose_c = pal.nose;
+    line_c = pal.line;
+
+    // 眼睛（最顶层）
+    if (eye == 0) {
+        // 睁眼：左 (9,8) 右 (15,8) 圆 r=1
+        if ((x - 9) * (x - 9) + (y - 8) * (y - 8) <= 1 ||
+            (x - 15) * (x - 15) + (y - 8) * (y - 8) <= 1) {
+            return eye_c;
+        }
+    }
+    if (eye == 1) {
+        // 闭眼：横线
+        if (pet_px_line(x, y, 7, 9, 11, 9, 1) || pet_px_line(x, y, 13, 9, 17, 9, 1)) {
+            return line_c;
+        }
+    }
+    if (eye == 2) {
+        // 眯眼 ^^
+        if (pet_px_line(x, y, 7, 10, 9, 8, 1) || pet_px_line(x, y, 9, 8, 11, 10, 1) ||
+            pet_px_line(x, y, 13, 10, 15, 8, 1) || pet_px_line(x, y, 15, 8, 17, 10, 1)) {
+            return line_c;
+        }
+    }
+    if (eye == 3) {
+        // 惊讶：白眼球 r=2 + 黑瞳孔 r=1
+        if ((x - 9) * (x - 9) + (y - 8) * (y - 8) <= 4 ||
+            (x - 15) * (x - 15) + (y - 8) * (y - 8) <= 4) {
+            if ((x - 9) * (x - 9) + (y - 8) * (y - 8) <= 1 ||
+                (x - 15) * (x - 15) + (y - 8) * (y - 8) <= 1) {
+                return [20, 20, 25];
+            }
+            return [255, 255, 255];
+        }
+    }
+
+    // 睡觉 Z（头顶右上）
+    if (zz) {
+        if (pet_px_line(x, y, 18, 2, 22, 2, 1) || pet_px_line(x, y, 22, 2, 18, 5, 1) ||
+            pet_px_line(x, y, 18, 5, 22, 5, 1)) {
+            return [140, 180, 230];
+        }
+    }
+
+    // 胡须
+    if (pet_px_line(x, y, 1, 9, 6, 10, 1) || pet_px_line(x, y, 1, 12, 6, 12, 1) ||
+        pet_px_line(x, y, 23, 9, 18, 10, 1) || pet_px_line(x, y, 23, 12, 18, 12, 1)) {
+        return line_c;
+    }
+
+    // 嘴
+    if (mouth == 1) {
+        // 张嘴（小椭圆）
+        if ((x - 12) * (x - 12) + (y - 14) * (y - 14) <= 4) { return [120, 60, 60]; }
+    } else {
+        if (pet_px_line(x, y, 10, 13, 12, 15, 1) || pet_px_line(x, y, 14, 13, 12, 15, 1)) {
+            return line_c;
+        }
+    }
+
+    // 鼻子（三角）
+    d1 = (x - 11) * (13 - 11) - (y - 11) * (13 - 11);
+    d2 = (x - 13) * (13 - 13) - (y - 11) * (11 - 13);
+    d3 = (x - 11) * (11 - 13) - (y - 13) * (11 - 11);
+    if ((d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0)) { return nose_c; }
+
+    // 腮红
+    if ((x - 6) * (x - 6) + (y - 11) * (y - 11) <= 1 ||
+        (x - 18) * (x - 18) + (y - 11) * (y - 11) <= 1) {
+        return [250, 140, 150];
+    }
+
+    // 左耳（外三角 + 内三角）
+    d1 = (x - 6) * (2 - 8) - (y - 8) * (8 - 6);
+    d2 = (x - 8) * (7 - 2) - (y - 2) * (13 - 8);
+    d3 = (x - 13) * (8 - 7) - (y - 7) * (6 - 13);
+    if ((d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0)) {
+        d1 = (x - 8) * (4 - 7) - (y - 7) * (9 - 8);
+        d2 = (x - 9) * (7 - 4) - (y - 4) * (12 - 9);
+        d3 = (x - 12) * (7 - 7) - (y - 7) * (8 - 12);
+        if ((d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0)) {
+            return ear;
+        }
+        return body;
+    }
+    // 右耳（外三角 + 内三角）
+    d1 = (x - 18) * (2 - 8) - (y - 8) * (16 - 18);
+    d2 = (x - 16) * (7 - 2) - (y - 2) * (11 - 16);
+    d3 = (x - 11) * (8 - 7) - (y - 7) * (18 - 11);
+    if ((d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0)) {
+        d1 = (x - 16) * (4 - 7) - (y - 7) * (15 - 16);
+        d2 = (x - 15) * (7 - 4) - (y - 4) * (12 - 15);
+        d3 = (x - 12) * (7 - 7) - (y - 7) * (16 - 12);
+        if ((d1 >= 0 && d2 >= 0 && d3 >= 0) || (d1 <= 0 && d2 <= 0 && d3 <= 0)) {
+            return ear;
+        }
+        return body;
+    }
+
+    // 头（椭圆 cx=12 cy=9 rx=7 ry=6）
+    hx = x - 12;
+    hy = y - 9;
+    if (hx * hx * 36 + hy * hy * 49 <= 1764) { return body; }
+
+    // 前爪（dy 偏移；椭圆 (9,22) (15,22) rx=2 ry=1）
+    px = x - 9;
+    py = y - 22 - dy;
+    if (px * px * 1 + py * py * 4 <= 4) { return belly; }
+    px = x - 15;
+    py = y - 22 - dy;
+    if (px * px * 1 + py * py * 4 <= 4) { return belly; }
+
+    // 肚皮（椭圆 cx=12 cy=19+dy rx=3 ry=2）
+    hx = x - 12;
+    hy = y - 19 - dy;
+    if (hx * hx * 4 + hy * hy * 9 <= 36) { return belly; }
+
+    // 身体（椭圆 cx=12 cy=18+dy rx=6 ry=5）
+    hx = x - 12;
+    hy = y - 18 - dy;
+    if (hx * hx * 25 + hy * hy * 36 <= 900) { return body; }
+
+    // 尾巴（右侧三段线）
+    if (pet_px_line(x, y, 17, 20, 21, 17, 1) || pet_px_line(x, y, 21, 17, 22, 13, 1) ||
+        pet_px_line(x, y, 22, 13, 19, 10, 1)) {
+        return body;
+    }
+
+    // 背景（品红 = 透明键）
+    return [255, 0, 255];
+}
+
+// ============ 帧构建 ============
+
+// 最近邻缩放（放大 2 倍用：24×24 内部几何 → 48×48 输出）
+fn pet_scale(img, nw : int, nh : int) {
+    w = img.w;
+    h = img.h;
+    rows = [[img.rows[dy * h / nh][dx * w / nw] for dx in pet_range(nw)] for dy in pet_range(nh)];
+    return {"w": nw, "h": nh, "rows": rows};
+}
+
+// 构建单帧（img dict 版）：24×24 判定 → 2× 最近邻放大到 48×48。
+// 供外部帧缺帧兜底 / 内存操作使用；批量生成请用 pet_frame_ppm（ptr 快路径）。
+fn pet_frame(pal, pose : str) {
+    small = [[pet_px(pal, pose, x, y) for x in pet_range(24)] for y in pet_range(24)];
+    return pet_scale({"w": 24, "h": 24, "rows": small}, 48, 48);
+}
+
+// 构建单帧 PPM 文本（快速路径）：24×24 判定写入 ptr 缓冲（内置读写零开销，
+// 无逐像素列表/rows 构造）→ 2× 放大时从 ptr 读字节直接拼 PPM P3 文本。
+// 实测：8 帧 < 1s（对比推导式构建 rows 约 10s）。
+fn pet_frame_ppm(pal, pose : str) -> str {
+    buf = ptr.alloc(24 * 24 * 3);
+    y = 0;
+    while (y < 24) {
+        x = 0;
+        while (x < 24) {
+            c = pet_px(pal, pose, x, y);
+            off = (y * 24 + x) * 3;
+            ptr.write_byte(buf, off, c[0]);
+            ptr.write_byte(buf, off + 1, c[1]);
+            ptr.write_byte(buf, off + 2, c[2]);
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    s = "P3\n48 48\n255\n";
+    y = 0;
+    while (y < 48) {
+        x = 0;
+        while (x < 48) {
+            off = ((y / 2) * 24 + (x / 2)) * 3;
+            s = s + to_str(ptr.read_byte(buf, off)) + " " +
+                to_str(ptr.read_byte(buf, off + 1)) + " " +
+                to_str(ptr.read_byte(buf, off + 2)) + "\n";
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    ptr.free(buf);
+    return s;
+}
+
+// 生成内置像素猫全部 8 帧为 PPM 文件（dir 需已存在；帧文件名 = 姿态名 + ".ppm"）
+fn pet_save_builtin(dir : str, pal) {
+    write_file(dir + "/idle0.ppm", pet_frame_ppm(pal, "idle0"));
+    write_file(dir + "/idle1.ppm", pet_frame_ppm(pal, "idle1"));
+    write_file(dir + "/walk0.ppm", pet_frame_ppm(pal, "walk0"));
+    write_file(dir + "/walk1.ppm", pet_frame_ppm(pal, "walk1"));
+    write_file(dir + "/sleep0.ppm", pet_frame_ppm(pal, "sleep0"));
+    write_file(dir + "/happy0.ppm", pet_frame_ppm(pal, "happy0"));
+    write_file(dir + "/happy1.ppm", pet_frame_ppm(pal, "happy1"));
+    write_file(dir + "/surprise0.ppm", pet_frame_ppm(pal, "surprise0"));
+}
+
+// 检查目录是否已有全部 8 帧 PPM 文件（外部帧替换时用）
+fn pet_frames_ready(dir : str) -> bool {
+    for n in ["idle0", "idle1", "walk0", "walk1", "sleep0", "happy0", "happy1", "surprise0"] {
+        try {
+            t = read_file(dir + "/" + n + ".ppm");
+            if (len(t) < 20) { return false; }
+        } catch e {
+            return false;
+        }
+    }
+    return true;
+}
+
+// ============ PPM P3 解析（外部帧替换用） ============
+
+// PPM P3 文本 → 图像（maxval 非 255 时按比例换算；忽略注释行）
+fn pet_from_ppm(text : str) {
+    lines = regex.split("\n", text);
+    nums = "";
+    for line in lines {
+        tl = str_trim(line);
+        if (tl == "" || str_contains(tl, "#")) { continue; }
+        nums = nums + tl + " ";
+    }
+    tokens = regex.split("\\s+", str_trim(nums));
+    w = to_int(pet_at(tokens, 1));
+    h = to_int(pet_at(tokens, 2));
+    maxv = to_int(pet_at(tokens, 3));
+    rows = [];
+    k = 4;
+    y = 0;
+    while (y < h) {
+        row = [];
+        x = 0;
+        while (x < w) {
+            r = to_int(pet_at(tokens, k));
+            g = to_int(pet_at(tokens, k + 1));
+            b = to_int(pet_at(tokens, k + 2));
+            if (maxv != 255) {
+                r = to_int(to_float(r) * 255.0 / to_float(maxv) + 0.5);
+                g = to_int(to_float(g) * 255.0 / to_float(maxv) + 0.5);
+                b = to_int(to_float(b) * 255.0 / to_float(maxv) + 0.5);
+            }
+            row = append(row, [r, g, b]);
+            k = k + 3;
+            x = x + 1;
+        }
+        rows = append(rows, row);
+        y = y + 1;
+    }
+    return {"w": w, "h": h, "rows": rows};
+}
+
+// 读取 PPM P3 文件 → 图像
+fn pet_load_ppm(path : str) {
+    return pet_from_ppm(read_file(path));
+}
+
+// 从外部帧目录加载单帧；读取失败返回内置同姿态帧（pal 兜底）
+fn pet_load_opt(dir : str, name : str, pal) {
+    try {
+        t = read_file(dir + "/" + name + ".ppm");
+        if (len(t) > 3) { return pet_from_ppm(t); }
+        return pet_frame(pal, name);
+    } catch e {
+        return pet_frame(pal, name);
+    }
+}
+
+// 从外部帧目录加载全部帧（缺帧用内置兜底；目录不存在时全部内置）
+fn pet_load_frames(dir : str, pal) {
+    idle0 = pet_load_opt(dir, "idle0", pal);
+    idle1 = pet_load_opt(dir, "idle1", pal);
+    walk0 = pet_load_opt(dir, "walk0", pal);
+    walk1 = pet_load_opt(dir, "walk1", pal);
+    sleep0 = pet_load_opt(dir, "sleep0", pal);
+    happy0 = pet_load_opt(dir, "happy0", pal);
+    happy1 = pet_load_opt(dir, "happy1", pal);
+    surprise0 = pet_load_opt(dir, "surprise0", pal);
+    return {"idle0": idle0, "idle1": idle1, "walk0": walk0, "walk1": walk1,
+            "sleep0": sleep0, "happy0": happy0, "happy1": happy1, "surprise0": surprise0};
+}
+
+// ============ 台词系统 ============
+// 台词表结构: {"场景": [台词, ...], ...}，场景键:
+//   greet    启动问候     pet     被抚摸/点击回应    walk   散步感想
+//   sleep    入睡/睡觉     happy   开心回应           surprise 惊讶回应
+//   hourly   整点报时前缀  resource 系统资源播报前缀  idle   随机闲话
+// 自定义台词: JSON 文件 {"greet": [...], "idle": [...]}，未写的键用内置。
+
+// 内置台词表
+fn pet_lines() {
+    return {"greet": ["你好呀！", "喵~ 我来了！", "今天也要元气满满喵！", "想我了吗？"],
+            "pet": ["喵呜~ 好舒服！", "再摸摸我嘛~", "最喜欢你啦！", "喵喵喵！"],
+            "walk": ["去那边逛逛~", "散步时间到！", "走走走~", "喵，这边有情况！"],
+            "sleep": ["zZ... 呼噜……", "困了，睡一会儿……", "晚安喵……"],
+            "happy": ["喵！好开心！", "被摸摸好幸福~", "蹦跶蹦跶！"],
+            "surprise": ["哇！吓我一跳！", "喵呜？！", "干嘛突然戳我！"],
+            "hourly": ["整点啦！现在 ", "滴答滴答，报时：", "铛铛铛！现在 "],
+            "resource": ["我看看电脑……", "系统状态报告：", "CPU/内存汇报："],
+            "idle": ["喵？", "好无聊呀……", "在看什么呢？", "(打哈欠)", "想吃小鱼干……"]};
+}
+
+// 取单个场景台词列表：用户有该键用用户，否则用内置
+fn pet_merge_key(base, user, key : str) {
+    if (pet_dict_has(user, key)) { return pet_dict_get(user, key); }
+    return pet_dict_get(base, key);
+}
+
+// 合并用户台词（JSON 解析结果）与内置台词，返回完整台词表
+fn pet_merge_lines(user) {
+    base = pet_lines();
+    greet = pet_merge_key(base, user, "greet");
+    pet = pet_merge_key(base, user, "pet");
+    walk = pet_merge_key(base, user, "walk");
+    sleep = pet_merge_key(base, user, "sleep");
+    happy = pet_merge_key(base, user, "happy");
+    surprise = pet_merge_key(base, user, "surprise");
+    hourly = pet_merge_key(base, user, "hourly");
+    resource = pet_merge_key(base, user, "resource");
+    idle = pet_merge_key(base, user, "idle");
+    return {"greet": greet, "pet": pet, "walk": walk, "sleep": sleep,
+            "happy": happy, "surprise": surprise, "hourly": hourly,
+            "resource": resource, "idle": idle};
+}
+
+// 加载自定义台词文件（JSON），与内置合并；读取/解析失败返回内置台词表
+fn pet_load_lines(path : str) {
+    t = "";
+    try { t = read_file(path); } catch e { }
+    if (len(t) == 0) { return pet_lines(); }
+    try {
+        user = json_parse(t);
+        return pet_merge_lines(user);
+    } catch e {
+        return pet_lines();
+    }
+}
+
+// 从台词表随机取一句（场景无台词返回 ""）
+fn pet_line_pick(lines, key : str) -> str {
+    return pet_pick(pet_dict_get(lines, key));
+}
+
+// ============ 系统播报 ============
+
+// 从 "KEY=value" 文本中取 value（wmic /value 输出格式）
+fn pet_parse_kv(out : str, key : str) -> str {
+    lines = regex.split("\n", out);
+    for l in lines {
+        tl = str_trim(l);
+        if (str_contains(tl, key + "=")) {
+            return str_trim(str_replace(tl, key + "=", ""));
+        }
+    }
+    return "";
+}
+
+// 系统资源占用文本 "CPU xx% / 内存 yy%"（Windows wmic；失败部分显示 "?"）
+fn pet_cpu_mem() -> str {
+    cpu = "?";
+    try {
+        out = sys.run("wmic cpu get loadpercentage /value");
+        c = pet_parse_kv(out, "LoadPercentage");
+        if (len(c) > 0) { cpu = c; }
+    } catch e { }
+    mem = "?";
+    try {
+        out = sys.run("wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /value");
+        free = to_int(pet_parse_kv(out, "FreePhysicalMemory"));
+        total = to_int(pet_parse_kv(out, "TotalVisibleMemorySize"));
+        if (total > 0) {
+            used = (total - free) * 100 / total;
+            mem = to_str(used);
+        }
+    } catch e { }
+    return "CPU " + cpu + "% / 内存 " + mem + "%";
+}
+
+// 当前小时 "HH"（整点报时判断用）
+fn pet_time_hh() -> str {
+    return time.format(time.now(), "HH");
+}
+
+// 当前 "HH:mm"（气泡显示用）
+fn pet_time_hhmm() -> str {
+    return time.format(time.now(), "HH:mm");
+}
+
+// ============ PowerShell 窗口脚本 ============
+// 生成 pet_window.ps1（透明置顶窗 + 轮询渲染 + 鼠标事件上报）。
+// 编码说明：Windows PowerShell 5.1 按 ANSI 读 .ps1，中文会乱码，故模板纯 ASCII
+// （注释英文、菜单文字从 labels.json 用 -Encoding UTF8 读取；state.json 同样
+// 用 -Encoding UTF8 读，保证气泡中文正常）。
+// 占位符: __STATE__ / __EVENTS__ / __FRAMEDIR__ / __LABELS__ / __SCALE__
+// 帧名约定: 帧目录下 "<姿态名>.ppm"（idle0/idle1/walk0/walk1/sleep0/happy0/happy1/surprise0）
+// state.json: {"frame": "idle0", "x": 100, "y": 300, "text": "气泡", "quit": false}
+// events.json: 每行一个 JSON 事件，Hone 读后清空:
+//   {"t":"click"} / {"t":"dblclick"} / {"t":"drag","x":..,"y":..} /
+//   {"t":"menu","item":"dress"|"mute"|"follow"|"bubble"|"quit"}
+
+fn pet_ps_script(state_file : str, events_file : str, frame_dir : str, labels_file : str, scale : int) -> str {
+    s = """# Hone desktop pet window (auto-generated, do not edit)
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$stateFile = '__STATE__'
+$eventsFile = '__EVENTS__'
+$frameDir = '__FRAMEDIR__'
+$labelsFile = '__LABELS__'
+$scale = __SCALE__
+
+$magenta = [System.Drawing.Color]::FromArgb(255, 0, 255)
+$petW = 48 * $scale
+$petH = 48 * $scale
+$bubbleH = 30
+
+# menu labels (read as UTF-8 to keep Chinese correct on PS 5.1)
+$labels = @{}
+if (Test-Path $labelsFile) {
+    $ls = Get-Content -Raw -Encoding UTF8 $labelsFile | ConvertFrom-Json
+    $labels.dress = $ls.dress
+    $labels.mute = $ls.mute
+    $labels.follow = $ls.follow
+    $labels.bubble = $ls.bubble
+    $labels.quit = $ls.quit
+}
+
+function Write-Event($e) {
+    Add-Content -Path $eventsFile -Value $e -Encoding UTF8
+}
+
+# parse PPM P3 text -> Bitmap
+function Read-Ppm($path) {
+    $txt = Get-Content -Raw $path
+    $tokens = $txt -split '\s+'
+    $w = [int]$tokens[1]
+    $h = [int]$tokens[2]
+    $bmp = New-Object System.Drawing.Bitmap($w, $h)
+    $k = 4
+    for ($y = 0; $y -lt $h; $y++) {
+        for ($x = 0; $x -lt $w; $x++) {
+            $r = [int]$tokens[$k]; $g = [int]$tokens[$k + 1]; $b = [int]$tokens[$k + 2]
+            $bmp.SetPixel($x, $y, [System.Drawing.Color]::FromArgb(255, $r, $g, $b))
+            $k += 3
+        }
+    }
+    return $bmp
+}
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'Hone Pet'
+$form.FormBorderStyle = 'None'
+$form.TopMost = $true
+$form.ShowInTaskbar = $false
+$form.StartPosition = 'Manual'
+$form.AllowTransparency = $true
+$form.BackColor = $magenta
+$form.TransparencyKey = $magenta
+$form.ClientSize = New-Object System.Drawing.Size($petW, $petH + $bubbleH)
+
+$script:curFrame = ''
+$script:curVer = 0
+$script:bitmap = $null
+$script:text = ''
+$script:posX = 0
+$script:posY = 0
+$script:lastX = 0
+$script:lastY = 0
+$script:drag = $false
+$script:cursorN = 0
+
+$form.Add_Paint({
+    param($sender, $e)
+    $g = $e.Graphics
+    $g.Clear($magenta)
+    if ($script:bitmap -ne $null) {
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::NearestNeighbor
+        $g.DrawImage($script:bitmap, 0, $bubbleH, $petW, $petH)
+    }
+    if ($script:text -ne '') {
+        $font = New-Object System.Drawing.Font('Microsoft YaHei', 9)
+        $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(240, 255, 255, 255))
+        $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(120, 120, 120))
+        $rect = New-Object System.Drawing.Rectangle(2, 2, $form.ClientSize.Width - 4, $bubbleH - 4)
+        $g.FillRectangle($brush, $rect)
+        $g.DrawRectangle($pen, $rect)
+        $g.DrawString($script:text, $font, [System.Drawing.Brushes]::Black, 4, 4)
+    }
+})
+
+$form.Add_MouseDown({
+    param($sender, $e)
+    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+        $script:drag = $true
+        $script:lastX = $e.X
+        $script:lastY = $e.Y
+    }
+})
+$form.Add_MouseMove({
+    param($sender, $e)
+    if ($script:drag) {
+        $form.Left += $e.X - $script:lastX
+        $form.Top += $e.Y - $script:lastY
+    }
+})
+$form.Add_MouseUp({
+    param($sender, $e)
+    if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+        $script:drag = $false
+        Write-Event ('{"t":"drag","x":' + $form.Left + ',"y":' + $form.Top + '}')
+    }
+})
+$form.Add_Click({ Write-Event '{"t":"click"}' })
+$form.Add_DoubleClick({ Write-Event '{"t":"dblclick"}' })
+
+$menu = New-Object System.Windows.Forms.ContextMenuStrip
+$mi1 = $menu.Items.Add($labels.dress)
+$mi1.Add_Click({ Write-Event '{"t":"menu","item":"dress"}' })
+$mi2 = $menu.Items.Add($labels.mute)
+$mi2.Add_Click({ Write-Event '{"t":"menu","item":"mute"}' })
+$mi3 = $menu.Items.Add($labels.follow)
+$mi3.Add_Click({ Write-Event '{"t":"menu","item":"follow"}' })
+$mi4 = $menu.Items.Add($labels.bubble)
+$mi4.Add_Click({ Write-Event '{"t":"menu","item":"bubble"}' })
+$mi5 = $menu.Items.Add($labels.quit)
+$mi5.Add_Click({ Write-Event '{"t":"menu","item":"quit"}' })
+$form.ContextMenuStrip = $menu
+
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 100
+$timer.Add_Tick({
+    if (-not (Test-Path $stateFile)) { return }
+    $st = Get-Content -Raw -Encoding UTF8 $stateFile | ConvertFrom-Json
+    if ($st.quit -eq $true) {
+        $timer.Stop()
+        $form.Close()
+        return
+    }
+    # version bump (costume change) forces frame reload even if name is same
+    if ($st.ver -ne $script:curVer) {
+        $script:curVer = $st.ver
+        $script:curFrame = ''
+    }
+    if ($st.x -ne $script:posX -or $st.y -ne $script:posY) {
+        $script:posX = [int]$st.x
+        $script:posY = [int]$st.y
+        $form.Left = $script:posX
+        $form.Top = $script:posY
+    }
+    $fn = [string]$st.frame
+    if ($fn -ne $script:curFrame) {
+        $script:curFrame = $fn
+        $path = Join-Path $frameDir ($fn + '.ppm')
+        if (Test-Path $path) {
+            $script:bitmap = Read-Ppm $path
+        }
+    }
+    $script:text = [string]$st.text
+    # mouse-follow mode: report cursor position (throttled ~500ms)
+    $script:cursorN += 1
+    if ($st.follow -eq $true -and ($script:cursorN % 5) -eq 0) {
+        $cp = [System.Windows.Forms.Cursor]::Position
+        Write-Event ('{"t":"cursor","x":' + $cp.X + ',"y":' + $cp.Y + '}')
+    }
+    $form.Invalidate()
+})
+$timer.Start()
+
+[System.Windows.Forms.Application]::Run($form)
+""";
+    s = str_replace(s, "__STATE__", state_file);
+    s = str_replace(s, "__EVENTS__", events_file);
+    s = str_replace(s, "__FRAMEDIR__", frame_dir);
+    s = str_replace(s, "__LABELS__", labels_file);
+    s = str_replace(s, "__SCALE__", to_str(scale));
+    return s;
+}
+
+// 生成菜单标签 JSON（供 PS 读取，避免 .ps1 中文乱码）
+fn pet_labels_json() -> str {
+    return "{\"dress\": \"换装\", \"mute\": \"静音/恢复\", \"follow\": \"跟随鼠标\", \"bubble\": \"隐藏/显示台词\", \"quit\": \"退出\"}";
+}
+
+// ============ 事件读取 ============
+
+// 读取事件文件（每行一个 JSON 事件），返回事件列表
+fn pet_read_events(path : str) {
+    out = [];
+    t = "";
+    try { t = read_file(path); } catch e { }
+    lines = regex.split("\n", t);
+    for l in lines {
+        tl = str_trim(l);
+        if (len(tl) > 2) {
+            try {
+                ev = json_parse(tl);
+                out = append(out, ev);
+            } catch e { }
+        }
+    }
+    return out;
+}
+
+// ============ 初始化 ============
+
+// 初始化桌宠：生成帧/脚本/启动窗口，返回完整状态 dict。
+// 状态字段: x/y 窗口左上角坐标、dir 朝向、mode 状态机、frame 当前帧、
+//   pal 调色板、ver 帧版本（换装+1）、follow/mute/show_bubble 开关、
+//   lines 台词表、last_* 各定时器时间戳、quit 退出标志、cfg 配置。
+fn pet_init(user) {
+    cfg = pet_cfg(user);
+    // 屏幕尺寸（"宽x高"）
+    size = sys.get_screen_size();
+    parts = regex.split("x", size);
+    sw = to_int(pet_at(parts, 0));
+    sh = to_int(pet_at(parts, 1));
+    // 工作目录（默认 %TEMP%/hone_pet；无 mkdir 内置，用 cmd 创建）
+    workdir = pet_cfg_str(user, "workdir", "");
+    if (len(workdir) == 0) {
+        workdir = sys.get_env("TEMP");
+        workdir = str_replace(workdir, "\\", "/");
+        workdir = workdir + "/hone_pet";
+    }
+    try { sys.run("cmd /c mkdir \"" + workdir + "\" 2>nul"); } catch e { }
+    frames_dir = workdir + "/frames";
+    try { sys.run("cmd /c mkdir \"" + frames_dir + "\" 2>nul"); } catch e { }
+    // 帧：内置生成或外部帧目录
+    use_external = false;
+    if (len(cfg.frames_dir) > 0 && pet_frames_ready(cfg.frames_dir)) {
+        use_external = true;
+        frames_dir = cfg.frames_dir;
+    } else {
+        pal = pet_palette(cfg.pal);
+        pet_save_builtin(frames_dir, pal);
+    }
+    // 台词
+    lines = pet_lines();
+    if (len(cfg.lines_file) > 0) {
+        lines = pet_load_lines(cfg.lines_file);
+    }
+    // 标签 + PS 脚本 + 初始状态文件
+    labels_file = workdir + "/labels.json";
+    write_file(labels_file, pet_labels_json());
+    state_file = workdir + "/state.json";
+    events_file = workdir + "/events.json";
+    ps_file = workdir + "/pet_window.ps1";
+    write_file(ps_file, pet_ps_script(state_file, events_file, frames_dir, labels_file, cfg.scale));
+    // 初始位置：start_x/start_y 或屏幕底部中央
+    w = 48 * cfg.scale;
+    h = 48 * cfg.scale + 30;
+    x = cfg.start_x;
+    y = cfg.start_y;
+    if (x < 0) { x = (sw - w) / 2; }
+    if (y < 0) { y = sh - h - 10; }
+    if (y < 0) { y = 0; }
+    now = time.now();
+    st = {"cfg": cfg, "x": x, "y": y, "dir": 1, "mode": "idle", "mode_t": 0,
+          "frame": "idle0", "flip": false, "pal": cfg.pal, "ver": 0,
+          "lines": lines, "follow": false, "mute": cfg.mute,
+          "show_bubble": cfg.show_bubble,
+          "last_wander": now, "last_bubble": now, "last_hour": pet_time_hh(),
+          "last_res": now, "last_activity": now, "text_until": 0,
+          "workdir": workdir, "state_file": state_file,
+          "events_file": events_file, "frame_dir": frames_dir,
+          "sw": sw, "sh": sh, "quit": false, "use_external": use_external};
+    // 初始状态文件（让 PS 立即渲染）
+    write_file(state_file, json_stringify({"frame": st.frame, "x": x, "y": y,
+        "text": pet_line_pick(lines, "greet"), "quit": false, "ver": 0,
+        "follow": false}));
+    // 启动 PowerShell 透明窗（cmd start 立即返回，不阻塞）
+    try {
+        sys.run("cmd /c start \"\" powershell -NoProfile -ExecutionPolicy Bypass -File \"" + ps_file + "\"");
+    } catch e { }
+    return st;
+}
+
+// ============ 单步推进 ============
+
+// 单步推进：读事件 → 处理 → 状态机 → 定时行为 → 写状态文件。
+// 返回新状态 dict（Hone dict 值语义，整体重建）。
+fn pet_tick(st) {
+    cfg = st.cfg;
+    x = st.x;
+    y = st.y;
+    dir = st.dir;
+    mode = st.mode;
+    mode_t = st.mode_t + 1;
+    frame = st.frame;
+    flip = st.flip;
+    pal = st.pal;
+    ver = st.ver;
+    lines = st.lines;
+    follow = st.follow;
+    mute = st.mute;
+    show_bubble = st.show_bubble;
+    last_wander = st.last_wander;
+    last_bubble = st.last_bubble;
+    last_hour = st.last_hour;
+    last_res = st.last_res;
+    last_activity = st.last_activity;
+    text_until = st.text_until;
+    sw = st.sw;
+    sh = st.sh;
+    quit = st.quit;
+    use_external = st.use_external;
+    speed = cfg.speed;
+    w = 48 * cfg.scale;
+    h = 48 * cfg.scale + 30;
+    now = time.now();
+    text = "";
+    tx = x;
+    ty = y;
+
+    // ---- 事件处理 ----
+    evs = pet_read_events(st.events_file);
+    for ev in evs {
+        t = pet_dict_get(ev, "t");
+        if (t == "click") {
+            mode = "happy";
+            mode_t = 0;
+            text = pet_line_pick(lines, "pet");
+            text_until = now + 3;
+            last_activity = now;
+        }
+        if (t == "dblclick") {
+            mode = "surprise";
+            mode_t = 0;
+            text = pet_line_pick(lines, "surprise");
+            text_until = now + 3;
+            last_activity = now;
+        }
+        if (t == "drag") {
+            x = to_int(pet_dict_get(ev, "x"));
+            y = to_int(pet_dict_get(ev, "y"));
+            last_activity = now;
+        }
+        if (t == "cursor") {
+            if (follow) {
+                tx = to_int(pet_dict_get(ev, "x"));
+                ty = to_int(pet_dict_get(ev, "y"));
+            }
+        }
+        if (t == "menu") {
+            item = pet_dict_get(ev, "item");
+            if (item == "dress") {
+                if (use_external) {
+                    text = "外部帧不支持换装";
+                    text_until = now + 2;
+                } else {
+                    pal = (pal + 1) % 3;
+                    ver = ver + 1;
+                    p2 = pet_palette(pal);
+                    pet_save_builtin(st.frame_dir, p2);
+                    text = "换装完成！";
+                    text_until = now + 2;
+                }
+            }
+            if (item == "mute") {
+                mute = !mute;
+                text = pet_line_pick(lines, "pet");
+                text_until = now + 2;
+            }
+            if (item == "follow") {
+                follow = !follow;
+                if (follow) {
+                    text = "跟着你走~";
+                } else {
+                    text = "不跟了喵";
+                }
+                text_until = now + 2;
+            }
+            if (item == "bubble") {
+                show_bubble = !show_bubble;
+            }
+            if (item == "quit") {
+                quit = true;
+            }
+        }
+    }
+    // 清空事件文件（竞态可接受：偶尔丢事件无碍）
+    try { write_file(st.events_file, ""); } catch e { }
+
+    // ---- 状态机 ----
+    if (mode == "idle") {
+        // 眨眼：每 12 tick 眨一次
+        if (mode_t % 12 == 0) { frame = "idle1"; } else { frame = "idle0"; }
+        // 游荡触发
+        if (cfg.wander > 0 && now - last_wander >= cfg.wander) {
+            mode = "walk";
+            mode_t = 0;
+            tx = pet_rand(0, sw - w);
+            ty = pet_rand(0, sh - h);
+            last_wander = now;
+        }
+        // 入睡
+        if (cfg.sleep_after > 0 && now - last_activity >= cfg.sleep_after) {
+            mode = "sleep";
+            mode_t = 0;
+            text = pet_line_pick(lines, "sleep");
+            text_until = now + 4;
+        }
+        // 随机台词
+        if (show_bubble && cfg.bubble > 0 && now - last_bubble >= cfg.bubble && now >= text_until) {
+            text = pet_line_pick(lines, "idle");
+            text_until = now + 4;
+            last_bubble = now;
+        }
+    }
+    if (mode == "walk") {
+        dx = tx - x;
+        dy = ty - y;
+        if (abs(dx) <= speed && abs(dy) <= speed) {
+            x = tx;
+            y = ty;
+            mode = "idle";
+            mode_t = 0;
+            frame = "idle0";
+        } else {
+            if (dx > 0) { x = x + speed; dir = 1; }
+            else if (dx < 0) { x = x - speed; dir = -1; }
+            if (dy > 0) { y = y + speed; }
+            else if (dy < 0) { y = y - speed; }
+            if (mode_t % 2 == 0) { frame = "walk0"; } else { frame = "walk1"; }
+            flip = (dir < 0);
+        }
+    }
+    if (mode == "sleep") {
+        frame = "sleep0";
+    }
+    if (mode == "happy") {
+        if (mode_t % 2 == 0) { frame = "happy0"; } else { frame = "happy1"; }
+        if (mode_t > 8) { mode = "idle"; mode_t = 0; }
+    }
+    if (mode == "surprise") {
+        frame = "surprise0";
+        if (mode_t > 6) { mode = "idle"; mode_t = 0; }
+    }
+
+    // ---- 定时行为 ----
+    // 整点报时
+    if (cfg.hourly) {
+        hh = pet_time_hh();
+        if (hh != last_hour) {
+            text = pet_line_pick(lines, "hourly") + pet_time_hhmm();
+            text_until = now + 5;
+            last_hour = hh;
+            if (!mute) { try { sys.beep(880, 60); } catch e { } }
+        }
+    }
+    // 系统资源播报
+    if (cfg.res_report > 0 && now - last_res >= cfg.res_report) {
+        text = pet_line_pick(lines, "resource") + pet_cpu_mem();
+        text_until = now + 5;
+        last_res = now;
+        if (!mute) { try { sys.beep(660, 50); } catch e { } }
+    }
+    // 气泡过期清空
+    if (now >= text_until) { text = ""; }
+
+    // ---- 写状态文件 ----
+    try {
+        write_file(st.state_file, json_stringify({"frame": frame, "x": x, "y": y,
+            "text": text, "quit": quit, "ver": ver, "follow": follow}));
+    } catch e { }
+
+    return {"cfg": cfg, "x": x, "y": y, "dir": dir, "mode": mode, "mode_t": mode_t,
+            "frame": frame, "flip": flip, "pal": pal, "ver": ver,
+            "lines": lines, "follow": follow, "mute": mute,
+            "show_bubble": show_bubble,
+            "last_wander": last_wander, "last_bubble": last_bubble,
+            "last_hour": last_hour, "last_res": last_res,
+            "last_activity": last_activity, "text_until": text_until,
+            "workdir": st.workdir, "state_file": st.state_file,
+            "events_file": st.events_file, "frame_dir": st.frame_dir,
+            "sw": sw, "sh": sh, "quit": quit, "use_external": use_external};
+}
+
+// ============ 主循环与清理 ============
+
+// 阻塞运行：pet_init + 主循环（每 cfg.tick 秒推进一次）+ 清理。
+// Ctrl+C 或右键菜单「退出」结束。
+fn pet_run(user) {
+    st = pet_init(user);
+    print("桌宠已启动，右键菜单可退出（Ctrl+C 亦可）。");
+    while (st.quit == false) {
+        st = pet_tick(st);
+        time.sleep(st.cfg.tick);
+    }
+    pet_cleanup(st);
+    return st;
+}
+
+// 清理：写 quit 标志让 PS 窗口自关，等待退出
+fn pet_cleanup(st) {
+    try {
+        write_file(st.state_file, json_stringify({"frame": st.frame, "x": st.x,
+            "y": st.y, "text": "", "quit": true, "ver": st.ver,
+            "follow": st.follow}));
+    } catch e { }
+    time.sleep(0.5);
+    print("桌宠已退出。");
+}

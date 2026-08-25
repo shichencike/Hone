@@ -737,6 +737,18 @@ widgets = [
     <span class="f">time.sleep</span>(<span class="n">0.05</span>);
 }</code></pre>
   </div>
+
+  <div class="example">
+    <div class="title">10.3 桌宠标准库（Windows 透明置顶窗）</div>
+    <div class="note">hone_lib/pet.hn：Hone 驱动状态机 + PowerShell 透明置顶窗渲染，内置像素猫动画/气泡/交互；仅支持 Windows（PowerShell 5.1+）</div>
+<pre><code><span class="k">import</span> <span class="s">"pet"</span> <span class="k">from</span> <span class="s">"./hone_lib/pet.hn"</span>;
+
+cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"scale"</span>: <span class="n">2</span>, <span class="s">"speed"</span>: <span class="n">3</span>, <span class="s">"sleep_after"</span>: <span class="n">90</span>};
+<span class="f">pet_run</span>(cfg);   <span class="c">// 阻塞运行：右键菜单或 Ctrl+C 退出</span>
+
+<span class="c">// 非阻塞：st = pet_init(cfg); while (st.quit == false) { st = pet_tick(st); time.sleep(st.cfg.tick); }</span>
+<span class="c">// 交互：单击开心、双击惊讶、按住拖拽、右键菜单（换装/静音/跟随鼠标/隐藏台词/退出）</span></code></pre>
+  </div>
 </main>
 
 <script>

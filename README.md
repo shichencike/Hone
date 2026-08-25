@@ -336,6 +336,32 @@ img_save_svg(im, "out.svg", 4);             // 保存 SVG（每像素放大 4 �
 - 读写：`img_to_ppm` / `img_save_ppm` / `img_from_ppm` / `img_load_ppm` / `img_to_svg` / `img_save_svg`
 - 说明：Hone 的 str 无法承载二进制，故不支持 PNG/BMP 等二进制格式，采用文本格式 PPM P3（GIMP/ImageMagick 可查看）与 SVG（浏览器直接打开）；列表为值类型、索引赋值整体拷贝，绘图/滤镜适合 ≤128×128 的小图
 
+## 桌宠库（hone_lib/pet.hn）
+
+Windows 桌面宠物标准库（仅支持 Windows）：Hone 驱动状态机 + PowerShell 透明置顶窗渲染。
+内置像素猫（idle 眨眼 / walk 走路 / sleep 睡觉 / happy 开心 / surprise 惊讶 8 帧动画），
+说话气泡、点击/拖拽交互、右键菜单（换装/静音/跟随鼠标/隐藏台词/退出）、全屏游荡、
+自动入睡、整点报时、CPU/内存播报。运行示例：`hone examples/pet_demo.hn`（Ctrl+C 或右键菜单退出）。
+
+```hn
+import "pet" from "./hone_lib/pet.hn";
+
+cfg = {"pal": 0, "scale": 2, "speed": 3, "sleep_after": 90};
+pet_run(cfg);                    // 阻塞运行（推荐）
+
+// 非阻塞：st = pet_init(cfg); while (st.quit == false) { st = pet_tick(st); time.sleep(st.cfg.tick); }
+```
+
+- 动画状态：`idle`（眨眼）/ `walk`（左右方向镜像）/ `sleep`（闭眼 + 头顶 Z）/ `happy`（跳起）/ `surprise`（惊讶）
+- 交互：单击开心回应、双击惊讶、按住拖拽移动、右键菜单（换装/静音/跟随鼠标/隐藏显示台词/退出）
+- 行为：空闲自动全屏游荡、无操作自动入睡、随机台词气泡、整点报时、定时播报 CPU/内存（wmic）
+- 配置：`pal` 调色板（0 橘猫/1 黑猫/2 白猫）、`scale` 显示缩放、`speed` 移动速度、`tick` 帧间隔（默认 0.125 = 8fps）、
+  `wander` 游荡间隔秒、`bubble` 随机台词间隔秒、`sleep_after` 入睡阈值秒、`mute` 静音、`hourly` 整点报时、
+  `res_report` 资源播报间隔秒、`lines_file` 自定义台词 JSON、`frames_dir` 外部 PPM 帧目录、`start_x/start_y` 初始位置
+- 性能：帧构建用 `ptr.alloc` 缓冲 + 24×24 内联整数判定 + 2× 最近邻放大到 48×48，8 帧约 2s（对比推导式 rows 约 10s）
+- 说明：Hone 无原生窗口 API，窗口渲染/鼠标事件由运行时生成的 `pet_window.ps1`（WinForms 透明置顶窗）承担，
+  Hone 与窗口间以文件轮询通信（state.json / events.json）；与 gui.hn 同类，非纯 Hone 实现（详见库头注释）
+
 ## 错误报告格式
 
 ```

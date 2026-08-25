@@ -1,5 +1,19 @@
 # Changelog
 
+## [v0.7.2] - 2026-08-25
+
+### 新增
+- **hone_lib/pet.hn 桌宠标准库**（Windows）：Hone 驱动状态机 + PowerShell 透明置顶窗渲染，
+  内置像素猫 8 帧动画（idle 眨眼 / walk 走路镜像 / sleep 睡觉 / happy 开心 / surprise 惊讶），
+  说话气泡、点击/拖拽交互、右键菜单（换装/静音/跟随鼠标/隐藏显示台词/退出）、全屏游荡、
+  自动入睡、整点报时、CPU/内存播报（wmic）；支持自定义台词 JSON 与外部 PPM 帧目录替换；
+  提供阻塞 `pet_run(cfg)` 与非阻塞 `pet_tick(st)` 两种形态；示例：`examples/pet_demo.hn`
+- 性能：帧构建用 `ptr.alloc` 缓冲 + 24×24 内联整数判定 + 2× 最近邻放大到 48×48，
+  8 帧约 2s（对比推导式 rows 约 10s）；规避 Hone 列表值类型 O(w*h) 逐像素拷贝
+- 说明：Hone 无原生窗口 API，窗口渲染/鼠标事件由运行时生成的 `pet_window.ps1`
+  （WinForms 透明置顶窗）承担，Hone 与窗口以文件轮询通信（state.json / events.json）；
+  仅支持 Windows（PowerShell 5.1+），与 gui.hn 同类，非纯 Hone 实现
+
 ## [v0.7.1] - 2026-08-19
 
 ### 新增

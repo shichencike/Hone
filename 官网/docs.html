@@ -815,10 +815,35 @@ im = <span class="f">img_grayscale</span>(im);                          <span cl
       完整函数表与测试脚本见 <a href="stdlib.html#img">标准库 · img 图片模块</a>。</p>
   </section>
 
-  <section id="advanced">
-    <h2><span class="hash">#</span>17. 进阶用法（多文件 / 调试 / 性能）</h2>
+  <section id="pet">
+    <h2><span class="hash">#</span>17. 桌宠库（hone_lib/pet.hn）</h2>
+    <p>Windows 桌面宠物标准库（仅支持 Windows，需 PowerShell 5.1+）：Hone 驱动状态机 +
+      PowerShell 透明置顶窗渲染。内置像素猫 8 帧动画（idle 眨眼 / walk 走路镜像 / sleep 睡觉 /
+      happy 开心 / surprise 惊讶），说话气泡、点击/拖拽交互、右键菜单（换装/静音/跟随鼠标/
+      隐藏显示台词/退出）、全屏游荡、自动入睡、整点报时、CPU/内存播报（wmic）。
+      提供阻塞 <code class="inline">pet_run(cfg)</code> 与非阻塞 <code class="inline">pet_tick(st)</code> 两种形态。
+      运行示例：<code class="inline">hone examples/pet_demo.hn</code>（Ctrl+C 或右键菜单退出）。</p>
+<pre><code><span class="k">import</span> <span class="s">"pet"</span> <span class="k">from</span> <span class="s">"./hone_lib/pet.hn"</span>;
 
-    <h3>17.1 多文件项目组织</h3>
+cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"scale"</span>: <span class="n">2</span>, <span class="s">"speed"</span>: <span class="n">3</span>, <span class="s">"sleep_after"</span>: <span class="n">90</span>};
+<span class="f">pet_run</span>(cfg);   <span class="c">// 阻塞运行（Ctrl+C 或右键菜单退出）</span>
+
+<span class="c">// 非阻塞：st = pet_init(cfg); while (st.quit == false) { st = pet_tick(st); time.sleep(st.cfg.tick); }</span></code></pre>
+    <p>配置项（均可省略，用默认值）：<code class="inline">pal</code> 调色板（0 橘猫/1 黑猫/2 白猫）、
+      <code class="inline">scale</code> 显示缩放（默认 2 → 96×96 窗口）、<code class="inline">speed</code> 移动速度、
+      <code class="inline">tick</code> 帧间隔（默认 0.125 = 8fps）、<code class="inline">sleep_after</code> 入睡阈值秒、
+      <code class="inline">wander</code> 游荡间隔秒、<code class="inline">bubble</code> 随机台词间隔秒、
+      <code class="inline">mute</code> 静音、<code class="inline">hourly</code> 整点报时、
+      <code class="inline">res_report</code> 资源播报间隔秒、<code class="inline">lines_file</code> 自定义台词 JSON、
+      <code class="inline">frames_dir</code> 外部 PPM 帧目录、<code class="inline">start_x/start_y</code> 初始位置。
+      帧构建用 <code class="inline">ptr.alloc</code> 缓冲 + 24×24 内联整数判定 + 2× 最近邻放大到 48×48，8 帧约 2s。
+      完整函数表与配置说明见 <a href="stdlib.html#pet">标准库 · pet 桌宠模块</a>。</p>
+  </section>
+
+  <section id="advanced">
+    <h2><span class="hash">#</span>18. 进阶用法（多文件 / 调试 / 性能）</h2>
+
+    <h3>18.1 多文件项目组织</h3>
     <p>单文件即可运行，项目变大后建议拆分模块。三种复用方式：</p>
 <pre><code><span class="c">// import：.hn 源码复用（最常用）</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;   <span class="c">// 本地：相对当前目录</span>
@@ -836,7 +861,7 @@ im = <span class="f">img_grayscale</span>(im);                          <span cl
       或在项目根目录放 <code class="inline">hone.json</code> 清单（name / version / modules），用
       <code class="inline">hone get</code> 批量下载全部模块（见 §15 工具链）。</p>
 
-    <h3>17.2 函数别名（alias）</h3>
+    <h3>18.2 函数别名（alias）</h3>
     <p>给已有函数起新名字再调用，原名保持不变：</p>
 <pre><code><span class="c">// 基础：alias 原名 as 新名;  之后用新名调用</span>
 <span class="k">fn</span> <span class="f">greet</span>(name) { <span class="k">return</span> <span class="s">"你好 "</span> + name; }
@@ -855,7 +880,7 @@ im = <span class="f">img_grayscale</span>(im);                          <span cl
     <p>别名作用域为文件级（当前 .hn 文件全局可见），在 <code class="inline">alias</code> 语句之后即可用新名调用。
       完整示例见 <code class="inline">examples/alias_demo.hn</code>。</p>
 
-    <h3>17.3 调试复杂逻辑</h3>
+    <h3>18.3 调试复杂逻辑</h3>
     <table>
       <tr><th>工具</th><th>用途</th></tr>
       <tr><td><code class="inline">hone debug &lt;script.hn&gt;</code> + <code class="inline">breakpoint;</code></td><td>运行到断点暂停，打印当前作用域全部变量快照，Enter 继续 / Ctrl+C 退出</td></tr>
@@ -871,7 +896,7 @@ im = <span class="f">img_grayscale</span>(im);                          <span cl
       <code class="inline">breakpoint;</code> 观察变量快照 → 用 try/catch 捕获运行时错误并打印
       <code class="inline">e.code / e.message / e.line</code> → 用 <code class="inline">assert</code> 固化关键不变量防止回归。</p>
 
-    <h3>17.4 性能优化</h3>
+    <h3>18.4 性能优化</h3>
     <ul>
       <li><strong>避免循环内反复 append</strong>：列表是值类型，<code class="inline">append</code> 返回新列表（整体拷贝），
         循环里 <code class="inline">l = append(l, x)</code> 是 O(n²)。累积数据时优先用 dict，或先确定规模再一次性构造</li>
@@ -886,7 +911,7 @@ im = <span class="f">img_grayscale</span>(im);                          <span cl
   </section>
 
   <section id="pitfalls">
-    <h2><span class="hash">#</span>18. 已知问题与常见坑</h2>
+    <h2><span class="hash">#</span>19. 已知问题与常见坑</h2>
     <p>以下都是新手最容易踩的坑，提前看完能省不少调试时间。完整版见
       <a href="faq.html">FAQ</a> 与仓库 <code class="inline">hone.md</code> 的「FAQ 与已知问题」章节。</p>
     <table>

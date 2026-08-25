@@ -45,6 +45,25 @@ function toggleTheme(){
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
 
   <div class="release">
+    <span class="ver-tag">v0.7.2</span><span class="date">2026-08-25</span>
+    <h4>新增</h4>
+    <ul>
+      <li><strong>桌宠标准库 <code>hone_lib/pet.hn</code></strong>（Windows）：Hone 驱动状态机 +
+        PowerShell 透明置顶窗渲染，内置像素猫 8 帧动画（<code>idle</code> 眨眼 / <code>walk</code> 走路镜像 /
+        <code>sleep</code> 睡觉 / <code>happy</code> 开心 / <code>surprise</code> 惊讶），
+        说话气泡、点击/拖拽交互、右键菜单（换装/静音/跟随鼠标/隐藏显示台词/退出）、全屏游荡、
+        自动入睡、整点报时、CPU/内存播报（wmic）；支持自定义台词 JSON 与外部 PPM 帧目录替换；
+        提供阻塞 <code>pet_run(cfg)</code> 与非阻塞 <code>pet_tick(st)</code> 两种形态；
+        示例 <code>examples/pet_demo.hn</code>，详见 <a href="stdlib.html#pet">标准库 · pet 桌宠模块</a></li>
+      <li>性能：帧构建用 <code>ptr.alloc</code> 缓冲 + 24×24 内联整数判定 + 2× 最近邻放大到 48×48，
+        8 帧约 2s（对比推导式 rows 约 10s）；规避 Hone 列表值类型 O(w*h) 逐像素拷贝</li>
+      <li>说明：Hone 无原生窗口 API，窗口渲染/鼠标事件由运行时生成的 <code>pet_window.ps1</code>
+        （WinForms 透明置顶窗）承担，Hone 与窗口以文件轮询通信（<code>state.json</code> / <code>events.json</code>）；
+        仅支持 Windows（PowerShell 5.1+），与 gui.hn 同类、非纯 Hone 实现</li>
+    </ul>
+  </div>
+
+  <div class="release">
     <span class="ver-tag">v0.7.1</span><span class="date">2026-08-19</span>
     <h4>新增</h4>
     <ul>
