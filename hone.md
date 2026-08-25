@@ -878,6 +878,31 @@ cfg = yaml.parse("name: hone\nversion: 1.0\nok: true\n");
 print(cfg.name);                 // hone
 print(yaml.stringify({"a": 1, "b": "x"}));
 
+3.25 guipro 原生图形界面模块（Windows: Win32 / Linux: GTK3）
+
+原生窗口 + 原生控件标准库（升级版图形界面，区别于 3.x 浏览器的 gui.hn）。
+Rust 内置实现，Windows 用 Win32 标准控件（user32/gdi32，零新增依赖、不增体积），
+Linux 运行时动态加载 GTK3（libgtk-3.so，缺失时 X11 降级弹窗）。Hone 层
+hone_lib/guipro.hn 提供 guipro_ 前缀统一 API + 闭包分发主循环 + 定时器：
+`guipro.window` 创建窗口，`guipro.add` 添加控件（button/label/input/select/checkbox/radio），
+`guipro.poll` 泵消息取事件 JSON，`guipro.set_text/get_text` 读写文本，`guipro.close/msgbox` 关闭与弹窗。
+
+· guipro.available() → bool：当前平台是否有原生 GUI 后端（Windows 恒 true；Linux 需已装 GTK3）
+· guipro.window(title, w, h) → int：创建窗口，返回窗口 id
+· guipro.add(win, widget_dict) → int：添加控件，返回控件 id
+  widget_dict：{"type": "button"|"label"|"input"|"select"|"checkbox"|"radio",
+   "text": str, "options": [..], "x"/"y"/"w"/"h": int}（Linux 忽略 x/y，自动纵向排布）
+· guipro.poll() → str：泵消息（非阻塞）+ 取事件 JSON 数组
+  [{"win":1,"id":2,"type":"click"|"change","value":".."}, {"win":1,"id":0,"type":"close"|"resize","value":".."}]
+· guipro.set_text(win, id, text) / guipro.get_text(win, id) → str：读写控件文本
+· guipro.close(win)：销毁窗口（同时推送 close 事件，主循环据此退出）
+· guipro.msgbox(title, msg)：原生消息框（Linux 无 GTK3 时回退 zenity/xmessage）
+
+说明：builtins::call 无解释器上下文，闭包回调无法从 Rust 直接调用，故事件分发
+在 Hone 层完成——hone_lib/guipro.hn 的 guipro_run(handlers) 主循环轮询 poll、
+查 guipro_on 注册表（函数式：注册返回新表）并调用闭包；guipro_timer 定时器
+由 Hone 层 time.now 调度。示例：examples/guipro_demo.hn（20 秒后自动关闭演示）。
+
 四、导入与外部集成
 
 4.1 load 动态库加载

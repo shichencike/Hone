@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.7.3] - 2026-08-25
+
+### 新增
+- **hone_lib/guipro.hn 原生图形界面标准库**（gui.hn 的升级版）：原生窗口 + 原生控件，不再依赖浏览器。
+  Windows 用 Win32 标准控件（user32/gdi32，零新增依赖、不增体积），Linux 运行时动态加载 GTK3
+  （缺失时 msgbox 降级 zenity/xmessage）；控件：button / label / input / select / checkbox / radio + VBox 布局；
+  事件：click / change / close / resize，闭包分发 + `guipro_timer` 定时器 + 原生消息框；
+  示例：`examples/guipro_demo.hn`（20 秒后自动关闭演示）
+- 架构：内置 `guipro.*` 原语（checker 签名表 + builtins 分发）只推送事件队列，闭包分发在 Hone 层
+  `guipro_run` 主循环完成（builtins::call 无解释器上下文）；事件注册表函数式传递（Hone 函数内不能改全局变量）
+
 ## [v0.7.2] - 2026-08-25
 
 ### 新增

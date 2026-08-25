@@ -10,6 +10,9 @@ mod codegen;
 mod datamod;
 mod error;
 mod fmt;
+mod guimod;
+#[cfg(not(windows))]
+mod guimod_gtk;
 mod header;
 mod interp;
 mod lexer;

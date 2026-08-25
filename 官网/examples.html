@@ -749,6 +749,34 @@ cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"
 <span class="c">// 非阻塞：st = pet_init(cfg); while (st.quit == false) { st = pet_tick(st); time.sleep(st.cfg.tick); }</span>
 <span class="c">// 交互：单击开心、双击惊讶、按住拖拽、右键菜单（换装/静音/跟随鼠标/隐藏台词/退出）</span></code></pre>
   </div>
+
+  <div class="example">
+    <div class="title">10.4 原生图形界面库（Windows: Win32 / Linux: GTK3）</div>
+    <div class="note">hone_lib/guipro.hn：原生窗口 + 原生控件（gui.hn 的升级版，不依赖浏览器）；Windows 用 Win32 标准控件，Linux 动态加载 GTK3；闭包事件分发 + 定时器 + 消息框</div>
+<pre><code><span class="k">import</span> <span class="s">"guipro"</span> <span class="k">from</span> <span class="s">"./hone_lib/guipro.hn"</span>;
+
+win = <span class="f">guipro_window</span>(<span class="s">"guipro 演示"</span>, <span class="n">460</span>, <span class="n">420</span>);
+
+<span class="c">// VBox 纵向布局：返回控件 id 列表（与 specs 顺序对应）</span>
+specs = [];
+specs = <span class="f">append</span>(specs, {<span class="s">"type"</span>: <span class="s">"input"</span>, <span class="s">"w"</span>: <span class="n">220</span>, <span class="s">"h"</span>: <span class="n">28</span>});
+specs = <span class="f">append</span>(specs, {<span class="s">"type"</span>: <span class="s">"select"</span>, <span class="s">"options"</span>: [<span class="s">"北京"</span>, <span class="s">"上海"</span>, <span class="s">"广州"</span>], <span class="s">"w"</span>: <span class="n">140</span>, <span class="s">"h"</span>: <span class="n">28</span>});
+specs = <span class="f">append</span>(specs, {<span class="s">"type"</span>: <span class="s">"button"</span>, <span class="s">"text"</span>: <span class="s">"提交"</span>, <span class="s">"w"</span>: <span class="n">120</span>, <span class="s">"h"</span>: <span class="n">32</span>});
+ids = <span class="f">guipro_vbox</span>(win, specs, <span class="n">24</span>, <span class="n">20</span>, <span class="n">6</span>);
+
+handlers = [];
+handlers = <span class="f">guipro_on</span>(handlers, win, ids[<span class="n">2</span>], <span class="s">"click"</span>, <span class="k">fn</span>(id, value) {
+    name = <span class="f">guipro_get_text</span>(win, ids[<span class="n">0</span>]);
+    city = <span class="f">guipro_get_text</span>(win, ids[<span class="n">1</span>]);
+    <span class="f">guipro_msgbox</span>(<span class="s">"提交成功"</span>, <span class="s">"姓名: "</span> + name + <span class="s">"\n城市: "</span> + city);
+    <span class="k">return</span> <span class="s">""</span>;
+});
+handlers = <span class="f">guipro_on_win</span>(handlers, win, <span class="s">"close"</span>, <span class="k">fn</span>(id, value) {
+    <span class="f">print</span>(<span class="s">"窗口已关闭"</span>);
+    <span class="k">return</span> <span class="s">""</span>;
+});
+<span class="f">guipro_run</span>(handlers);   <span class="c">// 阻塞主循环，窗口关闭后返回</span></code></pre>
+  </div>
 </main>
 
 <script>

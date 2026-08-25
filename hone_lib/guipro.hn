@@ -1,0 +1,232 @@
+// hone_lib/guipro.hn - 原生图形界面标准库（guipro 升级版）
+// 依赖内置 guipro.* 函数（Windows: Win32 标准控件，Linux: GTK3/X11 后续补）。
+// 用法: import "guipro" from "./hone_lib/guipro.hn";
+//
+// 设计说明：Hone 函数内无法读写全局变量（函数调用创建独立环境），故事件
+// 注册表采用「函数式传参 + 返回新值」风格（与 hone_lib/sched.hn 一致）：
+//   handlers = guipro_on(handlers, win, btn_id, "click", fn(id, value) {...});
+//   guipro_run(handlers);        // 阻塞主循环，Ctrl+C 退出
+//
+// 快速上手：
+//   win = guipro_window("示例", 420, 320);
+//   b1  = guipro_button(win, "点我", 10, 10, 100, 32);
+//   out = guipro_label(win, "尚未点击", 10, 52, 200, 24);
+//   handlers = [];
+//   handlers = guipro_on(handlers, win, b1, "click", fn(id, value) {
+//       guipro_set_text(win, out, "点击了按钮 #" + to_str(id));
+//   });
+//   guipro_run(handlers);
+//
+// 事件回调签名统一 fn(id, value)：
+//   click/change 事件：id = 控件 id，value = 载荷（change 为文本/勾选态）
+//   close 事件：注册于窗口（id=0），value = ""
+// 事件 JSON（guipro.poll 返回）：
+//   [{"win":1,"id":2,"type":"click","value":""}, ...]
+
+// ============ dict 工具（Hone 无 d["k"] 索引语法，遍历实现） ============
+
+fn guipro_dict_get_str(d, key : str) -> str {
+    for k, v in d {
+        if (k == key) {
+            if (is_str(v)) { return v; }
+            return to_str(v);
+        }
+    }
+    return "";
+}
+
+fn guipro_dict_get_int(d, key : str, def : int) -> int {
+    for k, v in d {
+        if (k == key) {
+            if (is_int(v)) { return v; }
+            if (is_str(v)) { return to_int(v); }
+            return def;
+        }
+    }
+    return def;
+}
+
+// 取任意类型字段（列表/dict 原样返回；键不存在返回 "" 哨兵，Hone 无 null）
+fn guipro_dict_get_val(d, key : str) {
+    for k, v in d {
+        if (k == key) { return v; }
+    }
+    return "";
+}
+
+// ============ 窗口 ============
+
+// 创建窗口，返回窗口 id（int）
+fn guipro_window(title : str, w : int, h : int) -> int {
+    return guipro.window(title, w, h);
+}
+
+// 销毁窗口
+fn guipro_close(win : int) {
+    guipro.close(win);
+}
+
+// 原生消息框（对话框）
+fn guipro_msgbox(title : str, msg : str) {
+    guipro.msgbox(title, msg);
+}
+
+// 当前平台是否有原生 GUI 后端
+fn guipro_available() -> bool {
+    return guipro.available();
+}
+
+// ============ 控件构造（绝对定位，返回控件 id） ============
+
+fn guipro_button(win : int, label : str, x : int, y : int, w : int, h : int) -> int {
+    return guipro.add(win, {"type": "button", "text": label, "x": x, "y": y, "w": w, "h": h});
+}
+
+fn guipro_label(win : int, text : str, x : int, y : int, w : int, h : int) -> int {
+    return guipro.add(win, {"type": "label", "text": text, "x": x, "y": y, "w": w, "h": h});
+}
+
+fn guipro_input(win : int, x : int, y : int, w : int, h : int) -> int {
+    return guipro.add(win, {"type": "input", "x": x, "y": y, "w": w, "h": h});
+}
+
+fn guipro_select(win : int, options, x : int, y : int, w : int, h : int) -> int {
+    return guipro.add(win, {"type": "select", "options": options, "x": x, "y": y, "w": w, "h": h});
+}
+
+fn guipro_checkbox(win : int, label : str, x : int, y : int, w : int, h : int) -> int {
+    return guipro.add(win, {"type": "checkbox", "text": label, "x": x, "y": y, "w": w, "h": h});
+}
+
+fn guipro_radio(win : int, label : str, x : int, y : int, w : int, h : int) -> int {
+    return guipro.add(win, {"type": "radio", "text": label, "x": x, "y": y, "w": w, "h": h});
+}
+
+// ============ 控件读写 ============
+
+fn guipro_set_text(win : int, id : int, text : str) {
+    guipro.set_text(win, id, text);
+}
+
+fn guipro_get_text(win : int, id : int) -> str {
+    return guipro.get_text(win, id);
+}
+
+// ============ VBox 布局（纵向排布，返回控件 id 列表） ============
+
+// specs 元素：{"type": "button"|"label"|"input"|"select"|"checkbox"|"radio",
+//              "text": str, "w": int, "h": int}
+// 返回控件 id 列表（与 specs 顺序一一对应，可按 ids[0]、ids[1]... 注册事件）
+fn guipro_vbox(win : int, specs, x : int, y : int, gap : int) {
+    ids = [];
+    cy = y;
+    for s in specs {
+        t = guipro_dict_get_str(s, "type");
+        text = guipro_dict_get_str(s, "text");
+        w = guipro_dict_get_int(s, "w", 80);
+        h = guipro_dict_get_int(s, "h", 30);
+        if (t == "input") {
+            ids = append(ids, guipro.add(win, {"type": "input", "x": x, "y": cy, "w": w, "h": h}));
+        } else if (t == "select") {
+            ids = append(ids, guipro.add(win, {"type": "select", "options": guipro_dict_get_val(s, "options"), "x": x, "y": cy, "w": w, "h": h}));
+        } else {
+            ids = append(ids, guipro.add(win, {"type": t, "text": text, "x": x, "y": cy, "w": w, "h": h}));
+        }
+        cy = cy + h + gap;
+    }
+    return ids;
+}
+
+// ============ 事件注册（函数式：传入注册表，返回新注册表） ============
+
+// 注册控件事件：evt = "click" / "change"；回调 fn(id, value)
+fn guipro_on(handlers, win : int, id : int, evt : str, cb) {
+    return append(handlers, {"win": win, "id": id, "evt": evt, "fn": cb});
+}
+
+// 注册窗口级事件：evt = "close"（id 固定 0）；回调 fn(id, value)
+fn guipro_on_win(handlers, win : int, evt : str, cb) {
+    return append(handlers, {"win": win, "id": 0, "evt": evt, "fn": cb});
+}
+
+// 注册定时器：每 ms 毫秒触发一次；回调 fn()（无参）
+fn guipro_timer(handlers, ms : int, cb) {
+    return append(handlers, {"win": -1, "id": -1, "evt": "timer", "ms": ms, "next": time.now() + ms / 1000, "fn": cb});
+}
+
+// 查找匹配的事件处理器，返回 {"found": 1, "fn": lambda} 或 {"found": 0}
+// （不用 lambda 与 "" 比较——Hone 类型检查拒绝 fn/str 比较，故用哨兵 dict）
+fn guipro_find(handlers, win : int, id : int, evt : str) {
+    for h in handlers {
+        hw = guipro_dict_get_int(h, "win", -1);
+        hi = guipro_dict_get_int(h, "id", -1);
+        he = guipro_dict_get_str(h, "evt");
+        if (hw == win && hi == id && he == evt) {
+            for k2, v2 in h {
+                if (k2 == "fn") { return {"found": 1, "fn": v2}; }
+            }
+        }
+    }
+    return {"found": 0};
+}
+
+// ============ 定时器 tick（函数式：返回新注册表） ============
+
+fn guipro_tick(handlers) {
+    now = time.now();
+    out = [];
+    for h in handlers {
+        if (guipro_dict_get_str(h, "evt") == "timer") {
+            if (guipro_dict_get_int(h, "next", 0) <= now) {
+                fd = guipro_dict_get_val(h, "fn");
+                if (is_str(fd)) {
+                    // 哨兵 ""（理论上 timer 注册必有 fn，兜底保留原条目）
+                    out = append(out, h);
+                } else {
+                    fd();
+                    ms = guipro_dict_get_int(h, "ms", 1000);
+                    out = append(out, {"win": -1, "id": -1, "evt": "timer", "ms": ms, "next": now + ms / 1000, "fn": fd});
+                }
+            } else {
+                out = append(out, h);
+            }
+        } else {
+            out = append(out, h);
+        }
+    }
+    return out;
+}
+
+// ============ 主循环（阻塞；收到窗口 close 事件后返回） ============
+
+// handlers：guipro_on / guipro_on_win / guipro_timer 累积的注册表
+fn guipro_run(handlers) {
+    while (true) {
+        evs = guipro.poll();
+        if (evs != "[]") {
+            list = json_parse(evs);
+            for ev in list {
+                win_id = guipro_dict_get_int(ev, "win", 0);
+                ctl_id = guipro_dict_get_int(ev, "id", 0);
+                ty = guipro_dict_get_str(ev, "type");
+                val = guipro_dict_get_str(ev, "value");
+                if (ty == "close") {
+                    // 调用 close 处理器（若有），然后返回主循环
+                    f = guipro_find(handlers, win_id, 0, "close");
+                    if (guipro_dict_get_int(f, "found", 0) == 1) {
+                        cb = guipro_dict_get_val(f, "fn");
+                        cb(win_id, val);
+                    }
+                    return;
+                }
+                f = guipro_find(handlers, win_id, ctl_id, ty);
+                if (guipro_dict_get_int(f, "found", 0) == 1) {
+                    cb = guipro_dict_get_val(f, "fn");
+                    cb(ctl_id, val);
+                }
+            }
+        }
+        handlers = guipro_tick(handlers);
+        time.sleep(0.02);
+    }
+}

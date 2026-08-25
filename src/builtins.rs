@@ -320,6 +320,14 @@ pub fn is_builtin(name: &str) -> bool {
             | "plugin.list"
             | "plugin.unload"
             | "uuid.new"
+            | "guipro.available"
+            | "guipro.window"
+            | "guipro.add"
+            | "guipro.poll"
+            | "guipro.set_text"
+            | "guipro.get_text"
+            | "guipro.close"
+            | "guipro.msgbox"
     )
 }
 
@@ -1137,6 +1145,11 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         // 插件系统（pluginmod 模块实现，运行期动态注册）
         "plugin.load" | "plugin.has" | "plugin.list" | "plugin.unload" => {
             crate::pluginmod::call(name, &args, span, file, src)
+        }
+        // 原生图形界面（guimod 模块实现，Windows: Win32 标准控件）
+        "guipro.available" | "guipro.window" | "guipro.add" | "guipro.poll"
+        | "guipro.set_text" | "guipro.get_text" | "guipro.close" | "guipro.msgbox" => {
+            crate::guimod::call(name, &args, span, file, src)
         }
         // ---------- log ----------
         "log.info" => {

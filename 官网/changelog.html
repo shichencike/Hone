@@ -45,6 +45,23 @@ function toggleTheme(){
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
 
   <div class="release">
+    <span class="ver-tag">v0.7.3</span><span class="date">2026-08-25</span>
+    <h4>新增</h4>
+    <ul>
+      <li><strong>原生图形界面标准库 <code>hone_lib/guipro.hn</code></strong>（gui.hn 的升级版）：
+        原生窗口 + 原生控件，不再依赖浏览器。Windows 用 Win32 标准控件（user32/gdi32，零新增依赖、不增体积），
+        Linux 运行时动态加载 GTK3（缺失时 msgbox 降级 zenity/xmessage）；
+        控件：button / label / input / select / checkbox / radio + VBox 布局；
+        事件：click / change / close / resize，闭包分发 + <code>guipro_timer</code> 定时器 + 原生消息框；
+        示例 <code>examples/guipro_demo.hn</code>（20 秒后自动关闭演示），详见
+        <a href="stdlib.html#guipro">标准库 · guipro 原生图形界面模块</a></li>
+      <li>架构：内置 <code>guipro.*</code> 原语（checker 签名表 + builtins 分发）只推送事件队列，
+        闭包分发在 Hone 层 <code>guipro_run</code> 主循环完成（builtins::call 无解释器上下文）；
+        事件注册表函数式传递（Hone 函数内不能改全局变量）</li>
+    </ul>
+  </div>
+
+  <div class="release">
     <span class="ver-tag">v0.7.2</span><span class="date">2026-08-25</span>
     <h4>新增</h4>
     <ul>

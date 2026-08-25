@@ -362,6 +362,35 @@ pet_run(cfg);                    // 阻塞运行（推荐）
 - 说明：Hone 无原生窗口 API，窗口渲染/鼠标事件由运行时生成的 `pet_window.ps1`（WinForms 透明置顶窗）承担，
   Hone 与窗口间以文件轮询通信（state.json / events.json）；与 gui.hn 同类，非纯 Hone 实现（详见库头注释）
 
+## 原生图形界面库（hone_lib/guipro.hn）
+
+原生窗口 + 原生控件标准库（gui.hn 的升级版）：Windows 用 Win32 标准控件（user32/gdi32，零新增依赖、不增体积），
+Linux 运行时动态加载 GTK3（缺失时 X11 降级弹窗）。Rust 内置 `guipro.*` 原语 + Hone 层统一 API：
+窗口 / button / label / input / select / checkbox / radio 控件、VBox 布局、闭包事件分发、定时器、消息框。
+运行示例：`hone examples/guipro_demo.hn`（20 秒后自动关闭演示）。
+
+```hn
+import "guipro" from "./hone_lib/guipro.hn";
+
+win = guipro_window("示例", 420, 320);
+b1  = guipro_button(win, "点我", 10, 10, 100, 32);
+out = guipro_label(win, "尚未点击", 10, 52, 200, 24);
+handlers = [];
+handlers = guipro_on(handlers, win, b1, "click", fn(id, value) {
+    guipro_set_text(win, out, "点击了按钮 #" + to_str(id));
+});
+guipro_run(handlers);   // 阻塞主循环，窗口关闭后返回
+```
+
+- 控件：`guipro_button/label/input/select/checkbox/radio(win, ..., x, y, w, h)` 绝对定位；
+  `guipro_vbox(win, specs, x, y, gap)` 纵向布局（返回控件 id 列表，顺序对应 specs）
+- 事件：`guipro_on(handlers, win, id, evt, fn)` 注册 click/change 回调（fn(id, value)），
+  `guipro_on_win(handlers, win, "close", fn)` 窗口级事件，`guipro_timer(handlers, ms, fn)` 定时器；
+  注册表函数式传递（Hone 函数内不能改全局变量），`guipro_run(handlers)` 阻塞分发
+- 事件模型：Rust 层只推事件队列（poll 返回 JSON），闭包分发在 Hone 层主循环完成——
+  `builtins::call` 无解释器上下文，闭包无法从 Rust 直接回调
+- 平台：Windows（Win32 原生控件）/ Linux（GTK3 动态加载；无 GTK3 时 msgbox 降级 zenity/xmessage）
+
 ## 错误报告格式
 
 ```

@@ -840,10 +840,40 @@ cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"
       完整函数表与配置说明见 <a href="stdlib.html#pet">标准库 · pet 桌宠模块</a>。</p>
   </section>
 
-  <section id="advanced">
-    <h2><span class="hash">#</span>18. 进阶用法（多文件 / 调试 / 性能）</h2>
+  <section id="guipro">
+    <h2><span class="hash">#</span>18. 原生图形界面库（hone_lib/guipro.hn）</h2>
+    <p>原生窗口 + 原生控件标准库（<code class="inline">gui.hn</code> 的升级版，§13 为浏览器方案）：直接创建系统原生窗口与控件。
+      Windows 用 Win32 标准控件（user32/gdi32，零新增依赖、不增体积），Linux 运行时动态加载 GTK3
+      （<code class="inline">libgtk-3.so</code>，缺失时 msgbox 降级 zenity/xmessage）。Rust 内置 <code class="inline">guipro.*</code> 原语 +
+      Hone 层统一 API：窗口 / button / label / input / select / checkbox / radio 控件、VBox 布局、
+      闭包事件分发、定时器、消息框。运行示例：<code class="inline">hone examples/guipro_demo.hn</code>（20 秒后自动关闭演示）。</p>
+<pre><code><span class="k">import</span> <span class="s">"guipro"</span> <span class="k">from</span> <span class="s">"./hone_lib/guipro.hn"</span>;
 
-    <h3>18.1 多文件项目组织</h3>
+win = <span class="f">guipro_window</span>(<span class="s">"示例"</span>, <span class="n">420</span>, <span class="n">320</span>);
+b1  = <span class="f">guipro_button</span>(win, <span class="s">"点我"</span>, <span class="n">10</span>, <span class="n">10</span>, <span class="n">100</span>, <span class="n">32</span>);
+out = <span class="f">guipro_label</span>(win, <span class="s">"尚未点击"</span>, <span class="n">10</span>, <span class="n">52</span>, <span class="n">200</span>, <span class="n">24</span>);
+handlers = [];
+handlers = <span class="f">guipro_on</span>(handlers, win, b1, <span class="s">"click"</span>, <span class="k">fn</span>(id, value) {
+    <span class="f">guipro_set_text</span>(win, out, <span class="s">"点击了按钮 #"</span> + <span class="f">to_str</span>(id));
+});
+<span class="f">guipro_run</span>(handlers);   <span class="c">// 阻塞主循环，窗口关闭后返回</span></code></pre>
+    <p><strong>控件</strong>：<code class="inline">guipro_button/label/input/select/checkbox/radio(win, ..., x, y, w, h)</code> 绝对定位，
+      <code class="inline">guipro_vbox(win, specs, x, y, gap)</code> 纵向布局（specs 为控件 dict 列表，返回控件 id 列表）。
+      Linux 后端忽略 x/y，控件自动纵向排布。</p>
+    <p><strong>事件与定时器</strong>：<code class="inline">guipro_on(handlers, win, id, evt, fn)</code> 注册 click/change 回调
+      （<code class="inline">fn(id, value)</code>，value 为文本/勾选态 "1"/"0"），<code class="inline">guipro_on_win(handlers, win, "close", fn)</code>
+      窗口级事件，<code class="inline">guipro_timer(handlers, ms, fn)</code> 周期定时器（<code class="inline">fn</code> 无参）；
+      <code class="inline">guipro_run(handlers)</code> 阻塞分发，窗口 close 后返回。</p>
+    <p><strong>架构</strong>：内置 <code class="inline">builtins::call</code> 无解释器上下文，闭包无法从 Rust 直接回调，
+      故 Rust 层只推送事件队列（<code class="inline">guipro.poll()</code> 返回 JSON，含 click/change/close/resize 事件），
+      闭包分发在 Hone 层主循环完成；注册表函数式传递（Hone 函数内不能改全局变量）。
+      完整函数表与事件协议见 <a href="stdlib.html#guipro">标准库 · guipro 原生图形界面模块</a>。</p>
+  </section>
+
+  <section id="advanced">
+    <h2><span class="hash">#</span>19. 进阶用法（多文件 / 调试 / 性能）</h2>
+
+    <h3>19.1 多文件项目组织</h3>
     <p>单文件即可运行，项目变大后建议拆分模块。三种复用方式：</p>
 <pre><code><span class="c">// import：.hn 源码复用（最常用）</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;   <span class="c">// 本地：相对当前目录</span>
@@ -861,7 +891,7 @@ cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"
       或在项目根目录放 <code class="inline">hone.json</code> 清单（name / version / modules），用
       <code class="inline">hone get</code> 批量下载全部模块（见 §15 工具链）。</p>
 
-    <h3>18.2 函数别名（alias）</h3>
+    <h3>19.2 函数别名（alias）</h3>
     <p>给已有函数起新名字再调用，原名保持不变：</p>
 <pre><code><span class="c">// 基础：alias 原名 as 新名;  之后用新名调用</span>
 <span class="k">fn</span> <span class="f">greet</span>(name) { <span class="k">return</span> <span class="s">"你好 "</span> + name; }
@@ -880,7 +910,7 @@ cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"
     <p>别名作用域为文件级（当前 .hn 文件全局可见），在 <code class="inline">alias</code> 语句之后即可用新名调用。
       完整示例见 <code class="inline">examples/alias_demo.hn</code>。</p>
 
-    <h3>18.3 调试复杂逻辑</h3>
+    <h3>19.3 调试复杂逻辑</h3>
     <table>
       <tr><th>工具</th><th>用途</th></tr>
       <tr><td><code class="inline">hone debug &lt;script.hn&gt;</code> + <code class="inline">breakpoint;</code></td><td>运行到断点暂停，打印当前作用域全部变量快照，Enter 继续 / Ctrl+C 退出</td></tr>
@@ -896,7 +926,7 @@ cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"
       <code class="inline">breakpoint;</code> 观察变量快照 → 用 try/catch 捕获运行时错误并打印
       <code class="inline">e.code / e.message / e.line</code> → 用 <code class="inline">assert</code> 固化关键不变量防止回归。</p>
 
-    <h3>18.4 性能优化</h3>
+    <h3>19.4 性能优化</h3>
     <ul>
       <li><strong>避免循环内反复 append</strong>：列表是值类型，<code class="inline">append</code> 返回新列表（整体拷贝），
         循环里 <code class="inline">l = append(l, x)</code> 是 O(n²)。累积数据时优先用 dict，或先确定规模再一次性构造</li>
@@ -911,7 +941,7 @@ cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"
   </section>
 
   <section id="pitfalls">
-    <h2><span class="hash">#</span>19. 已知问题与常见坑</h2>
+    <h2><span class="hash">#</span>20. 已知问题与常见坑</h2>
     <p>以下都是新手最容易踩的坑，提前看完能省不少调试时间。完整版见
       <a href="faq.html">FAQ</a> 与仓库 <code class="inline">hone.md</code> 的「FAQ 与已知问题」章节。</p>
     <table>

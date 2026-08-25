@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 标准库文档</title>
-<meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui / music / spider / process / sched / img / ai / pet 模块，本地路径导入即可使用。">
+<meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui / music / spider / process / sched / img / ai / pet / guipro 模块，本地路径导入即可使用。">
 <meta name="theme-color" content="#0d1117">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
@@ -60,6 +60,7 @@ function toggleTheme(){
       <li><a href="#img">img 图片模块</a></li>
       <li><a href="#ai">ai AI 编程助手模块</a></li>
       <li><a href="#pet">pet 桌宠模块（Windows）</a></li>
+      <li><a href="#guipro">guipro 原生图形界面模块</a></li>
       <li><a href="#demo">组合示例</a></li>
     </ol>
   </div>
@@ -79,6 +80,7 @@ function toggleTheme(){
 <span class="k">import</span> <span class="s">"img"</span> <span class="k">from</span> <span class="s">"./hone_lib/img.hn"</span>;     <span class="c">// 图片：绘图/滤镜/变换 + PPM/SVG</span>
 <span class="k">import</span> <span class="s">"ai"</span> <span class="k">from</span> <span class="s">"./hone_lib/ai.hn"</span>;      <span class="c">// AI 编程助手：对话/生成/审查/修复/工具调用</span>
 <span class="k">import</span> <span class="s">"pet"</span> <span class="k">from</span> <span class="s">"./hone_lib/pet.hn"</span>;    <span class="c">// 桌宠（Windows）：透明置顶窗 + 动画/交互/台词（依赖 PowerShell）</span>
+<span class="k">import</span> <span class="s">"guipro"</span> <span class="k">from</span> <span class="s">"./hone_lib/guipro.hn"</span>; <span class="c">// 原生图形界面：窗口/控件/事件/定时器（Windows: Win32，Linux: GTK3）</span>
 
 <span class="c">// import as：以别名导入，函数名前缀整体替换</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span> <span class="k">as</span> m;   <span class="c">// m_clamp / m_gcd ...</span></code></pre>
@@ -438,8 +440,46 @@ cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"
       2× 最近邻放大到 48×48，8 帧约 2s（对比推导式 rows 约 10s）。</p>
   </section>
 
+  <section id="guipro">
+    <h2><span class="hash">#</span>13. guipro 原生图形界面模块</h2>
+    <p>原生窗口 + 原生控件标准库（<code class="inline">gui.hn</code> 的升级版）：不再依赖浏览器，直接创建系统原生窗口与控件。
+      Windows 用 Win32 标准控件（user32/gdi32，零新增依赖、不增体积），Linux 运行时动态加载 GTK3
+      （<code class="inline">libgtk-3.so</code>，缺失时 msgbox 降级 zenity/xmessage）。Rust 内置 <code class="inline">guipro.*</code> 原语 +
+      Hone 层统一 API：窗口 / button / label / input / select / checkbox / radio 控件、VBox 布局、
+      闭包事件分发、定时器、消息框。运行示例：<code class="inline">hone examples/guipro_demo.hn</code>（20 秒后自动关闭演示）。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>guipro_window(title, w, h)</code></td><td>创建窗口，返回窗口 id</td></tr>
+      <tr><td><code>guipro_button/label/input/select/checkbox/radio(win, ..., x, y, w, h)</code></td><td>绝对定位创建控件，返回控件 id</td></tr>
+      <tr><td><code>guipro_vbox(win, specs, x, y, gap)</code></td><td>纵向布局（specs 为控件 dict 列表，返回控件 id 列表）</td></tr>
+      <tr><td><code>guipro_on(handlers, win, id, evt, fn)</code> / <code>guipro_on_win(handlers, win, evt, fn)</code></td><td>注册控件/窗口事件回调（fn(id, value)），返回新注册表</td></tr>
+      <tr><td><code>guipro_timer(handlers, ms, fn)</code></td><td>周期定时器（fn 无参），返回新注册表</td></tr>
+      <tr><td><code>guipro_run(handlers)</code></td><td>阻塞主循环：轮询事件并分发闭包，窗口 close 后返回</td></tr>
+      <tr><td><code>guipro_set_text(win, id, text)</code> / <code>guipro_get_text(win, id)</code></td><td>读写控件文本</td></tr>
+      <tr><td><code>guipro_close(win)</code> / <code>guipro_msgbox(title, msg)</code> / <code>guipro_available()</code></td><td>关闭窗口 / 原生消息框 / 平台可用性</td></tr>
+    </table>
+    <p><strong>事件协议</strong>（<code class="inline">guipro.poll()</code> 返回 JSON 数组）：
+      <code class="inline">{"win":1,"id":2,"type":"click","value":""}</code>（按钮点击）、
+      <code class="inline">{"win":1,"id":3,"type":"change","value":"文本"}</code>（input/select 变更，checkbox/radio 为 "1"/"0"）、
+      <code class="inline">{"win":1,"id":0,"type":"close","value":""}</code>（窗口关闭）、
+      <code class="inline">{"win":1,"id":0,"type":"resize","value":"800x600"}</code>（窗口缩放）。</p>
+    <p><strong>架构说明</strong>：内置 <code class="inline">builtins::call</code> 无解释器上下文，闭包无法从 Rust 直接回调，
+      故 Rust 层只推送事件队列（<code class="inline">guipro.poll</code>），闭包分发在 Hone 层 <code class="inline">guipro_run</code> 主循环完成；
+      注册表函数式传递（Hone 函数内不能改全局变量）。</p>
+<pre><code><span class="k">import</span> <span class="s">"guipro"</span> <span class="k">from</span> <span class="s">"./hone_lib/guipro.hn"</span>;
+
+win = <span class="f">guipro_window</span>(<span class="s">"示例"</span>, <span class="n">420</span>, <span class="n">320</span>);
+b1  = <span class="f">guipro_button</span>(win, <span class="s">"点我"</span>, <span class="n">10</span>, <span class="n">10</span>, <span class="n">100</span>, <span class="n">32</span>);
+out = <span class="f">guipro_label</span>(win, <span class="s">"尚未点击"</span>, <span class="n">10</span>, <span class="n">52</span>, <span class="n">200</span>, <span class="n">24</span>);
+handlers = [];
+handlers = <span class="f">guipro_on</span>(handlers, win, b1, <span class="s">"click"</span>, <span class="k">fn</span>(id, value) {
+    <span class="f">guipro_set_text</span>(win, out, <span class="s">"点击了按钮 #"</span> + <span class="f">to_str</span>(id));
+});
+<span class="f">guipro_run</span>(handlers);   <span class="c">// 阻塞主循环，窗口关闭后返回</span></code></pre>
+  </section>
+
   <section id="demo">
-    <h2><span class="hash">#</span>13. 组合示例</h2>
+    <h2><span class="hash">#</span>14. 组合示例</h2>
 <pre><code><span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
 <span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;

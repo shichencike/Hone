@@ -3353,6 +3353,52 @@ impl Checker {
                 self.arg_count(name, n, 0, span)?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
+            // ---------- guipro 原生图形界面 ----------
+            "guipro.available" => {
+                self.arg_count(name, n, 0, span)?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            "guipro.window" => {
+                self.arg_count(name, n, 3, span)?;
+                self.expect_str(name, args, 0, span, "the window title")?;
+                self.expect_int(name, args, 1, span, "the window width")?;
+                self.expect_int(name, args, 2, span, "the window height")?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
+            "guipro.add" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_int(name, args, 0, span, "the window id")?;
+                self.expect_any(name, args, 1, span, "the widget dict")?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
+            "guipro.poll" => {
+                self.arg_count(name, n, 0, span)?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "guipro.set_text" => {
+                self.arg_count(name, n, 3, span)?;
+                self.expect_int(name, args, 0, span, "the window id")?;
+                self.expect_int(name, args, 1, span, "the widget id")?;
+                self.expect_str(name, args, 2, span, "the new text")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            "guipro.get_text" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_int(name, args, 0, span, "the window id")?;
+                self.expect_int(name, args, 1, span, "the widget id")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "guipro.close" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_int(name, args, 0, span, "the window id")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            "guipro.msgbox" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the dialog title")?;
+                self.expect_str(name, args, 1, span, "the dialog message")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
             other => Err(self.zerr(
                 codes::UNDEFINED,
                 format!("undefined function `{}`", other),
@@ -3565,6 +3611,14 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "plugin.list",
         "plugin.unload",
         "uuid.new",
+        "guipro.available",
+        "guipro.window",
+        "guipro.add",
+        "guipro.poll",
+        "guipro.set_text",
+        "guipro.get_text",
+        "guipro.close",
+        "guipro.msgbox",
     ]
     .into_iter()
     .collect()
