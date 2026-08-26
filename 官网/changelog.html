@@ -45,6 +45,19 @@ function toggleTheme(){
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
 
   <div class="release">
+    <span class="ver-tag">v0.7.5</span><span class="date">2026-08-26</span>
+    <h4>工具链增强</h4>
+    <ul>
+      <li><strong>LSP 语义高亮</strong>：新增 <code>textDocument/semanticTokens/full</code>（semantic tokens），
+        复用词法分析器精准 token 流，智能分类高亮——关键字 / 类型（<code>int/float/bool/str</code>）/
+        函数（定义名带 declaration 修饰符、调用、内置函数）/ 变量 / 字符串（含 <code>f"..."</code> 插值串与
+        <code>"""</code> 多行串）/ 数字 / 注释（<code>//</code> 与跨行 <code>/* */</code>）/ 命名空间（<code>time.</code> 等模块名）/
+        类 / 结构体，输出标准 LSP delta 编码</li>
+      <li>词法失败（如未闭合字符串）时自动退化为仅注释高亮，不影响编辑；无新增依赖</li>
+    </ul>
+  </div>
+
+  <div class="release">
     <span class="ver-tag">v0.7.4</span><span class="date">2026-08-26</span>
     <h4>新增</h4>
     <ul>

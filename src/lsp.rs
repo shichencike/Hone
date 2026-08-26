@@ -1,7 +1,8 @@
 // lsp.rs - Hone 语言服务器（LSP over stdio）
 // 支持：全文同步（didOpen/didChange）、诊断（语法/类型错误，publishDiagnostics）、
 //       上下文感知补全（关键字/内置函数/模块成员/文档变量/用户函数）、hover 说明、
-//       跳转定义（textDocument/definition）、文档大纲（documentSymbol）。
+//       跳转定义（textDocument/definition）、文档大纲（documentSymbol）、
+//       语义高亮（textDocument/semanticTokens/full，复用词法 token 分类）。
 // 协议：Content-Length 头 + JSON-RPC 2.0 body（serde_json 手工构造，无额外依赖）。
 
 use std::collections::{HashMap, HashSet};
@@ -10,6 +11,7 @@ use std::io::{self, BufRead, Write};
 use serde_json::{json, Value};
 
 use crate::error::ZError;
+use crate::lexer::Tok;
 
 /// 启动 LSP 服务：从 stdin 读取请求，向 stdout 发送响应。阻塞直到客户端 exit。
 pub fn run_lsp() -> Result<(), ZError> {
@@ -79,6 +81,11 @@ pub fn run_lsp() -> Result<(), ZError> {
                 let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
                 send(json!({"jsonrpc":"2.0","id":id,"result":document_symbol_result(&docs, &uri, &params)}));
             }
+            "textDocument/semanticTokens/full" => {
+                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+                send(json!({"jsonrpc":"2.0","id":id,"result":semantic_tokens_result(&docs, &uri, &params)}));
+            }
             _ => {
                 // 未实现的请求：返回 null 结果，避免客户端等待超时
                 if id.is_some() {
@@ -128,7 +135,17 @@ fn initialize_result() -> Value {
             "completionProvider": { "triggerCharacters": ["."] },
             "hoverProvider": true,
             "definitionProvider": true,
-            "documentSymbolProvider": true
+            "documentSymbolProvider": true,
+            "semanticTokensProvider": {
+                "legend": {
+                    "tokenTypes": [
+                        "keyword", "type", "function", "variable", "string",
+                        "number", "comment", "namespace", "class", "struct"
+                    ],
+                    "tokenModifiers": ["declaration"]
+                },
+                "full": true
+            }
         },
         "serverInfo": { "name": "hone-lsp", "version": "0.7.0" }
     })
@@ -518,4 +535,241 @@ fn document_symbol_result(docs: &HashMap<String, String>, uri: &str, params: &Va
         })
         .collect();
     json!(syms)
+}
+
+// ---------- 语义高亮（semantic tokens） ----------
+
+/// semanticTokens legend 中 token 类型的下标（与 initialize_result 中声明顺序一致）。
+const ST_KEYWORD: u64 = 0;
+const ST_TYPE: u64 = 1;
+const ST_FUNCTION: u64 = 2;
+const ST_VARIABLE: u64 = 3;
+const ST_STRING: u64 = 4;
+const ST_NUMBER: u64 = 5;
+const ST_COMMENT: u64 = 6;
+const ST_NAMESPACE: u64 = 7;
+const ST_CLASS: u64 = 8;
+const ST_STRUCT: u64 = 9;
+
+/// 语义高亮：复用词法分析器的精准 token 流（含位置），逐 token 分类为
+/// 关键字/类型/函数/变量/字符串/数字/命名空间/类/结构体，输出 LSP delta 编码。
+fn semantic_tokens_result(docs: &HashMap<String, String>, uri: &str, params: &Value) -> Value {
+    let text = docs.get(uri).map(|s| s.as_str()).unwrap_or("");
+    let _ = params;
+    // (line, col, len, type_idx, modifier)
+    let mut toks: Vec<(u64, u64, u64, u64, u64)> = Vec::new();
+
+    // 注释：lexer 会跳过注释，这里单独扫描并追加
+    scan_comments(text, &mut toks);
+
+    // 用户符号表（函数/类/结构体名）用于标识符分类
+    let mut user_fns: HashSet<String> = HashSet::new();
+    let mut user_classes: HashSet<String> = HashSet::new();
+    let mut user_structs: HashSet<String> = HashSet::new();
+    for (kind, name, _, _) in scan_symbols(text) {
+        match kind.as_str() {
+            "fn" => { user_fns.insert(name); }
+            "class" => { user_classes.insert(name); }
+            "struct" => { user_structs.insert(name); }
+            _ => {}
+        }
+    }
+    let builtins = crate::checker::builtin_names();
+    // 模块名（`mod.` 前缀）→ 命名空间
+    let mut modules: HashSet<&str> = HashSet::new();
+    for (full, _, _) in MODULE_DOCS {
+        if let Some((m, _)) = full.split_once('.') {
+            modules.insert(m);
+        }
+    }
+
+    // 词法 token 流（失败时退化为仅注释高亮）
+    if let Ok(stream) = crate::lexer::Lexer::new("", text).tokenize() {
+        for (i, (tok, span)) in stream.iter().enumerate() {
+            let line = span.line.saturating_sub(1) as u64;
+            let col = span.col.saturating_sub(1) as u64;
+            let len = span.len.max(1) as u64;
+            let (ty, modif) = match tok {
+                // 关键字
+                Tok::Fn | Tok::If | Tok::Else | Tok::While | Tok::Do | Tok::For
+                | Tok::In | Tok::Return | Tok::True | Tok::False | Tok::Go
+                | Tok::Try | Tok::Catch | Tok::Throw | Tok::Continue | Tok::Match
+                | Tok::Break | Tok::Breakpoint | Tok::Load | Tok::Lazy | Tok::Use
+                | Tok::Import | Tok::Alias | Tok::As | Tok::From | Tok::Tmp
+                | Tok::Struct | Tok::Class => (ST_KEYWORD, 0),
+                // 类型关键字
+                Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr => (ST_TYPE, 0),
+                // 数字
+                Tok::IntLit(_) | Tok::FloatLit(_) => (ST_NUMBER, 0),
+                // 字符串（含插值/多行）
+                Tok::StrLit(_) | Tok::FStr(_) | Tok::MultiStr(_) => (ST_STRING, 0),
+                // 标识符：结合上下文智能分类
+                Tok::Ident(name) => {
+                    let prev = stream.get(i.wrapping_sub(1)).map(|(t, _)| t);
+                    let next = stream.get(i + 1).map(|(t, _)| t);
+                    if matches!(prev, Some(Tok::Fn)) {
+                        (ST_FUNCTION, 1) // 函数定义名（declaration）
+                    } else if matches!(prev, Some(Tok::Class)) {
+                        (ST_CLASS, 1)
+                    } else if matches!(prev, Some(Tok::Struct)) {
+                        (ST_STRUCT, 1)
+                    } else if matches!(next, Some(Tok::LParen)) {
+                        (ST_FUNCTION, 0) // 函数调用
+                    } else if builtins.contains(name.as_str()) {
+                        (ST_FUNCTION, 0) // 内置函数
+                    } else if user_fns.contains(name) {
+                        (ST_FUNCTION, 0)
+                    } else if user_classes.contains(name) {
+                        (ST_CLASS, 0)
+                    } else if user_structs.contains(name) {
+                        (ST_STRUCT, 0)
+                    } else if modules.contains(name.as_str()) {
+                        (ST_NAMESPACE, 0) // 模块名
+                    } else {
+                        (ST_VARIABLE, 0) // 变量
+                    }
+                }
+                _ => continue, // 运算符/括号等不参与高亮
+            };
+            toks.push((line, col, len, ty, modif));
+        }
+    }
+
+    // 按 (line, col) 排序后做 delta 编码
+    toks.sort_by_key(|(l, c, _, _, _)| (*l, *c));
+    let mut data: Vec<u64> = Vec::with_capacity(toks.len() * 5);
+    let mut prev_line: u64 = 0;
+    let mut prev_col: u64 = 0;
+    for (line, col, len, ty, modif) in toks {
+        if data.is_empty() {
+            data.push(line);
+            data.push(col);
+        } else if line == prev_line {
+            data.push(0);
+            data.push(col.saturating_sub(prev_col));
+        } else {
+            data.push(line - prev_line);
+            data.push(col);
+        }
+        data.push(len);
+        data.push(ty);
+        data.push(modif);
+        prev_line = line;
+        prev_col = col;
+    }
+    json!({ "data": data })
+}
+
+/// 扫描注释（`//` 行注释与 `/* */` 块注释），追加为 ST_COMMENT token。
+/// lexer 在跳过空白时已吞掉注释，因此需要单独识别以参与高亮。
+fn scan_comments(text: &str, out: &mut Vec<(u64, u64, u64, u64, u64)>) {
+    let chars: Vec<char> = text.chars().collect();
+    let n = chars.len();
+    let mut i = 0usize;
+    let mut line: u64 = 0;
+    let mut col: u64 = 0;
+    while i < n {
+        let c = chars[i];
+        if c == '\n' {
+            line += 1;
+            col = 0;
+            i += 1;
+            continue;
+        }
+        // 行注释
+        if c == '/' && i + 1 < n && chars[i + 1] == '/' {
+            let start_col = col;
+            while i < n && chars[i] != '\n' {
+                i += 1;
+                col += 1;
+            }
+            out.push((line, start_col, col.saturating_sub(start_col), ST_COMMENT, 0));
+            continue;
+        }
+        // 块注释（可能跨行：逐行输出）
+        if c == '/' && i + 1 < n && chars[i + 1] == '*' {
+            let start_line = line;
+            let start_col = col;
+            let mut cur_line = start_line;
+            let mut cur_col = start_col;
+            let mut cur_len: u64 = 0;
+            let mut closed = false;
+            i += 2;
+            col += 2;
+            cur_len += 2;
+            while i < n {
+                if chars[i] == '*' && i + 1 < n && chars[i + 1] == '/' {
+                    cur_len += 2;
+                    out.push((cur_line, cur_col, cur_len, ST_COMMENT, 0));
+                    i += 2;
+                    col += 2;
+                    closed = true;
+                    break;
+                }
+                if chars[i] == '\n' {
+                    // 当前行结束，输出该行片段
+                    out.push((cur_line, cur_col, cur_len, ST_COMMENT, 0));
+                    line += 1;
+                    col = 0;
+                    i += 1;
+                    cur_line = line;
+                    cur_col = 0;
+                    cur_len = 0;
+                    continue;
+                }
+                cur_len += 1;
+                i += 1;
+                col += 1;
+            }
+            if !closed {
+                // 未闭合：输出剩余部分
+                out.push((cur_line, cur_col, cur_len, ST_COMMENT, 0));
+            }
+            continue;
+        }
+        // 字符串字面量：跳过，避免把字符串内的 `//` 误判为注释
+        if c == '"' {
+            if i + 2 < n && chars[i + 1] == '"' && chars[i + 2] == '"' {
+                // 三引号原始字符串（可能跨行）
+                i += 3;
+                col += 3;
+                while i + 2 < n && !(chars[i] == '"' && chars[i + 1] == '"' && chars[i + 2] == '"') {
+                    if chars[i] == '\n' {
+                        line += 1;
+                        col = 0;
+                    } else {
+                        col += 1;
+                    }
+                    i += 1;
+                }
+                if i + 2 < n {
+                    i += 3;
+                    col += 3;
+                }
+            } else {
+                // 普通字符串
+                i += 1;
+                col += 1;
+                while i < n && chars[i] != '"' {
+                    if chars[i] == '\\' && i + 1 < n {
+                        i += 2;
+                        col += 2;
+                        continue;
+                    }
+                    if chars[i] == '\n' {
+                        break;
+                    }
+                    i += 1;
+                    col += 1;
+                }
+                if i < n && chars[i] == '"' {
+                    i += 1;
+                    col += 1;
+                }
+            }
+            continue;
+        }
+        i += 1;
+        col += 1;
+    }
 }

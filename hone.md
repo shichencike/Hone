@@ -470,7 +470,7 @@ hone get 读取当前目录 hone.json 清单并批量下载全部模块（类似
 hone get <module> <url> 下载单个模块并缓存到本地，同时写入/更新 hone.json 清单
 hone self-update [url] 从 URL 下载最新 hone 二进制并替换当前程序（也可用环境变量 HONE_UPDATE_URL）
 hone explain <code> 查看错误码解释与修复建议（如 hone explain H201）
-hone lsp 启动语言服务器（代码补全、跳转定义）
+hone lsp 启动语言服务器（代码补全、跳转定义、语义高亮 semantic tokens）
 hone prof <script.hn> 以剖析模式运行脚本，输出函数级热点报告（总耗时 / 调用次数 / 平均耗时，按总耗时降序）
 hone poop <file.hn> 屎山检测（if 嵌套深度 + 圈复杂度）
 hone --help / --version 帮助信息 / 版本信息

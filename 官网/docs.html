@@ -632,7 +632,7 @@ age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span cl
       <tr><td><code>hone get</code></td><td>读取当前目录 <code>hone.json</code> 清单，批量下载全部模块（类似 package.json / Cargo.toml 的依赖清单）</td></tr>
       <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存到 ~/.hone/cache/，同时写入/更新 hone.json 清单（也支持扫描脚本 import 批量预下载）</td></tr>
       <tr><td><code>hone self-update [url]</code></td><td>从 URL（或环境变量 <code>HONE_UPDATE_URL</code>）下载最新 hone 二进制并替换当前程序，魔数校验防误下载</td></tr>
-      <tr><td><code>hone lsp</code></td><td>语言服务器（补全/诊断/hover，LSP over stdio）</td></tr>
+      <tr><td><code>hone lsp</code></td><td>语言服务器（补全/诊断/hover/跳转定义/文档大纲/语义高亮，LSP over stdio）</td></tr>
       <tr><td><code>hone repl</code></td><td>交互式解释器（Python 式：表达式自动回显、多行续行、.vars 查看变量 / .help 帮助 / .exit 退出）</td></tr>
       <tr><td><code>hone prof &lt;file.hn&gt;</code></td><td>剖析模式运行脚本，统计每个用户函数的总耗时 / 调用次数 / 平均耗时，按总耗时降序输出热点表格</td></tr>
       <tr><td><code>hone poop &lt;file.hn&gt;</code></td><td>屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
