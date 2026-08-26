@@ -3,6 +3,7 @@
 
 mod ast;
 mod archmod;
+mod aot;
 mod builtins;
 mod bundle;
 mod checker;
@@ -385,6 +386,7 @@ fn print_help() {
     println!("  hone doc <file.hn>        从 fn/class 定义与上方 `//` 注释生成 Markdown API 文档");
     println!("  hone build --dll <file.hn> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
     println!("  hone build --exe <file.hn> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
+    println!("  hone build --exe -c <file.hn> AOT 编译为原生可执行文件（脚本→C 中间文件→gcc/clang；默认删 .c，--keep-c 保留）");
     println!("  hone build --script <file.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）");
     println!("  hone get                   读取当前目录 hone.json 清单，批量下载全部模块");
     println!("  hone get <module> <url>  下载模块依赖并缓存到 ~/.hone/cache/，并写入 hone.json 清单");
@@ -554,7 +556,10 @@ fn cmd_build_script(args: &[String]) -> Result<(), ZError> {
 }
 
 /// hone build --exe <script.hn> [-o <out>] [--icon <ico>] [--version]
-/// 将当前 hone 运行时与脚本打包为单个自释放可执行文件（见 bundle.rs 格式）。
+/// [-c] [--keep-c]
+/// 默认：将当前 hone 运行时与脚本打包为单个自释放可执行文件（见 bundle.rs 格式）。
+/// -c：AOT 模式——脚本编译为 C 中间文件，再用 C 编译器生成原生可执行文件；
+///     生成前先做语法/类型检查；默认删除中间 .c，--keep-c 保留。
 fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("hone build --exe (Hone v{})", VERSION);
@@ -563,9 +568,13 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     let mut out: Option<String> = None;
     let mut icon: Option<String> = None;
     let mut path: Option<String> = None;
+    let mut aot_mode = false;
+    let mut keep_c = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "-c" => aot_mode = true,
+            "--keep-c" => keep_c = true,
             "-o" => {
                 i += 1;
                 out = args.get(i).cloned();
@@ -580,7 +589,7 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
                 return Err(ZError::plain(
                     codes::SYNTAX,
                     format!("unknown build option `{}`", s),
-                    Some("options: `-o <out>`, `--icon <ico>`, `--version`"),
+                    Some("options: `-c`, `--keep-c`, `-o <out>`, `--icon <ico>`, `--version`"),
                 ));
             }
             s => {
@@ -590,7 +599,7 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
                     return Err(ZError::plain(
                         codes::SYNTAX,
                         "too many arguments",
-                        Some("usage: `hone build --exe <script.hn> [-o <out>]`"),
+                        Some("usage: `hone build --exe <script.hn> [-c] [-o <out>]`"),
                     ));
                 }
             }
@@ -606,6 +615,9 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     })?;
     if let Some(ic) = &icon {
         eprintln!("[build] warning: `--icon` is not supported in this build, ignoring `{}`", ic);
+    }
+    if aot_mode {
+        return cmd_build_exe_aot(&path, out, keep_c);
     }
 
     // 以当前 hone 可执行文件作为内嵌运行时
@@ -675,6 +687,84 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
         ver.2,
         out_bytes.len() as f64 / 1024.0
     );
+    Ok(())
+}
+
+/// hone build --exe -c <script.hn> [-o <out>] [--keep-c]
+/// AOT 编译：脚本 → C 中间文件 → C 编译器 → 原生可执行文件。
+/// 生成前先做语法与类型检查（用户要求），重内置在生成期报错。
+fn cmd_build_exe_aot(path: &str, out: Option<String>, keep_c: bool) -> Result<(), ZError> {
+    let src = std::fs::read_to_string(path).map_err(|e| {
+        ZError::plain(
+            codes::FILE_NOT_FOUND,
+            format!("cannot read `{}`: {}", path, e),
+            Some("check the path"),
+        )
+    })?;
+
+    // [1/4] 解析与语法/类型检查（生成前必须检查脚本语法）
+    print!("[1/4] 解析与类型检查...\r");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let program = parser::Parser::parse(path, &src)?;
+    checker::Checker::check(&program, path, &src)?;
+
+    // [2/4] 生成 C 中间文件
+    print!("[2/4] 生成 C 中间文件...\r");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let c_code = aot::generate(&program, path, &src)?;
+
+    let stem = std::path::Path::new(path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "app".to_string());
+    let cfile = format!("{}.c", stem);
+    std::fs::write(&cfile, &c_code).map_err(|e| {
+        ZError::plain(
+            codes::NOT_FOUND,
+            format!("cannot write `{}`: {}", cfile, e),
+            Some("check the directory permissions"),
+        )
+    })?;
+
+    // [3/4] 查找 C 编译器
+    print!("[3/4] 查找 C 编译器...\r");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let cc = match find_cc() {
+        Ok(cc) => cc,
+        Err(_) => {
+            println!();
+            if keep_c {
+                eprintln!("[build] 中间文件保留在 `{}`", cfile);
+            }
+            return Err(ZError::plain(
+                codes::NOT_IMPLEMENTED,
+                "no C compiler found (gcc/clang), cannot compile the AOT executable",
+                Some(format!(
+                    "install gcc (e.g. MinGW-w64 on Windows), or set the `CC` environment variable; the generated C source is kept at `{}`",
+                    cfile
+                )),
+            ));
+        }
+    };
+
+    // [4/4] 编译为原生可执行文件（-Os + 函数节 + 链接期死代码消除 → 小体积）
+    print!("[4/4] 编译中（{}）...\r", cc);
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let out = match out {
+        Some(o) => o,
+        None => format!("{}.exe", stem),
+    };
+    let result = run_cc_exe(&cc, &cfile, &out);
+    if !keep_c {
+        std::fs::remove_file(&cfile).ok();
+    }
+    result?;
+
+    let size = std::fs::metadata(&out)
+        .map(|m| m.len() as f64 / 1024.0)
+        .unwrap_or(0.0);
+    println!();
+    println!("生成 {} 完成（AOT 原生编译, {:.1} KB）", out, size);
     Ok(())
 }
 
@@ -803,6 +893,45 @@ fn run_cc(cc: &str, cfile: &str, out: &str) -> Result<(), ZError> {
     };
     match status {
         Ok(s) if s.success() => Ok(()),
+        Ok(s) => Err(ZError::plain(
+            codes::NOT_IMPLEMENTED,
+            format!("C compiler exited with code {}", s.code().unwrap_or(-1)),
+            Some("check the generated C code, or install a complete toolchain"),
+        )),
+        Err(e) => Err(ZError::plain(
+            codes::NOT_IMPLEMENTED,
+            format!("cannot run C compiler `{}`: {}", cc, e),
+            None::<&str>,
+        )),
+    }
+}
+
+/// AOT 可执行文件编译：-Os + 函数/数据节 + 链接期死代码消除 → 几十 KB 级体积。
+/// 编译后校验输出文件确实生成（个别工具链报错时退出码仍为 0，如 Educe 的 clang 包装）。
+fn run_cc_exe(cc: &str, cfile: &str, out: &str) -> Result<(), ZError> {
+    let status = std::process::Command::new(cc)
+        .args([
+            "-Os",
+            "-ffunction-sections",
+            "-fdata-sections",
+            "-o",
+            out,
+            cfile,
+            "-Wl,--gc-sections",
+        ])
+        .status();
+    match status {
+        Ok(s) if s.success() => {
+            if std::path::Path::new(out).exists() {
+                Ok(())
+            } else {
+                Err(ZError::plain(
+                    codes::NOT_IMPLEMENTED,
+                    "C compiler reported success but produced no output file",
+                    Some("check the C toolchain (e.g. ccache/缓存包装导致无产物), or set the `CC` environment variable"),
+                ))
+            }
+        }
         Ok(s) => Err(ZError::plain(
             codes::NOT_IMPLEMENTED,
             format!("C compiler exited with code {}", s.code().unwrap_or(-1)),

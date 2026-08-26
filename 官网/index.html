@@ -104,6 +104,7 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
       <tr><td><code>hone fmt [-w] &lt;file.hn&gt;</code></td><td>代码格式化（Tab 缩进/运算符空格/大括号）</td></tr>
       <tr><td><code>hone build --dll &lt;file.hn&gt;</code></td><td>打包 C ABI 动态库（int/float/bool/str 类型映射）</td></tr>
       <tr><td><code>hone build --exe &lt;file.hn&gt;</code></td><td>打包独立可执行文件（解释器+脚本自释放）</td></tr>
+      <tr><td><code>hone build --exe -c &lt;file.hn&gt;</code></td><td>AOT 原生编译（脚本 → C 中间文件 → gcc/clang → 原生 exe，需系统 C 编译器）</td></tr>
       <tr><td><code>hone bind &lt;header.h&gt;</code></td><td>从 C 头文件生成 typed load 签名块（FFI 自动绑定）</td></tr>
       <tr><td><code>hone explain &lt;code&gt;</code></td><td>查询错误码含义与修复建议</td></tr>
       <tr><td><code>hone get</code></td><td>读取 hone.json 清单批量下载模块（类似 package.json / Cargo.toml）</td></tr>

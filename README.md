@@ -38,6 +38,7 @@ hone run --resume <script.hn> # 恢复上次 db 检查点并启用自动落盘�
 hone fmt [-w] <file.hn>   # 代码格式化（Tab 缩进/运算符空格/大括号；-w 覆盖写，支持多文件）
 hone build --dll <file.hn> # 打包 C ABI 动态库（int/float/bool/str 类型映射，需系统 C 编译器）
 hone build --exe <file.hn> # 将脚本与解释器打包为自释放独立可执行文件（[-o <out>] [--icon <ico>]）
+hone build --exe -c <file.hn> # AOT 原生编译：脚本 → C 中间文件 → gcc/clang → 原生可执行文件（--keep-c 保留中间 .c）
 hone explain <code>       # 查询错误码含义（如 hone explain H201）
 hone get                  # 读取当前目录 hone.json 清单，批量下载全部模块（类似 package.json / Cargo.toml）
 hone get <module> <url>   # 下载模块依赖并缓存到 ~/.hn/cache/，并写入/更新 hone.json 清单
@@ -468,6 +469,9 @@ help: Hone types are locked after inference; no implicit conversion is allowed
   （重启仅对可重入错误生效；默认最多 3 次，间隔 1/3/10 秒）
 - `hone run --resume` 检查点恢复（`db` 自动落盘，脚本变更后自动失效）
 - `hone build --exe` 将解释器与脚本打包为自释放独立可执行文件（`[-o <out>] [--icon <ico>]`）
+- `hone build --exe -c` AOT 原生编译：脚本 → C 中间文件 → 系统 C 编译器 → 原生可执行文件
+  （`-Os` + 函数节 + 链接期死代码消除，常见脚本约 50~70 KB；默认删除 .c，`--keep-c` 保留；
+  需系统 C 编译器，可用 `CC` 环境变量指定）
 - `hone explain <code>` 查询错误码含义与修复建议
 - `tmp fn` 临时函数在编译时自动忽略，仅开发阶段使用
 - `debug_print(expr)` 调试输出仅在 `hone debug` 模式生效，普通模式自动跳过

@@ -45,6 +45,23 @@ function toggleTheme(){
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
 
   <div class="release">
+    <span class="ver-tag">v0.7.6</span><span class="date">2026-08-26</span>
+    <h4>新增</h4>
+    <ul>
+      <li><strong>AOT 原生编译</strong>：<code>hone build --exe -c &lt;script.hn&gt;</code> 将 .hn 脚本编译为
+        C 中间文件，再用系统 C 编译器（gcc/clang/cc，可用 <code>CC</code> 环境变量指定）生成原生可执行文件；
+        生成前先做语法与类型检查</li>
+      <li>编译参数 <code>-Os -ffunction-sections -fdata-sections</code> + 链接期死代码消除，未用到的内置函数
+        不占体积，常见脚本约 50~70 KB；默认删除中间 .c 文件，<code>--keep-c</code> 保留便于检查，
+        输出名用 <code>[-o &lt;out&gt;]</code></li>
+      <li>值语义与解释器一致（列表/字典深拷贝、lambda 按值捕获、索引赋值克隆写回），支持函数/递归/类方法/
+        结构体/lambda/异常/推导式/解构/多返回值/match/可选链/复合赋值等全语言特性</li>
+      <li>内置函数支持核心集（print/len/to_str/集合/字符串/文件/时间/随机等）；
+        http/crypto/sqlite/guipro 等重内置与 import/load/go 在编译期报「暂不支持」（附定位与建议）</li>
+    </ul>
+  </div>
+
+  <div class="release">
     <span class="ver-tag">v0.7.5</span><span class="date">2026-08-26</span>
     <h4>工具链增强</h4>
     <ul>

@@ -463,6 +463,7 @@ hone fmt -w *.hn 直接覆盖写入源文件
 hone test [目录] 递归扫描 *.test.hn 测试文件，运行并汇总 PASS/FAIL（配合 assert 断言）
 hone build --dll <script.hn> 将脚本打包成 C ABI 动态库（DLL / SO / DYLIB）
 hone build --exe <script.hn> 打包独立可执行文件（解释器 + 脚本自释放，[-o <out>] [--icon <ico>]）
+hone build --exe -c <script.hn> AOT 编译原生可执行文件（脚本 → C 中间文件 → gcc/clang → 原生 exe；默认删除 .c，--keep-c 保留）
 hone build --script <script.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）
 hone bind <header.h> 从 C 头文件生成 typed load 签名块（FFI 自动绑定）
 hone debug <script.hn> 断点调试模式（支持 breakpoint 关键字）
@@ -1023,6 +1024,23 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · 生成的动态库自包含，不依赖 Hone 解释器（内嵌微型运行时）
 · 类型映射：int → int，float → double，bool → bool，str → const char*
 · 错误时返回错误码，并写入错误缓冲区
+
+4.6 AOT 原生编译（hone build --exe -c）
+
+· 将 .hn 脚本编译为 C 中间文件，再用系统 C 编译器（gcc / clang / cc，可用 CC 环境变量指定）生成原生可执行文件
+· 生成前先做语法与类型检查（parse + checker），错误不产出中间文件
+· 编译参数：-Os -ffunction-sections -fdata-sections + 链接期死代码消除，未用到的内置函数不占体积，常见脚本约 50~70 KB
+· 默认删除中间 .c 文件，--keep-c 保留便于检查；输出名用 [-o <out>]
+· 入口：顶层语句编译进 main()；无顶层语句且有 main 函数时调用之
+· 值语义与解释器一致：列表/字典为值类型（读取/传参深拷贝），lambda 按值捕获，索引赋值克隆写回
+· 支持全语言特性：函数/递归/类方法/结构体/lambda/异常（setjmp+longjmp）/推导式/解构/多返回值/match/可选链/复合赋值等
+· 内置函数支持核心集（print/len/to_str/集合操作/字符串/文件/时间/随机等）；
+  http/crypto/sqlite/guipro 等重内置以及 import/load/go 在编译期报"暂不支持"（附定位与建议）
+· 已知限制：
+  · 错误对象无 file/line/col/context 源码定位（运行时错误只带错误码与消息）
+  · throw 字符串消息在 C 端简化
+  · 函数返回时不显式释放局部变量（int/float/bool 零泄漏；str/list/dict 密集的递归脚本可能累积）
+  · 需系统安装 C 编译器（如 Windows 的 MinGW-w64 / LLVM，Linux/macOS 自带 gcc/clang）
 
 五、错误处理与报错风格
 

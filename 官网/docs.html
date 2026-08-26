@@ -625,6 +625,7 @@ age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span cl
       <tr><td><code>hone fmt [-w] &lt;file.hn&gt;</code></td><td>代码格式化（Tab 缩进、运算符空格、大括号位置）</td></tr>
       <tr><td><code>hone build --dll &lt;file.hn&gt;</code></td><td>打包 C ABI 动态库；类型映射 int→int64_t、float→double、bool→bool、str→const char*；需系统 C 编译器</td></tr>
       <tr><td><code>hone build --exe &lt;file.hn&gt;</code></td><td>打包独立可执行文件（解释器+脚本自释放，<code>[-o &lt;out&gt;]</code>）；打包后 <code>--version</code> 查看版本信息，<code>--keep-cache</code> 保留缓存</td></tr>
+      <tr><td><code>hone build --exe -c &lt;file.hn&gt;</code></td><td>AOT 原生编译：脚本 → C 中间文件 → gcc/clang → 原生可执行文件（几十 KB 级体积，需系统 C 编译器；默认删除 .c，<code>--keep-c</code> 保留，<code>[-o &lt;out&gt;]</code>）</td></tr>
       <tr><td><code>hone build --script &lt;file.hn&gt;</code></td><td>生成仅脚本压缩包 <code>.hzp</code>（不内嵌解释器，<code>[-o &lt;out&gt;]</code>，用 <code>hone run</code> 执行）</td></tr>
       <tr><td><code>hone test [目录]</code></td><td>递归扫描 <code>*.test.hn</code> 运行测试并汇总 PASS/FAIL（配合 <code>assert</code> 断言，失败退出码非 0）</td></tr>
       <tr><td><code>hone bind &lt;header.h&gt;</code></td><td>从 C 头文件离线生成 typed load 签名块（输出到 stdout，unsupported 原型列为注释）</td></tr>
