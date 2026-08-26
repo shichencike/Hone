@@ -398,6 +398,21 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             let msg = as_str(&args[1], 1, span, file, src)?;
             msgbox(title, msg, span, file, src)
         }
+        // 进阶控件/托盘/菜单仅 Windows（Win32）原生实现，其他平台返回明确错误
+        "guipro.set_value" | "guipro.get_value"
+        | "guipro.table_add_row" | "guipro.table_clear" | "guipro.table_count"
+        | "guipro.table_get" | "guipro.table_get_row" | "guipro.table_set"
+        | "guipro.tree_add" | "guipro.tree_clear" | "guipro.tree_get"
+        | "guipro.canvas_clear" | "guipro.canvas_line" | "guipro.canvas_rect"
+        | "guipro.canvas_ellipse" | "guipro.canvas_text" | "guipro.canvas_repaint"
+        | "guipro.tray_add" | "guipro.tray_tip" | "guipro.tray_remove" | "guipro.menu" => Err(zerr(
+            codes::NOT_IMPLEMENTED,
+            format!("`{}` is only supported on the Windows (Win32) GUI backend", name),
+            span,
+            file,
+            src,
+            Some("run on Windows, or stick to button/label/input/select/checkbox/radio/slider"),
+        )),
         other => Err(zerr(
             codes::UNDEFINED,
             format!("undefined function `{}`", other),
@@ -736,4 +751,9 @@ fn ptr_to_string(p: *const c_char) -> String {
     } else {
         unsafe { std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned() }
     }
+}
+
+/// GTK3 后端是否可用（供 guimod.rs 的「GTK 优先、X11 兜底」分发使用）。
+pub fn available() -> bool {
+    API.as_ref().is_ok()
 }

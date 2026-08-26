@@ -22,6 +22,15 @@
 //   close 事件：注册于窗口（id=0），value = ""
 // 事件 JSON（guipro.poll 返回）：
 //   [{"win":1,"id":2,"type":"click","value":""}, ...]
+//
+// 进阶控件（Windows 原生，其他平台返回"仅 Windows 支持"错误）：
+//   slider  滑块：guipro_slider / guipro_set_value / guipro_get_value；change 事件 value=当前位置
+//   table   表格：guipro_table / guipro_table_* ；change 事件 value=选中行索引，click(双击) 同
+//   tree    树：  guipro_tree / guipro_tree_* ；change 事件 value=选中节点 id
+//   canvas  画布：guipro_canvas / guipro_canvas_* ；click 事件 value="[x,y]"（json_parse 解析）
+//   托盘图标：guipro_tray_add / guipro_tray_tip / guipro_tray_remove；tray 事件 value=left/right/double
+//   菜单栏：  guipro_menu；menu 事件 value=菜单路径（如 "文件/打开"）
+// 颜色参数（canvas）：支持 "#RRGGBB" 字符串或整数 RGB（R*65536+G*256+B）
 
 // ============ dict 工具（Hone 无 d["k"] 索引语法，遍历实现） ============
 
@@ -102,6 +111,28 @@ fn guipro_radio(win : int, label : str, x : int, y : int, w : int, h : int) -> i
     return guipro.add(win, {"type": "radio", "text": label, "x": x, "y": y, "w": w, "h": h});
 }
 
+// ============ 进阶控件构造（slider/table/tree/canvas） ============
+
+// 滑块（返回控件 id）；min/max 为范围，value 为初始值
+fn guipro_slider(win : int, min : int, max : int, value : int, x : int, y : int, w : int, h : int) -> int {
+    return guipro.add(win, {"type": "slider", "min": min, "max": max, "value": value, "x": x, "y": y, "w": w, "h": h});
+}
+
+// 表格（返回控件 id）；columns 为字符串列表，rows 为行列表（每行是字符串列表）
+fn guipro_table(win : int, columns, rows, x : int, y : int, w : int, h : int) -> int {
+    return guipro.add(win, {"type": "table", "columns": columns, "rows": rows, "x": x, "y": y, "w": w, "h": h});
+}
+
+// 树（返回控件 id）；items 为嵌套列表：[{"text": "..", "items": [...]}, ...]
+fn guipro_tree(win : int, items, x : int, y : int, w : int, h : int) -> int {
+    return guipro.add(win, {"type": "tree", "items": items, "x": x, "y": y, "w": w, "h": h});
+}
+
+// 画布（返回控件 id）；用 guipro_canvas_* 绘制
+fn guipro_canvas(win : int, x : int, y : int, w : int, h : int) -> int {
+    return guipro.add(win, {"type": "canvas", "x": x, "y": y, "w": w, "h": h});
+}
+
 // ============ 控件读写 ============
 
 fn guipro_set_text(win : int, id : int, text : str) {
@@ -112,10 +143,160 @@ fn guipro_get_text(win : int, id : int) -> str {
     return guipro.get_text(win, id);
 }
 
+// ============ 颜色工具（canvas 用） ============
+
+// 颜色转换："#RRGGBB" 字符串 → 整数 RGB（R*65536+G*256+B）；整数原样返回
+fn guipro_color(c) -> int {
+    if (is_int(c)) { return c; }
+    s = to_str(c);
+    if (len(s) > 0 && s[0] == "#") {
+        s = str_replace(s, "#", "");
+    }
+    if (len(s) != 6) { return 0; }
+    hex = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"];
+    r = guipro_hex_val(s[0], hex) * 16 + guipro_hex_val(s[1], hex);
+    g = guipro_hex_val(s[2], hex) * 16 + guipro_hex_val(s[3], hex);
+    b = guipro_hex_val(s[4], hex) * 16 + guipro_hex_val(s[5], hex);
+    return r * 65536 + g * 256 + b;
+}
+
+// 单个十六进制字符 → 数值（0-15，支持大小写）
+fn guipro_hex_val(ch : str, hex) -> int {
+    v = index_of(hex, ch);
+    if (v >= 0) { return v; }
+    if (ch == "a") { return 10; }
+    if (ch == "b") { return 11; }
+    if (ch == "c") { return 12; }
+    if (ch == "d") { return 13; }
+    if (ch == "e") { return 14; }
+    if (ch == "f") { return 15; }
+    return 0;
+}
+
+// ============ 滑块读写 ============
+
+// 设置滑块位置（也可用于其他数值控件）
+fn guipro_set_value(win : int, id : int, val : int) {
+    guipro.set_value(win, id, val);
+}
+
+// 读取滑块位置
+fn guipro_get_value(win : int, id : int) -> int {
+    return guipro.get_value(win, id);
+}
+
+// ============ 表格读写 ============
+
+// 追加一行（row 为字符串列表）
+fn guipro_table_add_row(win : int, id : int, row) {
+    guipro.table_add_row(win, id, row);
+}
+
+// 清空全部行
+fn guipro_table_clear(win : int, id : int) {
+    guipro.table_clear(win, id);
+}
+
+// 行数
+fn guipro_table_count(win : int, id : int) -> int {
+    return guipro.table_count(win, id);
+}
+
+// 选中行索引（无选中返回 -1）
+fn guipro_table_get(win : int, id : int) -> int {
+    return guipro.table_get(win, id);
+}
+
+// 读取某行全部单元格（返回字符串列表）
+fn guipro_table_get_row(win : int, id : int, row : int) {
+    return guipro.table_get_row(win, id, row);
+}
+
+// 修改单元格文本
+fn guipro_table_set(win : int, id : int, row : int, col : int, text : str) {
+    guipro.table_set(win, id, row, col, text);
+}
+
+// ============ 树读写 ============
+
+// 添加节点（parent_id = 0 表示根），返回新节点 id
+fn guipro_tree_add(win : int, id : int, parent_id : int, label : str) -> int {
+    return guipro.tree_add(win, id, parent_id, label);
+}
+
+// 清空全部节点
+fn guipro_tree_clear(win : int, id : int) {
+    guipro.tree_clear(win, id);
+}
+
+// 选中节点 id（无选中返回 -1）
+fn guipro_tree_get(win : int, id : int) -> int {
+    return guipro.tree_get(win, id);
+}
+
+// ============ 画布绘制 ============
+
+// 清空画布
+fn guipro_canvas_clear(win : int, id : int) {
+    guipro.canvas_clear(win, id);
+}
+
+// 线段
+fn guipro_canvas_line(win : int, id : int, x1 : int, y1 : int, x2 : int, y2 : int, color) {
+    guipro.canvas_line(win, id, x1, y1, x2, y2, guipro_color(color));
+}
+
+// 矩形（fill = 1 填充，0 仅描边）
+fn guipro_canvas_rect(win : int, id : int, x : int, y : int, w : int, h : int, color, fill : int) {
+    guipro.canvas_rect(win, id, x, y, w, h, guipro_color(color), fill);
+}
+
+// 椭圆（fill = 1 填充，0 仅描边）
+fn guipro_canvas_ellipse(win : int, id : int, x : int, y : int, w : int, h : int, color, fill : int) {
+    guipro.canvas_ellipse(win, id, x, y, w, h, guipro_color(color), fill);
+}
+
+// 文本
+fn guipro_canvas_text(win : int, id : int, x : int, y : int, text : str, color) {
+    guipro.canvas_text(win, id, x, y, text, guipro_color(color));
+}
+
+// 强制重绘（图形变更后一般自动重绘，可手动调用）
+fn guipro_canvas_repaint(win : int, id : int) {
+    guipro.canvas_repaint(win, id);
+}
+
+// ============ 托盘图标 ============
+
+// 添加托盘图标（每窗口一个）；tip 为悬停提示
+fn guipro_tray_add(win : int, tip : str) {
+    guipro.tray_add(win, tip);
+}
+
+// 修改托盘提示文本
+fn guipro_tray_tip(win : int, tip : str) {
+    guipro.tray_tip(win, tip);
+}
+
+// 移除托盘图标
+fn guipro_tray_remove(win : int) {
+    guipro.tray_remove(win);
+}
+
+// ============ 菜单栏 ============
+
+// 构建菜单栏并挂到窗口。items 为列表：
+//   [{"text": "文件", "items": [{"text": "打开"}, {"text": "-"}, {"text": "退出"}]}, {"text": "帮助"}]
+// 叶子项 text 为 "-" 表示分隔线；点击叶子项触发 "menu" 事件（value = 路径，如 "文件/打开"）
+fn guipro_menu(win : int, items) {
+    guipro.menu(win, items);
+}
+
 // ============ VBox 布局（纵向排布，返回控件 id 列表） ============
 
-// specs 元素：{"type": "button"|"label"|"input"|"select"|"checkbox"|"radio",
+// specs 元素：{"type": "button"|"label"|"input"|"select"|"checkbox"|"radio"|"slider"|"table"|"tree"|"canvas",
 //              "text": str, "w": int, "h": int}
+// 进阶控件额外字段：slider 用 "min"/"max"/"value"；table 用 "columns"/"rows"；tree 用 "items"
 // 返回控件 id 列表（与 specs 顺序一一对应，可按 ids[0]、ids[1]... 注册事件）
 fn guipro_vbox(win : int, specs, x : int, y : int, gap : int) {
     ids = [];
@@ -129,6 +310,14 @@ fn guipro_vbox(win : int, specs, x : int, y : int, gap : int) {
             ids = append(ids, guipro.add(win, {"type": "input", "x": x, "y": cy, "w": w, "h": h}));
         } else if (t == "select") {
             ids = append(ids, guipro.add(win, {"type": "select", "options": guipro_dict_get_val(s, "options"), "x": x, "y": cy, "w": w, "h": h}));
+        } else if (t == "slider") {
+            ids = append(ids, guipro.add(win, {"type": "slider", "min": guipro_dict_get_int(s, "min", 0), "max": guipro_dict_get_int(s, "max", 100), "value": guipro_dict_get_int(s, "value", 0), "x": x, "y": cy, "w": w, "h": h}));
+        } else if (t == "table") {
+            ids = append(ids, guipro.add(win, {"type": "table", "columns": guipro_dict_get_val(s, "columns"), "rows": guipro_dict_get_val(s, "rows"), "x": x, "y": cy, "w": w, "h": h}));
+        } else if (t == "tree") {
+            ids = append(ids, guipro.add(win, {"type": "tree", "items": guipro_dict_get_val(s, "items"), "x": x, "y": cy, "w": w, "h": h}));
+        } else if (t == "canvas") {
+            ids = append(ids, guipro.add(win, {"type": "canvas", "x": x, "y": cy, "w": w, "h": h}));
         } else {
             ids = append(ids, guipro.add(win, {"type": t, "text": text, "x": x, "y": cy, "w": w, "h": h}));
         }

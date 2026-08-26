@@ -120,8 +120,16 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
 mod platform {
     use super::*;
 
+    /// GTK3 优先，X11 自绘兜底。
     pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Result<Value, ZError> {
-        crate::guimod_gtk::call(name, args, span, file, src)
+        if name == "guipro.available" {
+            return Ok(Value::Bool(crate::guimod_gtk::available() || crate::guimod_x11::available()));
+        }
+        if crate::guimod_gtk::available() {
+            crate::guimod_gtk::call(name, args, span, file, src)
+        } else {
+            crate::guimod_x11::call(name, args, span, file, src)
+        }
     }
 }
 
@@ -134,12 +142,34 @@ mod platform {
     use std::ptr;
     use std::sync::atomic::{AtomicI64, Ordering};
     use std::sync::Mutex;
-    use winapi::ctypes::c_void;
+    use winapi::ctypes::{c_int, c_void};
     use winapi::shared::minwindef::{DWORD, HINSTANCE, HIWORD, LOWORD, LPARAM, LRESULT, UINT, WPARAM, WORD};
-    use winapi::shared::windef::{HBRUSH, HFONT, HWND};
+    use winapi::shared::ntdef::LPWSTR;
+    use winapi::shared::windef::{HBRUSH, HDC, HGDIOBJ, HFONT, HMENU, HWND};
     use winapi::um::errhandlingapi::GetLastError;
+    use winapi::um::commctrl::{
+        InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_BAR_CLASSES, ICC_LISTVIEW_CLASSES,
+        ICC_TREEVIEW_CLASSES, ICC_PROGRESS_CLASS, ICC_TAB_CLASSES, TRACKBAR_CLASS,
+        TBM_SETRANGE, TBM_SETPOS, TBM_GETPOS, TBS_HORZ, TBS_AUTOTICKS,
+        TB_THUMBTRACK, TB_ENDTRACK,
+        WC_LISTVIEW, WC_TREEVIEW,
+        LVM_INSERTCOLUMNW, LVM_INSERTITEMW, LVM_SETITEMTEXTW, LVM_GETITEMCOUNT,
+        LVM_DELETEALLITEMS, LVM_GETNEXTITEM, LVM_GETITEMW, LVM_SETEXTENDEDLISTVIEWSTYLE,
+        LVIF_TEXT, LVCF_TEXT, LVCF_WIDTH, LVCF_SUBITEM, LVNI_SELECTED, LVIS_SELECTED,
+        LVS_REPORT, LVS_SINGLESEL, LVS_SHOWSELALWAYS, LVS_EX_FULLROWSELECT, LVS_EX_GRIDLINES,
+        LVN_ITEMCHANGED, NM_DBLCLK, LVITEMW, LVCOLUMNW, NMLISTVIEW,
+        TVM_INSERTITEMW, TVM_DELETEITEM, TVM_GETNEXTITEM,
+        TVGN_CARET, TVIF_TEXT, TVIF_PARAM,
+        TVN_SELCHANGEDW, TVS_HASLINES, TVS_LINESATROOT, TVS_HASBUTTONS, TVS_SHOWSELALWAYS,
+        TVINSERTSTRUCTW, TVI_ROOT, TVI_SORT, NMTREEVIEWW, HTREEITEM,
+    };
     use winapi::um::libloaderapi::GetModuleHandleW;
-    use winapi::um::wingdi::{GetStockObject, DEFAULT_GUI_FONT};
+    use winapi::um::shellapi::{Shell_NotifyIconW, NOTIFYICONDATAW, NIM_ADD, NIM_MODIFY, NIM_DELETE, NIF_MESSAGE, NIF_ICON, NIF_TIP};
+    use winapi::um::wingdi::{
+        GetStockObject, DEFAULT_GUI_FONT, CreatePen, CreateSolidBrush, SelectObject, DeleteObject,
+        MoveToEx, LineTo, Rectangle, Ellipse, SetTextColor, SetBkMode, TextOutW,
+        PS_SOLID, NULL_BRUSH, WHITE_BRUSH, TRANSPARENT,
+    };
     use winapi::um::winuser::*;
 
     // ---------- 全局状态 ----------
@@ -155,10 +185,49 @@ mod platform {
 
     struct WinState {
         hwnd: HWND,
-        /// 控件 id → 类型（"button"/"label"/"input"/"select"/"checkbox"/"radio"）
+        /// 控件 id → 类型（"button"/"label"/"input"/"select"/"checkbox"/"radio"/"slider"/"table"/"tree"/"canvas"）
         ctl_kind: HashMap<i64, String>,
         /// 控件 id → 原生句柄
         ctl_hwnd: HashMap<i64, HWND>,
+        /// 控件 id → 附加数据（canvas 图形 / tree 节点表）
+        ctl_data: HashMap<i64, CtlData>,
+        /// 菜单 id → 菜单路径（"文件/打开"，用于菜单点击事件）
+        menu_path: HashMap<i64, String>,
+        /// 下一个菜单项 id（从 0x1000 起，避开控件 id 常用区）
+        next_menu_id: i64,
+        /// 当前窗口菜单句柄（替换/销毁时回收）
+        menu_hmenu: Option<HMENU>,
+        /// 托盘图标是否已添加（每窗口一个）
+        tray_added: bool,
+    }
+
+    /// 控件附加数据（进阶控件专用）
+    enum CtlData {
+        /// canvas 图形指令列表
+        Canvas(Vec<Shape>),
+        /// tree 节点表
+        Tree(TreeData),
+    }
+
+    /// canvas 绘图指令（kind: "line"/"rect"/"ellipse"/"text"）
+    #[derive(Clone)]
+    struct Shape {
+        kind: &'static str,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        text: String,
+        /// 0xRRGGBB
+        color: u32,
+        /// 是否填充（rect/ellipse 有效）
+        fill: bool,
+    }
+
+    /// tree 节点表：节点 id → HTREEITEM 句柄
+    struct TreeData {
+        nodes: HashMap<i64, HTREEITEM>,
+        next_node: i64,
     }
 
     /// HWND 是裸指针；窗口注册表仅经 Mutex 在 GUI 线程访问，标记 Send 可行。
@@ -213,6 +282,34 @@ mod platform {
         None
     }
 
+    /// 仅按控件句柄定位（WM_HSCROLL 等只带 lParam 句柄的通知）。
+    fn find_ctl_by_hwnd_only(hctl: HWND) -> Option<(i64, String)> {
+        let wins = WINDOWS.lock().unwrap();
+        for (win_id, s) in wins.iter() {
+            for (id, h) in s.ctl_hwnd.iter() {
+                if *h == hctl {
+                    if let Some(kind) = s.ctl_kind.get(id) {
+                        return Some((*win_id, kind.clone()));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// 由控件句柄反查控件 id（配合 find_ctl_by_hwnd_only 使用）。
+    fn ctl_id_of(hctl: HWND) -> i64 {
+        let wins = WINDOWS.lock().unwrap();
+        for s in wins.values() {
+            for (id, h) in s.ctl_hwnd.iter() {
+                if *h == hctl {
+                    return *id;
+                }
+            }
+        }
+        0
+    }
+
     fn get_ctl_text(hctl: HWND) -> String {
         unsafe {
             let len = GetWindowTextLengthW(hctl) as usize;
@@ -227,10 +324,16 @@ mod platform {
     unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         match msg {
             WM_COMMAND => {
-                // 子控件通知：wParam 低 16 位 = 控件 id，高 16 位 = 通知码；lParam = 控件句柄
+                // 菜单命令：lParam == 0（控件通知 lParam 为控件句柄）
                 let ctl_id = LOWORD(wparam as DWORD) as i64;
                 let code = HIWORD(wparam as DWORD) as WORD;
                 let hctl = lparam as HWND;
+                if lparam == 0 {
+                    if let Some((win_id, path)) = find_menu_item(ctl_id) {
+                        push_event(win_id, 0, "menu", &path);
+                    }
+                    return 0;
+                }
                 if let Some((win_id, kind)) = find_ctl(ctl_id, hctl) {
                     match code {
                         BN_CLICKED => {
@@ -265,11 +368,78 @@ mod platform {
                 }
                 0
             }
+            WM_NOTIFY => {
+                // 表/树等公共控件通知：lParam 指向 NMHDR
+                let nm = lparam as *const NMHDR;
+                if nm.is_null() {
+                    return DefWindowProcW(hwnd, msg, wparam, lparam);
+                }
+                unsafe {
+                    let hctl = (*nm).hwndFrom;
+                    let ncode = (*nm).code;
+                    if ncode == LVN_ITEMCHANGED {
+                        // 表：选中行变化（仅当选中有变化时推送）
+                        let nmlv = lparam as *const NMLISTVIEW;
+                        let new_sel = (*nmlv).uNewState & LVIS_SELECTED;
+                        let old_sel = (*nmlv).uOldState & LVIS_SELECTED;
+                        if new_sel != old_sel {
+                            if let Some((win_id, _)) = find_ctl_by_hwnd_only(hctl) {
+                                let ctl_id = ctl_id_of(hctl);
+                                let sel = SendMessageW(hctl, LVM_GETNEXTITEM, !0 as WPARAM, LVNI_SELECTED) as i64;
+                                push_event(win_id, ctl_id, "change", &sel.to_string());
+                            }
+                        }
+                    } else if ncode == NM_DBLCLK {
+                        // 表：双击行
+                        if let Some((win_id, _)) = find_ctl_by_hwnd_only(hctl) {
+                            let ctl_id = ctl_id_of(hctl);
+                            let sel = SendMessageW(hctl, LVM_GETNEXTITEM, !0 as WPARAM, LVNI_SELECTED) as i64;
+                            push_event(win_id, ctl_id, "click", &sel.to_string());
+                        }
+                    } else if ncode == TVN_SELCHANGEDW {
+                        // 树：选中节点变化（itemNew.lParam 即节点 id）
+                        let nmtv = lparam as *const NMTREEVIEWW;
+                        if let Some((win_id, _)) = find_ctl_by_hwnd_only(hctl) {
+                            let ctl_id = ctl_id_of(hctl);
+                            let node_id = (*nmtv).itemNew.lParam;
+                            push_event(win_id, ctl_id, "change", &node_id.to_string());
+                        }
+                    }
+                }
+                0
+            }
+            0x8001 => {
+                // 托盘图标回调（WM_APP+1）：wparam = uID，lparam 低 16 位 = 鼠标消息
+                let mouse = LOWORD(lparam as DWORD) as u32;
+                if let Some(win_id) = find_win_by_hwnd(hwnd) {
+                    match mouse {
+                        WM_LBUTTONDOWN => push_event(win_id, 0, "tray", "left"),
+                        WM_RBUTTONUP => push_event(win_id, 0, "tray", "right"),
+                        WM_LBUTTONDBLCLK => push_event(win_id, 0, "tray", "double"),
+                        _ => {}
+                    }
+                }
+                0
+            }
             WM_SIZE => {
                 if let Some(win_id) = find_win_by_hwnd(hwnd) {
                     let w = LOWORD(lparam as DWORD) as i32;
                     let h = HIWORD(lparam as DWORD) as i32;
                     push_event(win_id, 0, "resize", &format!("{}x{}", w, h));
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_HSCROLL | WM_VSCROLL => {
+                // slider 拖动：lParam 为滑块句柄，取当前位置推送 change 事件
+                let hctl = lparam as HWND;
+                let code = LOWORD(wparam as DWORD) as WORD;
+                if (code as usize) == TB_THUMBTRACK || (code as usize) == TB_ENDTRACK {
+                    if let Some((win_id, kind)) = find_ctl_by_hwnd_only(hctl) {
+                        if kind == "slider" {
+                            let pos = unsafe { SendMessageW(hctl, TBM_GETPOS, 0, 0) };
+                            push_event(win_id, ctl_id_of(hctl), "change", &pos.to_string());
+                        }
+                    }
                 }
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
@@ -283,7 +453,23 @@ mod platform {
             WM_DESTROY => {
                 // 从注册表移除（close 已推送事件，脚本侧据此收尾）
                 if let Some(win_id) = find_win_by_hwnd(hwnd) {
-                    WINDOWS.lock().unwrap().remove(&win_id);
+                    let mut wins = WINDOWS.lock().unwrap();
+                    if let Some(s) = wins.get(&win_id) {
+                        if let Some(m) = s.menu_hmenu {
+                            DestroyMenu(m);
+                        }
+                        // 进程退出前自动回收托盘图标
+                        if s.tray_added {
+                            let mut nid: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
+                            nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as DWORD;
+                            nid.hWnd = hwnd;
+                            nid.uID = 1;
+                            unsafe {
+                                Shell_NotifyIconW(NIM_DELETE, &mut nid);
+                            }
+                        }
+                    }
+                    wins.remove(&win_id);
                 }
                 0
             }
@@ -296,6 +482,13 @@ mod platform {
         let mut reg_err: Option<DWORD> = None;
         CLASS_READY.call_once(|| {
             unsafe {
+                // 注册公共控件类（slider/table/tree 等 comctl32 控件需要）
+                let mut icc = INITCOMMONCONTROLSEX {
+                    dwSize: std::mem::size_of::<INITCOMMONCONTROLSEX>() as DWORD,
+                    dwICC: ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES
+                        | ICC_PROGRESS_CLASS | ICC_TAB_CLASSES,
+                };
+                InitCommonControlsEx(&mut icc);
                 let hinst = GetModuleHandleW(ptr::null());
                 *HINST.lock().unwrap() = hinst as usize;
                 let class_name = to_utf16("HoneGuiproWnd");
@@ -316,6 +509,24 @@ mod platform {
                 if RegisterClassExW(&wc) == 0 {
                     reg_err = Some(GetLastError());
                 }
+                // canvas 子窗口类（白底，自绘图形）
+                let canvas_class = to_utf16("HoneCanvasWnd");
+                let wc2 = WNDCLASSEXW {
+                    cbSize: std::mem::size_of::<WNDCLASSEXW>() as UINT,
+                    style: CS_HREDRAW | CS_VREDRAW,
+                    lpfnWndProc: Some(canvas_wnd_proc),
+                    cbClsExtra: 0,
+                    cbWndExtra: 0,
+                    hInstance: hinst,
+                    hIcon: ptr::null_mut(),
+                    hCursor: LoadCursorW(ptr::null_mut(), IDC_ARROW),
+                    hbrBackground: GetStockObject(WHITE_BRUSH as i32) as *mut c_void as HBRUSH,
+                    lpszMenuName: ptr::null(),
+                    lpszClassName: canvas_class.as_ptr(),
+                    hIconSm: ptr::null_mut(),
+                };
+                // 类已注册（同进程重复）时返回 0，可忽略
+                RegisterClassExW(&wc2);
             }
         });
         if let Some(code) = reg_err {
@@ -354,10 +565,14 @@ mod platform {
             "select" => ("COMBOBOX", CBS_DROPDOWNLIST | WS_TABSTOP),
             "checkbox" => ("BUTTON", BS_AUTOCHECKBOX | WS_TABSTOP),
             "radio" => ("BUTTON", BS_AUTORADIOBUTTON | WS_TABSTOP),
+            "slider" => (TRACKBAR_CLASS, TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP),
+            "table" => (WC_LISTVIEW, LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_TABSTOP),
+            "tree" => (WC_TREEVIEW, TVS_HASLINES | TVS_LINESATROOT | TVS_HASBUTTONS | TVS_SHOWSELALWAYS | WS_TABSTOP),
+            "canvas" => ("HoneCanvasWnd", WS_BORDER),
             other => {
                 return Err(zerr(
                     codes::TYPE_MISMATCH,
-                    format!("unknown widget type `{}` (button/label/input/select/checkbox/radio)", other),
+                    format!("unknown widget type `{}` (button/label/input/select/checkbox/radio/slider/table/tree/canvas)", other),
                     span,
                     file,
                     src,
@@ -401,6 +616,18 @@ mod platform {
                 unsafe {
                     SendMessageW(hctl, CB_SETCURSEL, 0, 0);
                 }
+            }
+        }
+        // slider 初始化：范围（min/max，默认 0-100）与取值（value，默认 min）
+        if kind == "slider" {
+            let min = dict_int(d, "min", 0, span, file, src)? as i32;
+            let max = dict_int(d, "max", 100, span, file, src)? as i32;
+            let val = dict_int(d, "value", min as i64, span, file, src)? as i32;
+            unsafe {
+                // TBM_SETRANGE：lParam 低 16 位 = 最小值，高 16 位 = 最大值
+                let range = ((max as u32) << 16) | (min as u32 & 0xFFFF);
+                SendMessageW(hctl, TBM_SETRANGE, 1, range as LPARAM);
+                SendMessageW(hctl, TBM_SETPOS, 1, val as LPARAM);
             }
         }
         Ok(hctl)
@@ -450,6 +677,23 @@ mod platform {
                 let ctl = as_int(&args[1], 1, span, file, src)?;
                 get_text(win, ctl, span, file, src)
             }
+            "guipro.set_value" => {
+                if args.len() != 3 {
+                    return Err(arg_count(name, 3, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                let val = as_int(&args[2], 2, span, file, src)?;
+                set_value(win, ctl, val, span, file, src)
+            }
+            "guipro.get_value" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                get_value(win, ctl, span, file, src)
+            }
             "guipro.close" => {
                 if args.len() != 1 {
                     return Err(arg_count(name, 1, args.len(), span, file, src));
@@ -464,6 +708,204 @@ mod platform {
                 let title = as_str(&args[0], 0, span, file, src)?;
                 let msg = as_str(&args[1], 1, span, file, src)?;
                 msgbox(title, msg, span, file, src)
+            }
+            // ---------- 表（ListView） ----------
+            "guipro.table_add_row" => {
+                if args.len() != 3 {
+                    return Err(arg_count(name, 3, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                table_add_row(win, ctl, &args[2], span, file, src)
+            }
+            "guipro.table_clear" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                table_clear(win, ctl, span, file, src)
+            }
+            "guipro.table_count" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                table_count(win, ctl, span, file, src)
+            }
+            "guipro.table_get" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                table_get(win, ctl, span, file, src)
+            }
+            "guipro.table_get_row" => {
+                if args.len() != 3 {
+                    return Err(arg_count(name, 3, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                let row = as_int(&args[2], 2, span, file, src)?;
+                table_get_row(win, ctl, row, span, file, src)
+            }
+            "guipro.table_set" => {
+                if args.len() != 5 {
+                    return Err(arg_count(name, 5, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                let row = as_int(&args[2], 2, span, file, src)?;
+                let col = as_int(&args[3], 3, span, file, src)?;
+                let text = as_str(&args[4], 4, span, file, src)?;
+                table_set(win, ctl, row, col, text, span, file, src)
+            }
+            // ---------- 树（TreeView） ----------
+            "guipro.tree_add" => {
+                if args.len() != 4 {
+                    return Err(arg_count(name, 4, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                let parent = as_int(&args[2], 2, span, file, src)?;
+                let label = as_str(&args[3], 3, span, file, src)?;
+                tree_add(win, ctl, parent, label, span, file, src)
+            }
+            "guipro.tree_clear" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                tree_clear(win, ctl, span, file, src)
+            }
+            "guipro.tree_get" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                tree_get(win, ctl, span, file, src)
+            }
+            // ---------- 画布（Canvas） ----------
+            "guipro.canvas_clear" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                canvas_clear(win, ctl, span, file, src)
+            }
+            "guipro.canvas_line" => {
+                if args.len() != 7 {
+                    return Err(arg_count(name, 7, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                let x1 = as_int(&args[2], 2, span, file, src)? as i32;
+                let y1 = as_int(&args[3], 3, span, file, src)? as i32;
+                let x2 = as_int(&args[4], 4, span, file, src)? as i32;
+                let y2 = as_int(&args[5], 5, span, file, src)? as i32;
+                let color = as_int(&args[6], 6, span, file, src)? as u32;
+                canvas_push_shape(
+                    win, ctl,
+                    Shape { kind: "line", x1, y1, x2, y2, text: String::new(), color, fill: false },
+                    span, file, src,
+                )
+            }
+            "guipro.canvas_rect" => {
+                if args.len() != 8 {
+                    return Err(arg_count(name, 8, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                let x = as_int(&args[2], 2, span, file, src)? as i32;
+                let y = as_int(&args[3], 3, span, file, src)? as i32;
+                let w = as_int(&args[4], 4, span, file, src)? as i32;
+                let h = as_int(&args[5], 5, span, file, src)? as i32;
+                let color = as_int(&args[6], 6, span, file, src)? as u32;
+                let fill = as_int(&args[7], 7, span, file, src)? != 0;
+                canvas_push_shape(
+                    win, ctl,
+                    Shape { kind: "rect", x1: x, y1: y, x2: x + w, y2: y + h, text: String::new(), color, fill },
+                    span, file, src,
+                )
+            }
+            "guipro.canvas_ellipse" => {
+                if args.len() != 8 {
+                    return Err(arg_count(name, 8, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                let x = as_int(&args[2], 2, span, file, src)? as i32;
+                let y = as_int(&args[3], 3, span, file, src)? as i32;
+                let w = as_int(&args[4], 4, span, file, src)? as i32;
+                let h = as_int(&args[5], 5, span, file, src)? as i32;
+                let color = as_int(&args[6], 6, span, file, src)? as u32;
+                let fill = as_int(&args[7], 7, span, file, src)? != 0;
+                canvas_push_shape(
+                    win, ctl,
+                    Shape { kind: "ellipse", x1: x, y1: y, x2: x + w, y2: y + h, text: String::new(), color, fill },
+                    span, file, src,
+                )
+            }
+            "guipro.canvas_text" => {
+                if args.len() != 6 {
+                    return Err(arg_count(name, 6, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                let x = as_int(&args[2], 2, span, file, src)? as i32;
+                let y = as_int(&args[3], 3, span, file, src)? as i32;
+                let text = as_str(&args[4], 4, span, file, src)?;
+                let color = as_int(&args[5], 5, span, file, src)? as u32;
+                canvas_push_shape(
+                    win, ctl,
+                    Shape { kind: "text", x1: x, y1: y, x2: 0, y2: 0, text: text.to_string(), color, fill: false },
+                    span, file, src,
+                )
+            }
+            "guipro.canvas_repaint" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let ctl = as_int(&args[1], 1, span, file, src)?;
+                canvas_repaint(win, ctl, span, file, src)
+            }
+            // ---------- 托盘图标 ----------
+            "guipro.tray_add" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let tip = as_str(&args[1], 1, span, file, src)?;
+                tray_add(win, tip, span, file, src)
+            }
+            "guipro.tray_tip" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let tip = as_str(&args[1], 1, span, file, src)?;
+                tray_tip(win, tip, span, file, src)
+            }
+            "guipro.tray_remove" => {
+                if args.len() != 1 {
+                    return Err(arg_count(name, 1, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                tray_remove(win, span, file, src)
+            }
+            // ---------- 菜单栏 ----------
+            "guipro.menu" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                menu(win, &args[1], span, file, src)
             }
             other => Err(zerr(
                 codes::UNDEFINED,
@@ -524,6 +966,11 @@ mod platform {
                 hwnd,
                 ctl_kind: HashMap::new(),
                 ctl_hwnd: HashMap::new(),
+                ctl_data: HashMap::new(),
+                menu_path: HashMap::new(),
+                next_menu_id: 0x1000,
+                menu_hmenu: None,
+                tray_added: false,
             },
         );
         unsafe {
@@ -539,7 +986,7 @@ mod platform {
         if kind.is_empty() {
             return Err(zerr(
                 codes::TYPE_MISMATCH,
-                "widget dict requires a `type` field (button/label/input/select/checkbox/radio)",
+                "widget dict requires a `type` field (button/label/input/select/checkbox/radio/slider/table/tree/canvas)",
                 span,
                 file,
                 src,
@@ -560,9 +1007,238 @@ mod platform {
         let ctl_id = next_ctl_id();
         let hinst = *HINST.lock().unwrap() as HINSTANCE;
         let hctl = create_ctl(win, ctl_id, &kind, d, hinst, span, file, src)?;
+        // 进阶控件初始化（表/树/画布）
+        match kind.as_str() {
+            "table" => init_table(hctl, d, span, file, src)?,
+            "tree" => {
+                let mut td = TreeData { nodes: HashMap::new(), next_node: 1 };
+                if let Some(Value::List(items)) = dict_get(d, "items") {
+                    for it in items {
+                        insert_tree_node(hctl, TVI_ROOT, it, &mut td, span, file, src)?;
+                    }
+                }
+                win.ctl_data.insert(ctl_id, CtlData::Tree(td));
+            }
+            "canvas" => {
+                win.ctl_data.insert(ctl_id, CtlData::Canvas(Vec::new()));
+            }
+            _ => {}
+        }
         win.ctl_kind.insert(ctl_id, kind);
         win.ctl_hwnd.insert(ctl_id, hctl);
         Ok(Value::Int(ctl_id))
+    }
+
+    // ---------- 进阶控件辅助（table/tree/canvas） ----------
+
+    /// 初始化表：扩展样式 + 列头 + 初始行。
+    fn init_table(hctl: HWND, d: &Value, span: Span, file: &str, src: &str) -> Result<(), ZError> {
+        unsafe {
+            SendMessageW(
+                hctl,
+                LVM_SETEXTENDEDLISTVIEWSTYLE,
+                (LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES) as WPARAM,
+                (LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES) as LPARAM,
+            );
+        }
+        if let Some(Value::List(cols)) = dict_get(d, "columns") {
+            let mut ci = 0;
+            for c in cols {
+                if let Value::Str(s) = c {
+                    let ws = to_utf16(s);
+                    let mut col = LVCOLUMNW {
+                        mask: LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM,
+                        fmt: 0,
+                        cx: 120,
+                        pszText: ws.as_ptr() as LPWSTR,
+                        cchTextMax: 0,
+                        iSubItem: ci,
+                        iImage: 0,
+                        iOrder: 0,
+                        cxMin: 0,
+                        cxDefault: 0,
+                        cxIdeal: 0,
+                    };
+                    unsafe {
+                        SendMessageW(hctl, LVM_INSERTCOLUMNW, ci as WPARAM, &mut col as *mut LVCOLUMNW as LPARAM);
+                    }
+                    ci += 1;
+                }
+            }
+        }
+        if let Some(Value::List(rows)) = dict_get(d, "rows") {
+            for r in rows {
+                if let Value::List(cells) = r {
+                    insert_table_row(hctl, cells);
+                }
+            }
+        }
+        let _ = (span, file, src);
+        Ok(())
+    }
+
+    /// 追加一行（cells 为字符串列表）。
+    fn insert_table_row(hctl: HWND, cells: &[Value]) {
+        unsafe {
+            let count = SendMessageW(hctl, LVM_GETITEMCOUNT, 0, 0) as i32;
+            let mut col = 0;
+            for c in cells {
+                if let Value::Str(s) = c {
+                    let ws = to_utf16(s);
+                    let mut item = LVITEMW {
+                        mask: LVIF_TEXT,
+                        iItem: count,
+                        iSubItem: col,
+                        state: 0,
+                        stateMask: 0,
+                        pszText: ws.as_ptr() as LPWSTR,
+                        cchTextMax: 0,
+                        iImage: 0,
+                        lParam: 0,
+                        iIndent: 0,
+                        iGroupId: 0,
+                        cColumns: 0,
+                        puColumns: ptr::null_mut(),
+                        piColFmt: ptr::null_mut(),
+                        iGroup: 0,
+                    };
+                    if col == 0 {
+                        SendMessageW(hctl, LVM_INSERTITEMW, 0, &mut item as *mut LVITEMW as LPARAM);
+                    } else {
+                        SendMessageW(hctl, LVM_SETITEMTEXTW, 0, &mut item as *mut LVITEMW as LPARAM);
+                    }
+                }
+                col += 1;
+            }
+        }
+    }
+
+    /// 递归插入树节点（parent 为 HTREEITEM 句柄；TVI_ROOT 表示根）。
+    fn insert_tree_node(
+        hctl: HWND,
+        parent: HTREEITEM,
+        d: &Value,
+        td: &mut TreeData,
+        span: Span,
+        file: &str,
+        src: &str,
+    ) -> Result<i64, ZError> {
+        let text = dict_str(d, "text", span, file, src)?;
+        let node_id = td.next_node;
+        td.next_node += 1;
+        let ws = to_utf16(&text);
+        let mut tv = TVINSERTSTRUCTW {
+            hParent: parent,
+            hInsertAfter: TVI_SORT,
+            u: unsafe { std::mem::zeroed() },
+        };
+        unsafe {
+            let item = tv.u.item_mut();
+            item.mask = TVIF_TEXT | TVIF_PARAM;
+            item.pszText = ws.as_ptr() as LPWSTR;
+            item.lParam = node_id as LPARAM;
+        }
+        let hitem = unsafe { SendMessageW(hctl, TVM_INSERTITEMW, 0, &mut tv as *mut TVINSERTSTRUCTW as LPARAM) } as HTREEITEM;
+        td.nodes.insert(node_id, hitem);
+        if let Some(Value::List(children)) = dict_get(d, "items") {
+            for ch in children {
+                insert_tree_node(hctl, hitem, ch, td, span, file, src)?;
+            }
+        }
+        Ok(node_id)
+    }
+
+    /// 菜单 id → (窗口 id, 菜单路径)。
+    fn find_menu_item(id: i64) -> Option<(i64, String)> {
+        let wins = WINDOWS.lock().unwrap();
+        for (win_id, s) in wins.iter() {
+            if let Some(path) = s.menu_path.get(&id) {
+                return Some((*win_id, path.clone()));
+            }
+        }
+        None
+    }
+
+    /// 由画布句柄取图形列表。
+    fn get_canvas_shapes(hwnd: HWND) -> Option<Vec<Shape>> {
+        let wins = WINDOWS.lock().unwrap();
+        for (_, s) in wins.iter() {
+            for (id, data) in s.ctl_data.iter() {
+                if s.ctl_hwnd.get(id) == Some(&hwnd) {
+                    if let CtlData::Canvas(shapes) = data {
+                        return Some(shapes.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// 绘制画布图形列表。
+    fn draw_shapes(hdc: HDC, shapes: &[Shape]) {
+        unsafe {
+            for sh in shapes {
+                let pen = CreatePen(PS_SOLID as i32, 1, sh.color);
+                let old_pen = SelectObject(hdc, pen as HGDIOBJ);
+                let brush: HGDIOBJ = if sh.fill {
+                    CreateSolidBrush(sh.color) as HGDIOBJ
+                } else {
+                    GetStockObject(NULL_BRUSH as i32)
+                };
+                let old_brush = SelectObject(hdc, brush);
+                match sh.kind {
+                    "line" => {
+                        MoveToEx(hdc, sh.x1, sh.y1, ptr::null_mut());
+                        LineTo(hdc, sh.x2, sh.y2);
+                    }
+                    "rect" => {
+                        Rectangle(hdc, sh.x1, sh.y1, sh.x2, sh.y2);
+                    }
+                    "ellipse" => {
+                        Ellipse(hdc, sh.x1, sh.y1, sh.x2, sh.y2);
+                    }
+                    "text" => {
+                        SetTextColor(hdc, sh.color);
+                        SetBkMode(hdc, TRANSPARENT as i32);
+                        let ws = to_utf16(&sh.text);
+                        TextOutW(hdc, sh.x1, sh.y1, ws.as_ptr(), sh.text.len() as i32);
+                    }
+                    _ => {}
+                }
+                SelectObject(hdc, old_pen);
+                SelectObject(hdc, old_brush);
+                DeleteObject(pen as HGDIOBJ);
+                if sh.fill {
+                    DeleteObject(brush);
+                }
+            }
+        }
+    }
+
+    /// canvas 子窗口过程：WM_PAINT 自绘，WM_LBUTTONDOWN 推送点击事件。
+    unsafe extern "system" fn canvas_wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        match msg {
+            WM_PAINT => {
+                let mut ps: PAINTSTRUCT = std::mem::zeroed();
+                let hdc = BeginPaint(hwnd, &mut ps);
+                if let Some(shapes) = get_canvas_shapes(hwnd) {
+                    draw_shapes(hdc, &shapes);
+                }
+                EndPaint(hwnd, &ps);
+                0
+            }
+            WM_LBUTTONDOWN => {
+                let x = LOWORD(lparam as DWORD) as i32;
+                let y = HIWORD(lparam as DWORD) as i32;
+                if let Some((win_id, _)) = find_ctl_by_hwnd_only(hwnd) {
+                    let ctl_id = ctl_id_of(hwnd);
+                    // 推送 "[x,y]"（Hone 侧用 json_parse 解析）
+                    push_event(win_id, ctl_id, "click", &format!("[{},{}]", x, y));
+                }
+                0
+            }
+            _ => DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
     }
 
     /// 泵消息（非阻塞）+ 取事件 JSON 数组。
@@ -625,6 +1301,52 @@ mod platform {
         Ok(Value::Null)
     }
 
+    /// 设置控件数值（slider 用 TBM_SETPOS；其他控件不支持时报错）。
+    fn set_value(win_id: i64, ctl_id: i64, val: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let wins = WINDOWS.lock().unwrap();
+        let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        let kind = win.ctl_kind.get(&ctl_id).map(|s| s.as_str()).unwrap_or("");
+        match kind {
+            "slider" => {
+                unsafe {
+                    SendMessageW(hctl, TBM_SETPOS, 1, val as LPARAM);
+                }
+                Ok(Value::Null)
+            }
+            _ => Err(zerr(
+                codes::TYPE_MISMATCH,
+                format!("widget type `{}` does not support set_value (slider only)", kind),
+                span,
+                file,
+                src,
+                Some("set_value works on slider widgets"),
+            )),
+        }
+    }
+
+    /// 读取控件数值（slider 用 TBM_GETPOS）。
+    fn get_value(win_id: i64, ctl_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let wins = WINDOWS.lock().unwrap();
+        let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        let kind = win.ctl_kind.get(&ctl_id).map(|s| s.as_str()).unwrap_or("");
+        match kind {
+            "slider" => {
+                let pos = unsafe { SendMessageW(hctl, TBM_GETPOS, 0, 0) };
+                Ok(Value::Int(pos as i64))
+            }
+            _ => Err(zerr(
+                codes::TYPE_MISMATCH,
+                format!("widget type `{}` does not support get_value (slider only)", kind),
+                span,
+                file,
+                src,
+                Some("get_value works on slider widgets"),
+            )),
+        }
+    }
+
     fn win_missing(win_id: i64, span: Span, file: &str, src: &str) -> ZError {
         zerr(
             codes::NOT_FOUND,
@@ -634,6 +1356,384 @@ mod platform {
             src,
             Some("create it with `guipro.window` first"),
         )
+    }
+
+    // ---------- 表（ListView）实现 ----------
+
+    fn table_add_row(win_id: i64, ctl_id: i64, row: &Value, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let wins = WINDOWS.lock().unwrap();
+        let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        match row {
+            Value::List(cells) => insert_table_row(hctl, cells),
+            _ => {
+                return Err(zerr(
+                    codes::TYPE_MISMATCH,
+                    "table row must be a list of strings",
+                    span,
+                    file,
+                    src,
+                    Some("pass e.g. [\"a\", \"b\"]"),
+                ));
+            }
+        }
+        Ok(Value::Null)
+    }
+
+    fn table_clear(win_id: i64, ctl_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let wins = WINDOWS.lock().unwrap();
+        let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        unsafe {
+            SendMessageW(hctl, LVM_DELETEALLITEMS, 0, 0);
+        }
+        Ok(Value::Null)
+    }
+
+    fn table_count(win_id: i64, ctl_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let wins = WINDOWS.lock().unwrap();
+        let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        let count = unsafe { SendMessageW(hctl, LVM_GETITEMCOUNT, 0, 0) } as i64;
+        Ok(Value::Int(count))
+    }
+
+    /// 选中行索引（无选中返回 -1）。
+    fn table_get(win_id: i64, ctl_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let wins = WINDOWS.lock().unwrap();
+        let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        let sel = unsafe { SendMessageW(hctl, LVM_GETNEXTITEM, !0 as WPARAM, LVNI_SELECTED) } as i64;
+        Ok(Value::Int(sel))
+    }
+
+    /// 读取某行全部单元格（返回字符串列表）。
+    fn table_get_row(win_id: i64, ctl_id: i64, row: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let wins = WINDOWS.lock().unwrap();
+        let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        let count = unsafe { SendMessageW(hctl, LVM_GETITEMCOUNT, 0, 0) } as i64;
+        if row < 0 || row >= count {
+            return Err(zerr(
+                codes::NOT_FOUND,
+                format!("table row {} out of range (0..{})", row, count),
+                span,
+                file,
+                src,
+                Some("check the row index"),
+            ));
+        }
+        let mut cells = Vec::new();
+        for col in 0..256i64 {
+            let mut buf = [0u16; 512];
+            let mut item = LVITEMW {
+                mask: LVIF_TEXT,
+                iItem: row as c_int,
+                iSubItem: col as c_int,
+                state: 0,
+                stateMask: 0,
+                pszText: buf.as_mut_ptr(),
+                cchTextMax: buf.len() as c_int,
+                iImage: 0,
+                lParam: 0,
+                iIndent: 0,
+                iGroupId: 0,
+                cColumns: 0,
+                puColumns: ptr::null_mut(),
+                piColFmt: ptr::null_mut(),
+                iGroup: 0,
+            };
+            let r = unsafe { SendMessageW(hctl, LVM_GETITEMW, 0, &mut item as *mut LVITEMW as LPARAM) };
+            if r == 0 {
+                break;
+            }
+            let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+            cells.push(Value::Str(String::from_utf16_lossy(&buf[..len])));
+        }
+        Ok(Value::List(cells))
+    }
+
+    fn table_set(win_id: i64, ctl_id: i64, row: i64, col: i64, text: &str, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let wins = WINDOWS.lock().unwrap();
+        let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        let ws = to_utf16(text);
+        let mut item = LVITEMW {
+            mask: LVIF_TEXT,
+            iItem: row as c_int,
+            iSubItem: col as c_int,
+            state: 0,
+            stateMask: 0,
+            pszText: ws.as_ptr() as LPWSTR,
+            cchTextMax: 0,
+            iImage: 0,
+            lParam: 0,
+            iIndent: 0,
+            iGroupId: 0,
+            cColumns: 0,
+            puColumns: ptr::null_mut(),
+            piColFmt: ptr::null_mut(),
+            iGroup: 0,
+        };
+        unsafe {
+            SendMessageW(hctl, LVM_SETITEMTEXTW, 0, &mut item as *mut LVITEMW as LPARAM);
+        }
+        Ok(Value::Null)
+    }
+
+    // ---------- 树（TreeView）实现 ----------
+
+    /// 添加节点（parent_id = 0 表示根），返回新节点 id。
+    fn tree_add(win_id: i64, ctl_id: i64, parent_id: i64, label: &str, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let mut wins = WINDOWS.lock().unwrap();
+        let win = wins.get_mut(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        let td = match win.ctl_data.get_mut(&ctl_id) {
+            Some(CtlData::Tree(td)) => td,
+            _ => {
+                return Err(zerr(
+                    codes::TYPE_MISMATCH,
+                    format!("widget {} is not a tree", ctl_id),
+                    span,
+                    file,
+                    src,
+                    Some("create it with guipro_tree"),
+                ));
+            }
+        };
+        let parent = if parent_id == 0 {
+            TVI_ROOT
+        } else {
+            match td.nodes.get(&parent_id) {
+                Some(h) => *h,
+                None => {
+                    return Err(zerr(
+                        codes::NOT_FOUND,
+                        format!("tree parent node {} does not exist", parent_id),
+                        span,
+                        file,
+                        src,
+                        Some("check the parent node id"),
+                    ));
+                }
+            }
+        };
+        let node_id = td.next_node;
+        td.next_node += 1;
+        let ws = to_utf16(label);
+        let mut tv = TVINSERTSTRUCTW {
+            hParent: parent,
+            hInsertAfter: TVI_SORT,
+            u: unsafe { std::mem::zeroed() },
+        };
+        unsafe {
+            let item = tv.u.item_mut();
+            item.mask = TVIF_TEXT | TVIF_PARAM;
+            item.pszText = ws.as_ptr() as LPWSTR;
+            item.lParam = node_id as LPARAM;
+        }
+        let hitem = unsafe { SendMessageW(hctl, TVM_INSERTITEMW, 0, &mut tv as *mut TVINSERTSTRUCTW as LPARAM) } as HTREEITEM;
+        td.nodes.insert(node_id, hitem);
+        Ok(Value::Int(node_id))
+    }
+
+    fn tree_clear(win_id: i64, ctl_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let mut wins = WINDOWS.lock().unwrap();
+        let win = wins.get_mut(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        unsafe {
+            SendMessageW(hctl, TVM_DELETEITEM, 0, TVI_ROOT as LPARAM);
+        }
+        if let Some(CtlData::Tree(td)) = win.ctl_data.get_mut(&ctl_id) {
+            td.nodes.clear();
+            td.next_node = 1;
+        }
+        Ok(Value::Null)
+    }
+
+    /// 选中节点 id（无选中返回 -1）。
+    fn tree_get(win_id: i64, ctl_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let wins = WINDOWS.lock().unwrap();
+        let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        let hsel = unsafe { SendMessageW(hctl, TVM_GETNEXTITEM, TVGN_CARET, 0) } as HTREEITEM;
+        if hsel.is_null() {
+            return Ok(Value::Int(-1));
+        }
+        if let Some(CtlData::Tree(td)) = win.ctl_data.get(&ctl_id) {
+            for (id, h) in td.nodes.iter() {
+                if *h == hsel {
+                    return Ok(Value::Int(*id));
+                }
+            }
+        }
+        Ok(Value::Int(-1))
+    }
+
+    // ---------- 画布（Canvas）实现 ----------
+
+    /// 向画布追加图形并重绘。
+    fn canvas_push_shape(win_id: i64, ctl_id: i64, shape: Shape, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let mut wins = WINDOWS.lock().unwrap();
+        let win = wins.get_mut(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        match win.ctl_data.get_mut(&ctl_id) {
+            Some(CtlData::Canvas(shapes)) => shapes.push(shape),
+            _ => {
+                return Err(zerr(
+                    codes::TYPE_MISMATCH,
+                    format!("widget {} is not a canvas", ctl_id),
+                    span,
+                    file,
+                    src,
+                    Some("create it with guipro_canvas"),
+                ));
+            }
+        }
+        unsafe {
+            InvalidateRect(hctl, ptr::null(), 1);
+        }
+        Ok(Value::Null)
+    }
+
+    fn canvas_clear(win_id: i64, ctl_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let mut wins = WINDOWS.lock().unwrap();
+        let win = wins.get_mut(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        if let Some(CtlData::Canvas(shapes)) = win.ctl_data.get_mut(&ctl_id) {
+            shapes.clear();
+        }
+        unsafe {
+            InvalidateRect(hctl, ptr::null(), 1);
+        }
+        Ok(Value::Null)
+    }
+
+    fn canvas_repaint(win_id: i64, ctl_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let wins = WINDOWS.lock().unwrap();
+        let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
+        unsafe {
+            InvalidateRect(hctl, ptr::null(), 1);
+        }
+        Ok(Value::Null)
+    }
+
+    // ---------- 托盘图标实现 ----------
+
+    /// 底层 Shell_NotifyIconW 调用（action: NIM_ADD / NIM_MODIFY / NIM_DELETE）。
+    fn tray_notify(win: &WinState, tip: &str, action: DWORD) {
+        let mut nid: NOTIFYICONDATAW = unsafe { std::mem::zeroed() };
+        nid.cbSize = std::mem::size_of::<NOTIFYICONDATAW>() as DWORD;
+        nid.hWnd = win.hwnd;
+        nid.uID = 1;
+        nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+        nid.uCallbackMessage = 0x8001;
+        nid.hIcon = unsafe { LoadIconW(ptr::null_mut(), IDI_APPLICATION) };
+        let tip16: Vec<u16> = tip.encode_utf16().chain(std::iter::once(0)).collect();
+        for (i, c) in tip16.iter().enumerate() {
+            if i >= 127 {
+                break;
+            }
+            nid.szTip[i] = *c;
+        }
+        unsafe {
+            Shell_NotifyIconW(action, &mut nid);
+        }
+    }
+
+    fn tray_add(win_id: i64, tip: &str, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let mut wins = WINDOWS.lock().unwrap();
+        let win = wins.get_mut(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        tray_notify(win, tip, NIM_ADD);
+        win.tray_added = true;
+        Ok(Value::Null)
+    }
+
+    fn tray_tip(win_id: i64, tip: &str, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let wins = WINDOWS.lock().unwrap();
+        let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        tray_notify(win, tip, NIM_MODIFY);
+        Ok(Value::Null)
+    }
+
+    fn tray_remove(win_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let mut wins = WINDOWS.lock().unwrap();
+        let win = wins.get_mut(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        tray_notify(win, "", NIM_DELETE);
+        win.tray_added = false;
+        Ok(Value::Null)
+    }
+
+    // ---------- 菜单栏实现 ----------
+
+    /// 递归构建菜单（items 元素：{"text": "..", "items": [子项]}；text 为 "-" 表示分隔线）。
+    /// 叶子项自动分配 id 并记录路径（parent_path + "/" + text）到 win.menu_path。
+    fn build_menu(win: &mut WinState, items: &Value, parent_path: &str, span: Span, file: &str, src: &str) -> Result<HMENU, ZError> {
+        let list = match items {
+            Value::List(l) => l,
+            _ => {
+                return Err(zerr(
+                    codes::TYPE_MISMATCH,
+                    "menu items must be a list of dicts",
+                    span,
+                    file,
+                    src,
+                    Some("pass e.g. [{\"text\": \"文件\", \"items\": [...]}]"),
+                ));
+            }
+        };
+        let menu = unsafe { CreateMenu() };
+        for item in list {
+            let text = dict_str(item, "text", span, file, src)?;
+            if text == "-" {
+                unsafe {
+                    AppendMenuW(menu, MF_SEPARATOR, 0, ptr::null());
+                }
+                continue;
+            }
+            // 有子项 → 弹出子菜单；否则 → 叶子菜单项
+            if dict_get(item, "items").is_some() {
+                let sub = build_menu(win, item, "", span, file, src)?;
+                let ws = to_utf16(&text);
+                unsafe {
+                    AppendMenuW(menu, MF_POPUP, sub as usize, ws.as_ptr());
+                }
+            } else {
+                let id = win.next_menu_id;
+                win.next_menu_id += 1;
+                let path = if parent_path.is_empty() {
+                    text.clone()
+                } else {
+                    format!("{}/{}", parent_path, text)
+                };
+                win.menu_path.insert(id, path);
+                let ws = to_utf16(&text);
+                unsafe {
+                    AppendMenuW(menu, MF_STRING, id as usize, ws.as_ptr());
+                }
+            }
+        }
+        Ok(menu)
+    }
+
+    /// 构建菜单栏并挂到窗口（替换旧菜单）。
+    fn menu(win_id: i64, items: &Value, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let mut wins = WINDOWS.lock().unwrap();
+        let win = wins.get_mut(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        let m = build_menu(win, items, "", span, file, src)?;
+        unsafe {
+            SetMenu(win.hwnd, m);
+            DrawMenuBar(win.hwnd);
+        }
+        // 回收旧菜单句柄
+        if let Some(old) = win.menu_hmenu {
+            unsafe {
+                DestroyMenu(old);
+            }
+        }
+        win.menu_hmenu = Some(m);
+        Ok(Value::Null)
     }
 
     fn ctl_missing(win_id: i64, ctl_id: i64, span: Span, file: &str, src: &str) -> ZError {

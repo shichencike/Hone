@@ -13,6 +13,7 @@ mod fmt;
 mod guimod;
 #[cfg(not(windows))]
 mod guimod_gtk;
+mod guimod_x11;
 mod header;
 mod interp;
 mod lexer;

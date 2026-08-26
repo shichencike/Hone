@@ -45,6 +45,21 @@ function toggleTheme(){
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
 
   <div class="release">
+    <span class="ver-tag">v0.7.4</span><span class="date">2026-08-26</span>
+    <h4>新增</h4>
+    <ul>
+      <li><strong>guipro 进阶控件</strong>：滑块 <code>slider</code> / 表格 <code>table</code> / 树 <code>tree</code> / 画布 <code>canvas</code>，
+        支持读写（<code>guipro_table_*</code> / <code>guipro_tree_*</code> / <code>guipro_canvas_*</code>）与事件；
+        示例 <code>examples/guipro_adv_demo.hn</code>（滑块/表格/树/画布/托盘/菜单）</li>
+      <li><strong>托盘图标与菜单栏</strong>：<code>guipro_tray_add/tray_tip/tray_remove</code>（Windows 用
+        Shell_NotifyIcon，Linux X11 用 XEmbed 系统托盘协议）、<code>guipro_menu</code> 菜单栏
+        （menu 事件 value=菜单路径）</li>
+      <li><strong>Linux X11 自绘后端</strong>：GTK3 缺失时自动回退 libX11.so.6 动态加载的单窗口自绘后端，
+        覆盖全部控件与事件（含托盘 XEmbed）；本机 Windows 亦可 cargo check 编译验证</li>
+    </ul>
+  </div>
+
+  <div class="release">
     <span class="ver-tag">v0.7.3</span><span class="date">2026-08-25</span>
     <h4>新增</h4>
     <ul>

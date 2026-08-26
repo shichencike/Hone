@@ -326,8 +326,29 @@ pub fn is_builtin(name: &str) -> bool {
             | "guipro.poll"
             | "guipro.set_text"
             | "guipro.get_text"
+            | "guipro.set_value"
+            | "guipro.get_value"
             | "guipro.close"
             | "guipro.msgbox"
+            | "guipro.table_add_row"
+            | "guipro.table_clear"
+            | "guipro.table_count"
+            | "guipro.table_get"
+            | "guipro.table_get_row"
+            | "guipro.table_set"
+            | "guipro.tree_add"
+            | "guipro.tree_clear"
+            | "guipro.tree_get"
+            | "guipro.canvas_clear"
+            | "guipro.canvas_line"
+            | "guipro.canvas_rect"
+            | "guipro.canvas_ellipse"
+            | "guipro.canvas_text"
+            | "guipro.canvas_repaint"
+            | "guipro.tray_add"
+            | "guipro.tray_tip"
+            | "guipro.tray_remove"
+            | "guipro.menu"
     )
 }
 
@@ -1148,7 +1169,14 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         }
         // 原生图形界面（guimod 模块实现，Windows: Win32 标准控件）
         "guipro.available" | "guipro.window" | "guipro.add" | "guipro.poll"
-        | "guipro.set_text" | "guipro.get_text" | "guipro.close" | "guipro.msgbox" => {
+        | "guipro.set_text" | "guipro.get_text" | "guipro.set_value" | "guipro.get_value"
+        | "guipro.close" | "guipro.msgbox"
+        | "guipro.table_add_row" | "guipro.table_clear" | "guipro.table_count"
+        | "guipro.table_get" | "guipro.table_get_row" | "guipro.table_set"
+        | "guipro.tree_add" | "guipro.tree_clear" | "guipro.tree_get"
+        | "guipro.canvas_clear" | "guipro.canvas_line" | "guipro.canvas_rect"
+        | "guipro.canvas_ellipse" | "guipro.canvas_text" | "guipro.canvas_repaint"
+        | "guipro.tray_add" | "guipro.tray_tip" | "guipro.tray_remove" | "guipro.menu" => {
             crate::guimod::call(name, &args, span, file, src)
         }
         // ---------- log ----------

@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.7.4] - 2026-08-26
+
+### 新增
+- **guipro 进阶控件**：滑块 slider / 表格 table / 树 tree / 画布 canvas，支持读写
+  （guipro_table_* / guipro_tree_* / guipro_canvas_*）与事件；示例 examples/guipro_adv_demo.hn
+  （滑块/表格/树/画布/托盘/菜单）
+- **托盘图标与菜单栏**：guipro_tray_add/tray_tip/tray_remove（Windows 用 Shell_NotifyIcon，
+  Linux X11 用 XEmbed 系统托盘协议）、guipro_menu 菜单栏（menu 事件 value=菜单路径）
+- **Linux X11 自绘后端**：GTK3 缺失时自动回退 libX11.so.6 动态加载的单窗口自绘后端，
+  覆盖全部控件与事件（含托盘 XEmbed）；本机 Windows 亦可 cargo check 编译验证
+
 ## [v0.7.3] - 2026-08-25
 
 ### 新增

@@ -39,4 +39,4 @@ rustls-webpki = "0.103"
 webpki-roots = "0.26"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["winuser", "winbase", "winreg", "synchapi", "errhandlingapi", "winnt", "wincrypt", "libloaderapi", "wingdi", "windef", "minwindef"] }
+winapi = { version = "0.3", features = ["winuser", "winbase", "winreg", "synchapi", "errhandlingapi", "winnt", "wincrypt", "libloaderapi", "wingdi", "windef", "minwindef", "commctrl", "shellapi", "commdlg", "objbase", "shobjidl"] }
