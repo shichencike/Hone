@@ -1079,6 +1079,18 @@ fn pet_read_events(path : str) {
 
 // ============ 初始化 ============
 
+// 创建目录（含多级父目录；已存在不报错）。
+// 背景：无 mkdir 内置；sys.run 内部已包 `cmd /C <命令>`，若再写 `cmd /c mkdir "路径"` 会
+// 双重嵌套且 Rust 会把含引号参数转义为 \"（cmd 不认），正斜杠路径 cmd 也拒绝（语法错误）。
+// 故用 PowerShell New-Item：单引号路径 Rust 不转义，支持含空格路径与递归建父目录。
+fn pet_mkdir(path : str) {
+    p = str_replace(path, "/", "\\");
+    p = str_replace(p, "'", "''");
+    try {
+        sys.run("powershell -NoProfile -Command New-Item -ItemType Directory -Force -Path '" + p + "'");
+    } catch e { }
+}
+
 // 初始化桌宠：生成帧/脚本/启动窗口，返回完整状态 dict。
 // 状态字段: x/y 窗口左上角坐标、dir 朝向、mode 状态机、frame 当前帧、
 //   pal 调色板、ver 帧版本（换装+1）、follow/mute/show_bubble 开关、
@@ -1097,9 +1109,9 @@ fn pet_init(user) {
         workdir = str_replace(workdir, "\\", "/");
         workdir = workdir + "/hone_pet";
     }
-    try { sys.run("cmd /c mkdir \"" + workdir + "\" 2>nul"); } catch e { }
+    try { pet_mkdir(workdir); } catch e { }
     frames_dir = workdir + "/frames";
-    try { sys.run("cmd /c mkdir \"" + frames_dir + "\" 2>nul"); } catch e { }
+    try { pet_mkdir(frames_dir); } catch e { }
     // 帧：内置生成或外部帧目录
     use_external = false;
     if (len(cfg.frames_dir) > 0 && pet_frames_ready(cfg.frames_dir)) {
@@ -1144,9 +1156,10 @@ fn pet_init(user) {
     write_file(state_file, json_stringify({"frame": st.frame, "x": x, "y": y,
         "text": pet_line_pick(lines, "greet"), "quit": false, "ver": 0,
         "follow": false}));
-    // 启动 PowerShell 透明窗（cmd start 立即返回，不阻塞）
+    // 启动 PowerShell 透明窗（Start-Process 立即返回，不阻塞；
+    // 避免 `cmd /c start "" ...` 的双重 cmd 嵌套与引号转义问题）
     try {
-        sys.run("cmd /c start \"\" powershell -NoProfile -ExecutionPolicy Bypass -File \"" + ps_file + "\"");
+        sys.run("powershell -NoProfile -Command Start-Process -FilePath powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','" + ps_file + "'");
     } catch e { }
     return st;
 }
