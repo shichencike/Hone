@@ -932,7 +932,7 @@ $form.StartPosition = 'Manual'
 $form.AllowTransparency = $true
 $form.BackColor = $magenta
 $form.TransparencyKey = $magenta
-$form.ClientSize = New-Object System.Drawing.Size($petW, $petH + $bubbleH)
+$form.ClientSize = New-Object System.Drawing.Size($petW, ($petH + $bubbleH))
 
 $script:curFrame = ''
 $script:curVer = 0
@@ -957,7 +957,7 @@ $form.Add_Paint({
         $font = New-Object System.Drawing.Font('Microsoft YaHei', 9)
         $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(240, 255, 255, 255))
         $pen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(120, 120, 120))
-        $rect = New-Object System.Drawing.Rectangle(2, 2, $form.ClientSize.Width - 4, $bubbleH - 4)
+        $rect = New-Object System.Drawing.Rectangle(2, 2, ($form.ClientSize.Width - 4), ($bubbleH - 4))
         $g.FillRectangle($brush, $rect)
         $g.DrawRectangle($pen, $rect)
         $g.DrawString($script:text, $font, [System.Drawing.Brushes]::Black, 4, 4)
