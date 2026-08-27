@@ -628,8 +628,9 @@ fn pet_frame_ppm(pal, pose : str) -> str {
     return s;
 }
 
-// 生成内置像素猫全部 8 帧为 PPM 文件（dir 需已存在；帧文件名 = 姿态名 + ".ppm"）
-fn pet_save_builtin(dir : str, pal) {
+// 生成内置像素猫全部 8 帧为 PPM 文件，并写入调色板标记 pal.txt
+// （dir 需已存在；帧文件名 = 姿态名 + ".ppm"；pal_idx 供下次判断是否需重建）
+fn pet_save_builtin(dir : str, pal, pal_idx : int) {
     write_file(dir + "/idle0.ppm", pet_frame_ppm(pal, "idle0"));
     write_file(dir + "/idle1.ppm", pet_frame_ppm(pal, "idle1"));
     write_file(dir + "/walk0.ppm", pet_frame_ppm(pal, "walk0"));
@@ -638,6 +639,7 @@ fn pet_save_builtin(dir : str, pal) {
     write_file(dir + "/happy0.ppm", pet_frame_ppm(pal, "happy0"));
     write_file(dir + "/happy1.ppm", pet_frame_ppm(pal, "happy1"));
     write_file(dir + "/surprise0.ppm", pet_frame_ppm(pal, "surprise0"));
+    write_file(dir + "/pal.txt", to_str(pal_idx));
 }
 
 // 检查目录是否已有全部 8 帧 PPM 文件（外部帧替换时用）
@@ -651,6 +653,37 @@ fn pet_frames_ready(dir : str) -> bool {
         }
     }
     return true;
+}
+
+// 内置帧是否已就绪：8 帧齐全且调色板标记与 pal_idx 一致
+fn pet_builtin_ready(dir : str, pal_idx : int) -> bool {
+    mark = "";
+    try { mark = str_trim(read_file(dir + "/pal.txt")); } catch e { }
+    if (mark != to_str(pal_idx)) { return false; }
+    return pet_frames_ready(dir);
+}
+
+// 确保内置帧就绪（缺失才创建）：调色板标记不匹配（换装/改 pal）时全量重建；
+// 标记匹配但缺帧时仅补齐缺失的帧。dir 需已存在。
+fn pet_ensure_builtin(dir : str, pal, pal_idx : int) {
+    mark = "";
+    try { mark = str_trim(read_file(dir + "/pal.txt")); } catch e { }
+    if (mark == to_str(pal_idx)) {
+        // 调色板一致：只补缺失帧
+        for n in ["idle0", "idle1", "walk0", "walk1", "sleep0", "happy0", "happy1", "surprise0"] {
+            ok = false;
+            try {
+                t = read_file(dir + "/" + n + ".ppm");
+                if (len(t) >= 20) { ok = true; }
+            } catch e { }
+            if (!ok) {
+                write_file(dir + "/" + n + ".ppm", pet_frame_ppm(pal, n));
+            }
+        }
+        return;
+    }
+    // 调色板变化或首次运行：全量重建（含 pal.txt 标记）
+    pet_save_builtin(dir, pal, pal_idx);
 }
 
 // ============ PPM P3 解析（外部帧替换用） ============
@@ -1074,7 +1107,8 @@ fn pet_init(user) {
         frames_dir = cfg.frames_dir;
     } else {
         pal = pet_palette(cfg.pal);
-        pet_save_builtin(frames_dir, pal);
+        // 内置帧缺失才创建/补齐（含调色板标记检查，避免每次启动全量重建）
+        pet_ensure_builtin(frames_dir, pal, cfg.pal);
     }
     // 台词
     lines = pet_lines();
@@ -1193,7 +1227,7 @@ fn pet_tick(st) {
                     pal = (pal + 1) % 3;
                     ver = ver + 1;
                     p2 = pet_palette(pal);
-                    pet_save_builtin(st.frame_dir, p2);
+                    pet_save_builtin(st.frame_dir, p2, pal);
                     text = "换装完成！";
                     text_until = now + 2;
                 }
