@@ -145,7 +145,7 @@ mod platform {
     use winapi::ctypes::{c_int, c_void};
     use winapi::shared::minwindef::{DWORD, HINSTANCE, HIWORD, LOWORD, LPARAM, LRESULT, UINT, WPARAM, WORD};
     use winapi::shared::ntdef::LPWSTR;
-    use winapi::shared::windef::{HBRUSH, HDC, HGDIOBJ, HFONT, HMENU, HWND};
+    use winapi::shared::windef::{HBRUSH, HDC, HGDIOBJ, HFONT, HMENU, HWND, POINT, RECT};
     use winapi::um::errhandlingapi::GetLastError;
     use winapi::um::commctrl::{
         InitCommonControlsEx, INITCOMMONCONTROLSEX, ICC_BAR_CLASSES, ICC_LISTVIEW_CLASSES,
@@ -169,6 +169,10 @@ mod platform {
         GetStockObject, DEFAULT_GUI_FONT, CreatePen, CreateSolidBrush, SelectObject, DeleteObject,
         MoveToEx, LineTo, Rectangle, Ellipse, SetTextColor, SetBkMode, TextOutW,
         PS_SOLID, NULL_BRUSH, WHITE_BRUSH, TRANSPARENT,
+        StretchDIBits, SetStretchBltMode, CreateFontW,
+        BITMAPINFO, BITMAPINFOHEADER, BI_RGB, COLORONCOLOR, DIB_RGB_COLORS, SRCCOPY,
+        DEFAULT_CHARSET, FW_NORMAL, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, FF_DONTCARE,
     };
     use winapi::um::winuser::*;
 
@@ -199,6 +203,43 @@ mod platform {
         menu_hmenu: Option<HMENU>,
         /// 托盘图标是否已添加（每窗口一个）
         tray_added: bool,
+        /// 桌宠窗口状态（guipro.pet_window 创建的窗口才有）
+        pet: Option<PetState>,
+    }
+
+    /// 桌宠窗口附加状态（pet_* 内置函数使用）。
+    struct PetState {
+        /// 帧源尺寸（Hone 侧传入，通常 48×48）
+        fw: i32,
+        fh: i32,
+        /// 帧 RGB 缓冲（fw*fh*3；已按 flip 处理）
+        frame: Vec<u8>,
+        /// 气泡文本（"" 表示不显示）
+        text: String,
+        /// 拖拽状态
+        dragging: bool,
+        drag_moved: bool,
+        drag_ox: i32,
+        drag_oy: i32,
+        drag_start_x: i32,
+        drag_start_y: i32,
+    }
+
+    impl Clone for PetState {
+        fn clone(&self) -> Self {
+            PetState {
+                fw: self.fw,
+                fh: self.fh,
+                frame: self.frame.clone(),
+                text: self.text.clone(),
+                dragging: false,
+                drag_moved: false,
+                drag_ox: 0,
+                drag_oy: 0,
+                drag_start_x: 0,
+                drag_start_y: 0,
+            }
+        }
     }
 
     /// 控件附加数据（进阶控件专用）
@@ -450,6 +491,138 @@ mod platform {
                 DestroyWindow(hwnd);
                 0
             }
+            // ---------- 桌宠窗口（pet_*） ----------
+            WM_PAINT => {
+                if let Some(win_id) = find_win_by_hwnd(hwnd) {
+                    let pet = { WINDOWS.lock().unwrap().get(&win_id).and_then(|w| w.pet.clone()) };
+                    if let Some(p) = pet {
+                        paint_pet(hwnd, &p);
+                        return 0;
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_ERASEBKGND => {
+                if let Some(win_id) = find_win_by_hwnd(hwnd) {
+                    let is_pet = WINDOWS.lock().unwrap().get(&win_id).map_or(false, |w| w.pet.is_some());
+                    if is_pet {
+                        // 背景由 WM_PAINT 全量绘制，跳过擦除避免闪烁
+                        return 1;
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_LBUTTONDOWN => {
+                if let Some(win_id) = find_win_by_hwnd(hwnd) {
+                    let is_pet = WINDOWS.lock().unwrap().get(&win_id).map_or(false, |w| w.pet.is_some());
+                    if is_pet {
+                        let mut cur: POINT = std::mem::zeroed();
+                        let mut rc: RECT = std::mem::zeroed();
+                        unsafe {
+                            GetCursorPos(&mut cur);
+                            GetWindowRect(hwnd, &mut rc);
+                            SetCapture(hwnd);
+                        }
+                        let mut wins = WINDOWS.lock().unwrap();
+                        if let Some(w) = wins.get_mut(&win_id) {
+                            if let Some(p) = w.pet.as_mut() {
+                                p.dragging = true;
+                                p.drag_moved = false;
+                                p.drag_ox = cur.x - rc.left;
+                                p.drag_oy = cur.y - rc.top;
+                                p.drag_start_x = cur.x;
+                                p.drag_start_y = cur.y;
+                            }
+                        }
+                        return 0;
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_MOUSEMOVE => {
+                let win_id = find_win_by_hwnd(hwnd);
+                let dragging = win_id.map_or(false, |id| {
+                    WINDOWS.lock().unwrap().get(&id).map_or(false, |w| w.pet.as_ref().map_or(false, |p| p.dragging))
+                });
+                if dragging {
+                    let win_id = win_id.unwrap();
+                    let mut cur: POINT = std::mem::zeroed();
+                    unsafe { GetCursorPos(&mut cur); }
+                    let (ox, oy, sx, sy) = {
+                        let wins = WINDOWS.lock().unwrap();
+                        let p = wins.get(&win_id).and_then(|w| w.pet.as_ref()).unwrap();
+                        (p.drag_ox, p.drag_oy, p.drag_start_x, p.drag_start_y)
+                    };
+                    let nx = cur.x - ox;
+                    let ny = cur.y - oy;
+                    if nx >= 0 && ny >= 0 {
+                        unsafe {
+                            SetWindowPos(hwnd, ptr::null_mut(), nx, ny, 0, 0,
+                                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                        }
+                    }
+                    // 相对拖拽起点位移超过 3px 才算拖拽（否则视为点击）
+                    let mut wins = WINDOWS.lock().unwrap();
+                    if let Some(w) = wins.get_mut(&win_id) {
+                        if let Some(p) = w.pet.as_mut() {
+                            if !p.drag_moved {
+                                let dx = cur.x - sx;
+                                let dy = cur.y - sy;
+                                if dx * dx + dy * dy > 9 {
+                                    p.drag_moved = true;
+                                }
+                            }
+                        }
+                    }
+                    return 0;
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_LBUTTONUP => {
+                if let Some(win_id) = find_win_by_hwnd(hwnd) {
+                    let mut wins = WINDOWS.lock().unwrap();
+                    if let Some(w) = wins.get_mut(&win_id) {
+                        if let Some(p) = w.pet.as_mut() {
+                            if p.dragging {
+                                p.dragging = false;
+                                let moved = p.drag_moved;
+                                let mut rc: RECT = std::mem::zeroed();
+                                unsafe {
+                                    ReleaseCapture();
+                                    GetWindowRect(hwnd, &mut rc);
+                                }
+                                if moved {
+                                    push_event(win_id, 0, "drag", &format!("{},{}", rc.left, rc.top));
+                                } else {
+                                    push_event(win_id, 0, "click", "");
+                                }
+                                return 0;
+                            }
+                        }
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_LBUTTONDBLCLK => {
+                if let Some(win_id) = find_win_by_hwnd(hwnd) {
+                    let is_pet = WINDOWS.lock().unwrap().get(&win_id).map_or(false, |w| w.pet.is_some());
+                    if is_pet {
+                        push_event(win_id, 0, "dblclick", "");
+                        return 0;
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
+            WM_RBUTTONUP => {
+                if let Some(win_id) = find_win_by_hwnd(hwnd) {
+                    let is_pet = WINDOWS.lock().unwrap().get(&win_id).map_or(false, |w| w.pet.is_some());
+                    if is_pet {
+                        push_event(win_id, 0, "rclick", "");
+                        return 0;
+                    }
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
+            }
             WM_DESTROY => {
                 // 从注册表移除（close 已推送事件，脚本侧据此收尾）
                 if let Some(win_id) = find_win_by_hwnd(hwnd) {
@@ -494,7 +667,8 @@ mod platform {
                 let class_name = to_utf16("HoneGuiproWnd");
                 let wc = WNDCLASSEXW {
                     cbSize: std::mem::size_of::<WNDCLASSEXW>() as UINT,
-                    style: CS_HREDRAW | CS_VREDRAW,
+                    // CS_DBLCLKS：桌宠窗口需要 WM_LBUTTONDBLCLK（双击事件）
+                    style: CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
                     lpfnWndProc: Some(wnd_proc),
                     cbClsExtra: 0,
                     cbWndExtra: 0,
@@ -907,6 +1081,72 @@ mod platform {
                 let win = as_int(&args[0], 0, span, file, src)?;
                 menu(win, &args[1], span, file, src)
             }
+            // ---------- 桌宠窗口（guipro.pet_*） ----------
+            "guipro.pet_window" => {
+                if args.len() != 3 {
+                    return Err(arg_count(name, 3, args.len(), span, file, src));
+                }
+                let title = as_str(&args[0], 0, span, file, src)?;
+                let w = as_int(&args[1], 1, span, file, src)?;
+                let h = as_int(&args[2], 2, span, file, src)?;
+                pet_window(title, w, h, span, file, src)
+            }
+            "guipro.pet_frame" => {
+                if args.len() != 5 {
+                    return Err(arg_count(name, 5, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let w = as_int(&args[1], 1, span, file, src)?;
+                let h = as_int(&args[2], 2, span, file, src)?;
+                let rgb = as_str(&args[3], 3, span, file, src)?;
+                let flip = as_int(&args[4], 4, span, file, src)?;
+                pet_frame(win, w, h, rgb, flip, span, file, src)
+            }
+            "guipro.pet_text" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let text = as_str(&args[1], 1, span, file, src)?;
+                pet_text(win, text, span, file, src)
+            }
+            "guipro.pet_move" => {
+                if args.len() != 3 {
+                    return Err(arg_count(name, 3, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                let x = as_int(&args[1], 1, span, file, src)?;
+                let y = as_int(&args[2], 2, span, file, src)?;
+                pet_move(win, x, y, span, file, src)
+            }
+            "guipro.pet_pos" => {
+                if args.len() != 1 {
+                    return Err(arg_count(name, 1, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                pet_pos(win, span, file, src)
+            }
+            "guipro.pet_cursor" => {
+                if args.len() != 1 {
+                    return Err(arg_count(name, 1, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                pet_cursor(win, span, file, src)
+            }
+            "guipro.pet_menu" => {
+                if args.len() != 2 {
+                    return Err(arg_count(name, 2, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                pet_menu(win, &args[1], span, file, src)
+            }
+            "guipro.pet_close" => {
+                if args.len() != 1 {
+                    return Err(arg_count(name, 1, args.len(), span, file, src));
+                }
+                let win = as_int(&args[0], 0, span, file, src)?;
+                pet_close(win, span, file, src)
+            }
             other => Err(zerr(
                 codes::UNDEFINED,
                 format!("undefined function `{}`", other),
@@ -971,6 +1211,75 @@ mod platform {
                 next_menu_id: 0x1000,
                 menu_hmenu: None,
                 tray_added: false,
+                pet: None,
+            },
+        );
+        unsafe {
+            ShowWindow(hwnd, SW_SHOW);
+            UpdateWindow(hwnd);
+        }
+        Ok(Value::Int(win_id))
+    }
+
+    /// 创建桌宠窗（guipro.pet_window）：无边框 + 置顶 + 任务栏隐藏 + 品红键透明 + 不抢焦点。
+    /// 帧/气泡/移动/菜单/关闭分别用 pet_frame/pet_text/pet_move/pet_menu/pet_close 操作。
+    fn pet_window(title: &str, w: i64, h: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        if w <= 0 || h <= 0 {
+            return Err(zerr(
+                codes::TYPE_MISMATCH,
+                "`guipro.pet_window` requires positive width and height",
+                span,
+                file,
+                src,
+                Some("pass w > 0 and h > 0"),
+            ));
+        }
+        let hinst = ensure_class(span, file, src)?;
+        let win_id = NEXT_WIN_ID.fetch_add(1, Ordering::Relaxed);
+        let hwnd = unsafe {
+            CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE,
+                to_utf16("HoneGuiproWnd").as_ptr(),
+                to_utf16(title).as_ptr(),
+                WS_POPUP | WS_VISIBLE,
+                CW_USEDEFAULT, CW_USEDEFAULT,
+                w as i32, h as i32,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                hinst,
+                ptr::null_mut(),
+            )
+        };
+        if hwnd.is_null() {
+            return Err(win_err("CreateWindowExW", span, file, src));
+        }
+        // 品红 (255,0,255) 颜色键透明（与 pet 帧背景一致）
+        unsafe {
+            SetLayeredWindowAttributes(hwnd, 0x00FF00FF, 0, LWA_COLORKEY);
+        }
+        WINDOWS.lock().unwrap().insert(
+            win_id,
+            WinState {
+                hwnd,
+                ctl_kind: HashMap::new(),
+                ctl_hwnd: HashMap::new(),
+                ctl_data: HashMap::new(),
+                menu_path: HashMap::new(),
+                next_menu_id: 0x1000,
+                menu_hmenu: None,
+                tray_added: false,
+                pet: Some(PetState {
+                    fw: 0,
+                    fh: 0,
+                    frame: Vec::new(),
+                    text: String::new(),
+                    dragging: false,
+                    drag_moved: false,
+                    drag_ox: 0,
+                    drag_oy: 0,
+                    drag_start_x: 0,
+                    drag_start_y: 0,
+                }),
             },
         );
         unsafe {
@@ -1215,6 +1524,126 @@ mod platform {
         }
     }
 
+    // ---------- 桌宠窗口绘制与帧数据处理 ----------
+
+    /// 解析 "r g b r g b ..." 十进制 RGB 文本为字节缓冲（需恰好 need 个字节）。
+    fn parse_rgb(s: &str, need: usize) -> Result<Vec<u8>, String> {
+        let mut out: Vec<u8> = Vec::with_capacity(need);
+        let mut cur: u32 = 0;
+        let mut has = false;
+        for b in s.bytes() {
+            if b == b' ' || b == b'\n' || b == b'\t' || b == b'\r' {
+                if has {
+                    if cur > 255 {
+                        return Err("frame RGB value out of range (0-255)".into());
+                    }
+                    out.push(cur as u8);
+                    cur = 0;
+                    has = false;
+                    if out.len() == need {
+                        break;
+                    }
+                }
+            } else if b.is_ascii_digit() {
+                cur = cur * 10 + (b - b'0') as u32;
+                has = true;
+            } else {
+                return Err("invalid byte in frame RGB data (expect decimal digits)".into());
+            }
+        }
+        if has {
+            if cur > 255 {
+                return Err("frame RGB value out of range (0-255)".into());
+            }
+            out.push(cur as u8);
+        }
+        if out.len() != need {
+            return Err(format!("frame RGB data needs {} bytes, got {}", need, out.len()));
+        }
+        Ok(out)
+    }
+
+    /// 水平翻转 RGB 缓冲（行内左右镜像）。
+    fn flip_rgb(mut buf: Vec<u8>, fw: i32, fh: i32) -> Vec<u8> {
+        let w = fw.max(0) as usize;
+        for y in 0..fh.max(0) as usize {
+            let row = y * w;
+            for x in 0..w / 2 {
+                let a = (row + x) * 3;
+                let b = (row + w - 1 - x) * 3;
+                for k in 0..3 {
+                    buf.swap(a + k, b + k);
+                }
+            }
+        }
+        buf
+    }
+
+    /// 桌宠窗 WM_PAINT：品红底 + 帧最近邻放大 + 顶部气泡文本。
+    fn paint_pet(hwnd: HWND, pet: &PetState) {
+        unsafe {
+            let mut ps: PAINTSTRUCT = std::mem::zeroed();
+            let hdc = BeginPaint(hwnd, &mut ps);
+            let mut rc: RECT = std::mem::zeroed();
+            GetClientRect(hwnd, &mut rc);
+            let cw = rc.right - rc.left;
+            let ch = rc.bottom - rc.top;
+            let bubble_h = 30;
+            // 品红底（透明键）
+            let bg = CreateSolidBrush(0x00FF00FF);
+            FillRect(hdc, &rc, bg);
+            DeleteObject(bg as HGDIOBJ);
+            // 帧（最近邻放大到窗口下部区域）
+            if !pet.frame.is_empty() && pet.fw > 0 && pet.fh > 0 && ch > bubble_h {
+                let mut bmi: BITMAPINFO = std::mem::zeroed();
+                bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+                bmi.bmiHeader.biWidth = pet.fw;
+                bmi.bmiHeader.biHeight = -pet.fh; // 自顶向下
+                bmi.bmiHeader.biPlanes = 1;
+                bmi.bmiHeader.biBitCount = 24;
+                bmi.bmiHeader.biCompression = BI_RGB;
+                SetStretchBltMode(hdc, COLORONCOLOR);
+                StretchDIBits(
+                    hdc,
+                    0, bubble_h, cw, ch - bubble_h,
+                    0, 0, pet.fw, pet.fh,
+                    pet.frame.as_ptr() as *const c_void,
+                    &bmi,
+                    DIB_RGB_COLORS,
+                    SRCCOPY,
+                );
+            }
+            // 气泡：白底圆角感矩形 + 单行文本（居中、超出省略）
+            let text = pet.text.as_str();
+            if !text.is_empty() {
+                let brush = CreateSolidBrush(0x00FFFFFF);
+                let mut br: RECT = RECT { left: 2, top: 2, right: cw - 2, bottom: bubble_h - 2 };
+                if br.right > br.left && br.bottom > br.top {
+                    FillRect(hdc, &br, brush);
+                }
+                DeleteObject(brush as HGDIOBJ);
+                let font = CreateFontW(
+                    -14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
+                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                    DEFAULT_PITCH | FF_DONTCARE, to_utf16("Microsoft YaHei").as_ptr(),
+                );
+                let old = SelectObject(hdc, font as HGDIOBJ);
+                SetTextColor(hdc, 0x00000000);
+                SetBkMode(hdc, TRANSPARENT as i32);
+                let ws = to_utf16(text);
+                let mut tr: RECT = RECT { left: 4, top: 2, right: cw - 4, bottom: bubble_h - 2 };
+                DrawTextW(
+                    hdc, ws.as_ptr(), text.len() as i32, &mut tr,
+                    winapi::um::winuser::DT_SINGLELINE | winapi::um::winuser::DT_VCENTER
+                        | winapi::um::winuser::DT_CENTER | winapi::um::winuser::DT_END_ELLIPSIS,
+                );
+                SelectObject(hdc, old);
+                DeleteObject(font as HGDIOBJ);
+            }
+            EndPaint(hwnd, &ps);
+        }
+    }
+
     /// canvas 子窗口过程：WM_PAINT 自绘，WM_LBUTTONDOWN 推送点击事件。
     unsafe extern "system" fn canvas_wnd_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
         match msg {
@@ -1298,6 +1727,185 @@ mod platform {
                 MB_OK | MB_ICONINFORMATION,
             );
         }
+        Ok(Value::Null)
+    }
+
+    // ---------- 桌宠窗口（guipro.pet_*） ----------
+
+    /// 取桌宠窗口句柄并校验其确为宠物窗。
+    fn pet_hwnd(win_id: i64, span: Span, file: &str, src: &str) -> Result<HWND, ZError> {
+        let wins = WINDOWS.lock().unwrap();
+        let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
+        if win.pet.is_none() {
+            return Err(zerr(
+                codes::TYPE_MISMATCH,
+                format!("window {} is not a pet window (create it with `guipro.pet_window`)", win_id),
+                span,
+                file,
+                src,
+                Some("check the window id"),
+            ));
+        }
+        Ok(win.hwnd)
+    }
+
+    /// 推帧：RGB 十进制文本 → 缓冲并重绘；flip 非 0 时水平翻转。
+    fn pet_frame(win_id: i64, w: i64, h: i64, rgb: &str, flip: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        if w <= 0 || h <= 0 {
+            return Err(zerr(
+                codes::TYPE_MISMATCH,
+                "`guipro.pet_frame` requires positive frame width and height",
+                span,
+                file,
+                src,
+                Some("pass w > 0 and h > 0"),
+            ));
+        }
+        let need = (w * h * 3) as usize;
+        let buf = parse_rgb(rgb, need).map_err(|e| {
+            zerr(
+                codes::TYPE_MISMATCH,
+                format!("`guipro.pet_frame` frame data error: {}", e),
+                span,
+                file,
+                src,
+                Some("frame data must be \"r g b r g b ...\" decimal text of w*h*3 values"),
+            )
+        })?;
+        let buf = if flip != 0 { flip_rgb(buf, w as i32, h as i32) } else { buf };
+        let hwnd = pet_hwnd(win_id, span, file, src)?;
+        let mut wins = WINDOWS.lock().unwrap();
+        if let Some(ws) = wins.get_mut(&win_id) {
+            if let Some(p) = ws.pet.as_mut() {
+                p.fw = w as i32;
+                p.fh = h as i32;
+                p.frame = buf;
+            }
+        }
+        unsafe {
+            InvalidateRect(hwnd, ptr::null_mut(), 1);
+        }
+        Ok(Value::Null)
+    }
+
+    /// 设置气泡文本（"" 清除）。
+    fn pet_text(win_id: i64, text: &str, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let hwnd = pet_hwnd(win_id, span, file, src)?;
+        let mut wins = WINDOWS.lock().unwrap();
+        if let Some(w) = wins.get_mut(&win_id) {
+            if let Some(p) = w.pet.as_mut() {
+                p.text = text.to_string();
+            }
+        }
+        unsafe {
+            InvalidateRect(hwnd, ptr::null_mut(), 1);
+        }
+        Ok(Value::Null)
+    }
+
+    /// 移动窗口到屏幕坐标 (x, y)。
+    fn pet_move(win_id: i64, x: i64, y: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let hwnd = pet_hwnd(win_id, span, file, src)?;
+        unsafe {
+            SetWindowPos(hwnd, ptr::null_mut(), x as i32, y as i32, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        Ok(Value::Null)
+    }
+
+    /// 当前窗口位置 "x,y"。
+    fn pet_pos(win_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let hwnd = pet_hwnd(win_id, span, file, src)?;
+        let mut rc: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetWindowRect(hwnd, &mut rc);
+        }
+        Ok(Value::Str(format!("{},{}", rc.left, rc.top)))
+    }
+
+    /// 光标屏幕坐标 "x,y"（跟随鼠标模式用）。
+    fn pet_cursor(_win_id: i64, _span: Span, _file: &str, _src: &str) -> Result<Value, ZError> {
+        let mut p: POINT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetCursorPos(&mut p);
+        }
+        Ok(Value::Str(format!("{},{}", p.x, p.y)))
+    }
+
+    /// 弹出右键菜单（items 为字符串列表），返回选中项文本；未选择返回 ""。
+    fn pet_menu(win_id: i64, items: &Value, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let hwnd = pet_hwnd(win_id, span, file, src)?;
+        let labels: Vec<String> = match items {
+            Value::List(list) => {
+                let mut out = Vec::with_capacity(list.len());
+                for v in list {
+                    match v {
+                        Value::Str(s) => out.push(s.clone()),
+                        other => {
+                            return Err(zerr(
+                                codes::TYPE_MISMATCH,
+                                format!("`guipro.pet_menu` expects a list of strings, got item `{}`", other.type_name()),
+                                span,
+                                file,
+                                src,
+                                Some("pass a list of menu labels"),
+                            ));
+                        }
+                    }
+                }
+                out
+            }
+            other => {
+                return Err(zerr(
+                    codes::TYPE_MISMATCH,
+                    format!("`guipro.pet_menu` expects a list of strings, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("pass a list of menu labels"),
+                ));
+            }
+        };
+        if labels.is_empty() {
+            return Ok(Value::Str(String::new()));
+        }
+        let hmenu = unsafe { CreatePopupMenu() };
+        if hmenu.is_null() {
+            return Err(win_err("CreatePopupMenu", span, file, src));
+        }
+        for (i, s) in labels.iter().enumerate() {
+            unsafe {
+                AppendMenuW(hmenu, MF_STRING, (0x1000 + i) as usize, to_utf16(s).as_ptr());
+            }
+        }
+        let mut cur: POINT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetCursorPos(&mut cur);
+        }
+        let sel = unsafe {
+            TrackPopupMenu(hmenu, TPM_RIGHTBUTTON | TPM_RETURNCMD, cur.x, cur.y, 0, hwnd, ptr::null_mut())
+        };
+        unsafe {
+            DestroyMenu(hmenu);
+        }
+        if sel == 0 {
+            return Ok(Value::Str(String::new()));
+        }
+        let idx = (sel - 0x1000) as usize;
+        if idx < labels.len() {
+            Ok(Value::Str(labels[idx].clone()))
+        } else {
+            Ok(Value::Str(String::new()))
+        }
+    }
+
+    /// 销毁桌宠窗并推送 close 事件。
+    fn pet_close(win_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+        let hwnd = pet_hwnd(win_id, span, file, src)?;
+        unsafe {
+            DestroyWindow(hwnd);
+        }
+        push_event(win_id, 0, "close", "");
         Ok(Value::Null)
     }
 

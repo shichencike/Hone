@@ -489,9 +489,11 @@ hone --help / --version 帮助信息 / 版本信息
 · input(prompt?) → str：从标准输入读取一行（去除行尾换行），可选提示文本（须为 str）；EOF（管道关闭 / Ctrl+Z / Ctrl+D）报 error[H306]
 · read_int(prompt?) → int：读取一行并解析为整数，格式非法报 error[H006]
 · read_float(prompt?) → float：读取一行并解析为浮点数，格式非法报 error[H007]
-· read_file(path) → str：读取文本文件内容
+· read_file(path) → str：读取文本文件内容（文件为二进制/非法 UTF-8 时报错，二进制请用 read_bytes）
 · write_file(path, content)：写入文本文件
 · file_exists(path) → bool：检查文件是否存在
+· read_bytes(path) → list[int]：读取文件原始字节（每个元素为 0-255 的 int，二进制安全）
+· write_bytes(path, bytes)：将字节列表（int 0-255）原样写入文件
 · len(value) → int：返回字符串长度（字节数）、列表/字典元素个数
 · type_of(value) → str：返回变量类型名称（"int"、"float"、"bool"、"str"、"list"、"dict"、"null"、"error"、"ptr"）
 · http_get(url) → str：发送 HTTP GET 请求，返回响应体（支持 http:// 与 https://，TLS 为纯 Rust 实现、内置 Mozilla 根证书，
@@ -913,6 +915,19 @@ Hone 层 hone_lib/guipro.hn 提供 guipro_ 前缀统一 API + 闭包分发主循
   （需托盘管理器，如 GNOME Shell / KDE Plasma / stalonetray）；tray 事件 value=left/right/double
 · 菜单栏 guipro_menu(win, items)：items 为嵌套列表 [{"text": "文件", "items": [{"text": "打开"}, ...]}]；
   menu 事件 value=菜单路径（如 "文件/打开"）；text 为 "-" 表示分隔线
+
+桌宠窗口（guipro.pet_*，Windows 专用，hone_lib/pet.hn 桌宠库使用）：
+· guipro.pet_window(title, w, h) → int：创建桌宠窗（WS_POPUP + 品红键透明 + 置顶 + 任务栏隐藏 + 不抢焦点）
+· guipro.pet_frame(win, w, h, rgb, flip)：推帧；rgb 为 "r g b r g b ..." 十进制文本（w*h*3 个数），
+  Rust 端解析后最近邻放大到窗口尺寸，flip 非 0 水平翻转
+· guipro.pet_text(win, text)：气泡文本（"" 清除）
+· guipro.pet_move(win, x, y)：移动窗口到屏幕坐标
+· guipro.pet_pos(win) → "x,y"：当前窗口位置
+· guipro.pet_cursor(win) → "x,y"：光标屏幕坐标（跟随鼠标模式用）
+· guipro.pet_menu(win, items) → str：光标处弹出右键菜单（items 为字符串列表），返回选中项文本（未选 ""）
+· guipro.pet_close(win)：销毁桌宠窗（推送 close 事件）
+桌宠窗事件（guipro.poll）：click / dblclick / drag（value="x,y" 拖拽后窗口位置，拖拽由 Rust 端
+SetCapture 完成）/ rclick（右键，Hone 侧调 pet_menu 弹菜单）/ close
 
 说明：builtins::call 无解释器上下文，闭包回调无法从 Rust 直接调用，故事件分发
 在 Hone 层完成——hone_lib/guipro.hn 的 guipro_run(handlers) 主循环轮询 poll、

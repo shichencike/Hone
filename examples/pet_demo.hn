@@ -1,11 +1,11 @@
-// pet_demo.hn - 桌宠标准库演示（Windows：Hone 驱动 + PowerShell 透明置顶窗）
+// pet_demo.hn - 桌宠标准库演示（Windows：原生 Win32 窗口，无 PowerShell 依赖）
 // 运行: hone examples/pet_demo.hn   （自动弹出桌宠小窗，右键菜单或 Ctrl+C 退出）
-// 依赖: hone_lib/pet.hn；仅支持 Windows（PowerShell 5.1+）
+// 依赖: hone_lib/pet.hn；仅支持 Windows
 //
 // 功能一览（全部可开关）：
 //   · 内置像素猫（idle/走路/睡觉/被摸开心/惊讶 8 帧动画，8fps）
 //   · 说话气泡：随机闲话、被摸回应、整点报时、CPU/内存播报
-//   · 交互：点击（开心）、双击（惊讶）、拖拽移动、右键菜单
+//   · 交互：点击（开心）、双击（惊讶）、拖拽移动、右键原生菜单
 //   · 右键菜单：换装（橘/黑/白猫循环）、静音、跟随鼠标、隐藏台词、退出
 //   · 空闲自动散步（全屏游荡）、无操作自动入睡
 //

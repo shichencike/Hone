@@ -1,5 +1,24 @@
 # Changelog
 
+## [v0.7.8] - 2026-08-29
+
+### 新增
+- **文件二进制读写**：新增内置函数 `read_bytes(path)` → list[int]（读取文件原始字节，每个元素为
+  0-255 的 int，二进制安全，不再受 UTF-8 限制）与 `write_bytes(path, bytes)`（将字节列表原样写入，
+  元素须为 0-255 的 int，越界/非整数报类型错误）；解释器、AOT 原生编译、LSP 悬停文档同步支持
+
+### 重构
+- **hone_lib/pet.hn 桌宠改原生窗口**：不再依赖 PowerShell/WinForms 与 state.json/events.json
+  文件轮询，改为运行时 guipro 模块新增的 `guipro.pet_*` 原生 Win32 窗口内置函数——
+  `pet_window`（无边框 + 品红键透明 + 置顶 + 不抢焦点）/ `pet_frame`（RGB 文本推帧，
+  Rust 端最近邻放大 + 水平翻转）/ `pet_text`（气泡）/ `pet_move` / `pet_pos` /
+  `pet_cursor` / `pet_menu`（右键原生弹出菜单，返回选中项）/ `pet_close`
+- 交互改走 `guipro.poll` 事件队列：click / dblclick / drag（Rust 端 SetCapture 拖拽窗口）/
+  rclick；跟随鼠标改用 `pet_cursor` 直接读光标；帧由磁盘 PPM 缓存改为内存 RGB 文本
+  （`pet_frame_rgb` / `pet_frames_rgb`），换装即时重建；外部 PPM 帧目录替换仍支持
+- 窗口随 Hone 进程生命周期，Ctrl+C 不再残留 PowerShell 孤儿窗口；示例：
+  `examples/pet_demo.hn`
+
 ## [v0.7.6] - 2026-08-26
 
 ### 新增

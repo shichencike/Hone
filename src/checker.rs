@@ -2761,10 +2761,21 @@ impl Checker {
                 self.expect_str(name, args, 0, span, "the URL/path")?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
+            "read_bytes" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the path")?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None }) // 字节列表（元素类型运行期确定）
+            }
             "write_file" => {
                 self.arg_count(name, n, 2, span)?;
                 self.expect_str(name, args, 0, span, "the first argument")?;
                 self.expect_str(name, args, 1, span, "the second argument")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            "write_bytes" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the path")?;
+                self.expect_any(name, args, 1, span, "a list of byte values (int 0-255)")?;
                 Ok(TyRes { ty: Ty::Void, slot: None })
             }
             "http_post" => {
@@ -3399,6 +3410,57 @@ impl Checker {
                 self.expect_str(name, args, 1, span, "the dialog message")?;
                 Ok(TyRes { ty: Ty::Void, slot: None })
             }
+            // ---------- guipro 桌宠窗口（pet_*，Windows 原生） ----------
+            "guipro.pet_window" => {
+                self.arg_count(name, n, 3, span)?;
+                self.expect_str(name, args, 0, span, "the window title")?;
+                self.expect_int(name, args, 1, span, "the window width")?;
+                self.expect_int(name, args, 2, span, "the window height")?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
+            "guipro.pet_frame" => {
+                self.arg_count(name, n, 5, span)?;
+                self.expect_int(name, args, 0, span, "the window id")?;
+                self.expect_int(name, args, 1, span, "the frame width")?;
+                self.expect_int(name, args, 2, span, "the frame height")?;
+                self.expect_str(name, args, 3, span, "the frame RGB data")?;
+                self.expect_int(name, args, 4, span, "the flip flag")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            "guipro.pet_text" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_int(name, args, 0, span, "the window id")?;
+                self.expect_str(name, args, 1, span, "the bubble text")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            "guipro.pet_move" => {
+                self.arg_count(name, n, 3, span)?;
+                self.expect_int(name, args, 0, span, "the window id")?;
+                self.expect_int(name, args, 1, span, "the x position")?;
+                self.expect_int(name, args, 2, span, "the y position")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            "guipro.pet_pos" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_int(name, args, 0, span, "the window id")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "guipro.pet_cursor" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_int(name, args, 0, span, "the window id")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "guipro.pet_menu" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_int(name, args, 0, span, "the window id")?;
+                self.expect_any(name, args, 1, span, "the menu items")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "guipro.pet_close" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_int(name, args, 0, span, "the window id")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
             other => Err(self.zerr(
                 codes::UNDEFINED,
                 format!("undefined function `{}`", other),
@@ -3489,6 +3551,8 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "read_file",
         "write_file",
         "file_exists",
+        "read_bytes",
+        "write_bytes",
         "abs",
         "max",
         "min",
@@ -3619,6 +3683,14 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "guipro.get_text",
         "guipro.close",
         "guipro.msgbox",
+        "guipro.pet_window",
+        "guipro.pet_frame",
+        "guipro.pet_text",
+        "guipro.pet_move",
+        "guipro.pet_pos",
+        "guipro.pet_cursor",
+        "guipro.pet_menu",
+        "guipro.pet_close",
     ]
     .into_iter()
     .collect()

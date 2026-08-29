@@ -45,6 +45,42 @@ function toggleTheme(){
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
 
   <div class="release">
+    <span class="ver-tag">v0.7.8</span><span class="date">2026-08-29</span>
+    <h4>重构</h4>
+    <ul>
+      <li><strong>桌宠 <code>hone_lib/pet.hn</code> 改原生窗口</strong>：不再依赖
+        PowerShell/WinForms 与 state.json/events.json 文件轮询，改为运行时 guipro 模块新增的
+        <code>guipro.pet_*</code> 原生 Win32 窗口内置函数——<code>pet_window</code>
+        （无边框 + 品红键透明 + 置顶 + 不抢焦点）/ <code>pet_frame</code>（RGB 文本推帧，
+        Rust 端最近邻放大 + 水平翻转）/ <code>pet_text</code>（气泡）/
+        <code>pet_move</code> / <code>pet_pos</code> / <code>pet_cursor</code> /
+        <code>pet_menu</code>（右键原生弹出菜单，返回选中项）/ <code>pet_close</code></li>
+      <li>交互改走 <code>guipro.poll</code> 事件队列：click / dblclick / drag（Rust 端
+        SetCapture 拖拽窗口）/ rclick；跟随鼠标改用 <code>pet_cursor</code> 直接读光标；
+        帧由磁盘 PPM 缓存改为内存 RGB 文本（<code>pet_frame_rgb</code> /
+        <code>pet_frames_rgb</code>），换装即时重建；外部 PPM 帧目录替换仍支持</li>
+      <li>窗口随 Hone 进程生命周期，Ctrl+C 不再残留 PowerShell 孤儿窗口；示例
+        <code>examples/pet_demo.hn</code>，详见
+        <a href="stdlib.html#pet">标准库 · pet 桌宠模块</a></li>
+    </ul>
+  </div>
+
+  <div class="release">
+    <span class="ver-tag">v0.7.7</span><span class="date">2026-08-28</span>
+    <h4>新增</h4>
+    <ul>
+      <li><strong>进度条标准库 <code>hone_lib/pbar.hn</code></strong>（纯 Hone 编写，零依赖）：
+        终端字符进度条 <code>[####----] 45% 12/24</code>，支持单行原地刷新（ANSI 重绘）、
+        每帧新行模式（老终端兼容）、剩余时间估算；
+        单行刷新通过 <code>crypto.base64_decode("Gw==")</code> 构造 ESC 字符拼出
+        <code>ESC[1A</code>（上移一行）+ <code>ESC[K</code>（清行）实现（Hone 的 <code>print</code>
+        自带换行且字符串转义不支持 \r/\x）；Hone 值语义，更新函数返回新对象需重新赋值
+        <code>pb = pbar_show(pb)</code>；示例 <code>examples/pbar_demo.hn</code>，详见
+        <a href="stdlib.html#pbar">标准库 · pbar 进度条模块</a></li>
+    </ul>
+  </div>
+
+  <div class="release">
     <span class="ver-tag">v0.7.6</span><span class="date">2026-08-26</span>
     <h4>新增</h4>
     <ul>

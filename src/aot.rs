@@ -862,6 +862,42 @@ static HnValue hn_builtin_file_exists(HnValue* args, int nargs) {
     return hn_bool(false);
 }
 
+static HnValue hn_builtin_read_bytes(HnValue* args, int nargs) {
+    if (nargs < 1 || args[0].type != HN_STR) { hn_throw_value(hn_err_new(1, "read_bytes requires a path")); return hn_null(); }
+    FILE* f = fopen(args[0].as.s->data, "rb");
+    if (!f) { hn_throw_value(hn_err_new(401, "file not found")); return hn_null(); }
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    HnValue r = hn_list_new();
+    if (sz > 0) {
+        unsigned char* buf = (unsigned char*)malloc((size_t)sz);
+        size_t rd = fread(buf, 1, (size_t)sz, f);
+        for (size_t i = 0; i < rd; i++) hn_list_push(r, hn_int(buf[i]));
+        free(buf);
+    }
+    fclose(f);
+    return r;
+}
+
+static HnValue hn_builtin_write_bytes(HnValue* args, int nargs) {
+    if (nargs < 2 || args[0].type != HN_STR || args[1].type != HN_LIST) {
+        hn_throw_value(hn_err_new(1, "write_bytes requires a path and a byte list"));
+        return hn_null();
+    }
+    HnList* l = args[1].as.list;
+    FILE* f = fopen(args[0].as.s->data, "wb");
+    if (!f) { hn_throw_value(hn_err_new(401, "cannot open file for writing")); return hn_null(); }
+    for (int i = 0; i < l->len; i++) {
+        if (l->items[i].type != HN_INT) { fclose(f); hn_throw_value(hn_err_new(1, "write_bytes expects integer byte values 0..255")); return hn_null(); }
+        int64_t b = l->items[i].as.i;
+        if (b < 0 || b > 255) { fclose(f); hn_throw_value(hn_err_new(1, "write_bytes byte value out of range 0..255")); return hn_null(); }
+        fputc((int)b, f);
+    }
+    fclose(f);
+    return hn_null();
+}
+
 static HnValue hn_builtin_input(HnValue* args, int nargs) {
     if (nargs >= 1 && args[0].type == HN_STR) {
         char* s = hn_display(args[0]);
@@ -989,6 +1025,8 @@ static HnValue hn_call_builtin(const char* name, HnValue* args, int nargs) {
     if (strcmp(name, "read_file") == 0) return hn_builtin_read_file(args, nargs);
     if (strcmp(name, "write_file") == 0) return hn_builtin_write_file(args, nargs);
     if (strcmp(name, "file_exists") == 0) return hn_builtin_file_exists(args, nargs);
+    if (strcmp(name, "read_bytes") == 0) return hn_builtin_read_bytes(args, nargs);
+    if (strcmp(name, "write_bytes") == 0) return hn_builtin_write_bytes(args, nargs);
     if (strcmp(name, "input") == 0) return hn_builtin_input(args, nargs);
     if (strcmp(name, "read_int") == 0) return hn_builtin_read_int(args, nargs);
     if (strcmp(name, "read_float") == 0) return hn_builtin_read_float(args, nargs);
@@ -1982,6 +2020,8 @@ fn is_aot_builtin(name: &str) -> bool {
             | "read_file"
             | "write_file"
             | "file_exists"
+            | "read_bytes"
+            | "write_bytes"
             | "input"
             | "read_int"
             | "read_float"

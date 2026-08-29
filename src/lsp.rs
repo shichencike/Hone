@@ -244,6 +244,8 @@ fn builtin_doc(name: &str) -> Option<(&'static str, &'static str)> {
         ("read_file", "read_file(path)", "读取文本文件内容"),
         ("write_file", "write_file(path, content)", "写入文本文件"),
         ("file_exists", "file_exists(path)", "判断文件是否存在"),
+        ("read_bytes", "read_bytes(path)", "读取文件为字节列表（int 0-255，二进制安全）"),
+        ("write_bytes", "write_bytes(path, bytes)", "将字节列表（int 0-255）写入文件"),
         ("input", "input(prompt?)", "读取一行标准输入（EOF 报 H306）"),
         ("read_int", "read_int(prompt?)", "读取并解析为 int（格式错报 H006）"),
         ("read_float", "read_float(prompt?)", "读取并解析为 float（格式错报 H007）"),

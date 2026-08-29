@@ -198,6 +198,8 @@ pub fn is_builtin(name: &str) -> bool {
             | "read_file"
             | "write_file"
             | "file_exists"
+            | "read_bytes"
+            | "write_bytes"
             | "abs"
             | "max"
             | "min"
@@ -349,6 +351,14 @@ pub fn is_builtin(name: &str) -> bool {
             | "guipro.tray_tip"
             | "guipro.tray_remove"
             | "guipro.menu"
+            | "guipro.pet_window"
+            | "guipro.pet_frame"
+            | "guipro.pet_text"
+            | "guipro.pet_move"
+            | "guipro.pet_pos"
+            | "guipro.pet_cursor"
+            | "guipro.pet_menu"
+            | "guipro.pet_close"
     )
 }
 
@@ -751,6 +761,106 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "file_exists" => {
             let p = as_str(&args[0], 0, name, span, file, src)?;
             Ok(Value::Bool(std::path::Path::new(p).exists()))
+        }
+        "read_bytes" => {
+            let p = as_str(&args[0], 0, name, span, file, src)?;
+            match std::fs::read(p) {
+                Ok(bytes) => Ok(Value::List(bytes.into_iter().map(|b| Value::Int(b as i64)).collect())),
+                Err(e) => {
+                    // 细分文件错误：不存在 / 权限不足 / 被占用锁定 / 其他
+                    let (code, hint): (&'static str, &'static str) = match e.kind() {
+                        std::io::ErrorKind::NotFound => (codes::FILE_NOT_FOUND, "the file does not exist"),
+                        std::io::ErrorKind::PermissionDenied => (codes::FILE_PERMISSION, "check file permissions"),
+                        std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::ResourceBusy
+                        | std::io::ErrorKind::Interrupted => (codes::FILE_LOCKED, "the file is locked by another process"),
+                        _ => (codes::NOT_FOUND, "check the path and file permissions"),
+                    };
+                    Err(err(
+                        code,
+                        format!("cannot read file `{}`: {}", p, e),
+                        span,
+                        file,
+                        src,
+                        Some(hint),
+                    ))
+                }
+            }
+        }
+        "write_bytes" => {
+            let p = as_str(&args[0], 0, name, span, file, src)?;
+            let list = args.get(1).ok_or_else(|| arg_err(name, 2, 1, span, file, src))?;
+            let items = match list {
+                Value::List(items) => items,
+                other => {
+                    return Err(err(
+                        codes::TYPE_MISMATCH,
+                        format!(
+                            "`{}` expects a list of byte values (int 0-255) for argument 2, got `{}`",
+                            name,
+                            other.type_name()
+                        ),
+                        span,
+                        file,
+                        src,
+                        Some("pass a list of integers in 0..=255, e.g. read_bytes of the file or [72, 105]"),
+                    ));
+                }
+            };
+            let mut bytes = Vec::with_capacity(items.len());
+            for (i, item) in items.iter().enumerate() {
+                match item {
+                    Value::Int(b) if (0..=255).contains(b) => bytes.push(*b as u8),
+                    Value::Int(b) => {
+                        return Err(err(
+                            codes::TYPE_MISMATCH,
+                            format!(
+                                "`{}` byte value at index {} is out of range: {} (expected 0-255)",
+                                name, i, b
+                            ),
+                            span,
+                            file,
+                            src,
+                            Some("each list element must be an integer in 0..=255"),
+                        ));
+                    }
+                    other => {
+                        return Err(err(
+                            codes::TYPE_MISMATCH,
+                            format!(
+                                "`{}` expects integer byte values, found `{}` at index {}",
+                                name,
+                                other.type_name(),
+                                i
+                            ),
+                            span,
+                            file,
+                            src,
+                            Some("each list element must be an integer in 0..=255"),
+                        ));
+                    }
+                }
+            }
+            std::fs::write(p, bytes).map_err(|e| {
+                // 细分文件错误：不存在 / 权限不足 / 被占用锁定 / 其他
+                let (code, hint): (&'static str, &'static str) = match e.kind() {
+                    std::io::ErrorKind::NotFound => (codes::FILE_NOT_FOUND, "the file does not exist"),
+                    std::io::ErrorKind::PermissionDenied => (codes::FILE_PERMISSION, "check file permissions"),
+                    std::io::ErrorKind::WouldBlock
+                    | std::io::ErrorKind::ResourceBusy
+                    | std::io::ErrorKind::Interrupted => (codes::FILE_LOCKED, "the file is locked by another process"),
+                    _ => (codes::NOT_FOUND, "check the path and file permissions"),
+                };
+                err(
+                    code,
+                    format!("cannot write file `{}`: {}", p, e),
+                    span,
+                    file,
+                    src,
+                    Some(hint),
+                )
+            })?;
+            Ok(Value::Null)
         }
         "abs" => match &args[0] {
             Value::Int(i) => i
@@ -1176,7 +1286,9 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         | "guipro.tree_add" | "guipro.tree_clear" | "guipro.tree_get"
         | "guipro.canvas_clear" | "guipro.canvas_line" | "guipro.canvas_rect"
         | "guipro.canvas_ellipse" | "guipro.canvas_text" | "guipro.canvas_repaint"
-        | "guipro.tray_add" | "guipro.tray_tip" | "guipro.tray_remove" | "guipro.menu" => {
+        | "guipro.tray_add" | "guipro.tray_tip" | "guipro.tray_remove" | "guipro.menu"
+        | "guipro.pet_window" | "guipro.pet_frame" | "guipro.pet_text" | "guipro.pet_move"
+        | "guipro.pet_pos" | "guipro.pet_cursor" | "guipro.pet_menu" | "guipro.pet_close" => {
             crate::guimod::call(name, &args, span, file, src)
         }
         // ---------- log ----------

@@ -740,7 +740,7 @@ widgets = [
 
   <div class="example">
     <div class="title">10.3 桌宠标准库（Windows 透明置顶窗）</div>
-    <div class="note">hone_lib/pet.hn：Hone 驱动状态机 + PowerShell 透明置顶窗渲染，内置像素猫动画/气泡/交互；仅支持 Windows（PowerShell 5.1+）</div>
+    <div class="note">hone_lib/pet.hn：Hone 驱动状态机 + 原生 Win32 窗口（guipro.pet_*，无 PowerShell 依赖），内置像素猫动画/气泡/交互；仅支持 Windows</div>
 <pre><code><span class="k">import</span> <span class="s">"pet"</span> <span class="k">from</span> <span class="s">"./hone_lib/pet.hn"</span>;
 
 cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"scale"</span>: <span class="n">2</span>, <span class="s">"speed"</span>: <span class="n">3</span>, <span class="s">"sleep_after"</span>: <span class="n">90</span>};
@@ -776,6 +776,26 @@ handlers = <span class="f">guipro_on_win</span>(handlers, win, <span class="s">"
     <span class="k">return</span> <span class="s">""</span>;
 });
 <span class="f">guipro_run</span>(handlers);   <span class="c">// 阻塞主循环，窗口关闭后返回</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">10.5 进度条标准库（pbar）</div>
+    <div class="note">hone_lib/pbar.hn：终端字符进度条 + 单行原地刷新（ANSI）+ 剩余时间估算；Hone 值语义，更新函数返回新对象需重新赋值</div>
+<pre><code><span class="k">import</span> <span class="s">"pbar"</span> <span class="k">from</span> <span class="s">"./hone_lib/pbar.hn"</span>;
+
+<span class="c">// 单行原地刷新（ANSI：ESC[1A 上移一行 + ESC[K 清行；print 自带换行，用 base64 解码构造 ESC）</span>
+pb = <span class="f">pbar_new</span>(<span class="n">100</span>, <span class="n">30</span>, <span class="s">"下载"</span>);
+i = <span class="n">0</span>;
+<span class="k">while</span> (i &lt;= <span class="n">100</span>) {
+    pb = <span class="f">pbar_update</span>(pb, i);
+    pb = <span class="f">pbar_show</span>(pb);        <span class="c">// 原地刷新，返回新对象</span>
+    <span class="f">time.sleep</span>(<span class="n">0.05</span>);
+    i = i + <span class="n">1</span>;
+}
+<span class="f">pbar_finish</span>(pb);              <span class="c">// 补齐到 100% 并换行</span>
+
+<span class="c">// 剩余时间估算（渲染到字符串）：print(pbar_render_full(pb, time.now()));</span>
+<span class="c">// 老终端兼容（每帧新行）：pb = pbar_update(pb, i); pbar_line(pb);</span></code></pre>
   </div>
 </main>
 
