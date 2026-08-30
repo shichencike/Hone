@@ -96,6 +96,7 @@ x = <span class="n">10</span>;              <span class="c">// int</span>
 f = <span class="n">3.14</span>;            <span class="c">// float</span>
 s = <span class="s">"hello"</span>;         <span class="c">// str</span>
 b = <span class="k">true</span>;            <span class="c">// bool</span>
+c = <span class="s">'中'</span>;            <span class="c">// char（单个 Unicode 字符）</span>
 
 <span class="c">// 控制流：条件必须是 bool</span>
 <span class="k">if</span> (x &gt; <span class="n">5</span>) { <span class="f">print</span>(<span class="s">"大"</span>); } <span class="k">else</span> { <span class="f">print</span>(<span class="s">"小"</span>); }
@@ -144,13 +145,16 @@ nums = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</s
 f = <span class="n">3.14</span>;            <span class="c">// 自动推导为 float</span>
 y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">// 显式类型（Rust/TS 风格）</span>
 <span class="k">int</span> z = <span class="n">30</span>;      <span class="c">// 显式类型（C 风格）</span>
-x = <span class="s">"Hone"</span>;          <span class="c">// error[H001]: 期望 int，得到 str</span></code></pre>
+x = <span class="s">"Hone"</span>;          <span class="c">// error[H001]: 期望 int，得到 str</span>
+ch = <span class="s">'a'</span>;            <span class="c">// char：单引号字面量（须恰好一个字符）</span>
+<span class="k">char</span> w = <span class="s">'中'</span>;   <span class="c">// 显式 char 声明；按码点比较：'a' &lt; 'b'</span></code></pre>
     <table>
       <tr><th>类型</th><th>说明</th><th>字面量示例</th></tr>
       <tr><td><code>int</code></td><td>64 位有符号整数</td><td><code>0, 42, -1</code></td></tr>
       <tr><td><code>float</code></td><td>64 位双精度（IEEE 754）</td><td><code>3.14, .2, 2.0</code></td></tr>
       <tr><td><code>bool</code></td><td>布尔值</td><td><code>true, false</code></td></tr>
       <tr><td><code>str</code></td><td>UTF-8 字符串</td><td><code>"hello"</code>（支持 \n \t \\ \"）</td></tr>
+      <tr><td><code>char</code></td><td>单个 Unicode 字符（按码点比较，无算术运算）</td><td><code>'a', '\n', '中'</code>（须恰好一个字符）</td></tr>
       <tr><td><code>ptr</code></td><td>FFI 不透明指针句柄（void*，用于 load 动态库调用）</td><td><code>load</code> 返回值 / <code>0</code> 表示 NULL</td></tr>
       <tr><td><code>list</code></td><td>动态列表（元素类型不锁定）</td><td><code>[1, "a", true]</code></td></tr>
       <tr><td><code>dict</code></td><td>动态字典（字符串键 → 任意值）</td><td><code>{"name": "hone", "ver": 1}</code></td></tr>
@@ -542,8 +546,9 @@ f = <span class="f">compute</span>(<span class="n">21</span>);      <span class=
       <tr><td>类型判断</td><td><code>is_int</code> <code>is_float</code> <code>is_str</code> <code>is_bool</code> <code>is_list</code> <code>is_dict</code> <code>is_null</code></td></tr>
       <tr><td>断言 / 测试</td><td><code>assert</code>（条件为 false 抛 H700，配合 <code>hone test</code>）<code>assert_eq</code>（实际≠期望抛 H700，相等语义与 <code>==</code> 一致）</td></tr>
       <tr><td>字符串</td><td><code>str_contains</code> <code>str_replace</code> <code>str_trim</code></td></tr>
+      <tr><td>字符</td><td><code>ord</code>（字符 → 码点）<code>char</code>（码点 → 字符，越界报错）<code>char_at</code>（按 Unicode 字符取串中字符，返回 char）<code>char_upper</code> <code>char_lower</code>（大小写转换）<code>char_is_digit</code> <code>char_is_alpha</code> <code>char_is_space</code>（字符分类）</td></tr>
       <tr><td>数学</td><td><code>abs</code> <code>max</code> <code>min</code></td></tr>
-      <tr><td>类型转换</td><td><code>to_str</code> <code>to_int</code> <code>to_float</code></td></tr>
+      <tr><td>类型转换</td><td><code>to_str</code>（含 char → 单字符字符串）<code>to_int</code> <code>to_float</code>；char ↔ int 用 <code>ord</code> / <code>char</code></td></tr>
       <tr><td>时间</td><td><code>time.now</code> <code>time.sleep</code> <code>time.format</code>（占位符 YYYY/MM/DD/HH/mm/SS/WW 星期）<code>time.parse</code> <code>time.add</code>（时间戳算术）<code>time.diff</code>（时间差）<code>time.weekday</code>（ISO 星期 1-7）</td></tr>
       <tr><td>随机</td><td><code>random.int</code> <code>random.float</code></td></tr>
       <tr><td>UUID</td><td><code>uuid.new</code>（UUID v4）</td></tr>

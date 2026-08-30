@@ -22,6 +22,8 @@ pub enum Ty {
     Float,
     Bool,
     Str,
+    /// 单个 Unicode 字符（'a' / '\n' / '中'）
+    Char,
     /// catch 绑定的错误对象类型（e.code / e.message 等）
     Error,
     Void,
@@ -35,6 +37,7 @@ impl Ty {
             Ty::Float => "float",
             Ty::Bool => "bool",
             Ty::Str => "str",
+            Ty::Char => "char",
             Ty::Error => "error",
             Ty::Void => "void",
             Ty::Unknown => "unknown",
@@ -47,6 +50,7 @@ impl Ty {
             TyName::Float => Ty::Float,
             TyName::Bool => Ty::Bool,
             TyName::Str => Ty::Str,
+            TyName::Char => Ty::Char,
             // 类型变量不直接映射具体类型（build_fn_info 中由类型参数槽接管）
             TyName::Var(_) => Ty::Unknown,
         }
@@ -1557,6 +1561,7 @@ impl Checker {
             Expr::FloatLit(..) => Ok(TyRes { ty: Ty::Float, slot: None }),
             Expr::BoolLit(..) => Ok(TyRes { ty: Ty::Bool, slot: None }),
             Expr::StrLit(..) => Ok(TyRes { ty: Ty::Str, slot: None }),
+            Expr::CharLit(..) => Ok(TyRes { ty: Ty::Char, slot: None }),
             Expr::ListLit(items, _) => {
                 for it in items {
                     self.check_expr(it)?;
@@ -1757,6 +1762,7 @@ impl Checker {
             Expr::FloatLit(..) => Ok(TyRes { ty: Ty::Float, slot: None }),
             Expr::BoolLit(..) => Ok(TyRes { ty: Ty::Bool, slot: None }),
             Expr::StrLit(..) => Ok(TyRes { ty: Ty::Str, slot: None }),
+            Expr::CharLit(..) => Ok(TyRes { ty: Ty::Char, slot: None }),
             Expr::ListLit(items, _) => {
                 for it in items {
                     self.check_expr_in_fn(it, scopes, scope_stack, param_slots, ret_slot)?;
@@ -2275,7 +2281,7 @@ impl Checker {
                 }
                 Ok(())
             }
-            (Ty::Unknown, t) if t.is_numeric() => {
+            (Ty::Unknown, t) if t.is_numeric() || t == Ty::Char => {
                 if let Some(slot) = l.slot {
                     if !self.strict {
                         self.unify_slot_ty(slot, t, span, format!("`{}` operand", sym))?;
@@ -2292,7 +2298,7 @@ impl Checker {
                 }
                 Ok(())
             }
-            (t, Ty::Unknown) if t.is_numeric() => {
+            (t, Ty::Unknown) if t.is_numeric() || t == Ty::Char => {
                 if let Some(slot) = r.slot {
                     if !self.strict {
                         self.unify_slot_ty(slot, t, span, format!("`{}` operand", sym))?;
@@ -2315,11 +2321,13 @@ impl Checker {
                 span,
                 Some("convert one side with `to_int` / `to_float` first"),
             )),
-            (a, _) if !a.is_numeric() => Err(self.zerr(
+            // char 与 char 按码点比较（'a' < 'b'）
+            (Ty::Char, Ty::Char) => Ok(()),
+            (a, _) if !a.is_numeric() && a != Ty::Char => Err(self.zerr(
                 codes::TYPE_MISMATCH,
-                format!("`{}` requires numeric operands, got `{}`", sym, a.name()),
+                format!("`{}` requires numeric or char operands, got `{}`", sym, a.name()),
                 span,
-                Some("comparison operators work on `int` / `float`"),
+                Some("comparison operators work on `int` / `float` / `char`"),
             )),
             _ => Ok(()),
         }
@@ -2959,6 +2967,36 @@ impl Checker {
         }
     }
 
+    /// 校验参数为 char 类型。
+    fn expect_char(&mut self, name: &str, args: &[TyRes], i: usize, span: Span, what: &str) -> Result<(), ZError> {
+        match args[i].ty {
+            Ty::Char => Ok(()),
+            Ty::Unknown => {
+                if let Some(slot) = args[i].slot {
+                    if !self.strict {
+                        self.unify_slot_ty(slot, Ty::Char, span, what.to_string())?;
+                    }
+                    return Ok(());
+                }
+                if self.strict {
+                    return Err(self.zerr(
+                        codes::CANNOT_INFER,
+                        format!("cannot determine the type of {}, expected `char`", what),
+                        span,
+                        Some("add an explicit type annotation"),
+                    ));
+                }
+                Ok(())
+            }
+            other => Err(self.zerr(
+                codes::TYPE_MISMATCH,
+                format!("`{}` expects `char` for {}, got `{}`", name, what, other.name()),
+                span,
+                Some("pass a single-character value, e.g. `'a'` or `char_at(s, 0)`"),
+            )),
+        }
+    }
+
     /// 接受任意类型（含 Unknown/动态类型）。用于不透明指针等静态阶段无法确定的参数。
     fn expect_any(&mut self, _name: &str, _args: &[TyRes], _i: usize, _span: Span, _what: &str) -> Result<(), ZError> {
         Ok(())
@@ -3049,6 +3087,33 @@ impl Checker {
             "to_float" => {
                 self.arg_count(name, n, 1, span)?;
                 Ok(TyRes { ty: Ty::Float, slot: None })
+            }
+            // ---- char 类型内置函数 ----
+            "ord" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_char(name, args, 0, span, "the character")?;
+                Ok(TyRes { ty: Ty::Int, slot: None })
+            }
+            "char" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_int(name, args, 0, span, "the code point")?;
+                Ok(TyRes { ty: Ty::Char, slot: None })
+            }
+            "char_at" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the string")?;
+                self.expect_int(name, args, 1, span, "the index")?;
+                Ok(TyRes { ty: Ty::Char, slot: None })
+            }
+            "char_upper" | "char_lower" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_char(name, args, 0, span, "the character")?;
+                Ok(TyRes { ty: Ty::Char, slot: None })
+            }
+            "char_is_digit" | "char_is_alpha" | "char_is_space" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_char(name, args, 0, span, "the character")?;
+                Ok(TyRes { ty: Ty::Bool, slot: None })
             }
             // input / read_int / read_float：0-1 个参数（可选提示文本），从标准输入读取
             "input" | "read_int" | "read_float" => {
@@ -3865,6 +3930,14 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "to_str",
         "to_int",
         "to_float",
+        "ord",
+        "char",
+        "char_at",
+        "char_upper",
+        "char_lower",
+        "char_is_digit",
+        "char_is_alpha",
+        "char_is_space",
         "input",
         "read_int",
         "read_float",

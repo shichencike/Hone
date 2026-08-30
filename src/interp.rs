@@ -55,6 +55,8 @@ pub enum Value {
     Float(f64),
     Bool(bool),
     Str(String),
+    /// 单个 Unicode 字符（'a' / '中'）
+    Char(char),
     /// 列表：[1, 2, 3]（也用于 JSON 数组）
     List(Vec<Value>),
     /// 字典：{"key": value}（保持插入顺序，也用于 JSON 对象）
@@ -128,6 +130,7 @@ impl PartialEq for Value {
             (Value::Float(a), Value::Float(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Char(a), Value::Char(b)) => a == b,
             (Value::List(a), Value::List(b)) => a == b,
             (Value::Dict(a), Value::Dict(b)) => a == b,
             (Value::Null, Value::Null) => true,
@@ -151,6 +154,7 @@ impl Value {
             Value::Float(_) => "float",
             Value::Bool(_) => "bool",
             Value::Str(_) => "str",
+            Value::Char(_) => "char",
             Value::List(_) => "list",
             Value::Dict(_) => "dict",
             Value::Null => "null",
@@ -168,6 +172,7 @@ impl Value {
             Value::Float(f) => f.to_string(),
             Value::Bool(b) => b.to_string(),
             Value::Str(s) => s.clone(),
+            Value::Char(c) => c.to_string(),
             Value::List(items) => {
                 let inner: Vec<String> = items.iter().map(|v| v.display()).collect();
                 format!("[{}]", inner.join(", "))
@@ -2078,6 +2083,7 @@ impl Interp {
             Expr::FloatLit(v, _) => Ok(Value::Float(*v)),
             Expr::BoolLit(v, _) => Ok(Value::Bool(*v)),
             Expr::StrLit(v, _) => Ok(Value::Str(v.clone())),
+            Expr::CharLit(v, _) => Ok(Value::Char(*v)),
             Expr::ListLit(items, _) => {
                 let mut vals = Vec::new();
                 for it in items {
@@ -2631,6 +2637,7 @@ impl Interp {
             (Value::Float(x), Value::Float(y)) => Ok(x == y),
             (Value::Bool(x), Value::Bool(y)) => Ok(x == y),
             (Value::Str(x), Value::Str(y)) => Ok(x == y),
+            (Value::Char(x), Value::Char(y)) => Ok(x == y),
             (Value::List(x), Value::List(y)) => Ok(x == y),
             (Value::Dict(x), Value::Dict(y)) => Ok(x == y),
             (Value::Ptr(x), Value::Ptr(y)) => Ok(x == y),
@@ -2660,11 +2667,13 @@ impl Interp {
                     None::<&str>,
                 )
             }),
+            // 字符按 Unicode 码点比较
+            (Value::Char(x), Value::Char(y)) => Ok(x.cmp(y)),
             _ => Err(self.runtime_err(
                 codes::TYPE_MISMATCH,
                 format!("cannot compare `{}` with `{}`", a.type_name(), b.type_name()),
                 span,
-                Some("comparison operators work on `int` / `float`"),
+                Some("comparison operators work on `int` / `float` / `char`"),
             )),
         }
     }
@@ -2761,6 +2770,7 @@ fn default_value(ty: TyName) -> Value {
         TyName::Float => Value::Float(0.0),
         TyName::Bool => Value::Bool(false),
         TyName::Str => Value::Str(String::new()),
+        TyName::Char => Value::Char('\0'),
         // 泛型类型参数无固定默认值（编译期擦除，运行时不可达）
         TyName::Var(_) => Value::Null,
     }

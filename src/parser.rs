@@ -185,7 +185,7 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Result<Stmt, ZError> {
         match self.peek() {
-            Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr => self.parse_decl_c(),
+            Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr | Tok::TChar => self.parse_decl_c(),
             Tok::Ident(_) => {
                 if self.peek2() == &Tok::LParen && self.peek() == &Tok::Ident("debug_print".to_string()) {
                     self.parse_debug_print()
@@ -291,6 +291,7 @@ impl Parser {
             Tok::TFloat => TyName::Float,
             Tok::TBool => TyName::Bool,
             Tok::TStr => TyName::Str,
+            Tok::TChar => TyName::Char,
             _ => unreachable!(),
         };
         let (name_tok, name_span) = self.next();
@@ -680,12 +681,13 @@ impl Parser {
                 };
                 Ok(Param { name: s, ty, span, default })
             }
-            Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr => {
+            Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr | Tok::TChar => {
                 let ty = match tok {
                     Tok::TInt => TyName::Int,
                     Tok::TFloat => TyName::Float,
                     Tok::TBool => TyName::Bool,
                     Tok::TStr => TyName::Str,
+                    Tok::TChar => TyName::Char,
                     _ => unreachable!(),
                 };
                 let (name_tok, name_span) = self.next();
@@ -729,6 +731,7 @@ impl Parser {
             Tok::TFloat => Ok(TyName::Float),
             Tok::TBool => Ok(TyName::Bool),
             Tok::TStr => Ok(TyName::Str),
+            Tok::TChar => Ok(TyName::Char),
             // 泛型类型变量（fn name[T] 的 T）：注解写 `x: T`。是否已声明由 checker 校验。
             Tok::Ident(s) => Ok(TyName::Var(s)),
             other => Err(self.err_here(
@@ -1444,6 +1447,7 @@ impl Parser {
                 Tok::True => Pattern::Lit(Expr::BoolLit(true, pspan)),
                 Tok::False => Pattern::Lit(Expr::BoolLit(false, pspan)),
                 Tok::StrLit(s) => Pattern::Lit(Expr::StrLit(s, pspan)),
+                Tok::CharLit(c) => Pattern::Lit(Expr::CharLit(c, pspan)),
                 // `_` 通配符：匹配任意值
                 Tok::Ident(s) if s == "_" => {
                     if saw_wildcard {
@@ -1889,6 +1893,7 @@ impl Parser {
             Tok::True => Ok(Expr::BoolLit(true, span)),
             Tok::False => Ok(Expr::BoolLit(false, span)),
             Tok::StrLit(s) => Ok(Expr::StrLit(s, span)),
+            Tok::CharLit(c) => Ok(Expr::CharLit(c, span)),
             // 三引号原始字符串：内容不做转义处理，与普通字符串同值
             Tok::MultiStr(s) => Ok(Expr::StrLit(s, span)),
             // 匿名函数（lambda）：fn(参数) { ... }
@@ -1898,6 +1903,21 @@ impl Parser {
             Tok::TFloat => Ok(Expr::StrLit("float".to_string(), span)),
             Tok::TBool => Ok(Expr::StrLit("bool".to_string(), span)),
             Tok::TStr => Ok(Expr::StrLit("str".to_string(), span)),
+            // `char` 同时是内置函数名：后跟 `(` 时按函数调用 `char(i)` 解析，否则同其他类型关键字
+            Tok::TChar => {
+                if self.at(&Tok::LParen) {
+                    self.next();
+                    let args = self.parse_args()?;
+                    self.expect(&Tok::RParen, "`)`")?;
+                    Ok(Expr::Call {
+                        callee: "char".to_string(),
+                        args,
+                        span,
+                    })
+                } else {
+                    Ok(Expr::StrLit("char".to_string(), span))
+                }
+            }
             Tok::FStr(parts) => {
                 // 插值字符串：文字段保留（折叠转义大括号 {{ → {，}} → }），代码段子解析为表达式
                 let mut segs = Vec::new();

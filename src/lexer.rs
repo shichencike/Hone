@@ -10,6 +10,8 @@ pub enum Tok {
     IntLit(i64),
     FloatLit(f64),
     StrLit(String),
+    /// 字符字面量 'a'：恰好一个 Unicode 字符（转义后）
+    CharLit(char),
     /// 插值字符串 f"..."：携带已拆分的片段（文字段 / 代码段原始文本），由 parser 子解析代码段
     FStr(Vec<FStrPart>),
     // 关键字
@@ -54,6 +56,7 @@ pub enum Tok {
     TFloat,
     TBool,
     TStr,
+    TChar,
     // 运算符与符号
     Plus,
     Minus,
@@ -111,6 +114,7 @@ impl Tok {
             Tok::IntLit(v) => format!("integer `{}`", v),
             Tok::FloatLit(v) => format!("float `{}`", v),
             Tok::StrLit(_) => "string literal".to_string(),
+            Tok::CharLit(_) => "char literal".to_string(),
             Tok::FStr(_) => "f-string literal".to_string(),
             Tok::Fn => "`fn`".into(),
             Tok::If => "`if`".into(),
@@ -147,6 +151,7 @@ impl Tok {
             Tok::TFloat => "type `float`".into(),
             Tok::TBool => "type `bool`".into(),
             Tok::TStr => "type `str`".into(),
+            Tok::TChar => "type `char`".into(),
             Tok::Plus => "`+`".into(),
             Tok::Minus => "`-`".into(),
             Tok::Star => "`*`".into(),
@@ -386,6 +391,7 @@ impl Lexer {
                 "float" => Tok::TFloat,
                 "bool" => Tok::TBool,
                 "str" => Tok::TStr,
+                "char" => Tok::TChar,
                 _ => {
                     // 标识符恰好为 `f` 且紧跟引号 → 插值字符串 f"..."
                     if s == "f" && self.peek() == Some('"') {
@@ -408,6 +414,11 @@ impl Lexer {
                 return self.lex_multistr();
             }
             return self.lex_string();
+        }
+
+        // 字符字面量 'a'（单引号定界）
+        if c == '\'' {
+            return self.lex_char();
         }
 
         // 运算符与符号
@@ -749,6 +760,100 @@ impl Lexer {
             }
         }
         Ok(Tok::StrLit(s))
+    }
+
+    /// 词法分析字符字面量 'a'。调用前已确认当前字符为 `'`。
+    /// 支持转义 \\n \\t \\\\ \\\" \\'；闭合后要求恰好一个 Unicode 字符（空/多字符报错）。
+    fn lex_char(&mut self) -> Result<Tok, ZError> {
+        self.bump(); // 开头的 '
+        let mut s = String::new();
+        loop {
+            match self.peek() {
+                None => {
+                    return Err(self.err(
+                        crate::error::codes::UNTERMINATED_STRING,
+                        "unterminated char literal",
+                        1,
+                        Some("close the char literal with `'`"),
+                    ));
+                }
+                Some('\n') => {
+                    return Err(self.err(
+                        crate::error::codes::UNTERMINATED_STRING,
+                        "unterminated char literal (newline inside char)",
+                        1,
+                        Some("close the char literal before the newline"),
+                    ));
+                }
+                Some('\'') => {
+                    self.bump();
+                    break;
+                }
+                Some('\\') => {
+                    self.bump();
+                    match self.peek() {
+                        Some('n') => {
+                            s.push('\n');
+                            self.bump();
+                        }
+                        Some('t') => {
+                            s.push('\t');
+                            self.bump();
+                        }
+                        Some('\\') => {
+                            s.push('\\');
+                            self.bump();
+                        }
+                        Some('"') => {
+                            s.push('"');
+                            self.bump();
+                        }
+                        Some('\'') => {
+                            s.push('\'');
+                            self.bump();
+                        }
+                        Some(c) => {
+                            return Err(self.err(
+                                crate::error::codes::SYNTAX,
+                                format!("invalid escape sequence `\\{}`", c),
+                                2,
+                                Some("supported escapes: \\n \\t \\\\ \\\" \\'"),
+                            ));
+                        }
+                        None => {
+                            return Err(self.err(
+                                crate::error::codes::UNTERMINATED_STRING,
+                                "unterminated char literal",
+                                1,
+                                Some("close the char literal with `'`"),
+                            ));
+                        }
+                    }
+                }
+                Some(c) => {
+                    s.push(c);
+                    self.bump();
+                }
+            }
+        }
+        let mut chars = s.chars();
+        let c = chars.next().ok_or_else(|| {
+            self.err(
+                crate::error::codes::SYNTAX,
+                "empty char literal",
+                1,
+                Some("a char literal must contain exactly one character, e.g. `'a'`"),
+            )
+        })?;
+        if chars.next().is_some() {
+            return Err(self.err(
+                crate::error::codes::SYNTAX,
+                format!("char literal must contain exactly one character, got `{}`", s),
+                1,
+                Some("use a string `\"...\"` for multiple characters"),
+            ));
+        }
+        Ok(Tok::CharLit(c))
     }
 
     /// 词法分析三引号原始字符串 """..."""。调用前已确认当前字符为 `"` 且后随 `""`。

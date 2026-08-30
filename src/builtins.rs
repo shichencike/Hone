@@ -209,6 +209,14 @@ pub fn is_builtin(name: &str) -> bool {
             | "to_str"
             | "to_int"
             | "to_float"
+            | "ord"
+            | "char"
+            | "char_at"
+            | "char_upper"
+            | "char_lower"
+            | "char_is_digit"
+            | "char_is_alpha"
+            | "char_is_space"
             | "input"
             | "read_int"
             | "read_float"
@@ -608,6 +616,8 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                     Ok(Value::Str(v.display()))
                 }
                 Value::Str(s) => Ok(Value::Str(s.clone())),
+                // char 转单字符字符串
+                Value::Char(c) => Ok(Value::Str(c.to_string())),
                 Value::List(_) | Value::Dict(_) | Value::Lambda(_) | Value::Enum(_) | Value::Future(_) => Ok(Value::Str(v.display())),
                 Value::Null => Ok(Value::Str("null".to_string())),
             }
@@ -687,6 +697,119 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                     file,
                     src,
                     Some("`to_float` accepts `int`, `float` or a numeric `str`"),
+                )),
+            }
+        }
+        // ---- char 类型内置函数 ----
+        "ord" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            match v {
+                Value::Char(c) => Ok(Value::Int(*c as i64)),
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`ord` expects a `char`, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("pass a single-character value, e.g. `ord('a')`; for a code point of a string use `ord(char_at(s, i))`"),
+                )),
+            }
+        }
+        "char" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            match v {
+                Value::Int(i) => {
+                    let u = *i as u32;
+                    match char::from_u32(u) {
+                        Some(c) => Ok(Value::Char(c)),
+                        None => Err(err(
+                            codes::TYPE_MISMATCH,
+                            format!("`char` code point {} is not a valid Unicode scalar value", i),
+                            span,
+                            file,
+                            src,
+                            Some("valid code points are 0x0-0x10FFFF excluding surrogates 0xD800-0xDFFF"),
+                        )),
+                    }
+                }
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`char` expects an `int` code point, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("pass a Unicode code point as an integer, e.g. `char(20013)`"),
+                )),
+            }
+        }
+        "char_at" => {
+            let s = as_str(args.get(0).ok_or_else(|| arg_err(name, 2, 0, span, file, src))?, 0, name, span, file, src)?;
+            let i = match args.get(1).ok_or_else(|| arg_err(name, 2, 1, span, file, src))? {
+                Value::Int(i) => *i,
+                other => {
+                    return Err(err(
+                        codes::TYPE_MISMATCH,
+                        format!("`char_at` expects an `int` index, got `{}`", other.type_name()),
+                        span,
+                        file,
+                        src,
+                        Some("the index counts Unicode characters, not bytes"),
+                    ));
+                }
+            };
+            let chars: Vec<char> = s.chars().collect();
+            if i < 0 || (i as usize) >= chars.len() {
+                return Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("index {} out of range for string of length {}", i, chars.len()),
+                    span,
+                    file,
+                    src,
+                    Some("check the index against the character count, e.g. via `len(s)`"),
+                ));
+            }
+            Ok(Value::Char(chars[i as usize]))
+        }
+        "char_upper" | "char_lower" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            match v {
+                // 部分字符大小写映射会展开为多字符（如 ß → SS），char 只取首字符
+                Value::Char(c) => {
+                    let mapped = if name == "char_upper" {
+                        c.to_uppercase().next()
+                    } else {
+                        c.to_lowercase().next()
+                    };
+                    Ok(Value::Char(mapped.unwrap_or(*c)))
+                }
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`{}` expects a `char`, got `{}`", name, other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("pass a single-character value, e.g. `char_upper('a')`"),
+                )),
+            }
+        }
+        "char_is_digit" | "char_is_alpha" | "char_is_space" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            match v {
+                Value::Char(c) => {
+                    let r = match name {
+                        "char_is_digit" => c.is_digit(10),
+                        "char_is_alpha" => c.is_alphabetic(),
+                        _ => c.is_whitespace(),
+                    };
+                    Ok(Value::Bool(r))
+                }
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`{}` expects a `char`, got `{}`", name, other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("pass a single-character value, e.g. `char_is_digit('5')`"),
                 )),
             }
         }
@@ -2899,6 +3022,8 @@ fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String,
             .ok_or_else(|| err(codes::TYPE_MISMATCH, "cannot serialize NaN/infinity to JSON", span, file, src, None::<&str>))?,
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Str(s) => serde_json::Value::String(s.clone()),
+        // char 序列化为单字符字符串（与 to_str 一致）
+        Value::Char(c) => serde_json::Value::String(c.to_string()),
         // 枚举值序列化为显示字符串（Color.Red / Shape.Circle(1.5)），与 to_str 一致
         Value::Enum(e) => serde_json::Value::String(Value::Enum(e.clone()).display()),
         // future 不可序列化：显示为字符串

@@ -39,6 +39,8 @@ impl CType {
             TyName::Float => CType::Double,
             TyName::Bool => CType::Bool,
             TyName::Str => CType::Str,
+            // char 在 C ABI 中以 Unicode 码点（int）表示
+            TyName::Char => CType::Int,
             // 泛型类型参数在 DLL 导出时无单一 C 类型，按默认 int 处理
             TyName::Var(_) => CType::Int,
         }
@@ -444,6 +446,7 @@ impl Codegen {
             Expr::FloatLit(..) => Ok(CType::Double),
             Expr::BoolLit(..) => Ok(CType::Bool),
             Expr::StrLit(..) => Ok(CType::Str),
+            Expr::CharLit(..) => Ok(CType::Int),
             Expr::Ident { name, span } => vt.get(name).copied().ok_or_else(|| {
                 self.zerr(
                     codes::UNDEFINED,
@@ -1049,6 +1052,8 @@ impl Codegen {
             }
             Expr::BoolLit(b, _) => Ok((CType::Bool, if *b { "true".to_string() } else { "false".to_string() })),
             Expr::StrLit(s, _) => Ok((CType::Str, c_str_lit(s))),
+            // 字符字面量在 C 中按 Unicode 码点（int）表示
+            Expr::CharLit(c, _) => Ok((CType::Int, format!("0x{:X}", *c as u32))),
             Expr::Ident { name, span } => match ctx.var_types.get(name) {
                 Some(t) => Ok((*t, name.clone())),
                 None => Err(self.zerr(

@@ -108,11 +108,13 @@ Hone 编程语言 – 完整设计规范 v1.2（对应实现版本 v0.7.9）
   · float：64位双精度浮点数（IEEE 754）
   · bool：布尔值（true / false）
   · str：UTF-8 字符串
+  · char：单个 Unicode 字符（如 'a'，'中'），按码点比较与转换
 · 字面量规则：
   · 整数：0，42，-1（无小数点）
   · 浮点数：必须包含小数点，如 3.14，-0.5，.2，2.0
   · 布尔：true，false
   · 字符串：双引号括起，如 "hello"，支持 \n，\t，\\，\"
+  · 字符：单引号括起，如 'a'，'\n'，'中'；必须恰好一个字符（空/多字符报 H005），支持 \n，\t，\\，\"，\'
 
 1.4 控制流
 
@@ -251,7 +253,7 @@ print(Math.double(21));   // 42（类方法不受影响）
 
 · 语法：match 表达式 { 模式 => 分支体, ..., _ => 默认值 }
 · 模式支持：
-  · 字面量（整数/浮点/布尔/字符串）
+  · 字面量（整数/浮点/布尔/字符串/字符，如 42、3.14、true、"hi"、'a'）
   · 枚举变体：Color.Red（无载荷）或 Shape.Circle(r)（带载荷，r 绑定到分支体变量；
     `_` 忽略某项：Shape.Rect(w, _)）；绑定变量仅在本分支体内可见
   · `_` 通配符（匹配任意值，只能出现一次且放最后）
@@ -704,11 +706,18 @@ r = random.float();
 print(r);                   // 0.873245
 
 
-3.5 字符串处理函数
+3.5 字符串与字符函数
 
 · str_contains(str, substr) → bool：判断 str 是否包含 substr
 · str_replace(str, old, new) → str：将 str 中的所有 old 替换为 new
 · str_trim(str) → str：去掉 str 首尾的空白字符（空格、Tab、换行）
+· ord(c) → int：返回字符 c 的 Unicode 码点（'中' → 20013）
+· char(i) → int → char：将码点转换为字符（20013 → '中'；越界/代理区报错 H001）
+· char_at(s, i) → char：按 Unicode 字符取字符串第 i 个字符（越界报错 H001；与 s[i] 的差异：s[i] 返回单字符 str，char_at 返回 char）
+· char_upper(c) / char_lower(c) → char：字符大小写转换（无大小写字符原样返回；多字符映射如 ß→SS 只取首字符）
+· char_is_digit(c) → bool：是否为十进制数字字符（'5' → true）
+· char_is_alpha(c) → bool：是否为字母字符（含中文等 Unicode 字母）
+· char_is_space(c) → bool：是否为空白字符（空格、Tab、换行等）
 
 示例：
 
@@ -717,6 +726,18 @@ s = "  hello world  ";
 print(str_trim(s));           // "hello world"
 print(str_contains(s, "world")); // true
 print(str_replace(s, "world", "Hone")); // "  hello Hone  "
+
+c = '中';
+print(ord(c));                // 20013
+print(char(20013));           // 中
+print(char_at("hone", 1));    // o
+print(char_upper('a'));       // A
+print(char_is_digit('5'));    // true
+print(char_is_alpha('中'));   // true
+print(char_is_space('\t'));   // true
+// char 按码点比较，无算术运算
+print('a' < 'b');             // true
+print('a' == 'a');            // true
 
 
 3.6 数学工具函数
@@ -735,9 +756,10 @@ print(min(3, 7));  // 3
 
 3.7 类型转换函数
 
-· to_str(value) → str：将 int、float 或 bool 转换为字符串（bool → "true"/"false"，浮点数按默认格式输出）
+· to_str(value) → str：将 int、float、bool 或 char 转换为字符串（bool → "true"/"false"，char → 单字符字符串，浮点数按默认格式输出）
 · to_int(value) → int：将 str（纯数字）或 float 转换为 int（截断小数部分），若 str 包含非数字字符则报错 error[H006]
 · to_float(value) → float：将 str（数字格式）或 int 转换为 float，若 str 格式非法则报错 error[H007]
+· char ↔ int 转换用 ord(c) / char(i)（见 3.5 字符串与字符函数）
 
 示例：
 

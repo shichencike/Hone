@@ -234,6 +234,7 @@ pub enum TyName {
     Float,
     Bool,
     Str,
+    Char,
     /// 泛型类型参数引用（fn name[T] 中的 T，注解写 `x: T`）
     Var(String),
 }
@@ -297,6 +298,8 @@ pub enum Expr {
     FloatLit(f64, Span),
     BoolLit(bool, Span),
     StrLit(String, Span),
+    /// 字符字面量 'a'（词法层已校验恰好一个 Unicode 字符）
+    CharLit(char, Span),
     /// 标识符；模块函数经点号合并为完整名（如 "time.now"）
     Ident { name: String, span: Span },
     /// 列表字面量 [a, b, c]
@@ -476,6 +479,7 @@ pub fn expr_span(e: &Expr) -> Span {
         | Expr::FloatLit(_, s)
         | Expr::BoolLit(_, s)
         | Expr::StrLit(_, s)
+        | Expr::CharLit(_, s)
         | Expr::ListLit(_, s)
         | Expr::DictLit(_, s)
         | Expr::ListComp { span: s, .. }

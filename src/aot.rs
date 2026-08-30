@@ -1671,6 +1671,17 @@ impl AotGen {
                         TyName::Float => "hn_float(0.0)".to_string(),
                         TyName::Bool => "hn_bool(false)".to_string(),
                         TyName::Str => "hn_str(\"\")".to_string(),
+                        // AOT 运行时暂无 char 值类型
+                        TyName::Char => {
+                            return Err(zerr(
+                                &self.file,
+                                &self.src,
+                                codes::NOT_IMPLEMENTED,
+                                "`char` is not supported in AOT native builds".to_string(),
+                                *span,
+                                Some("char works in interpreted mode only"),
+                            ));
+                        }
                         TyName::Var(_) => "hn_null()".to_string(),
                     },
                 };
@@ -2182,6 +2193,14 @@ impl AotGen {
             }
             Expr::BoolLit(b, _) => Ok(if *b { "hn_bool(true)".to_string() } else { "hn_bool(false)".to_string() }),
             Expr::StrLit(s, _) => Ok(format!("hn_str({})", c_str_lit(s))),
+            Expr::CharLit(_, span) => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                "`char` literals are not supported in AOT native builds".to_string(),
+                *span,
+                Some("char works in interpreted mode only"),
+            )),
             Expr::Ident { name, span } => {
                 if let Some(v) = self.lookup(name) {
                     Ok(format!("hn_copy({})", v))

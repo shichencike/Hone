@@ -314,6 +314,21 @@ msg = <span class="k">match</span> status {
 <span class="f">print</span>(<span class="n">3</span> |&gt; <span class="f">max</span>(<span class="n">7</span>) |&gt; <span class="f">to_str</span>);     <span class="c">// "7"</span></code></pre>
   </div>
 
+  <div class="example">
+    <div class="title">4.8 char 字符类型</div>
+    <div class="note">单引号字面量（须恰好一个字符）、按码点比较、ord/char/char_at/char_upper/char_lower/char_is_* 函数；无算术运算（完整示例：examples/char_demo.hn）</div>
+<pre><code>c = <span class="s">'中'</span>;                  <span class="c">// char：单个 Unicode 字符</span>
+<span class="k">char</span> w = <span class="s">'x'</span>;           <span class="c">// 显式类型声明</span>
+<span class="f">print</span>(<span class="f">type_of</span>(c));          <span class="c">// char</span>
+<span class="f">print</span>(<span class="s">'a'</span> &lt; <span class="s">'b'</span>);         <span class="c">// true（按码点比较）</span>
+<span class="f">print</span>(<span class="f">ord</span>(c));               <span class="c">// 20013（Unicode 码点）</span>
+<span class="f">print</span>(<span class="f">char</span>(<span class="n">97</span>));           <span class="c">// a（码点 → 字符）</span>
+<span class="f">print</span>(<span class="f">char_at</span>(<span class="s">"hone"</span>, <span class="n">1</span>)); <span class="c">// o（按字符取，返回 char）</span>
+<span class="f">print</span>(<span class="f">char_upper</span>(<span class="s">'a'</span>));    <span class="c">// A</span>
+<span class="f">print</span>(<span class="f">char_is_digit</span>(<span class="s">'5'</span>));  <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">char_is_alpha</span>(<span class="s">'中'</span>)); <span class="c">// true</span></code></pre>
+  </div>
+
   <h3><span class="hash">#</span>5. 内置函数</h3>
 
   <div class="example">
