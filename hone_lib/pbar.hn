@@ -1,0 +1,166 @@
+// hone_lib/pbar.hn - 终端字符进度条标准库（纯 Hone 编写）
+// 用法: import "pbar" from "./hone_lib/pbar.hn";
+// 函数统一 pbar_ 前缀。
+//
+// 进度条对象（pbar_new 返回的 dict）:
+//   label: str  左侧标签文本（可为 ""）
+//   total: int  总步数（>= 1）
+//   value: int  当前进度（0..total）
+//   width: int  条宽（字符数）
+//   start: int  创建时间戳（秒，剩余时间估算用）
+//   shown: int  已显示帧数（首帧不输出 ANSI 上移，避免越过屏幕顶部）
+//
+// 值语义说明：Hone 的 dict 不可原地修改，pbar_update / pbar_advance /
+// pbar_show 都返回新的进度条对象，必须重新赋值：
+//   pb = pbar_update(pb, i);
+//   pb = pbar_show(pb);
+//
+// 典型用法（单行原地刷新）:
+//   import "pbar" from "./hone_lib/pbar.hn";
+//   pb = pbar_new(100, 30, "下载");
+//   i = 0;
+//   while (i <= 100) {
+//       pb = pbar_update(pb, i);
+//       pb = pbar_show(pb);
+//       time.sleep(0.05);
+//       i = i + 1;
+//   }
+//   pbar_finish(pb);
+//
+// 输出模式：
+//   pbar_show    单行原地刷新（ANSI：ESC[1A 上移一行 + ESC[K 清行；
+//                适用于 Git Bash / VS Code 终端 / Windows Terminal /
+//                Linux/macOS 终端）
+//   pbar_line    每帧新行输出（兼容不支持 ANSI 的老终端，如旧版 cmd）
+//   pbar_finish  结束时输出完整进度条并换行
+
+// ============ 内部工具 ============
+
+// ESC 控制字符（0x1b）：Hone 字符串转义不支持 \x，用 base64 解码构造
+fn pbar_esc() -> str {
+    return crypto.base64_decode("Gw==");
+}
+
+// 数值钳制到 [lo, hi]
+fn pbar_clamp(v : int, lo : int, hi : int) -> int {
+    if (v < lo) { return lo; }
+    if (v > hi) { return hi; }
+    return v;
+}
+
+// 秒数格式化为 m:ss / h:mm:ss
+fn pbar_fmt_sec(s : int) -> str {
+    h = s / 3600;
+    m = (s % 3600) / 60;
+    sec = s % 60;
+    mm = to_str(m);
+    ss = to_str(sec);
+    if (m < 10) { mm = "0" + mm; }
+    if (sec < 10) { ss = "0" + ss; }
+    if (h > 0) {
+        hh = to_str(h);
+        return hh + ":" + mm + ":" + ss;
+    }
+    return mm + ":" + ss;
+}
+
+// ============ 构造与更新 ============
+
+// 创建进度条对象。total 总步数；width 条宽；label 标签（可为 ""）
+fn pbar_new(total : int, width : int, label : str) {
+    t = total;
+    if (t < 1) { t = 1; }
+    return {"label": label, "total": t, "value": 0, "width": width,
+            "start": time.now(), "shown": 0};
+}
+
+// 更新进度到 value（自动钳制到 [0, total]），返回新进度条对象
+fn pbar_update(pb, value : int) {
+    v = pbar_clamp(value, 0, pb.total);
+    return {"label": pb.label, "total": pb.total, "value": v,
+            "width": pb.width, "start": pb.start, "shown": pb.shown};
+}
+
+// 进度前进步数（增量），返回新进度条对象
+fn pbar_advance(pb, n : int) {
+    return pbar_update(pb, pb.value + n);
+}
+
+// ============ 查询 ============
+
+// 当前百分比（0-100）
+fn pbar_pct(pb) -> int {
+    return pb.value * 100 / pb.total;
+}
+
+// 是否已完成
+fn pbar_done(pb) -> bool {
+    return pb.value >= pb.total;
+}
+
+// 剩余秒数估算（基于平均速率；value 为 0 时返回 0）
+fn pbar_eta(pb, now : int) -> int {
+    elapsed = now - pb.start;
+    if (pb.value <= 0) { return 0; }
+    remain = (pb.total - pb.value) * elapsed / pb.value;
+    if (remain < 0) { return 0; }
+    return remain;
+}
+
+// ============ 渲染 ============
+
+// 渲染进度条字符串: label [####----] 45% 12/24
+fn pbar_render(pb) -> str {
+    pct = pbar_pct(pb);
+    filled = pb.value * pb.width / pb.total;
+    bar = "";
+    i = 0;
+    while (i < filled) {
+        bar = bar + "#";
+        i = i + 1;
+    }
+    while (i < pb.width) {
+        bar = bar + "-";
+        i = i + 1;
+    }
+    return pb.label + " [" + bar + "] " + to_str(pct) + "% "
+        + to_str(pb.value) + "/" + to_str(pb.total);
+}
+
+// 渲染带剩余时间估算的进度条字符串
+fn pbar_render_full(pb, now : int) -> str {
+    return pbar_render(pb) + " 剩余 " + pbar_fmt_sec(pbar_eta(pb, now));
+}
+
+// ============ 输出 ============
+
+// 单行原地刷新（ANSI 重绘）。返回新进度条对象（shown+1），需重新赋值：
+//   pb = pbar_show(pb);
+fn pbar_show(pb) {
+    line = pbar_render(pb);
+    if (pb.shown > 0) {
+        esc = pbar_esc();
+        print(esc + "[1A" + esc + "[K" + line);
+    } else {
+        print(line);
+    }
+    return {"label": pb.label, "total": pb.total, "value": pb.value,
+            "width": pb.width, "start": pb.start, "shown": pb.shown + 1};
+}
+
+// 每帧新行输出（兼容不支持 ANSI 的终端）
+fn pbar_line(pb) {
+    print(pbar_render(pb));
+}
+
+// 完成态输出：补齐到 100% 后换行（结束调用一次）
+fn pbar_finish(pb) {
+    done = pbar_update(pb, pb.total);
+    line = pbar_render(done);
+    if (pb.shown > 0) {
+        esc = pbar_esc();
+        print(esc + "[1A" + esc + "[K" + line);
+    } else {
+        print(line);
+    }
+}

@@ -1,0 +1,57 @@
+// pet_demo.hn - 桌宠标准库演示（Windows：原生 Win32 窗口，无 PowerShell 依赖）
+// 运行: hone examples/pet_demo.hn   （自动弹出桌宠小窗，右键菜单或 Ctrl+C 退出）
+// 依赖: hone_lib/pet.hn；仅支持 Windows
+//
+// 功能一览（全部可开关）：
+//   · 内置像素猫（idle/走路/睡觉/被摸开心/惊讶 8 帧动画，8fps）
+//   · 说话气泡：随机闲话、被摸回应、整点报时、CPU/内存播报
+//   · 交互：点击（开心）、双击（惊讶）、拖拽移动、右键原生菜单
+//   · 右键菜单：换装（橘/黑/白猫循环）、静音、跟随鼠标、隐藏台词、退出
+//   · 空闲自动散步（全屏游荡）、无操作自动入睡
+//
+// 配置项（均可不写，用默认值）：
+//   pal            int   调色板 0/1/2（橘猫/黑猫/白猫）
+//   scale          int   显示缩放（默认 2 → 96×96 窗口）
+//   speed          int   移动速度 px/tick（默认 2）
+//   tick           float 动画 tick 秒（默认 0.125 = 8fps）
+//   sleep_after    int   无操作多少秒后入睡（默认 120，0 = 不睡）
+//   wander         int   自动游荡间隔秒（默认 10，0 = 不游荡）
+//   bubble         int   随机台词间隔秒（默认 25，0 = 不说话）
+//   mute           bool  静音（默认 false）
+//   hourly         bool  整点报时（默认 true）
+//   res_report     int   系统资源播报间隔秒（默认 300，0 = 关闭）
+//   lines_file     str   自定义台词 JSON（格式见 pet.hn 台词系统注释）
+//   frames_dir     str   外部 PPM 帧目录（缺帧自动用内置兜底）
+//   start_x/start_y int  初始位置（默认 -1 = 屏幕底部中央）
+
+import "pet" from "./hone_lib/pet.hn";
+
+// ---- 自定义台词文件（可选）：uncomment 并建一个 lines.json ----
+// write_file("lines.json", json_stringify({
+//     "greet": ["欢迎回来！", "嗨~ 今天过得好吗？"],
+//     "idle": ["(观察你)", "喵了个咪~", "要不要休息一下？"]
+// }));
+
+// ---- 配置 ----
+cfg = {
+    "pal": 0,          // 橘猫
+    "scale": 2,        // 96×96 显示
+    "speed": 3,        // 走得稍快
+    "sleep_after": 90, // 90 秒无操作入睡
+    "wander": 8,       // 每 8 秒游荡一次
+    "bubble": 20,      // 每 20 秒随机说话
+    // "lines_file": "./lines.json",   // 自定义台词
+    // "frames_dir": "./pet_frames",   // 外部 PPM 帧目录（idle0.ppm 等）
+};
+
+// ---- 阻塞运行（推荐）：Ctrl+C 或右键菜单退出 ----
+pet_run(cfg);
+
+// ---- 非阻塞用法（可嵌入自己的主循环）----
+// st = pet_init(cfg);
+// while (st.quit == false) {
+//     st = pet_tick(st);
+//     time.sleep(st.cfg.tick);
+//     // ... 你自己的逻辑
+// }
+// pet_cleanup(st);

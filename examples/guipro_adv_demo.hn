@@ -1,0 +1,135 @@
+// guipro_adv_demo.hn - guipro 进阶控件演示（slider/table/tree/canvas/托盘/菜单）
+// 用法: hone examples/guipro_adv_demo.hn （进阶控件仅 Windows 原生后端支持）
+// 说明: 演示滑块 / 表格 / 树 / 画布 / 托盘图标 / 菜单栏，以及对应事件回调。
+//       窗口关闭（点 X）后自动退出（托盘图标与菜单句柄由运行时自动回收）。
+
+import "guipro" from "./hone_lib/guipro.hn";
+
+// ---------- 创建窗口 ----------
+win = guipro_window("guipro 进阶控件演示", 640, 540);
+
+// ---------- 菜单栏 ----------
+// 注意：Hone 列表字面量不支持跨行，用 append 逐行构建
+menu_items = [];
+file_menu = [];
+file_menu = append(file_menu, {"text": "打开"});
+file_menu = append(file_menu, {"text": "保存"});
+file_menu = append(file_menu, {"text": "-"});
+file_menu = append(file_menu, {"text": "退出"});
+menu_items = append(menu_items, {"text": "文件", "items": file_menu});
+help_menu = [];
+help_menu = append(help_menu, {"text": "关于"});
+menu_items = append(menu_items, {"text": "帮助", "items": help_menu});
+guipro_menu(win, menu_items);
+
+// ---------- 托盘图标 ----------
+guipro_tray_add(win, "guipro 进阶控件演示");
+
+// ---------- 滑块 ----------
+lbl_slider = guipro_label(win, "滑块: 50", 20, 20, 240, 24);
+slider = guipro_slider(win, 0, 100, 50, 20, 48, 280, 28);
+
+// ---------- 表格 ----------
+cols = ["姓名", "城市", "分数"];
+rows = [];
+rows = append(rows, ["张三", "北京", "92"]);
+rows = append(rows, ["李四", "上海", "87"]);
+rows = append(rows, ["王五", "广州", "75"]);
+table = guipro_table(win, cols, rows, 20, 92, 290, 170);
+lbl_table = guipro_label(win, "表格: 未选择（双击看详情）", 20, 270, 290, 24);
+
+// ---------- 树 ----------
+tree_items = [];
+node_a = [];
+node_a = append(node_a, {"text": "子项 A1"});
+node_a = append(node_a, {"text": "子项 A2"});
+tree_items = append(tree_items, {"text": "项目 A", "items": node_a});
+tree_items = append(tree_items, {"text": "项目 B"});
+tree = guipro_tree(win, tree_items, 330, 20, 290, 190);
+lbl_tree = guipro_label(win, "树: 未选择", 330, 218, 290, 24);
+
+// ---------- 画布 ----------
+canvas = guipro_canvas(win, 330, 250, 290, 220);
+lbl_canvas = guipro_label(win, "画布: 点击绘制红点", 330, 478, 290, 24);
+
+// 初始绘制（颜色支持 "#RRGGBB" 字符串）
+guipro_canvas_line(win, canvas, 10, 10, 280, 100, "#3366FF");
+guipro_canvas_rect(win, canvas, 20, 30, 80, 60, "#FF6600", 1);
+guipro_canvas_ellipse(win, canvas, 130, 40, 90, 60, "#00AA00", 0);
+guipro_canvas_text(win, canvas, 10, 170, "Hello Canvas", "#333333");
+
+// ---------- 事件注册（函数式注册表） ----------
+handlers = [];
+
+// 滑块变更
+handlers = guipro_on(handlers, win, slider, "change", fn(id, value) {
+    guipro_set_text(win, lbl_slider, "滑块: " + value);
+    return "";
+});
+
+// 表格选中行变化
+handlers = guipro_on(handlers, win, table, "change", fn(id, value) {
+    guipro_set_text(win, lbl_table, "表格: 选中行 " + value);
+    return "";
+});
+
+// 表格双击 → 弹出行详情
+handlers = guipro_on(handlers, win, table, "click", fn(id, value) {
+    row = to_int(value);
+    cells = guipro_table_get_row(win, table, row);
+    if (len(cells) >= 3) {
+        guipro_msgbox("行详情", cells[0] + " / " + cells[1] + " / 分数 " + cells[2]);
+    }
+    return "";
+});
+
+// 树选中节点变化
+handlers = guipro_on(handlers, win, tree, "change", fn(id, value) {
+    guipro_set_text(win, lbl_tree, "树: 选中节点 " + value);
+    return "";
+});
+
+// 画布点击 → 在点击处绘制红点（value 为 "[x,y]"）
+handlers = guipro_on(handlers, win, canvas, "click", fn(id, value) {
+    pos = json_parse(value);
+    x = pos[0];
+    y = pos[1];
+    guipro_canvas_rect(win, canvas, x - 5, y - 5, 10, 10, "#FF0000", 1);
+    guipro_set_text(win, lbl_canvas, "画布: 点击 @ " + to_str(x) + "," + to_str(y));
+    return "";
+});
+
+// 托盘事件（left/right/double）
+handlers = guipro_on(handlers, win, 0, "tray", fn(id, value) {
+    if (value == "left") {
+        guipro_set_text(win, lbl_canvas, "托盘: 左键单击");
+    } else if (value == "right") {
+        guipro_set_text(win, lbl_canvas, "托盘: 右键单击");
+    } else if (value == "double") {
+        guipro_set_text(win, lbl_canvas, "托盘: 双击");
+    }
+    return "";
+});
+
+// 菜单事件（value = 菜单路径）
+handlers = guipro_on(handlers, win, 0, "menu", fn(id, value) {
+    if (value == "文件/退出") {
+        guipro_close(win);
+    } else if (value == "帮助/关于") {
+        guipro_msgbox("关于", "guipro 进阶控件演示\n滑块 / 表格 / 树 / 画布 / 托盘 / 菜单");
+    } else {
+        guipro_set_text(win, lbl_canvas, "菜单: " + value);
+    }
+    return "";
+});
+
+// 窗口关闭事件（点 X）
+handlers = guipro_on_win(handlers, win, "close", fn(id, value) {
+    print("窗口已关闭");
+    return "";
+});
+
+// ---------- 主循环（阻塞，窗口关闭后返回） ----------
+print("guipro 进阶控件演示启动，请在窗口中操作…");
+guipro_run(handlers);
+print("guipro 进阶控件演示结束");

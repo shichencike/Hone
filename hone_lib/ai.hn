@@ -1,0 +1,358 @@
+// hone_lib/ai.hn - AI 编程助手标准库（纯 Hone 编写，单文件）
+// 用法: import "ai" from "./hone_lib/ai.hn";
+// 函数统一 ai_ 前缀。兼容 OpenAI Chat Completions 协议，
+// 默认对接本地 Ollama（http://localhost:11434/v1），配置了
+// HN_AI_KEY / HN_AI_BASE 后自动切换远程 API（DeepSeek/Kimi/通义/OpenAI 等）。
+//
+// 配置优先级（高 → 低）：
+//   1. 环境变量 HN_AI_KEY / HN_AI_BASE / HN_AI_MODEL
+//   2. 配置文件 ~/.hn/ai.json（{"base": ..., "key": ..., "model": ...}）
+//   3. 默认值：base=http://localhost:11434/v1，key="", model=qwen2.5-coder:7b
+// 函数级 opts 可再覆盖：{"model"?, "base"?, "key"?, "stream"?, "temperature"?, "max_tokens"?, "timeout"?}
+//
+// 功能一览：
+//   ai_chat(messages, opts)      对话补全（opts.stream=true 时 SSE 逐字输出，返回全文）
+//   ai_generate(prompt, opts)    按描述生成 Hone 代码
+//   ai_review(code, opts)        代码审查，返回问题与改进建议
+//   ai_explain(err, opts)        解释 Hone 错误码/报错信息并给修复建议
+//   ai_fix(code, err, opts)      报错信息 + 源码，返回修复后的完整代码
+//   ai_agent(prompt, opts)       工具调用代理：AI 可执行终端命令/读写文件完成多步任务
+//   ai_config()                  返回生效配置 {"base", "key", "model"}
+//   ai_tools()                   返回工具定义列表（供自建代理循环使用）
+//   ai_run_tool(name, args)      直接执行一个工具（"run_shell" 等）
+//
+// 工具集（ai_agent 内置）：run_shell / read_file / write_file / list_dir
+// 说明：Hone 不支持函数作为值传递，流式输出由库内部直接 print 逐字显示，
+//       同时返回完整文本供程序使用。
+
+// ============ 配置 ============
+
+// 家目录（Windows 用 USERPROFILE，其它平台用 HOME）
+fn ai_home() -> str {
+    h = sys.get_env("USERPROFILE");
+    if (len(h) > 0) { return h; }
+    return sys.get_env("HOME");
+}
+
+// 读取生效配置：环境变量 > ~/.hn/ai.json > 默认值
+fn ai_config() {
+    base = "http://localhost:11434/v1";
+    key = "";
+    model = "qwen2.5-coder:7b";
+    p = path.join(ai_home(), ".hn/ai.json");
+    if (file_exists(p)) {
+        try {
+            j = json_parse(read_file(p));
+            if (has_key(j, "base")) { base = j.base; }
+            if (has_key(j, "key")) { key = j.key; }
+            if (has_key(j, "model")) { model = j.model; }
+        } catch e { }
+    }
+    b = sys.get_env("HN_AI_BASE");
+    if (len(b) > 0) { base = b; }
+    k = sys.get_env("HN_AI_KEY");
+    if (len(k) > 0) { key = k; }
+    m = sys.get_env("HN_AI_MODEL");
+    if (len(m) > 0) { model = m; }
+    return {"base": base, "key": key, "model": model};
+}
+
+// 应用 opts 覆盖后的生效配置
+fn ai_effective(opts) {
+    c = ai_config();
+    nb = c.base;
+    nk = c.key;
+    nm = c.model;
+    if (has_key(opts, "base")) { nb = opts.base; }
+    if (has_key(opts, "key")) { nk = opts.key; }
+    if (has_key(opts, "model")) { nm = opts.model; }
+    return {"base": nb, "key": nk, "model": nm};
+}
+
+// ============ 内部工具 ============
+
+// 取列表第一个元素（Hone 列表无下标，用遍历计数；无元素返回 ""）
+fn ai_first(l) {
+    for x in l { return x; }
+    return "";
+}
+
+// 取列表第 idx 项（越界返回 ""）
+fn ai_at(l, idx : int) {
+    i = 0;
+    for x in l {
+        if (i == idx) { return x; }
+        i = i + 1;
+    }
+    return "";
+}
+
+// 列表元素拼接为字符串（分隔符 sep）
+fn ai_join(l, sep : str) -> str {
+    r = "";
+    first = true;
+    for x in l {
+        if (first) {
+            r = to_str(x);
+            first = false;
+        } else {
+            r = r + sep + to_str(x);
+        }
+    }
+    return r;
+}
+
+// 请求端点：base 未含 /chat/completions 时补全，并去除尾部斜杠
+fn ai_endpoint(base : str) -> str {
+    if (str_contains(base, "/chat/completions")) { return base; }
+    b = regex.replace("/+$", base, "");
+    return b + "/chat/completions";
+}
+
+// 请求头：有 key 时带 Bearer 认证
+fn ai_headers(cfg) {
+    if (len(cfg.key) > 0) {
+        return {"Content-Type": "application/json", "Authorization": "Bearer " + cfg.key};
+    }
+    return {"Content-Type": "application/json"};
+}
+
+// 请求超时（秒），opts.timeout 可覆盖，默认 300
+fn ai_timeout(opts) -> int {
+    if (has_key(opts, "timeout")) { return opts.timeout; }
+    return 300;
+}
+
+// 构造请求体 JSON（model + messages + 可选 temperature/max_tokens）
+fn ai_body(cfg, msgs, opts) -> str {
+    model = cfg.model;
+    // Hone 作用域为块级：b 需在 if 之前先声明
+    b = {"model": model, "messages": msgs};
+    has_t = has_key(opts, "temperature");
+    has_m = has_key(opts, "max_tokens");
+    if (has_t && has_m) {
+        b = {"model": model, "messages": msgs, "temperature": opts.temperature, "max_tokens": opts.max_tokens};
+    } else if (has_t) {
+        b = {"model": model, "messages": msgs, "temperature": opts.temperature};
+    } else if (has_m) {
+        b = {"model": model, "messages": msgs, "max_tokens": opts.max_tokens};
+    }
+    return json_stringify(b);
+}
+
+// 非流式 POST，返回响应体文本（错误向上抛出，调用方可 try-catch）
+fn ai_post(cfg, body : str, timeout : int) -> str {
+    url = ai_endpoint(cfg.base);
+    hdrs = ai_headers(cfg);
+    return http.request(url, {"method": "POST", "headers": hdrs, "body": body, "timeout": timeout});
+}
+
+// 从响应 JSON 提取 choices[0].message.content
+fn ai_extract_content(s : str) -> str {
+    j = json_parse(s);
+    if (!is_dict(j)) { return ""; }
+    if (!is_list(j.choices)) { return ""; }
+    for c in j.choices {
+        m = c.message;
+        if (is_str(m.content)) { return m.content; }
+        return "";
+    }
+    return "";
+}
+
+// 从流式块 JSON 提取 choices[0].delta.content
+fn ai_choice_delta(j) -> str {
+    if (!is_dict(j)) { return ""; }
+    if (!is_list(j.choices)) { return ""; }
+    for c in j.choices {
+        d = c.delta;
+        if (is_str(d.content)) { return d.content; }
+        return "";
+    }
+    return "";
+}
+
+// SSE 流式对话：逐块解析并 print 输出，返回完整回复文本
+fn ai_stream(messages, cfg, opts) -> str {
+    url = ai_endpoint(cfg.base);
+    body = ai_body(cfg, messages, opts);
+    hdrs = ai_headers(cfg);
+    h = 0;
+    try {
+        h = http.sse_open(url, {"method": "POST", "headers": hdrs, "body": body, "timeout": ai_timeout(opts)});
+    } catch e {
+        return "stream open failed: " + to_str(e.message);
+    }
+    full = "";
+    while (true) {
+        ev = "";
+        try { ev = http.sse_next(h); } catch e { break; }
+        if (ev == "") { break; }
+        try {
+            j = json_parse(ev);
+            c = ai_choice_delta(j);
+            if (len(c) > 0) {
+                full = full + c;
+                print(c);
+            }
+        } catch e2 { }
+    }
+    http.sse_close(h);
+    return full;
+}
+
+// ============ 五大功能 ============
+
+// 对话补全：messages 为 [{"role": "user"|"assistant"|"system", "content": "..."}]
+// opts.stream=true 时 SSE 逐字输出，仍返回完整文本
+fn ai_chat(messages, opts = {"timeout": 300}) -> str {
+    cfg = ai_effective(opts);
+    stream = false;
+    if (has_key(opts, "stream")) { stream = opts.stream; }
+    if (stream) { return ai_stream(messages, cfg, opts); }
+    body = ai_body(cfg, messages, opts);
+    r = ai_post(cfg, body, ai_timeout(opts));
+    return ai_extract_content(r);
+}
+
+// 代码生成：按自然语言描述生成 Hone 代码
+fn ai_generate(prompt : str, opts = {"timeout": 300}) -> str {
+    sys = "You are an expert Hone programming language assistant. Generate concise, correct, idiomatic Hone code. Return only the code, with no extra explanation unless asked.";
+    msgs = [{"role": "system", "content": sys}, {"role": "user", "content": prompt}];
+    return ai_chat(msgs, opts);
+}
+
+// 代码审查：粘贴代码，返回问题与改进建议
+fn ai_review(code : str, opts = {"timeout": 300}) -> str {
+    sys = "You are a senior Hone code reviewer. Analyze the given Hone code for bugs, edge cases, performance issues, and style problems. Give concrete, actionable suggestions with code snippets.";
+    user = "Please review the following Hone code:\n\n" + code;
+    msgs = [{"role": "system", "content": sys}, {"role": "user", "content": user}];
+    return ai_chat(msgs, opts);
+}
+
+// 错误解释：传入 Hone 错误码（如 H201）或报错信息，AI 解释原因并给修复建议
+fn ai_explain(err : str, opts = {"timeout": 300}) -> str {
+    sys = "You are a Hone language error explainer. Explain the root cause of the given error clearly, then give a concrete fix with example code.";
+    user = "Explain this Hone error and how to fix it:\n\n" + err;
+    msgs = [{"role": "system", "content": sys}, {"role": "user", "content": user}];
+    return ai_chat(msgs, opts);
+}
+
+// 自动修复：报错信息 + 源码，返回修复后的完整代码
+fn ai_fix(code : str, err : str, opts = {"timeout": 300}) -> str {
+    sys = "You are a Hone bug-fixing assistant. Given source code and an error message, return the corrected FULL code that compiles and runs. Preserve the original structure and style. If the error is unclear, ask for more info at the top of your reply.";
+    user = "Error message:\n" + err + "\n\nSource code:\n" + code;
+    msgs = [{"role": "system", "content": sys}, {"role": "user", "content": user}];
+    return ai_chat(msgs, opts);
+}
+
+// ============ 工具调用 ============
+
+// 工具定义列表（OpenAI function calling 格式）
+fn ai_tools() {
+    return [
+        {"type": "function",
+         "function": {"name": "run_shell", "description": "Execute a terminal command on the user's machine and return its output. Use for running hone scripts, git, file operations, etc.",
+                      "parameters": {"type": "object",
+                                     "properties": {"command": {"type": "string", "description": "The shell command to execute"}},
+                                     "required": ["command"]}}},
+        {"type": "function",
+         "function": {"name": "read_file", "description": "Read a text file and return its contents. Useful for inspecting source code.",
+                      "parameters": {"type": "object",
+                                     "properties": {"path": {"type": "string", "description": "Path to the file to read"}},
+                                     "required": ["path"]}}},
+        {"type": "function",
+         "function": {"name": "write_file", "description": "Write text content to a file, creating or overwriting it. Useful for applying code changes.",
+                      "parameters": {"type": "object",
+                                     "properties": {"path": {"type": "string", "description": "Path of the file to write"},
+                                                    "content": {"type": "string", "description": "Full text content to write"}},
+                                     "required": ["path", "content"]}}},
+        {"type": "function",
+         "function": {"name": "list_dir", "description": "List files and directories under a path. Useful for exploring a project structure.",
+                      "parameters": {"type": "object",
+                                     "properties": {"path": {"type": "string", "description": "Directory to list (default: current directory)"}},
+                                     "required": ["path"]}}}
+    ];
+}
+
+// 直接执行一个工具，返回字符串结果（错误转成 "error: ..." 而非抛出）
+fn ai_run_tool(name : str, a) -> str {
+    if (name == "run_shell") {
+        cmd = a.command;
+        try { return sys.run(cmd); } catch e { return "error: " + to_str(e.message); }
+    }
+    if (name == "read_file") {
+        p = a.path;
+        try { return read_file(p); } catch e { return "error: " + to_str(e.message); }
+    }
+    if (name == "write_file") {
+        p = a.path;
+        c = a.content;
+        try { write_file(p, c); return "ok"; } catch e { return "error: " + to_str(e.message); }
+    }
+    if (name == "list_dir") {
+        d = a.path;
+        if (len(d) == 0) { d = "."; }
+        try {
+            fs = glob.list(d);
+            return ai_join(fs, "\n");
+        } catch e { return "error: " + to_str(e.message); }
+    }
+    return "unknown tool: " + name;
+}
+
+// 从响应提取第一个 choice 的 message dict（失败返回 ""）
+fn ai_first_message(j) {
+    if (!is_dict(j)) { return ""; }
+    if (!is_list(j.choices)) { return ""; }
+    for c in j.choices {
+        return c.message;
+    }
+    return "";
+}
+
+// 从 message dict 提取文本内容（可能为 null，返回空串）
+fn ai_msg_text(msg) -> str {
+    if (is_str(msg.content)) { return msg.content; }
+    return "";
+}
+
+// 工具调用代理：AI 自主决定是否调用工具（执行终端命令/读写文件），
+// 循环执行直到给出最终回答（上限 10 轮防死循环）
+fn ai_agent(prompt : str, opts = {"timeout": 300}) -> str {
+    cfg = ai_effective(opts);
+    tools = ai_tools();
+    msgs = [{"role": "user", "content": prompt}];
+    i = 0;
+    while (i < 10) {
+        body = {"model": cfg.model, "messages": msgs, "tools": tools};
+        r = ai_post(cfg, json_stringify(body), ai_timeout(opts));
+        j = "";
+        try { j = json_parse(r); } catch e {
+            return "parse error: " + to_str(e.message) + "\nbody: " + r;
+        }
+        msg = ai_first_message(j);
+        if (msg == "") { return "no message in response: " + r; }
+        calls = [];
+        if (has_key(msg, "tool_calls")) { calls = msg.tool_calls; }
+        if (!is_list(calls) || len(calls) == 0) {
+            return ai_msg_text(msg);
+        }
+        // 追加 assistant 消息（含 tool_calls），再执行工具
+        msgs = append(msgs, msg);
+        for call in calls {
+            nm = call.function.name;
+            args_s = call.function.arguments;
+            out = "";
+            try {
+                a = json_parse(args_s);
+                out = ai_run_tool(nm, a);
+            } catch e {
+                out = "tool error: " + to_str(e.message);
+            }
+            msgs = append(msgs, {"role": "tool", "tool_call_id": call.id, "content": out});
+        }
+        i = i + 1;
+    }
+    return "agent stopped: max rounds reached (10)";
+}

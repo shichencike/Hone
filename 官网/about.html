@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>关于 Hone</title>
+<meta name="description" content="关于 Hone 编程语言：项目介绍、设计理念、路线图与开源信息。为效率而生，为乐趣而造。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+</head>
+<body>
+<header>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
+  <nav>
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="tutorial.html">教程</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
+  </nav>
+  <span class="ver">v0.7.9</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
+</header>
+
+<main>
+  <h2><span class="hash">#</span>关于 Hone</h2>
+  <p>Hone 是一门轻量级、跨平台、可嵌入的脚本语言，用 Rust 实现，单文件可执行程序，开箱即用。
+    项目始于对「少依赖、快上手」的追求：下载一个文件就能跑脚本，内置常用的系统能力，没有繁琐的环境配置。</p>
+
+  <h3>设计理念</h3>
+  <div class="about-grid">
+    <div class="card"><h4>⚡ 为效率而生</h4><p>无前缀变量声明、静态强类型编译期报错、内置文件/HTTP/JSON/多线程等工具箱，脚本即写即跑。</p></div>
+    <div class="card"><h4>📦 单文件分发</h4><p>下载 → 解压 → 运行，零配置、零依赖，跨 Windows / Linux / Termux，多版本共存互不干扰。</p></div>
+    <div class="card"><h4>🛠 可嵌入可扩展</h4><p>@export 打包 C ABI 动态库、typed FFI 调用 C 库、load 动态库、plugin 插件系统（运行期动态注册）、import 远程模块、LSP 语言服务器。</p></div>
+    <div class="card"><h4>🧰 现代语言特性</h4><p>struct 结构体（确定数据形态）、match 模式匹配、<code>|&gt;</code> 管道操作符、深度拷贝 clone/copy、指针类 ptr.*（分配表跟踪防野指针）。</p></div>
+    <div class="card"><h4>🧩 工具箱全开</h4><p>crypto 加密哈希（md5/sha1/sha256/HMAC/base64）、archive 压缩归档（zip/tar.gz）、server 本地 HTTP 服务器、hone test 测试框架。</p></div>
+    <div class="card"><h4>🔒 严谨而不繁琐</h4><p>类型一经推导即锁定，禁止隐式转换；错误码（Hxxx）+ 行列定位 + 修复建议，让报错可读、可查、可修。</p></div>
+    <div class="card"><h4>🧩 不背兼容包袱</h4><p>旧版本永久可用，新版本自由演化，升级不背兼容包袱。</p></div>
+    <div class="card"><h4>🗡️ 为乐趣而造</h4><p>也提供 hone poop 屎山检测、可视化编辑器（editor/index.html）这类开发乐趣工具。</p></div>
+  </div>
+
+  <h3>项目信息</h3>
+  <table>
+    <tr><th>项目</th><th>信息</th></tr>
+    <tr><td>源码仓库</td><td><a href="https://github.com/shichencike/Hone">github.com/shichencike/Hone</a></td></tr>
+    <tr><td>许可证</td><td>MIT</td></tr>
+    <tr><td>当前版本</td><td>v0.7.9（<a href="changelog.html">更新日志</a>）</td></tr>
+    <tr><td>实现语言</td><td>Rust（解释器 / 静态检查 / 代码生成 / LSP / FFI 均原生实现）</td></tr>
+    <tr><td>支持平台</td><td>Windows x86_64、Linux x86_64、Termux（Android aarch64）</td></tr>
+    <tr><td>设计规范</td><td><code class="mono">hone.md</code>（v1.2）</td></tr>
+  </table>
+
+  <h3>路线图</h3>
+  <ul>
+    <li>✅ 阶段 1：核心执行器（词法 / 解析 / AST / 解释器 / 静态类型检查）</li>
+    <li>✅ 阶段 2：fmt、debug、go 多线程、sys Windows API、build --dll</li>
+    <li>✅ 阶段 3：import 远程模块、load lazy、use / alias、hone get、lsp、可视化编辑器</li>
+    <li>✅ 阶段 4：GitHub 开源、独立官网、--dll 全类型映射、hone poop</li>
+    <li>✅ 阶段 5：内置函数扩展（log/path/args/env/db/regex/crypto）、tmp fn、try/catch/throw、--restart/--resume、build --exe、hone explain</li>
+    <li>✅ 阶段 6：集合类型（列表/字典）、for-in、f-string、类型判断、time.parse、uuid.new</li>
+    <li>✅ 阶段 7：本地 HTTP 服务器（server.*）、hone_lib 图形界面库</li>
+    <li>✅ 阶段 8：typed FFI 签名块、头文件自动绑定（from "header.h"）、hone bind</li>
+    <li>✅ 阶段 9：struct 结构体、match 模式匹配、<code>|&gt;</code> 管道操作符、hone test 测试框架、build --script 仅脚本包、self-update 自动更新</li>
+    <li>✅ 阶段 10：crypto 扩展（sha1/HMAC/base64）、archive 压缩归档（zip/tar.gz）、ptr 指针类（防野指针）、plugin 插件系统</li>
+    <li>✅ 阶段 11：hone repl 交互式解释器（Python 式回显/多行续行）、hone prof 函数级性能剖析</li>
+  </ul>
+
+  <p class="note">想参与？欢迎到 <a href="https://github.com/shichencike/Hone">GitHub</a> 提交 issue、PR，或在社区交流使用心得。</p>
+</main>
+
+<footer>
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="tutorial.html">教程</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.7.9 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+</footer>
+</body>
+</html>

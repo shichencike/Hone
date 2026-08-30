@@ -1,6 +1,9 @@
 # Rust 构建产物（所有层级）
 target/
 
+# AtomCode 代理配置（会话记忆等，不属项目代码）
+.atomcode/
+
 # 敏感凭据（切勿提交）
 token.txt
 ftp.txt
@@ -11,3 +14,6 @@ ka[.][.]md
 # build --dll 生成的临时 C 源码
 *.c
 !tests/ka_lib/src/*.c
+
+# 测试生成物
+examples/plot_test.svg

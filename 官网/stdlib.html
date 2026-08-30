@@ -4,19 +4,40 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 标准库文档</title>
+<meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui / music / spider / process / sched / img / ai / pet / guipro 模块，本地路径导入即可使用。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
 </head>
 <body>
 <header>
-  <span class="logo">⚡ Hone</span>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
   <nav>
     <a href="index.html">首页</a>
     <a href="docs.html">文档</a>
+    <a href="tutorial.html">教程</a>
     <a href="examples.html">示例</a>
-    <a href="install.html">安装</a>
     <a href="stdlib.html" class="active">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
   </nav>
-  <span class="ver">v0.3.0</span>
+  <span class="ver">v0.7.9</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
 <main>
@@ -32,21 +53,53 @@
       <li><a href="#collections">collections 集合模块</a></li>
       <li><a href="#str">str 字符串模块</a></li>
       <li><a href="#gui">gui 图形界面模块</a></li>
+      <li><a href="#music">music 乐理模块</a></li>
+      <li><a href="#spider">spider 爬虫模块</a></li>
+      <li><a href="#process">process 进程模块</a></li>
+      <li><a href="#sched">sched 定时任务模块</a></li>
+      <li><a href="#pbar">pbar 进度条模块</a></li>
+      <li><a href="#img">img 图片模块</a></li>
+      <li><a href="#ai">ai AI 编程助手模块</a></li>
+      <li><a href="#pet">pet 桌宠模块（Windows）</a></li>
+      <li><a href="#guipro">guipro 原生图形界面模块</a></li>
       <li><a href="#demo">组合示例</a></li>
     </ol>
   </div>
 
   <section id="intro">
     <h2><span class="hash">#</span>1. 概述与导入</h2>
-    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code>），通过本地路径 import 使用：</p>
+    <p>标准库位于 <code class="inline">hone_lib/</code> 目录，全部用 Hone 语言编写。函数统一模块前缀（<code class="inline">math_</code> / <code class="inline">coll_</code> / <code class="inline">str_</code> / <code class="inline">gui_</code> / <code class="inline">music_</code> / <code class="inline">sp_</code> / <code class="inline">proc_</code> / <code class="inline">sch_</code> / <code class="inline">pbar_</code> / <code class="inline">img_</code> / <code class="inline">ai_</code> / <code class="inline">pet_</code> / <code class="inline">guipro_</code>），通过本地路径 import 使用：</p>
 <pre><code><span class="c">// 本地路径导入（相对路径基于当前工作目录）</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
 <span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;
 <span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./hone_lib/gui.hn"</span>;   <span class="c">// 需 v0.3.0+（依赖 server.*）</span>
+<span class="k">import</span> <span class="s">"music"</span> <span class="k">from</span> <span class="s">"./hone_lib/music.hn"</span>; <span class="c">// 乐理：音名/音阶/和弦/调性等</span>
+<span class="k">import</span> <span class="s">"spider"</span> <span class="k">from</span> <span class="s">"./hone_lib/spider.hn"</span>; <span class="c">// 爬虫：静态直取 + 动态渲染</span>
+<span class="k">import</span> <span class="s">"process"</span> <span class="k">from</span> <span class="s">"./hone_lib/process.hn"</span>; <span class="c">// 进程：枚举/查找/结束（跨平台）</span>
+<span class="k">import</span> <span class="s">"sched"</span> <span class="k">from</span> <span class="s">"./hone_lib/sched.hn"</span>;   <span class="c">// 定时任务：间隔/时刻/cron（跨平台）</span>
+<span class="k">import</span> <span class="s">"pbar"</span> <span class="k">from</span> <span class="s">"./hone_lib/pbar.hn"</span>;   <span class="c">// 进度条：终端字符进度条 + 单行刷新/剩余时间</span>
+<span class="k">import</span> <span class="s">"img"</span> <span class="k">from</span> <span class="s">"./hone_lib/img.hn"</span>;     <span class="c">// 图片：绘图/滤镜/变换 + PPM/SVG</span>
+<span class="k">import</span> <span class="s">"ai"</span> <span class="k">from</span> <span class="s">"./hone_lib/ai.hn"</span>;      <span class="c">// AI 编程助手：对话/生成/审查/修复/工具调用</span>
+<span class="k">import</span> <span class="s">"pet"</span> <span class="k">from</span> <span class="s">"./hone_lib/pet.hn"</span>;    <span class="c">// 桌宠（Windows）：透明置顶窗 + 动画/交互/台词（依赖 PowerShell）</span>
+<span class="k">import</span> <span class="s">"guipro"</span> <span class="k">from</span> <span class="s">"./hone_lib/guipro.hn"</span>; <span class="c">// 原生图形界面：窗口/控件/事件/定时器（Windows: Win32，Linux: GTK3）</span>
 
 <span class="c">// import as：以别名导入，函数名前缀整体替换</span>
 <span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span> <span class="k">as</span> m;   <span class="c">// m_clamp / m_gcd ...</span></code></pre>
+    <p><strong>内置模块（无需导入，开箱即用）</strong>：除上述纯 Hone 模块外，解释器内置大量模块函数，直接调用即可：
+      <code class="inline">crypto.*</code>（md5/sha1/sha256/hmac_sha256/base64）、<code class="inline">archive.*</code>（zip/tar.gz 压缩归档）、
+      <code class="inline">zlib.*</code>（zlib/gzip 压缩）、<code class="inline">csv.*</code>（CSV 解析/序列化）、
+      <code class="inline">stat.*</code>（均值/中位数/方差/标准差）与 <code class="inline">matrix.*</code>（矩阵运算）、
+      <code class="inline">diff.*</code>（文本对比）与 <code class="inline">regex.*</code>（find/groups/split）、
+      <code class="inline">glob.*</code>（文件匹配）与 <code class="inline">temp.*</code>（临时文件/目录）、
+      <code class="inline">plot.*</code>（SVG 图表）与 <code class="inline">yaml.*</code>（YAML 解析/序列化）、
+      <code class="inline">http.request</code>（超时/自定义 Header）、<code class="inline">http.sse_open</code> / <code class="inline">http.sse_next</code> / <code class="inline">http.sse_close</code>（SSE 流式读取，AI 流式输出用）、
+      <code class="inline">smtp.send</code>（发邮件）、
+      <code class="inline">ws.request</code>（WebSocket）、<code class="inline">sqlite.*</code>（SQLite 封装，运行时加载系统库）、
+      <code class="inline">ptr.*</code>（指针类，分配表跟踪防野指针）、<code class="inline">plugin.*</code>（插件系统，运行期动态注册）、
+      <code class="inline">server.*</code>（本地 HTTP 服务器）、<code class="inline">args.*</code>（命令行参数，支持类型转换与默认值）、
+      <code class="inline">assert</code>（断言，配合 <code class="inline">hone test</code> 测试框架）、
+      <code class="inline">input</code> / <code class="inline">read_int</code> / <code class="inline">read_float</code>（标准输入读取，EOF 报 H306）。完整清单见 <a href="docs.html">语言手册 §8 内置函数参考</a>。</p>
   </section>
 
   <section id="math">
@@ -132,8 +185,345 @@ widgets = [
     <p>事件协议：<code class="inline">{"update": [[元素id, 新文本], ...]}</code> 更新元素文本、<code class="inline">{"alert": "消息"}</code> 弹窗提示、其他文本显示在页面底部状态栏。底层 <code class="inline">server.listen / server.poll / server.respond</code> 可直接使用（见 <a href="examples.html">示例 10.2</a>）。</p>
   </section>
 
+  <section id="music">
+    <h2><span class="hash">#</span>6. music 乐理模块</h2>
+    <p>音乐理论标准库（纯 Hone 编写）：音名 ↔ MIDI 编号 ↔ 频率换算、音阶与和弦生成、时值与 BPM、音程与移调、调号与调性、顺阶和声、音分与纯律比率。MIDI 编号 60 = C4，A4 = 440Hz。Hone 无 pow/log 内置，频率与音分按十二平均律半音比迭代计算。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>music_note_to_midi(note)</code> / <code>music_midi_to_note(m)</code></td><td>音名 ↔ MIDI 编号（C4=60，A4=69，A#4=70，Bb3=58）</td></tr>
+      <tr><td><code>music_midi_to_freq(m)</code> / <code>music_freq_to_midi(freq)</code></td><td>MIDI ↔ 频率(Hz)（十二平均律，A4=440）</td></tr>
+      <tr><td><code>music_note_to_freq(note)</code></td><td>音名 → 频率(Hz)</td></tr>
+      <tr><td><code>music_scale(root, name)</code> / <code>music_scale_names()</code></td><td>音阶生成（major/minor/dorian/.../blues/chromatic 共 16 种）</td></tr>
+      <tr><td><code>music_chord(root, name)</code> / <code>music_chord_names()</code></td><td>和弦生成（major/minor/maj7/dom7/sus2/power 等 20 种）</td></tr>
+      <tr><td><code>music_beat_sec(bpm)</code></td><td>每拍时长(秒)：60 / bpm</td></tr>
+      <tr><td><code>music_note_beats(note)</code></td><td>音符时值 → 拍数（whole=4 / half=2 / quarter=1 / eighth=0.5 ...）</td></tr>
+      <tr><td><code>music_note_dur_sec(bpm, note)</code> / <code>music_dur_sec(bpm, beats)</code></td><td>时值 / 拍数 → 秒数</td></tr>
+      <tr><td><code>music_interval_name(semitones)</code> / <code>music_interval_between(n1, n2)</code></td><td>音程（纯一度/小二度/.../纯八度）</td></tr>
+      <tr><td><code>music_transpose(note, semitones)</code> / <code>music_transpose_midi(m, semitones)</code></td><td>音名 / MIDI 编号按半音移调</td></tr>
+      <tr><td><code>music_shift_octave(note, octaves)</code></td><td>音名按八度移调（如 C4 移 1 → C5）</td></tr>
+      <tr><td><code>music_key_signature(tonic)</code> / <code>music_key_signature_str(tonic)</code></td><td>调号：升/降号数（正/负）与字符串（G→"#"、Eb→"bbb"）</td></tr>
+      <tr><td><code>music_relative_minor(tonic)</code> / <code>music_relative_major(tonic)</code></td><td>关系小调 / 关系大调（C 大调 → A 小调）</td></tr>
+      <tr><td><code>music_circle_of_fifths()</code></td><td>五度圈：纯五度上行的 12 个调主音序列</td></tr>
+      <tr><td><code>music_diatonic_triads(root, scale)</code> / <code>music_diatonic_sevenths(root, scale)</code></td><td>调内顺阶三和弦 / 七和弦</td></tr>
+      <tr><td><code>music_harmonize(root, scale)</code></td><td>顺阶和声标记（如 C 大调：C4, D4m, E4m, F4, G4, A4m, B4dim）</td></tr>
+      <tr><td><code>music_ratio_to_cents(f1, f2)</code> / <code>music_freq_to_cents(freq, ref)</code></td><td>频率比 → 音分（2^(1/1200) 迭代逼近）</td></tr>
+      <tr><td><code>music_just_ratio(name)</code> / <code>music_just_cents(name)</code> / <code>music_just_names()</code></td><td>纯律（自然音程）频率比与音分（如 perfect_fifth ≈ 702 音分）</td></tr>
+    </table>
+<pre><code><span class="k">import</span> <span class="s">"music"</span> <span class="k">from</span> <span class="s">"./hone_lib/music.hn"</span>;
+<span class="f">print</span>(<span class="f">music_note_to_midi</span>(<span class="s">"A4"</span>));       <span class="c">// 69</span>
+<span class="f">print</span>(<span class="f">music_midi_to_note</span>(<span class="n">60</span>));       <span class="c">// C4</span>
+<span class="f">print</span>(<span class="f">music_midi_to_freq</span>(<span class="n">69</span>));       <span class="c">// 440.0</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">music_scale</span>(<span class="n">60</span>, <span class="s">"major"</span>)));  <span class="c">// [60, 62, 64, 65, 67, 69, 71]</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">music_chord</span>(<span class="n">60</span>, <span class="s">"maj7"</span>)));   <span class="c">// [60, 64, 67, 71]</span>
+<span class="f">print</span>(<span class="f">music_note_dur_sec</span>(<span class="n">120</span>, <span class="s">"quarter"</span>)); <span class="c">// 0.5（120 BPM 每拍 0.5 秒）</span></code></pre>
+  </section>
+
+  <section id="spider">
+    <h2><span class="hash">#</span>7. spider 爬虫模块</h2>
+    <p>静态页面直取 + 动态页面渲染的轻量爬虫库（v0.7+，纯 Hone 编写）。设计遵循「渲染服务分离」：Hone 不内置 JS 引擎，动态页面渲染外包给外部服务（node/puppeteer 或 python/playwright），通过 <code class="inline">sys.run</code> 通信，Hone 只做请求、解析与提取。所有请求函数返回统一响应 dict：<code class="inline">{ok, status, headers, url, text, err}</code>。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>sp_get(url, opts)</code></td><td>智能请求：默认静态直取；<code>{"render": true}</code> 走渲染服务；<code>{"engine": "curl"}</code> 用 curl 拿真实状态码</td></tr>
+      <tr><td><code>sp_static(url, opts)</code></td><td>静态请求（内置 http.request，零依赖；status 为 0 表示未知）</td></tr>
+      <tr><td><code>sp_curl(url, opts)</code></td><td>curl 请求（能拿到状态码/响应头，curl 不可用时自动回退 sp_static）</td></tr>
+      <tr><td><code>sp_render(url, opts)</code></td><td>渲染请求（依次尝试 node 脚本 → python 脚本，输出最终 HTML）</td></tr>
+      <tr><td><code>sp_text(html, sel)</code> / <code>sp_text_all</code></td><td>CSS 选择器提取元素文本（支持 tag、.class、#id、[attr] 及组合）</td></tr>
+      <tr><td><code>sp_attr(html, sel, name)</code> / <code>sp_attr_all</code></td><td>CSS 选择器提取属性值</td></tr>
+      <tr><td><code>sp_links(html, base)</code></td><td>提取页面全部绝对链接（相对 href 自动补全）</td></tr>
+      <tr><td><code>sp_cookie_set(jar, name, value)</code> / <code>sp_cookie_get</code></td><td>Cookie 管理（字符串 jar："a=1; b=2"）</td></tr>
+      <tr><td><code>sp_ua_list()</code> / <code>sp_ua_rotate(agents, i)</code></td><td>User-Agent 轮换</td></tr>
+      <tr><td><code>sp_throttle(seconds)</code></td><td>请求限速（防反爬）</td></tr>
+      <tr><td><code>sp_body(resp)</code> / <code>sp_json(resp)</code></td><td>响应便捷函数：取正文 / 解析正文为 JSON</td></tr>
+    </table>
+    <p><strong>opts 选项</strong>（dict）：<code class="inline">ua</code>（User-Agent）、<code class="inline">cookie</code>（Cookie jar）、<code class="inline">timeout</code>（秒）、<code class="inline">retries</code>（重试次数）、<code class="inline">delay</code>（重试间隔秒）、<code class="inline">method</code> / <code class="inline">body</code>（POST 等）、<code class="inline">render</code> / <code class="inline">engine</code> / <code class="inline">render_cmd</code> / <code class="inline">render_js</code> / <code class="inline">render_py</code>。</p>
+<pre><code><span class="k">import</span> <span class="s">"spider"</span> <span class="k">from</span> <span class="s">"./hone_lib/spider.hn"</span>;
+
+<span class="c">// 1. 静态页面：直取 HTML，CSS 选择器提取</span>
+r = <span class="f">sp_get</span>(<span class="s">"https://example.com/"</span>, {});
+<span class="k">if</span> (r.ok) {
+    <span class="k">for</span> t <span class="k">in</span> <span class="f">sp_text_all</span>(r.text, <span class="s">"div.item"</span>) { <span class="f">print</span>(t); }
+    <span class="k">for</span> u <span class="k">in</span> <span class="f">sp_links</span>(r.text, <span class="s">"https://example.com/"</span>) { <span class="f">print</span>(u); }
+}
+
+<span class="c">// 2. 动态页面（JS 渲染）：外包给 node/puppeteer 或 python/playwright</span>
+<span class="c">//    后端脚本在 hone_lib/render/，安装后开箱即用：npm i puppeteer</span>
+r2 = <span class="f">sp_get</span>(<span class="s">"https://spa.example.com/"</span>, {<span class="s">"render"</span>: <span class="k">true</span>});
+<span class="f">print</span>(r2.status, <span class="f">len</span>(r2.text));
+
+<span class="c">// 3. 带 UA 轮换 / Cookie / 限速的批量抓取</span>
+uas = <span class="f">sp_ua_list</span>();
+jar = <span class="s">""</span>;
+i = <span class="n">0</span>;
+<span class="k">while</span> (i &lt; <span class="n">3</span>) {
+    u = <span class="f">sp_ua_rotate</span>(uas, i);
+    r3 = <span class="f">sp_get</span>(<span class="s">"https://example.com/"</span>, {<span class="s">"ua"</span>: u.ua, <span class="s">"cookie"</span>: jar});
+    jar = <span class="f">sp_cookie_set</span>(jar, <span class="s">"visit"</span>, <span class="f">to_str</span>(i));
+    <span class="f">sp_throttle</span>(<span class="n">1.0</span>);
+    i = u.next;
+}</code></pre>
+    <p>渲染后端安装（二选一）：<br>
+      · Node.js：<code class="inline">cd hone_lib/render &amp;&amp; npm i puppeteer</code>（或 <code class="inline">npm i playwright &amp;&amp; npx playwright install chromium</code>）<br>
+      · Python：<code class="inline">pip install playwright &amp;&amp; playwright install chromium</code><br>
+    脚本输出单行 JSON <code class="inline">{"status":200,"headers":{...},"url":"...","html":"..."}</code> 供 Hone 解析。</p>
+  </section>
+
+  <section id="process">
+    <h2><span class="hash">#</span>8. process 进程模块</h2>
+    <p>跨平台进程检测库（纯 Hone 编写）。Hone 无内置进程 API，本库经 <code class="inline">sys.run</code> 调用系统命令实现：Windows 用 <code class="inline">tasklist /FO CSV /NH</code> 枚举、<code class="inline">taskkill /F /PID</code> 结束；Linux/macOS 用 <code class="inline">ps -eo pid=,comm=,args=,rss=</code> 枚举、<code class="inline">kill -9</code> 结束。所有查询函数返回进程对象 dict：<code class="inline">{pid, name, mem, cmdline}</code>（<code class="inline">mem</code> 为 KB；<code class="inline">cmdline</code> 仅 Unix 有值，Windows 恒为空）。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>proc_os()</code></td><td>平台识别：<code class="inline">"windows"</code> / <code class="inline">"linux"</code> / <code class="inline">"macos"</code> / <code class="inline">"unknown"</code></td></tr>
+      <tr><td><code>proc_list()</code></td><td>枚举全部进程 → 进程对象列表</td></tr>
+      <tr><td><code>proc_find(name)</code></td><td>按名称模糊查找（不区分大小写、子串匹配）</td></tr>
+      <tr><td><code>proc_exists(name)</code></td><td>是否存在指定名称的进程</td></tr>
+      <tr><td><code>proc_by_pid(pid)</code></td><td>按 PID 反查（未找到返回空 dict）</td></tr>
+      <tr><td><code>proc_count(name)</code></td><td>匹配进程数量</td></tr>
+      <tr><td><code>proc_pids(name)</code></td><td>匹配进程的 PID 列表</td></tr>
+      <tr><td><code>proc_names()</code></td><td>全部进程名（去重）</td></tr>
+      <tr><td><code>proc_kill(pid)</code></td><td>结束指定 PID 的进程，成功判定：结束后进程不再存在</td></tr>
+      <tr><td><code>proc_kill_by_name(name)</code></td><td>结束全部同名进程，返回成功数</td></tr>
+    </table>
+<pre><code><span class="k">import</span> <span class="s">"process"</span> <span class="k">from</span> <span class="s">"./hone_lib/process.hn"</span>;
+
+os = <span class="f">proc_os</span>();
+<span class="f">print</span>(os);   <span class="c">// windows / linux / macos</span>
+
+<span class="k">if</span> (<span class="f">proc_exists</span>(<span class="s">"hone.exe"</span>)) { <span class="f">print</span>(<span class="s">"hone 正在运行"</span>); }
+
+<span class="c">// 枚举 / 模糊查找（Windows 进程名含 .exe，Unix 不含；子串匹配两边通用）</span>
+<span class="k">for</span> p <span class="k">in</span> <span class="f">proc_find</span>(<span class="s">"chrome"</span>) {
+    <span class="f">print</span>(p.pid, p.name, p.mem);
+}
+
+<span class="c">// 按 PID 反查</span>
+info = <span class="f">proc_by_pid</span>(<span class="n">1234</span>);
+<span class="f">print</span>(info.name);
+
+<span class="c">// 结束进程</span>
+<span class="f">proc_kill</span>(<span class="n">1234</span>);                        <span class="c">// 结束单个 PID</span>
+n = <span class="f">proc_kill_by_name</span>(<span class="s">"notepad.exe"</span>);  <span class="c">// 结束全部同名进程，返回成功数</span></code></pre>
+    <p><strong>跨平台差异</strong>：<code class="inline">name</code> 在 Windows 含扩展名（如 <code class="inline">chrome.exe</code>）、Unix 为命令名（如 <code class="inline">chrome</code>），请用 <code class="inline">proc_find("chrome")</code> 这类子串匹配以保证两边一致；<code class="inline">mem</code> 均为 KB；<code class="inline">cmdline</code> 仅 Unix 有值。测试脚本见 <code class="inline">examples/test_process_lib.hn</code>。</p>
+  </section>
+
+  <section id="sched">
+    <h2><span class="hash">#</span>9. sched 定时任务模块</h2>
+    <p>跨平台定时任务库（纯 Hone 编写）。Hone 不支持函数作为值传递（Value 无函数类型），故任务动作用「命令字符串 + <code class="inline">sys.run</code> 执行」，与 cron 心智模型一致：<code class="inline">sch_every</code> 按间隔秒执行、<code class="inline">sch_at</code> 每天指定时刻执行、<code class="inline">sch_cron</code> 按 cron 表达式执行。三种任务构造函数返回任务 dict，放入列表后交给 <code class="inline">sch_run</code> 阻塞调度。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>sch_every(interval, cmd, tag)</code></td><td>每 interval 秒执行一次 cmd（间隔任务）</td></tr>
+      <tr><td><code>sch_at(hhmm, cmd, tag)</code></td><td>每天 <code class="inline">"HH:MM"</code> 执行一次 cmd（时刻任务）</td></tr>
+      <tr><td><code>sch_cron(expr, cmd, tag)</code></td><td>按 cron 表达式执行（5 段：分 时 日 月 周）</td></tr>
+      <tr><td><code>sch_run(tasks, seconds)</code></td><td>阻塞调度 seconds 秒（0 = 一直运行，Ctrl+C 退出），返回更新后的任务列表</td></tr>
+      <tr><td><code>sch_tick(tasks, now)</code></td><td>单轮推进：执行到期任务，返回 <code class="inline">{"tasks": 新列表, "ran": 本次执行数}</code></td></tr>
+      <tr><td><code>sch_next_hhmm(now, hhmm)</code></td><td>下一次 hhmm 对应的时间戳（已过则取明天）</td></tr>
+      <tr><td><code>sch_cron_match(expr, now)</code> / <code>sch_cron_next(expr, now)</code></td><td>当前时刻是否匹配 cron / 下次匹配时间戳</td></tr>
+      <tr><td><code>sch_now()</code> / <code>sch_hhmm_to_sec(hhmm)</code></td><td>当前时间戳 / "HH:MM" 转当日秒数</td></tr>
+    </table>
+    <p><strong>cron 表达式</strong>（5 段，空格分隔）：分(0-59) 时(0-23) 日(1-31) 月(1-12) 周(0-7，0/7=周日)；字段支持 <code class="inline">*</code>、数字、<code class="inline">a-b</code>、<code class="inline">*/n</code>、<code class="inline">a-b/n</code>、逗号列表（如 <code class="inline">0,15,30,45</code>）。</p>
+<pre><code><span class="k">import</span> <span class="s">"sched"</span> <span class="k">from</span> <span class="s">"./hone_lib/sched.hn"</span>;
+
+tasks = [
+    <span class="f">sch_every</span>(<span class="n">60</span>, <span class="s">"hone backup.hn"</span>, <span class="s">"backup"</span>),          <span class="c">// 每分钟备份</span>
+    <span class="f">sch_at</span>(<span class="s">"09:30"</span>, <span class="s">"hone report.hn"</span>, <span class="s">"daily-report"</span>),  <span class="c">// 每天 9:30</span>
+    <span class="f">sch_cron</span>(<span class="s">"0 2 * * 1"</span>, <span class="s">"hone cleanup.hn"</span>, <span class="s">"weekly"</span>), <span class="c">// 每周一凌晨 2 点</span>
+];
+<span class="f">sch_run</span>(tasks, <span class="n">0</span>);   <span class="c">// 一直运行，Ctrl+C 退出</span></code></pre>
+    <p><strong>值语义注意</strong>：Hone 列表/字典为值类型且不支持字段赋值（<code class="inline">obj.f = v</code>），
+      <code class="inline">sch_run</code> / <code class="inline">sch_tick</code> 会重建任务列表并返回，调用方需重新赋值
+      <code class="inline">tasks = sch_run(tasks, 30)</code>。测试脚本见 <code class="inline">examples/test_sched_lib.hn</code>。</p>
+  </section>
+
+  <section id="pbar">
+    <h2><span class="hash">#</span>10. pbar 进度条模块</h2>
+    <p>终端字符进度条标准库（纯 Hone 编写，零依赖）：渲染 <code class="inline">[####----] 45% 12/24</code> 样式，
+      支持单行原地刷新（ANSI 重绘）、每帧新行模式（老终端兼容）、剩余时间估算。
+      Hone 的 <code class="inline">print</code> 自带换行且字符串转义不支持 <code class="inline">\r</code>/<code class="inline">\x</code>，
+      单行刷新通过 <code class="inline">crypto.base64_decode("Gw==")</code> 构造 ESC 字符拼出
+      <code class="inline">ESC[1A</code>（上移一行）+ <code class="inline">ESC[K</code>（清行）实现；首帧用
+      <code class="inline">shown</code> 字段避免上移越过屏幕顶部。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>pbar_new(total, width, label)</code></td><td>创建进度条对象（total≥1 自动钳制，label 可为 ""）</td></tr>
+      <tr><td><code>pbar_update(pb, value)</code> / <code>pbar_advance(pb, n)</code></td><td>设置进度 / 增量推进（自动钳制到 [0, total]），返回新对象</td></tr>
+      <tr><td><code>pbar_pct(pb)</code> / <code>pbar_done(pb)</code></td><td>当前百分比（0-100）/ 是否完成</td></tr>
+      <tr><td><code>pbar_eta(pb, now)</code> / <code>pbar_fmt_sec(s)</code></td><td>剩余秒数估算（按平均速率）/ 秒数格式化为 m:ss / h:mm:ss</td></tr>
+      <tr><td><code>pbar_render(pb)</code> / <code>pbar_render_full(pb, now)</code></td><td>渲染进度条字符串，后者带剩余时间</td></tr>
+      <tr><td><code>pbar_show(pb)</code> / <code>pbar_line(pb)</code></td><td>单行原地刷新（ANSI，返回新对象需重新赋值）/ 每帧新行输出（老终端兼容）</td></tr>
+      <tr><td><code>pbar_finish(pb)</code></td><td>结束：补齐到 100% 并换行（调用一次）</td></tr>
+    </table>
+    <p><strong>值语义说明</strong>：Hone 的 dict 不可原地修改，<code class="inline">pbar_update</code> /
+      <code class="inline">pbar_advance</code> / <code class="inline">pbar_show</code> 都返回新进度条对象，必须重新赋值
+      <code class="inline">pb = pbar_show(pb)</code>。演示脚本见 <code class="inline">examples/pbar_demo.hn</code>。</p>
+<pre><code><span class="k">import</span> <span class="s">"pbar"</span> <span class="k">from</span> <span class="s">"./hone_lib/pbar.hn"</span>;
+
+pb = <span class="f">pbar_new</span>(<span class="n">100</span>, <span class="n">30</span>, <span class="s">"下载"</span>);
+i = <span class="n">0</span>;
+<span class="k">while</span> (i &lt;= <span class="n">100</span>) {
+    pb = <span class="f">pbar_update</span>(pb, i);
+    pb = <span class="f">pbar_show</span>(pb);        <span class="c">// 单行原地刷新（ANSI）</span>
+    <span class="f">time.sleep</span>(<span class="n">0.05</span>);
+    i = i + <span class="n">1</span>;
+}
+<span class="f">pbar_finish</span>(pb);              <span class="c">// 补齐到 100% 并换行</span>
+
+<span class="c">// 剩余时间估算：print(pbar_render_full(pb, time.now()));</span>
+<span class="c">// 老终端兼容：pb = pbar_update(pb, i); pbar_line(pb);</span></code></pre>
+  </section>
+
+  <section id="img">
+    <h2><span class="hash">#</span>11. img 图片模块</h2>
+    <p>图片标准库（纯 Hone 编写）：像素网格 + 绘图/滤镜/变换 + PPM P3 / SVG 读写。
+      图像表示为 dict <code class="inline">{"w": 宽, "h": 高, "rows": [[[r,g,b],...],...]}</code>，
+      <code class="inline">rows[y][x]</code> 为像素（各通道 0-255，原点在左上角）。
+      Hone 的 str 无法承载二进制，故采用文本格式：<strong>PPM P3</strong>（ASCII 光栅，GIMP/ImageMagick 可查看）与
+      <strong>SVG</strong>（文本矢量，浏览器直接打开），不支持 PNG/BMP。
+      列表为值类型、索引赋值整体拷贝，绘图/滤镜适合 ≤128×128 的小图。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>img_new(w, h, r, g, b)</code> / <code>img_fill(img, r, g, b)</code></td><td>新建 w×h 画布（填充色）/ 全图填充，返回新图像</td></tr>
+      <tr><td><code>img_get(img, x, y)</code> / <code>img_set(img, x, y, r, g, b)</code></td><td>取像素 [r,g,b]（越界返回黑）/ 设像素（越界忽略）</td></tr>
+      <tr><td><code>img_size(img)</code></td><td>图像尺寸 → <code class="inline">[宽, 高]</code></td></tr>
+      <tr><td><code>img_rect(img, x0, y0, x1, y1, r, g, b)</code> / <code>img_line(img, x0, y0, x1, y1, r, g, b)</code></td><td>实心矩形（自动裁剪到画布内）/ 直线（Bresenham）</td></tr>
+      <tr><td><code>img_circle(img, cx, cy, rad, r, g, b)</code></td><td>实心圆（距离平方比较，rad≤0 画单点）</td></tr>
+      <tr><td><code>img_gradient_h(img, c1, c2)</code> / <code>img_gradient_v(img, c1, c2)</code></td><td>水平 / 垂直渐变（c1、c2 为 [r,g,b] 列表）</td></tr>
+      <tr><td><code>img_checker(img, cell, c1, c2)</code> / <code>img_noise(img)</code></td><td>棋盘格（cell 为格边长）/ 随机噪点</td></tr>
+      <tr><td><code>img_grayscale(img)</code> / <code>img_invert(img)</code> / <code>img_brightness(img, delta)</code></td><td>灰度 / 反色 / 亮度调整（±255，自动裁剪）</td></tr>
+      <tr><td><code>img_contrast(img, factor)</code> / <code>img_threshold(img, t)</code></td><td>对比度（float factor，1 不变）/ 二值化（亮度 &lt; t 置黑）</td></tr>
+      <tr><td><code>img_flip_h(img)</code> / <code>img_flip_v(img)</code> / <code>img_rotate90(img)</code></td><td>水平镜像 / 垂直镜像 / 顺时针旋转 90°</td></tr>
+      <tr><td><code>img_crop(img, x0, y0, x1, y1)</code> / <code>img_scale(img, nw, nh)</code></td><td>裁剪区域 / 最近邻缩放</td></tr>
+      <tr><td><code>img_to_ppm(img)</code> / <code>img_save_ppm(img, path)</code></td><td>转 PPM P3 文本 / 保存为 .ppm 文件</td></tr>
+      <tr><td><code>img_from_ppm(text)</code> / <code>img_load_ppm(path)</code></td><td>解析 PPM P3 文本 / 读取 .ppm 文件 → 图像</td></tr>
+      <tr><td><code>img_to_svg(img, scale)</code> / <code>img_save_svg(img, path, scale)</code></td><td>转 SVG 文本（每像素一个 rect，scale 为放大倍数）/ 保存为 .svg</td></tr>
+    </table>
+<pre><code><span class="k">import</span> <span class="s">"img"</span> <span class="k">from</span> <span class="s">"./hone_lib/img.hn"</span>;
+
+im = <span class="f">img_new</span>(<span class="n">64</span>, <span class="n">64</span>, <span class="n">255</span>, <span class="n">255</span>, <span class="n">255</span>);         <span class="c">// 白色画布</span>
+im = <span class="f">img_rect</span>(im, <span class="n">8</span>, <span class="n">8</span>, <span class="n">40</span>, <span class="n">40</span>, <span class="n">255</span>, <span class="n">0</span>, <span class="n">0</span>);  <span class="c">// 红色实心矩形</span>
+im = <span class="f">img_circle</span>(im, <span class="n">32</span>, <span class="n">32</span>, <span class="n">16</span>, <span class="n">0</span>, <span class="n">0</span>, <span class="n">255</span>);  <span class="c">// 蓝色实心圆</span>
+im = <span class="f">img_grayscale</span>(im);                          <span class="c">// 灰度滤镜</span>
+<span class="f">img_save_ppm</span>(im, <span class="s">"out.ppm"</span>);                    <span class="c">// 保存 PPM P3</span>
+<span class="f">img_save_svg</span>(im, <span class="s">"out.svg"</span>, <span class="n">4</span>);              <span class="c">// 保存 SVG（每像素放大 4 倍）</span></code></pre>
+    <p>测试脚本见 <code class="inline">examples/test_img_lib.hn</code>（35 项断言，生成 <code class="inline">examples/img_test.ppm</code> 与 <code class="inline">examples/img_test.svg</code>，浏览器打开 SVG 可预览）。</p>
+  </section>
+
+  <section id="ai">
+    <h2><span class="hash">#</span>12. ai AI 编程助手模块</h2>
+    <p>AI 编程助手标准库（纯 Hone 编写，需 v0.7+）：对接 OpenAI Chat Completions 协议，默认连接本地 Ollama（<code class="inline">http://localhost:11434/v1</code>），配置 API Key 后自动切换远程服务（DeepSeek / Kimi / 通义 / OpenAI 等兼容端点）。提供对话补全、代码生成、代码审查、错误解释、自动修复五大功能，以及「AI 自主调用工具」的代理循环（可执行终端命令 / 读写文件）。流式输出基于解释器新增的 <code class="inline">http.sse_open</code> / <code class="inline">http.sse_next</code> / <code class="inline">http.sse_close</code> 内置函数。</p>
+    <p><strong>配置优先级</strong>（高 → 低）：环境变量 <code class="inline">HN_AI_KEY</code> / <code class="inline">HN_AI_BASE</code> / <code class="inline">HN_AI_MODEL</code> → 配置文件 <code class="inline">~/.hn/ai.json</code>（<code class="inline">{"base": ..., "key": ..., "model": ...}</code>）→ 默认值（Ollama 本地 + <code class="inline">qwen2.5-coder:7b</code>）。函数级 <code class="inline">opts</code> 可再覆盖：<code class="inline">model</code> / <code class="inline">base</code> / <code class="inline">key</code> / <code class="inline">stream</code> / <code class="inline">temperature</code> / <code class="inline">max_tokens</code> / <code class="inline">timeout</code>。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>ai_chat(messages, opts)</code></td><td>对话补全；<code class="inline">opts.stream=true</code> 时 SSE 逐字输出并返回完整文本</td></tr>
+      <tr><td><code>ai_generate(prompt, opts)</code></td><td>按自然语言描述生成 Hone 代码</td></tr>
+      <tr><td><code>ai_review(code, opts)</code></td><td>代码审查：返回问题与改进建议</td></tr>
+      <tr><td><code>ai_explain(err, opts)</code></td><td>解释 Hone 错误码 / 报错信息并给修复建议</td></tr>
+      <tr><td><code>ai_fix(code, err, opts)</code></td><td>报错信息 + 源码 → 修复后的完整代码</td></tr>
+      <tr><td><code>ai_agent(prompt, opts)</code></td><td>工具调用代理：AI 自主决定是否调用工具完成任务（上限 10 轮防死循环）</td></tr>
+      <tr><td><code>ai_config()</code></td><td>返回生效配置 <code class="inline">{"base", "key", "model"}</code></td></tr>
+      <tr><td><code>ai_tools()</code> / <code>ai_run_tool(name, args)</code></td><td>工具定义列表（OpenAI function calling 格式）/ 直接执行工具</td></tr>
+    </table>
+    <p><strong>工具集</strong>（ai_agent 内置，可经 ai_run_tool 单独调用）：<code class="inline">run_shell</code>（执行终端命令）、<code class="inline">read_file</code>（读文件）、<code class="inline">write_file</code>（写文件）、<code class="inline">list_dir</code>（列目录）。Hone 不支持函数作为值传递，流式输出由库内部 <code class="inline">print</code> 逐字显示，同时返回完整文本。</p>
+<pre><code><span class="k">import</span> <span class="s">"ai"</span> <span class="k">from</span> <span class="s">"./hone_lib/ai.hn"</span>;
+
+<span class="c">// 1. 代码生成（默认连接本地 Ollama）</span>
+code = <span class="f">ai_generate</span>(<span class="s">"写一个 Hone 函数，计算斐波那契数列第 n 项"</span>);
+<span class="f">print</span>(code);
+
+<span class="c">// 2. 流式对话（SSE 逐字输出，仍返回完整回复）</span>
+msgs = [{<span class="s">"role"</span>: <span class="s">"user"</span>, <span class="s">"content"</span>: <span class="s">"用一句话介绍 Hone"</span>}];
+full = <span class="f">ai_chat</span>(msgs, {<span class="s">"stream"</span>: <span class="k">true</span>});
+
+<span class="c">// 3. 工具调用代理：AI 自主执行终端命令完成多步任务</span>
+r = <span class="f">ai_agent</span>(<span class="s">"列出当前目录的 .hn 文件，并告诉我有多少个"</span>);
+<span class="f">print</span>(r);
+
+<span class="c">// 4. 远程 API（配置了 HN_AI_BASE / HN_AI_KEY 后自动生效，可再按函数覆盖）</span>
+<span class="c">//    print(ai_generate("...", {"base": "https://api.deepseek.com/v1", "model": "deepseek-chat"}));</span></code></pre>
+    <p>完整演示见 <code class="inline">examples/ai_demo.hn</code>；SSE 流式冒烟测试见 <code class="inline">hone_lib/test/sse_smoke.hn</code>（配合本地 <code class="inline">hone_lib/test/mock_sse.py</code>）。</p>
+  </section>
+
+  <section id="pet">
+    <h2><span class="hash">#</span>13. pet 桌宠模块（Windows）</h2>
+    <p>Windows 桌面宠物标准库（仅支持 Windows）：Hone 驱动状态机 + 运行时 guipro 模块的
+      <strong>原生 Win32 窗口</strong>渲染（无边框 / 品红键透明 / 置顶 / 不抢焦点，不依赖 PowerShell）。
+      内置像素猫 8 帧动画（<code class="inline">idle</code> 眨眼 / <code class="inline">walk</code> 走路镜像 / <code class="inline">sleep</code> 睡觉 /
+      <code class="inline">happy</code> 开心 / <code class="inline">surprise</code> 惊讶），说话气泡、点击/拖拽交互、
+      右键原生菜单（换装/静音/跟随鼠标/隐藏显示台词/退出）、全屏游荡、自动入睡、整点报时、CPU/内存播报（wmic）。
+      提供阻塞 <code class="inline">pet_run(cfg)</code> 与非阻塞 <code class="inline">pet_tick(st)</code> 两种形态。
+      运行示例：<code class="inline">hone examples/pet_demo.hn</code>（Ctrl+C 或右键菜单退出）。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>pet_run(user_cfg)</code></td><td>阻塞运行：初始化 + 主循环 + 清理（推荐）</td></tr>
+      <tr><td><code>pet_init(user_cfg)</code> / <code>pet_tick(st)</code> / <code>pet_cleanup(st)</code></td><td>非阻塞三件套：初始化 / 单步推进 / 清理</td></tr>
+      <tr><td><code>pet_cfg(user)</code></td><td>合并用户配置与默认值，返回完整配置 dict</td></tr>
+      <tr><td><code>pet_frames_rgb(pal)</code> / <code>pet_frame_rgb(pal, pose)</code></td><td>生成全部 8 姿态 / 单姿态的内存 RGB 文本（48×48）</td></tr>
+      <tr><td><code>pet_load_lines(path)</code> / <code>pet_line_pick(lines, key)</code></td><td>加载自定义台词 JSON（合并内置）/ 随机取一句</td></tr>
+      <tr><td><code>pet_cpu_mem()</code> / <code>pet_time_hh()</code> / <code>pet_time_hhmm()</code></td><td>系统资源播报文本 / 当前小时 / 当前 "HH:mm"</td></tr>
+    </table>
+    <p><strong>配置项</strong>（均可省略，用默认值）：<code class="inline">pal</code> 调色板（0 橘猫/1 黑猫/2 白猫）、
+      <code class="inline">scale</code> 显示缩放（默认 2 → 96×96 窗口）、<code class="inline">speed</code> 移动速度 px/tick（默认 2）、
+      <code class="inline">tick</code> 帧间隔秒（默认 0.125 = 8fps）、<code class="inline">sleep_after</code> 入睡阈值秒（默认 120，0 = 不睡）、
+      <code class="inline">wander</code> 游荡间隔秒（默认 10，0 = 不游荡）、<code class="inline">bubble</code> 随机台词间隔秒（默认 25，0 = 不说话）、
+      <code class="inline">mute</code> 静音（默认 false）、<code class="inline">hourly</code> 整点报时（默认 true）、
+      <code class="inline">res_report</code> 资源播报间隔秒（默认 300，0 = 关闭）、
+      <code class="inline">lines_file</code> 自定义台词 JSON、<code class="inline">frames_dir</code> 外部 PPM 帧目录（缺帧自动用内置兜底）、
+      <code class="inline">start_x</code> / <code class="inline">start_y</code> 初始位置（默认 -1 = 屏幕底部中央）。</p>
+    <p><strong>自定义台词 JSON</strong>（<code class="inline">lines_file</code>）：<code class="inline">{"greet": [...], "idle": [...], "pet": [...], "walk": [...], "sleep": [...], "happy": [...], "surprise": [...], "hourly": [...], "resource": [...]}</code>，未写的键用内置。</p>
+<pre><code><span class="k">import</span> <span class="s">"pet"</span> <span class="k">from</span> <span class="s">"./hone_lib/pet.hn"</span>;
+
+cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"scale"</span>: <span class="n">2</span>, <span class="s">"speed"</span>: <span class="n">3</span>, <span class="s">"sleep_after"</span>: <span class="n">90</span>};
+<span class="f">pet_run</span>(cfg);   <span class="c">// 阻塞运行（Ctrl+C 或右键菜单退出）</span>
+
+<span class="c">// 非阻塞：st = pet_init(cfg); while (st.quit == false) { st = pet_tick(st); time.sleep(st.cfg.tick); }</span></code></pre>
+    <p><strong>架构与性能</strong>：窗口由运行时 guipro 模块的 <code class="inline">guipro.pet_*</code>
+      内置函数创建（Win32 <code class="inline">WS_POPUP</code> + 品红键透明 + <code class="inline">WS_EX_TOPMOST</code>），
+      Hone 每 tick 用 <code class="inline">guipro.pet_frame</code> 推帧（Rust 端最近邻放大到窗口尺寸、
+      支持水平翻转）、<code class="inline">guipro.pet_text</code> 绘气泡、<code class="inline">guipro.pet_move</code> 移动窗口，
+      交互经 <code class="inline">guipro.poll</code> 事件队列（click / dblclick / drag / rclick），
+      右键菜单用 <code class="inline">guipro.pet_menu</code> 原生弹出；帧构建用 <code class="inline">ptr.alloc</code> 缓冲 +
+      24×24 内联整数判定 + 2× 最近邻放大到 48×48，8 帧约 2s；窗口随进程生命周期，
+      Ctrl+C 不会残留孤儿窗口。</p>
+  </section>
+
+  <section id="guipro">
+    <h2><span class="hash">#</span>14. guipro 原生图形界面模块</h2>
+    <p>原生窗口 + 原生控件标准库（<code class="inline">gui.hn</code> 的升级版）：不再依赖浏览器，直接创建系统原生窗口与控件。
+      Windows 用 Win32 标准控件（user32/gdi32，零新增依赖、不增体积），Linux 运行时动态加载 GTK3
+      （<code class="inline">libgtk-3.so</code>，缺失时 msgbox 降级 zenity/xmessage）。Rust 内置 <code class="inline">guipro.*</code> 原语 +
+      Hone 层统一 API：窗口 / button / label / input / select / checkbox / radio 控件、VBox 布局、
+      闭包事件分发、定时器、消息框。运行示例：<code class="inline">hone examples/guipro_demo.hn</code>（20 秒后自动关闭演示）。</p>
+    <table>
+      <tr><th>函数</th><th>说明</th></tr>
+      <tr><td><code>guipro_window(title, w, h)</code></td><td>创建窗口，返回窗口 id</td></tr>
+      <tr><td><code>guipro_button/label/input/select/checkbox/radio(win, ..., x, y, w, h)</code></td><td>绝对定位创建控件，返回控件 id</td></tr>
+      <tr><td><code>guipro_vbox(win, specs, x, y, gap)</code></td><td>纵向布局（specs 为控件 dict 列表，返回控件 id 列表）</td></tr>
+      <tr><td><code>guipro_on(handlers, win, id, evt, fn)</code> / <code>guipro_on_win(handlers, win, evt, fn)</code></td><td>注册控件/窗口事件回调（fn(id, value)），返回新注册表</td></tr>
+      <tr><td><code>guipro_timer(handlers, ms, fn)</code></td><td>周期定时器（fn 无参），返回新注册表</td></tr>
+      <tr><td><code>guipro_run(handlers)</code></td><td>阻塞主循环：轮询事件并分发闭包，窗口 close 后返回</td></tr>
+      <tr><td><code>guipro_set_text(win, id, text)</code> / <code>guipro_get_text(win, id)</code></td><td>读写控件文本</td></tr>
+      <tr><td><code>guipro_close(win)</code> / <code>guipro_msgbox(title, msg)</code> / <code>guipro_available()</code></td><td>关闭窗口 / 原生消息框 / 平台可用性</td></tr>
+    </table>
+    <p><strong>事件协议</strong>（<code class="inline">guipro.poll()</code> 返回 JSON 数组）：
+      <code class="inline">{"win":1,"id":2,"type":"click","value":""}</code>（按钮点击）、
+      <code class="inline">{"win":1,"id":3,"type":"change","value":"文本"}</code>（input/select 变更，checkbox/radio 为 "1"/"0"）、
+      <code class="inline">{"win":1,"id":0,"type":"close","value":""}</code>（窗口关闭）、
+      <code class="inline">{"win":1,"id":0,"type":"resize","value":"800x600"}</code>（窗口缩放）。</p>
+    <p><strong>架构说明</strong>：内置 <code class="inline">builtins::call</code> 无解释器上下文，闭包无法从 Rust 直接回调，
+      故 Rust 层只推送事件队列（<code class="inline">guipro.poll</code>），闭包分发在 Hone 层 <code class="inline">guipro_run</code> 主循环完成；
+      注册表函数式传递（Hone 函数内不能改全局变量）。</p>
+<pre><code><span class="k">import</span> <span class="s">"guipro"</span> <span class="k">from</span> <span class="s">"./hone_lib/guipro.hn"</span>;
+
+win = <span class="f">guipro_window</span>(<span class="s">"示例"</span>, <span class="n">420</span>, <span class="n">320</span>);
+b1  = <span class="f">guipro_button</span>(win, <span class="s">"点我"</span>, <span class="n">10</span>, <span class="n">10</span>, <span class="n">100</span>, <span class="n">32</span>);
+out = <span class="f">guipro_label</span>(win, <span class="s">"尚未点击"</span>, <span class="n">10</span>, <span class="n">52</span>, <span class="n">200</span>, <span class="n">24</span>);
+handlers = [];
+handlers = <span class="f">guipro_on</span>(handlers, win, b1, <span class="s">"click"</span>, <span class="k">fn</span>(id, value) {
+    <span class="f">guipro_set_text</span>(win, out, <span class="s">"点击了按钮 #"</span> + <span class="f">to_str</span>(id));
+});
+<span class="f">guipro_run</span>(handlers);   <span class="c">// 阻塞主循环，窗口关闭后返回</span></code></pre>
+  </section>
+
   <section id="demo">
-    <h2><span class="hash">#</span>6. 组合示例</h2>
+    <h2><span class="hash">#</span>15. 组合示例</h2>
 <pre><code><span class="k">import</span> <span class="s">"math"</span> <span class="k">from</span> <span class="s">"./hone_lib/math.hn"</span>;
 <span class="k">import</span> <span class="s">"collections"</span> <span class="k">from</span> <span class="s">"./hone_lib/collections.hn"</span>;
 <span class="k">import</span> <span class="s">"str"</span> <span class="k">from</span> <span class="s">"./hone_lib/str.hn"</span>;
@@ -164,7 +554,21 @@ function searchDocs(q) {
 </script>
 
 <footer>
-  Hone v0.3.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="tutorial.html">教程</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.7.9 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

@@ -30,12 +30,17 @@ struct Item {
 }
 
 const KEYWORDS: &[&str] = &[
-    "fn", "if", "else", "while", "return", "true", "false", "go", "breakpoint",
+    "fn", "if", "else", "while", "do", "for", "in", "return", "true", "false", "go", "breakpoint",
+    "break", "continue", "try", "catch", "throw", "match", "struct", "class", "enum",
+    "async", "await",
     "int", "float", "bool", "str", "load", "lazy", "use", "import", "alias", "as", "from",
     "tmp",
 ];
 
-const BIN_OPS: &[&str] = &["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||"];
+const BIN_OPS: &[&str] = &[
+    "+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||",
+    "+=", "-=", "*=", "/=", "%=", "??", "?",
+];
 
 /// 对 Hone 源码做格式化。语法错误按 error[H005] 报告。
 pub fn format(src: &str) -> Result<String, ZError> {
@@ -136,6 +141,38 @@ fn tokenize(src: &str) -> Result<Vec<Item>, ZError> {
             continue;
         }
 
+        // 三引号原始字符串："""..."""（保留换行，原样输出）
+        if c == '"' && pos + 2 < chars.len() && chars[pos + 1] == '"' && chars[pos + 2] == '"' {
+            let mut text = String::from("\"\"\"");
+            pos += 3;
+            col += 3;
+            let mut closed = false;
+            while pos < chars.len() {
+                if chars[pos] == '"' && pos + 2 < chars.len() && chars[pos + 1] == '"' && chars[pos + 2] == '"' {
+                    text.push_str("\"\"\"");
+                    pos += 3;
+                    col += 3;
+                    closed = true;
+                    break;
+                }
+                if chars[pos] == '\n' {
+                    text.push('\n');
+                    line += 1;
+                    col = 1;
+                } else {
+                    text.push(chars[pos]);
+                    col += 1;
+                }
+                pos += 1;
+            }
+            if !closed {
+                return Err(err_at(codes::SYNTAX, "unterminated triple-quoted string", start_line, start_col, src));
+            }
+            items.push(Item { tok: FTok::StrLit(text), nl });
+            nl = 0;
+            continue;
+        }
+
         // 字符串
         if c == '"' {
             let mut text = String::from("\"");
@@ -230,7 +267,23 @@ fn tokenize(src: &str) -> Result<Vec<Item>, ZError> {
             None
         };
         let sym = match two.as_deref() {
-            Some("==") | Some("!=") | Some("<=") | Some(">=") | Some("&&") | Some("||") | Some("->") => {
+            Some("==")
+            | Some("!=")
+            | Some("<=")
+            | Some(">=")
+            | Some("&&")
+            | Some("||")
+            | Some("->")
+            | Some("=>")
+            | Some("|>")
+            | Some("??")
+            | Some("++")
+            | Some("--")
+            | Some("+=")
+            | Some("-=")
+            | Some("*=")
+            | Some("/=")
+            | Some("%=") => {
                 let s = two.unwrap();
                 pos += 2;
                 col += 2;

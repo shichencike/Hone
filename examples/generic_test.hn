@@ -1,0 +1,73 @@
+// generic_test.hn - 泛型特性验证
+// 运行: hone examples/generic_test.hn
+// 验证点：
+//   1. fn name[T, U](...) 类型参数声明
+//   2. 同一泛型函数以不同类型调用（int/str/float）
+//   3. 多个类型参数（T, U）
+//   4. 泛型返回类型推导
+//   5. 泛型与普通函数共存
+//   6. class 方法支持泛型
+
+// 单类型参数：透传
+fn identity[T](x: T) -> T {
+    return x;
+}
+print(identity(42));            // 42 (int)
+print(identity("hello"));       // hello (str)
+print(identity(3.14));          // 3.14 (float)
+print(identity(true));          // true (bool)
+
+// 两个类型参数：交换
+fn swap[A, B](a: A, b: B) -> B {
+    return b;
+}
+print(swap(1, "two"));          // two（B=str）
+print(swap("x", 99));           // 99（B=int）
+
+// 泛型 + 普通参数混用
+fn pick[T](a: T, b: T, want_first: bool) -> T {
+    if (want_first) {
+        return a;
+    }
+    return b;
+}
+print(pick("a", "b", true));    // a
+print(pick(10, 20, false));     // 20
+
+// 泛型返回值参与后续类型推导
+r = identity(7);
+print(r * 3);                   // 21（r 推导为 int）
+
+// 泛型与普通函数可共存（函数名全局唯一，需不同名）
+// 注意：非泛型函数参数无注解时首次调用即锁定类型（Hone 既有语义），
+//       因此普通函数只用单一类型调用。
+fn twice_gen[T](x: T) -> T {
+    return x;
+}
+fn twice(x) {
+    return "global: " + to_str(x);
+}
+print(twice(5));                // global: 5（普通函数）
+print(twice_gen(5));            // 5（泛型函数）
+print(twice_gen("ok"));         // ok（泛型可多类型）
+
+// class 方法支持泛型
+class Helper {
+    fn id[T](x: T) -> T {
+        return x;
+    }
+    fn combine[A, B](a: A, b: B) -> B {
+        return b;
+    }
+}
+print(Helper.id(100));          // 100
+print(Helper.id("cls"));        // cls
+print(Helper.combine(1, "end"));// end
+
+// 泛型内调用其他函数
+fn outer[T](x: T) -> T {
+    return identity(x);
+}
+print(outer(5.5));              // 5.5
+
+print("== 泛型特性验证完成 ==");

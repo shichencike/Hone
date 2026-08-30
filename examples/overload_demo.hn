@@ -1,0 +1,118 @@
+// overload_demo.hn - 运算符重载验证
+// 运行: hone examples/overload_demo.hn
+// 原理：顶层定义特殊函数 `__add` / `__eq` 等，仅在内建运算不支持的操作数组合时被调用。
+//   内置类型（int/float/str/list/dict/enum 等）的固有行为不受影响。
+// 验证点：
+//   1. 二元重载：__add / __mul / __mod
+//   2. 相等重载：__eq（dict == int 类型不同，内建失败 → 重载）
+//   3. 一元重载：__neg
+//   4. 内置重载：__len（len()）、__index（a[i]）
+//   5. 比较重载：__lt
+//   6. 内建行为不受影响：int 算术、str 拼接、list 索引、dict 结构相等
+
+// 用 dict 模拟「复数」：{"re": 1, "im": 2}
+fn mk_complex(re, im) {
+    return {"re": re, "im": im};
+}
+fn c_re(c) { return c.re; }
+fn c_im(c) { return c.im; }
+
+// 复数加法：dict + dict → __add（内建不支持 dict 相加）
+fn __add(a, b) {
+    if (type_of(a) == "dict" && type_of(b) == "dict") {
+        return mk_complex(c_re(a) + c_re(b), c_im(a) + c_im(b));
+    }
+    // 返回类型与目标一致（Hone 函数返回类型首次 return 后锁定）
+    return {"re": 0, "im": 0};
+}
+// 复数乘法（简化演示：逐元素相乘；Hone 中两个动态值相减需显式类型注解）
+fn __mul(a, b) {
+    if (type_of(a) == "dict" && type_of(b) == "dict") {
+        return mk_complex(c_re(a) * c_re(b), c_im(a) * c_im(b));
+    }
+    return {"re": 0, "im": 0};
+}
+// 相等重载：dict == int（类型不同内建失败）→ __eq
+fn __eq(a, b) {
+    if (type_of(a) == "dict" && type_of(b) == "dict") {
+        return c_re(a) == c_re(b) && c_im(a) == c_im(b);
+    }
+    return false;
+}
+
+// 1. 复数加法与乘法（dict + dict / dict * dict → __add / __mul）
+z1 = mk_complex(1, 2);
+z2 = mk_complex(3, 4);
+zs = z1 + z2;
+print(to_str(zs));              // {re: 4, im: 6}
+print(zs.re);                   // 4
+print(zs.im);                   // 6
+
+zp = z1 * z2;
+print(to_str(zp));              // {re: 3, im: 8}（逐元素乘）
+
+// 2. 相等：dict == dict 内建结构相等；dict == int 类型不同 → __eq
+print(z1 == mk_complex(1, 2));  // true（内建 dict 结构相等）
+print(z1 == z2);                // false（内建）
+print(z1 == 5);                 // false（__eq 生效）
+
+// 3. 一元负重载：enum 不支持负号 → __neg
+enum Vec2 { X, Y };
+fn __neg(v) {
+    if (type_of(v) == "enum") {
+        return "negated-" + to_str(v);
+    }
+    return "";
+}
+print(-Vec2.X);                 // negated-Vec2.X（__neg 生效）
+print(-5);                      // -5（int 内建不受影响）
+
+// 4. 取模重载：enum % int → __mod
+fn __mod(a, b) {
+    if (type_of(a) == "enum" && type_of(b) == "int") {
+        return "mod-" + to_str(a) + "-by-" + to_str(b);
+    }
+    return "";
+}
+print(Vec2.Y % 3);              // mod-Vec2.Y-by-3
+print(7 % 3);                   // 1（int 内建不受影响）
+
+// 5. __len：对 enum 计数（enum 无内建 len）
+fn __len(v) {
+    if (type_of(v) == "enum") {
+        return 1;
+    }
+    return 0;
+}
+print(len(Vec2.X));             // 1（__len 生效）
+print(len([1, 2, 3]));          // 3（list 内建不受影响）
+
+// 6. __index：对 enum 做索引（enum 无内建索引）
+fn __index(v, i) {
+    if (type_of(v) == "enum" && type_of(i) == "int") {
+        if (i == 0) { return to_str(v); }
+        return "out";
+    }
+    return "";
+}
+print(Vec2.X[0]);               // Vec2.X（__index 生效）
+print([9, 8][1]);               // 8（list 内建不受影响）
+
+// 7. 比较重载：__lt（enum < int 内建不支持）
+fn __lt(a, b) {
+    if (type_of(a) == "enum" && type_of(b) == "int") {
+        return true;
+    }
+    return false;
+}
+print(Vec2.X < 5);              // true（__lt 生效）
+print(1 < 5);                   // true（int 内建不受影响）
+print(5 < 1);                   // false
+
+// 8. 内建行为完全不受影响：str 拼接、int 算术、list 索引、enum 比较
+print("a" + "b");               // ab
+print(10 + 20);                 // 30
+print(3.5 * 2.0);               // 7（float 算术内建不受影响；Hone 禁止 int/float 隐式转换）
+print([1, 2][0]);               // 1
+
+print("== 运算符重载验证完成 ==");

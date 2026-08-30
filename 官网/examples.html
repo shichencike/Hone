@@ -4,19 +4,40 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 示例 - 期望运行效果</title>
+<meta name="description" content="Hone 语言示例：按知识点分组的基础、控制流、函数、集合、内置函数、并发、导入与外部集成、工具链、错误处理、图形界面示例。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
 </head>
 <body>
 <header>
-  <span class="logo">⚡ Hone</span>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
   <nav>
     <a href="index.html">首页</a>
     <a href="docs.html">文档</a>
+    <a href="tutorial.html">教程</a>
     <a href="examples.html" class="active">示例</a>
-    <a href="install.html">安装</a>
     <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
   </nav>
-  <span class="ver">v0.3.0</span>
+  <span class="ver">v0.7.9</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
 <main>
@@ -90,6 +111,44 @@ d = {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="
 <span class="f">print</span>(sum);              <span class="c">// 6</span></code></pre>
   </div>
 
+  <div class="example">
+    <div class="title">2.3 C 风格 for / do-while / continue</div>
+    <div class="note">for (init; cond; step) 三段可省略；do-while 至少执行一次；continue 跳过本次循环（期望输出：0 1 2 3 4 / 3 / 1 3 5）</div>
+<pre><code><span class="c">// C 风格 for：init; cond; step 三段均可省略（for (;;) 无限循环，配合 break 退出）</span>
+<span class="k">for</span> (i = <span class="n">0</span>; i &lt; <span class="n">5</span>; i = i + <span class="n">1</span>) {
+    <span class="f">print</span>(i);            <span class="c">// 0 1 2 3 4</span>
+}
+
+<span class="c">// do-while：先执行循环体再判断条件（至少执行一次）</span>
+j = <span class="n">0</span>;
+<span class="k">do</span> { j = j + <span class="n">1</span>; } <span class="k">while</span> (j &lt; <span class="n">3</span>);
+<span class="f">print</span>(j);              <span class="c">// 3</span>
+
+<span class="c">// continue：跳过本次循环剩余语句，只打印奇数</span>
+<span class="k">for</span> (i = <span class="n">1</span>; i &lt;= <span class="n">5</span>; i = i + <span class="n">1</span>) {
+    <span class="k">if</span> (i % <span class="n">2</span> == <span class="n">0</span>) { <span class="k">continue</span>; }
+    <span class="f">print</span>(i);            <span class="c">// 1 3 5</span>
+}</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">2.4 复合赋值与自增/自减</div>
+    <div class="note">+= -= *= /= %=（str 仅支持 += 拼接）；i++ 后缀返回旧值，++i 前缀返回新值（期望输出：2 / Hone! / 1 / 1 / 3）</div>
+<pre><code>x = <span class="n">10</span>;
+x += <span class="n">5</span>; x -= <span class="n">3</span>; x *= <span class="n">2</span>; x /= <span class="n">4</span>; x %= <span class="n">4</span>;
+<span class="f">print</span>(x);              <span class="c">// 2</span>
+
+s = <span class="s">"Hone"</span>;
+s += <span class="s">"!"</span>;
+<span class="f">print</span>(s);              <span class="c">// Hone!</span>
+
+i = <span class="n">0</span>;
+i++;
+<span class="f">print</span>(i);              <span class="c">// 1（后缀返回旧值）</span>
+<span class="f">print</span>(i++);            <span class="c">// 1（i 变为 2）</span>
+<span class="f">print</span>(++i);            <span class="c">// 3（前缀返回新值）</span></code></pre>
+  </div>
+
   <h3><span class="hash">#</span>3. 函数</h3>
 
   <div class="example">
@@ -109,6 +168,49 @@ d = {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="
 }
 <span class="f">print</span>(<span class="f">add</span>(<span class="n">20</span>, <span class="n">22</span>));  <span class="c">// 42</span></code></pre>
   </div>
+
+  <div class="example">
+    <div class="title">3.2 函数默认参数</div>
+    <div class="note">省略尾部实参取默认值；默认表达式调用时求值、可引用前面参数；必选参数必须在前（期望输出：Hello, Hone! / Hi, Hone! / *-*-* / *-* / *+*+*+*）</div>
+<pre><code><span class="k">fn</span> <span class="f">greet</span>(name, greeting = <span class="s">"Hello"</span>) {
+    <span class="k">return</span> greeting + <span class="s">", "</span> + name + <span class="s">"!"</span>;
+}
+<span class="f">print</span>(<span class="f">greet</span>(<span class="s">"Hone"</span>));           <span class="c">// Hello, Hone!</span>
+<span class="f">print</span>(<span class="f">greet</span>(<span class="s">"Hone"</span>, <span class="s">"Hi"</span>));     <span class="c">// Hi, Hone!</span>
+
+<span class="k">fn</span> <span class="f">repeat_char</span>(ch, times = <span class="n">3</span>, sep = <span class="s">"-"</span>) {
+    s = <span class="s">""</span>;
+    <span class="k">for</span> (i = <span class="n">0</span>; i &lt; times; i = i + <span class="n">1</span>) {
+        s = s + ch;
+        <span class="k">if</span> (i &lt; times - <span class="n">1</span>) { s = s + sep; }
+    }
+    <span class="k">return</span> s;
+}
+<span class="f">print</span>(<span class="f">repeat_char</span>(<span class="s">"*"</span>));          <span class="c">// *-*-*</span>
+<span class="f">print</span>(<span class="f">repeat_char</span>(<span class="s">"*"</span>, <span class="n">2</span>));       <span class="c">// *-*</span>
+<span class="f">print</span>(<span class="f">repeat_char</span>(<span class="s">"*"</span>, <span class="n">4</span>, <span class="s">"+"</span>));  <span class="c">// *+*+*+*</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">3.3 匿名函数（lambda 闭包）</div>
+    <div class="note">一等值：赋值/传参/返回；创建时按值捕获外围变量（期望输出：42 / 15 / 36 / 15）</div>
+<pre><code>double = <span class="k">fn</span>(x) { <span class="k">return</span> x * <span class="n">2</span>; };
+<span class="f">print</span>(double(<span class="n">21</span>));     <span class="c">// 42</span>
+
+base = <span class="n">10</span>;
+adder = <span class="k">fn</span>(y) { <span class="k">return</span> base + y; };  <span class="c">// 捕获 base（按值）</span>
+<span class="f">print</span>(adder(<span class="n">5</span>));       <span class="c">// 15</span>
+
+<span class="k">fn</span> <span class="f">apply</span>(f, v) { <span class="k">return</span> f(v); }
+<span class="f">print</span>(<span class="f">apply</span>(<span class="k">fn</span>(n: <span class="k">int</span>) { <span class="k">return</span> n * n; }, <span class="n">6</span>));  <span class="c">// 36</span>
+
+<span class="k">fn</span> <span class="f">make_adder</span>(offset) { <span class="k">return</span> <span class="k">fn</span>(z) { <span class="k">return</span> z + offset; }; }
+add5 = <span class="f">make_adder</span>(<span class="n">5</span>);
+<span class="f">print</span>(add5(<span class="n">10</span>));       <span class="c">// 15</span></code></pre>
+  </div>
+
+  <p>新语法综合示例（continue / C 风格 for / do-while / 复合赋值 / 自增自减 / 三元表达式 / 空值合并 /
+    lambda 闭包 / 函数默认参数 / 三引号原始字符串）见 <code class="inline">examples/new_syntax_demo.hn</code>。</p>
 
   <h3><span class="hash">#</span>4. 集合与字符串</h3>
 
@@ -163,6 +265,55 @@ d = {<span class="s">"a"</span>: <span class="n">1</span>};
 <span class="f">print</span>(<span class="f">is_bool</span>(<span class="k">true</span>));  <span class="c">// true</span></code></pre>
   </div>
 
+  <div class="example">
+    <div class="title">4.5 结构体（struct）与深度拷贝</div>
+    <div class="note">struct 声明确定的数据形态（字段名与类型固定），构造时按字段顺序传参并校验类型；clone/copy 深度拷贝防别名</div>
+<pre><code><span class="k">struct</span> <span class="f">Point</span> { x: <span class="k">int</span>, y: <span class="k">float</span> };
+<span class="k">struct</span> <span class="f">Rect</span> { w: <span class="k">int</span>, h: <span class="k">int</span>, label: <span class="k">str</span> };
+
+p = <span class="f">Point</span>(<span class="n">3</span>, <span class="n">2.5</span>);
+<span class="f">print</span>(p.x);            <span class="c">// 3</span>
+r = <span class="f">Rect</span>(<span class="n">10</span>, <span class="n">20</span>, <span class="s">"box"</span>);
+<span class="f">print</span>(r.label);        <span class="c">// box</span>
+
+<span class="c">// 深度拷贝：修改副本不影响原值</span>
+l1 = [<span class="n">1</span>, <span class="n">2</span>, [<span class="n">3</span>, <span class="n">4</span>]];
+l2 = <span class="f">clone</span>(l1);
+l2 = <span class="f">append</span>(l2, <span class="n">99</span>);
+<span class="f">print</span>(<span class="f">to_str</span>(l1));     <span class="c">// [1, 2, [3, 4]]（不变）</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">4.6 模式匹配（match）</div>
+    <div class="note">match 是表达式，返回匹配分支的值；模式支持字面量与 _ 通配符（放最后）；全部不匹配运行时报错</div>
+<pre><code>s = <span class="k">match</span> <span class="n">2</span> {
+    <span class="n">1</span> =&gt; <span class="s">"one"</span>,
+    <span class="n">2</span> =&gt; <span class="s">"two"</span>,
+    _ =&gt; <span class="s">"other"</span>,
+};
+<span class="f">print</span>(s);                 <span class="c">// two</span>
+
+status = <span class="n">404</span>;
+msg = <span class="k">match</span> status {
+    <span class="n">200</span> =&gt; <span class="s">"OK"</span>,
+    <span class="n">404</span> =&gt; <span class="s">"Not Found"</span>,
+    <span class="n">500</span> =&gt; <span class="s">"Server Error"</span>,
+    _ =&gt; <span class="s">"Unknown"</span>,
+};
+<span class="f">print</span>(msg);               <span class="c">// Not Found</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">4.7 管道操作符（|&gt;）</div>
+    <div class="note">x |&gt; f 等价 f(x)；x |&gt; f(a, b) 等价 f(x, a, b)；可链式，解析期转换为普通调用</div>
+<pre><code><span class="c">// 嵌套调用写法 vs 管道写法</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">len</span>(<span class="s">"hello"</span>)));      <span class="c">// "5"</span>
+<span class="f">print</span>(<span class="s">"hello"</span> |&gt; <span class="f">len</span> |&gt; <span class="f">to_str</span>);  <span class="c">// "5"</span>
+
+<span class="f">print</span>([<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>] |&gt; <span class="f">len</span>);          <span class="c">// 3</span>
+<span class="f">print</span>(<span class="n">3</span> |&gt; <span class="f">max</span>(<span class="n">7</span>) |&gt; <span class="f">to_str</span>);     <span class="c">// "7"</span></code></pre>
+  </div>
+
   <h3><span class="hash">#</span>5. 内置函数</h3>
 
   <div class="example">
@@ -215,10 +366,14 @@ result = <span class="f">regex.replace</span>(<span class="s">"world"</span>, <s
   </div>
 
   <div class="example">
-    <div class="title">5.5 MD5 / SHA256 哈希</div>
-    <div class="note">crypto.md5 / crypto.sha256 计算十六进制哈希</div>
-<pre><code><span class="f">print</span>(<span class="f">crypto.md5</span>(<span class="s">"hello"</span>));
-<span class="f">print</span>(<span class="f">crypto.sha256</span>(<span class="s">"hello"</span>));</code></pre>
+    <div class="title">5.5 加密与哈希（crypto.*）</div>
+    <div class="note">crypto.md5 / sha1 / sha256 / hmac_sha256 / base64_encode / base64_decode</div>
+<pre><code><span class="f">print</span>(<span class="f">crypto.md5</span>(<span class="s">"abc"</span>));      <span class="c">// 900150983cd24fb0d6963f7d28e17f72</span>
+<span class="f">print</span>(<span class="f">crypto.sha1</span>(<span class="s">"abc"</span>));     <span class="c">// a9993e364706816aba3e25717850c26c9cd0d89d</span>
+<span class="f">print</span>(<span class="f">crypto.sha256</span>(<span class="s">"abc"</span>));   <span class="c">// ba7816bf8f01cfea414140de5dae2223...</span>
+<span class="f">print</span>(<span class="f">crypto.hmac_sha256</span>(<span class="s">"key"</span>, <span class="s">"msg"</span>));
+<span class="f">print</span>(<span class="f">crypto.base64_encode</span>(<span class="s">"hello"</span>));  <span class="c">// aGVsbG8=</span>
+<span class="f">print</span>(<span class="f">crypto.base64_decode</span>(<span class="s">"aGVsbG8="</span>)); <span class="c">// hello</span></code></pre>
   </div>
 
   <div class="example">
@@ -250,10 +405,12 @@ b = <span class="f">uuid.new</span>();
 
   <div class="example">
     <div class="title">5.9 命令行参数解析</div>
-    <div class="note">args.get / args.has 解析 --port 8080 或 -v 标志</div>
-<pre><code>port = <span class="f">args.get</span>(<span class="s">"port"</span>);
-<span class="k">if</span> (<span class="f">args.has</span>(<span class="s">"v"</span>)) {
-    <span class="f">print</span>(<span class="s">"详细模式已开启"</span>);
+    <div class="note">args.get 支持类型转换与默认值：args.get(key, type[, default])，type 可为 int/float/bool/str</div>
+<pre><code>port = <span class="f">args.get</span>(<span class="s">"port"</span>, <span class="k">int</span>, <span class="n">8080</span>);  <span class="c">// --port 9090 → 9090(int)；缺省 → 8080</span>
+ratio = <span class="f">args.get</span>(<span class="s">"ratio"</span>, <span class="k">float</span>, <span class="n">1.5</span>); <span class="c">// --ratio 2.5 → 2.5(float)</span>
+verbose = <span class="f">args.get</span>(<span class="s">"v"</span>, <span class="k">bool</span>, <span class="k">false</span>); <span class="c">// --v → true</span>
+<span class="k">if</span> (verbose) {
+    <span class="f">print</span>(<span class="s">"port="</span> + <span class="f">to_str</span>(port) + <span class="s">" ratio="</span> + <span class="f">to_str</span>(ratio));
 }</code></pre>
   </div>
 
@@ -273,6 +430,64 @@ resp = <span class="f">http_post</span>(<span class="s">"http://httpbin.org/post
 <span class="k">log.warn</span>(<span class="s">"磁盘空间不足"</span>);
 <span class="k">log.error</span>(<span class="s">"连接失败"</span>);
 <span class="k">log.debug</span>(<span class="s">"x = 42"</span>);</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">5.12 压缩与归档（archive.*）</div>
+    <div class="note">zip / tar.gz 的列表、读取、解压与创建；解压自动拒绝 `..` 穿越条目（防 zip-slip）</div>
+<pre><code><span class="f">archive.zip_create</span>(<span class="s">"pkg.zip"</span>, {<span class="s">"a.txt"</span>: <span class="s">"hello"</span>, <span class="s">"sub/b.txt"</span>: <span class="s">"nested"</span>});
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">archive.zip_list</span>(<span class="s">"pkg.zip"</span>)));    <span class="c">// [a.txt, sub/b.txt]</span>
+<span class="f">print</span>(<span class="f">archive.zip_read</span>(<span class="s">"pkg.zip"</span>, <span class="s">"a.txt"</span>));   <span class="c">// hello</span>
+<span class="f">archive.zip_extract</span>(<span class="s">"pkg.zip"</span>, <span class="s">"out"</span>);           <span class="c">// 解压到 out/</span>
+
+<span class="c">// tar.gz 同款：archive.tgz_list / tgz_read / tgz_extract / tgz_create</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">5.13 指针类（ptr.*）</div>
+    <div class="note">分配 / 释放 / 读写内存；分配表跟踪防野指针（未分配/已释放/重复释放报 H304，越界报 H305）</div>
+<pre><code>p = <span class="f">ptr.alloc</span>(<span class="n">32</span>);                  <span class="c">// 分配 32 字节</span>
+<span class="f">ptr.write_int</span>(p, <span class="n">0</span>, <span class="n">12345</span>);       <span class="c">// 偏移 0 写 8 字节整数</span>
+<span class="f">print</span>(<span class="f">ptr.read_int</span>(p, <span class="n">0</span>));        <span class="c">// 12345</span>
+<span class="f">print</span>(<span class="f">ptr.size</span>(p));                 <span class="c">// 32</span>
+<span class="f">ptr.free</span>(p);                          <span class="c">// 释放；此后访问报 H304</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">5.14 插件系统（plugin.*）</div>
+    <div class="note">运行期加载动态库并注册，之后可用别名直接调用（走 C ABI 通道）；plugin.list 列出已注册插件</div>
+<pre><code>ok = <span class="f">plugin.load</span>(<span class="s">"path/to/lib.dll"</span>, <span class="s">"pl"</span>);  <span class="c">// 加载并注册别名 pl</span>
+<span class="f">print</span>(<span class="f">plugin.has</span>(<span class="s">"pl"</span>));                  <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">pl.lib_add</span>(<span class="n">3</span>, <span class="n">4</span>));                  <span class="c">// 7（调用库函数）</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">plugin.list</span>()));              <span class="c">// [{name: pl, path: ...}]</span>
+<span class="f">plugin.unload</span>(<span class="s">"pl"</span>);                       <span class="c">// 注销</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">5.15 标准输入与默认值（EOF 降级）</div>
+    <div class="note">input / read_int / read_float 从 stdin 读取；EOF 抛 H306、数字格式错抛 H006/H007，用 try-catch 包装实现默认值（期望输出：管道喂入 "Bob\n25\n" → 你好, Bob! / 明年你 26 岁）</div>
+<pre><code><span class="k">fn</span> <span class="f">ask</span>(prompt, fallback) {
+    <span class="k">try</span> {
+        <span class="k">return</span> <span class="f">input</span>(prompt);
+    } <span class="k">catch</span> e {
+        <span class="k">return</span> fallback;   <span class="c">// H306 EOF → 默认值</span>
+    }
+}
+name = <span class="f">ask</span>(<span class="s">"姓名: "</span>, <span class="s">"匿名"</span>);
+<span class="f">print</span>(<span class="s">"你好, "</span> + name + <span class="s">"!"</span>);
+
+<span class="k">fn</span> <span class="f">ask_int</span>(prompt, fallback) {
+    <span class="k">try</span> {
+        <span class="k">return</span> <span class="f">read_int</span>(prompt);
+    } <span class="k">catch</span> e {
+        <span class="k">return</span> fallback;   <span class="c">// H006 格式错 / H306 EOF → 默认值</span>
+    }
+}
+age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span class="n">0</span>);
+<span class="f">print</span>(<span class="s">"明年你 "</span> + <span class="f">to_str</span>(age + <span class="n">1</span>) + <span class="s">" 岁"</span>);
+
+<span class="c">// 完整示例：examples/input_demo.hn；EOF 也可用 ?? 空值合并？——不行，</span>
+<span class="c">// input 在 EOF 抛错误而非返回 null，?? 只对 null 值生效，必须 try-catch</span></code></pre>
   </div>
 
   <h3><span class="hash">#</span>6. 并发</h3>
@@ -315,7 +530,85 @@ resp = <span class="f">http_post</span>(<span class="s">"http://httpbin.org/post
     <p>生成的 C ABI：<code class="inline">int64_t add(int64_t, int64_t)</code>、<code class="inline">double avg(double, double)</code>、<code class="inline">const char* greet(const char*)</code>。</p>
   </div>
 
+  <div class="example">
+    <div class="title">7.3 typed FFI：load 签名块精确调用 C 函数（v0.4+）</div>
+    <div class="note">签名块显式声明参数/返回类型（int/float/bool/str/ptr/void），按声明精确转换；调用在检查阶段校验参数（H001/H005）</div>
+<pre><code><span class="k">load</span> <span class="s">"tests/hone_lib/target/release/hone_lib.dll"</span> <span class="k">as</span> m {
+    <span class="c">// 仅描述 C 函数 ABI，不定义 Hone 函数体；返回类型允许 void</span>
+    <span class="k">fn</span> <span class="f">lib_add_f</span>(a: <span class="k">float</span>, b: <span class="k">float</span>) -&gt; <span class="k">float</span>;
+    <span class="k">fn</span> <span class="f">lib_strlen</span>(s: <span class="k">str</span>) -&gt; <span class="k">int</span>;
+    <span class="k">fn</span> <span class="f">lib_not</span>(b: <span class="k">bool</span>) -&gt; <span class="k">bool</span>;
+    <span class="k">fn</span> <span class="f">lib_echo_ptr</span>(p: <span class="k">ptr</span>) -&gt; <span class="k">ptr</span>;
+    <span class="k">fn</span> <span class="f">lib_bump</span>() -&gt; <span class="k">void</span>;
+}
+
+<span class="f">print</span>(m.<span class="f">lib_add_f</span>(<span class="n">1.5</span>, <span class="n">2.25</span>));  <span class="c">// 3.75（float 通道）</span>
+<span class="f">print</span>(m.<span class="f">lib_strlen</span>(<span class="s">"hello"</span>));   <span class="c">// 5（str → int）</span>
+<span class="f">print</span>(m.<span class="f">lib_not</span>(<span class="k">true</span>));          <span class="c">// false（bool）</span>
+p = m.<span class="f">lib_echo_ptr</span>(<span class="n">0</span>);            <span class="c">// ptr 句柄往返，0 为 NULL</span>
+<span class="f">print</span>(p == <span class="n">0</span>);                     <span class="c">// true（ptr 支持 == 比较）</span>
+
+<span class="c">// 静态校验：参数类型/个数错误在检查阶段直接报错，而非运行时</span>
+<span class="c">// m.lib_strlen(123);   // H001: 参数期望 str，给了 int</span>
+<span class="c">// m.lib_strlen();      // H005: 参数个数不匹配</span></code></pre>
+    <p>未声明签名的库函数保持旧 int64 通道调用（向后兼容）。完整示例见 <code class="inline">examples/ffi_demo.hn</code>。</p>
+  </div>
+
+  <div class="example">
+    <div class="title">7.4 头文件自动绑定：load ... from "header.h"（v0.4+）</div>
+    <div class="note">从 C 头文件提取函数原型自动生成 FFI 签名；hone bind 可离线生成签名块粘贴进脚本</div>
+<pre><code><span class="c">// 从头文件自动绑定：类型全部来自 hone_lib.h（等价于手写签名块）</span>
+<span class="k">load</span> <span class="s">"tests/hone_lib/target/release/hone_lib.dll"</span> <span class="k">as</span> m <span class="k">from</span> <span class="s">"tests/hone_lib/hone_lib.h"</span>;
+
+<span class="f">print</span>(m.<span class="f">lib_add</span>(<span class="n">1</span>, <span class="n">2</span>));         <span class="c">// 3（typedef 展开 ka_int64 → int）</span>
+<span class="f">print</span>(m.<span class="f">lib_add_f</span>(<span class="n">1.5</span>, <span class="n">2.25</span>));  <span class="c">// 3.75（double → float）</span>
+<span class="f">print</span>(m.<span class="f">lib_strlen</span>(<span class="s">"hello"</span>));   <span class="c">// 5（const char* → str）</span>
+
+<span class="c">// 离线生成签名块（输出到 stdout，unsupported 原型列为注释）</span>
+<span class="c">// hone bind tests/hone_lib/hone_lib.h</span>
+
+<span class="c">// 不支持的原型（回调/变参/数组/结构体按值）调用时直接报错，而非 ABI 崩溃</span>
+<span class="c">// print(m.lib_cb(0));   // H006: cannot be called: callback parameter</span>
+<span class="c">// print(m.lib_var("x")); // H006: cannot be called: variadic (`...`)</span></code></pre>
+    <p>解析能力为纯 Rust 受限子集（无 libclang 依赖）：跳过注释/预处理/struct 定义/extern "C" 块，typedef 简单展开，
+      属性宏跳过；类型映射 int/size_t→int、float/double→float、bool→bool、char*→str、其余指针→ptr、void→void。
+      完整示例见 <code class="inline">examples/ffi_header.hn</code>。</p>
+  </div>
+
+  <div class="example">
+    <div class="title">7.5 函数别名：alias 原名 as 新名（v0.6.1+）</div>
+    <div class="note">给已有函数起新名字再调用；原名支持点号路径（模块/类/内置函数），别名可叠加、可指向内置函数</div>
+<pre><code><span class="k">fn</span> <span class="f">greet</span>(name : <span class="k">str</span>) -&gt; <span class="k">str</span> { <span class="k">return</span> <span class="s">"你好 "</span> + name; }
+
+<span class="k">alias</span> <span class="f">greet</span> <span class="k">as</span> hi;           <span class="c">// 用户函数别名</span>
+<span class="f">print</span>(<span class="f">hi</span>(<span class="s">"Hone"</span>));               <span class="c">// 你好 Hone</span>
+
+<span class="k">alias</span> <span class="f">random.int</span> <span class="k">as</span> rint;     <span class="c">// 点号路径原名（内置点号函数）</span>
+<span class="f">print</span>(<span class="f">rint</span>(<span class="n">1</span>, <span class="n">100</span>));            <span class="c">// [1, 100] 随机整数</span>
+
+<span class="k">alias</span> <span class="f">greet</span> <span class="k">as</span> hello;          <span class="c">// 别名叠加：hello → greet</span>
+<span class="k">alias</span> <span class="f">hello</span> <span class="k">as</span> hey;           <span class="c">// hey → hello → greet</span>
+<span class="f">print</span>(<span class="f">hey</span>(<span class="s">"World"</span>));             <span class="c">// 你好 World</span>
+
+<span class="k">alias</span> <span class="f">abs</span> <span class="k">as</span> mabs;             <span class="c">// 内置函数别名</span>
+<span class="f">print</span>(<span class="f">mabs</span>(<span class="n">-5</span>));                 <span class="c">// 5</span></code></pre>
+    <p>别名作用域为文件级，<code class="inline">alias</code> 语句之后即可用新名调用。完整示例见 <code class="inline">examples/alias_demo.hn</code>。</p>
+  </div>
+
   <h3><span class="hash">#</span>8. 工具链</h3>
+
+  <div class="example">
+    <div class="title">8.0 测试框架（hone test + assert）</div>
+    <div class="note">递归扫描 *.test.hn 并运行；assert 条件为 false 抛 H700；失败退出码非 0</div>
+<pre><code><span class="c">// arith.test.hn（文件名以 .test.hn 结尾）</span>
+<span class="f">assert</span>(<span class="n">1</span> + <span class="n">1</span> == <span class="n">2</span>, <span class="s">"basic math"</span>);
+<span class="f">assert</span>(<span class="f">len</span>([<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>]) == <span class="n">3</span>);
+
+<span class="c">// 运行目录下所有测试</span>
+hone test
+<span class="c">// PASS  arith.test.hn</span>
+<span class="c">// 2 passed, 0 failed (2 total)</span></code></pre>
+  </div>
 
   <div class="example">
     <div class="title">8.1 build --exe 打包独立可执行文件</div>
@@ -333,6 +626,22 @@ hone build --exe app.hn [-o my_app.exe]
 
 <span class="c">// 保留缓存以加速下次启动</span>
 ./my_app.exe --keep-cache</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">8.1b build --script 仅脚本压缩包（.hzp）</div>
+    <div class="note">不内嵌解释器，体积小；生成 .hzp 后用任意 hone 运行时执行（hone run pkg.hzp）</div>
+<pre><code><span class="c">// 打包(默认输出 app.hzp)</span>
+hone build --script app.hn [-o my_app.hzp]
+
+<span class="c">// 执行(自动解包运行,也可直接 hone my_app.hzp)</span>
+hone run my_app.hzp</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">8.1c self-update 自动更新</div>
+    <div class="note">从 URL（或环境变量 HONE_UPDATE_URL）下载最新 hone 二进制替换当前程序；魔数校验防误下载</div>
+<pre><code>hone self-update https://example.com/hone-latest.exe</code></pre>
   </div>
 
   <div class="example">
@@ -379,7 +688,7 @@ x = <span class="n">42</span>;
 <pre><code><span class="c">// 失败自动重启(默认最多3次,间隔1s/3s/10s递增;--restart-on 错误码白名单)</span>
 hone run --restart=2 --backoff=1,1 --restart-on=H401 app.hn
 
-<span class="c">// 检查点恢复(db.set 自动落盘 ~/.hn/state/,脚本变更后检查点自动失效)</span>
+<span class="c">// 检查点恢复(db.set 自动落盘 ~/.hone/state/,脚本变更后检查点自动失效)</span>
 hone run --resume app.hn
 
 <span class="c">// app.hn 中写入检查点</span>
@@ -411,7 +720,7 @@ widgets = [
 
   <div class="example">
     <div class="title">10.2 本地 HTTP 服务器（server.* 内置函数）</div>
-    <div class="note">server.listen / server.poll / server.respond：纯 std::net 跨平台，后台线程收发、脚本主线程轮询响应</div>
+    <div class="note">server.listen / server.poll / server.respond：纯 std::net 跨平台，后台线程收发、脚本主线程轮询响应；respond 可指定状态码（如 404/500）</div>
 <pre><code>port = <span class="f">server.listen</span>(<span class="n">0</span>);  <span class="c">// 0 = 自动分配端口，返回实际端口</span>
 <span class="f">print</span>(<span class="s">"http://127.0.0.1:"</span> + <span class="f">to_str</span>(port) + <span class="s">"/"</span>);
 
@@ -421,11 +730,72 @@ widgets = [
         list = <span class="f">json_parse</span>(reqs);
         <span class="k">for</span> req <span class="k">in</span> list {
             <span class="c">// gui_dict_get(req, "id") 取字段（Hone 无 d["k"] 索引语法）</span>
-            <span class="f">server.respond</span>(<span class="n">1</span>, <span class="s">"ok"</span>);  <span class="c">// 发送 HTTP 200 响应体</span>
+            <span class="f">server.respond</span>(<span class="n">1</span>, <span class="s">"ok"</span>, <span class="n">200</span>);     <span class="c">// 指定 HTTP 200</span>
+            <span class="f">server.respond</span>(<span class="n">2</span>, <span class="s">"not found"</span>, <span class="n">404</span>); <span class="c">// 404（默认 200，范围 100..=599）</span>
         }
     }
     <span class="f">time.sleep</span>(<span class="n">0.05</span>);
 }</code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">10.3 桌宠标准库（Windows 透明置顶窗）</div>
+    <div class="note">hone_lib/pet.hn：Hone 驱动状态机 + 原生 Win32 窗口（guipro.pet_*，无 PowerShell 依赖），内置像素猫动画/气泡/交互；仅支持 Windows</div>
+<pre><code><span class="k">import</span> <span class="s">"pet"</span> <span class="k">from</span> <span class="s">"./hone_lib/pet.hn"</span>;
+
+cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"scale"</span>: <span class="n">2</span>, <span class="s">"speed"</span>: <span class="n">3</span>, <span class="s">"sleep_after"</span>: <span class="n">90</span>};
+<span class="f">pet_run</span>(cfg);   <span class="c">// 阻塞运行：右键菜单或 Ctrl+C 退出</span>
+
+<span class="c">// 非阻塞：st = pet_init(cfg); while (st.quit == false) { st = pet_tick(st); time.sleep(st.cfg.tick); }</span>
+<span class="c">// 交互：单击开心、双击惊讶、按住拖拽、右键菜单（换装/静音/跟随鼠标/隐藏台词/退出）</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">10.4 原生图形界面库（Windows: Win32 / Linux: GTK3）</div>
+    <div class="note">hone_lib/guipro.hn：原生窗口 + 原生控件（gui.hn 的升级版，不依赖浏览器）；Windows 用 Win32 标准控件，Linux 动态加载 GTK3；闭包事件分发 + 定时器 + 消息框</div>
+<pre><code><span class="k">import</span> <span class="s">"guipro"</span> <span class="k">from</span> <span class="s">"./hone_lib/guipro.hn"</span>;
+
+win = <span class="f">guipro_window</span>(<span class="s">"guipro 演示"</span>, <span class="n">460</span>, <span class="n">420</span>);
+
+<span class="c">// VBox 纵向布局：返回控件 id 列表（与 specs 顺序对应）</span>
+specs = [];
+specs = <span class="f">append</span>(specs, {<span class="s">"type"</span>: <span class="s">"input"</span>, <span class="s">"w"</span>: <span class="n">220</span>, <span class="s">"h"</span>: <span class="n">28</span>});
+specs = <span class="f">append</span>(specs, {<span class="s">"type"</span>: <span class="s">"select"</span>, <span class="s">"options"</span>: [<span class="s">"北京"</span>, <span class="s">"上海"</span>, <span class="s">"广州"</span>], <span class="s">"w"</span>: <span class="n">140</span>, <span class="s">"h"</span>: <span class="n">28</span>});
+specs = <span class="f">append</span>(specs, {<span class="s">"type"</span>: <span class="s">"button"</span>, <span class="s">"text"</span>: <span class="s">"提交"</span>, <span class="s">"w"</span>: <span class="n">120</span>, <span class="s">"h"</span>: <span class="n">32</span>});
+ids = <span class="f">guipro_vbox</span>(win, specs, <span class="n">24</span>, <span class="n">20</span>, <span class="n">6</span>);
+
+handlers = [];
+handlers = <span class="f">guipro_on</span>(handlers, win, ids[<span class="n">2</span>], <span class="s">"click"</span>, <span class="k">fn</span>(id, value) {
+    name = <span class="f">guipro_get_text</span>(win, ids[<span class="n">0</span>]);
+    city = <span class="f">guipro_get_text</span>(win, ids[<span class="n">1</span>]);
+    <span class="f">guipro_msgbox</span>(<span class="s">"提交成功"</span>, <span class="s">"姓名: "</span> + name + <span class="s">"\n城市: "</span> + city);
+    <span class="k">return</span> <span class="s">""</span>;
+});
+handlers = <span class="f">guipro_on_win</span>(handlers, win, <span class="s">"close"</span>, <span class="k">fn</span>(id, value) {
+    <span class="f">print</span>(<span class="s">"窗口已关闭"</span>);
+    <span class="k">return</span> <span class="s">""</span>;
+});
+<span class="f">guipro_run</span>(handlers);   <span class="c">// 阻塞主循环，窗口关闭后返回</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">10.5 进度条标准库（pbar）</div>
+    <div class="note">hone_lib/pbar.hn：终端字符进度条 + 单行原地刷新（ANSI）+ 剩余时间估算；Hone 值语义，更新函数返回新对象需重新赋值</div>
+<pre><code><span class="k">import</span> <span class="s">"pbar"</span> <span class="k">from</span> <span class="s">"./hone_lib/pbar.hn"</span>;
+
+<span class="c">// 单行原地刷新（ANSI：ESC[1A 上移一行 + ESC[K 清行；print 自带换行，用 base64 解码构造 ESC）</span>
+pb = <span class="f">pbar_new</span>(<span class="n">100</span>, <span class="n">30</span>, <span class="s">"下载"</span>);
+i = <span class="n">0</span>;
+<span class="k">while</span> (i &lt;= <span class="n">100</span>) {
+    pb = <span class="f">pbar_update</span>(pb, i);
+    pb = <span class="f">pbar_show</span>(pb);        <span class="c">// 原地刷新，返回新对象</span>
+    <span class="f">time.sleep</span>(<span class="n">0.05</span>);
+    i = i + <span class="n">1</span>;
+}
+<span class="f">pbar_finish</span>(pb);              <span class="c">// 补齐到 100% 并换行</span>
+
+<span class="c">// 剩余时间估算（渲染到字符串）：print(pbar_render_full(pb, time.now()));</span>
+<span class="c">// 老终端兼容（每帧新行）：pb = pbar_update(pb, i); pbar_line(pb);</span></code></pre>
   </div>
 </main>
 
@@ -460,7 +830,21 @@ function searchExamples(q) {
 </script>
 
 <footer>
-  Hone v0.3.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="tutorial.html">教程</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.7.9 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

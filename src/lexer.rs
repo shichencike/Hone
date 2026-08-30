@@ -17,6 +17,7 @@ pub enum Tok {
     If,
     Else,
     While,
+    Do,
     For,
     In,
     Return,
@@ -26,6 +27,10 @@ pub enum Tok {
     Try,
     Catch,
     Throw,
+    Continue,
+    // match 模式匹配
+    Match,
+    Break,
     Breakpoint,
     Load,
     Lazy,
@@ -35,6 +40,15 @@ pub enum Tok {
     As,
     From,
     Tmp,
+    // struct 结构体定义
+    Struct,
+    // class 类定义（成员函数不进入全局符号表）
+    Class,
+    // enum 枚举定义（简单变体 + 带载荷变体）
+    Enum,
+    // 异步：async fn（后台线程执行，返回 future）与 await（等待 future 结果）
+    Async,
+    Await,
     // 类型关键字
     TInt,
     TFloat,
@@ -54,10 +68,28 @@ pub enum Tok {
     Ge,
     AndAnd,
     OrOr,
+    Pipe, // |>（管道操作符）
     Bang,
     Assign,
+    /// 复合赋值：+= -= *= /= %=
+    PlusEq,
+    MinusEq,
+    StarEq,
+    SlashEq,
+    PercentEq,
+    /// 自增/自减：++ --
+    PlusPlus,
+    MinusMinus,
+    /// 三元表达式 `?` 与空值合并 `??`
+    Question,
+    QuestionQuestion,
+    /// 可选链 `?.`（obj 为 null 时短路返回 null）
+    QuestionDot,
+    /// 三引号原始字符串 """..."""（保留换行，不做转义处理）
+    MultiStr(String),
     Colon,
     Arrow, // ->
+    FatArrow, // =>（match 模式分支）
     Comma,
     Semi,
     Dot,
@@ -84,6 +116,7 @@ impl Tok {
             Tok::If => "`if`".into(),
             Tok::Else => "`else`".into(),
             Tok::While => "`while`".into(),
+            Tok::Do => "`do`".into(),
             Tok::For => "`for`".into(),
             Tok::In => "`in`".into(),
             Tok::Return => "`return`".into(),
@@ -93,6 +126,9 @@ impl Tok {
             Tok::Try => "`try`".into(),
             Tok::Catch => "`catch`".into(),
             Tok::Throw => "`throw`".into(),
+            Tok::Continue => "`continue`".into(),
+            Tok::Match => "`match`".into(),
+            Tok::Break => "`break`".into(),
             Tok::Breakpoint => "`breakpoint`".into(),
             Tok::Load => "`load`".into(),
             Tok::Lazy => "`lazy`".into(),
@@ -102,6 +138,11 @@ impl Tok {
             Tok::As => "`as`".into(),
             Tok::From => "`from`".into(),
             Tok::Tmp => "`tmp`".into(),
+            Tok::Struct => "`struct`".into(),
+            Tok::Class => "`class`".into(),
+            Tok::Enum => "`enum`".into(),
+            Tok::Async => "`async`".into(),
+            Tok::Await => "`await`".into(),
             Tok::TInt => "type `int`".into(),
             Tok::TFloat => "type `float`".into(),
             Tok::TBool => "type `bool`".into(),
@@ -119,10 +160,23 @@ impl Tok {
             Tok::Ge => "`>=`".into(),
             Tok::AndAnd => "`&&`".into(),
             Tok::OrOr => "`||`".into(),
+            Tok::Pipe => "`|>`".into(),
             Tok::Bang => "`!`".into(),
             Tok::Assign => "`=`".into(),
+            Tok::PlusEq => "`+=`".into(),
+            Tok::MinusEq => "`-=`".into(),
+            Tok::StarEq => "`*=`".into(),
+            Tok::SlashEq => "`/=`".into(),
+            Tok::PercentEq => "`%=`".into(),
+            Tok::PlusPlus => "`++`".into(),
+            Tok::MinusMinus => "`--`".into(),
+            Tok::Question => "`?`".into(),
+            Tok::QuestionQuestion => "`??`".into(),
+            Tok::QuestionDot => "`?.`".into(),
+            Tok::MultiStr(_) => "triple-quoted string".into(),
             Tok::Colon => "`:`".into(),
             Tok::Arrow => "`->`".into(),
+            Tok::FatArrow => "`=>`".into(),
             Tok::Comma => "`,`".into(),
             Tok::Semi => "`;`".into(),
             Tok::Dot => "`.`".into(),
@@ -212,6 +266,10 @@ impl Lexer {
         self.chars.get(self.pos + 1).copied()
     }
 
+    fn peek3(&self) -> Option<char> {
+        self.chars.get(self.pos + 2).copied()
+    }
+
     fn bump(&mut self) -> Option<char> {
         let c = self.chars.get(self.pos).copied()?;
         self.pos += 1;
@@ -297,6 +355,7 @@ impl Lexer {
                 "if" => Tok::If,
                 "else" => Tok::Else,
                 "while" => Tok::While,
+                "do" => Tok::Do,
                 "for" => Tok::For,
                 "in" => Tok::In,
                 "return" => Tok::Return,
@@ -306,6 +365,9 @@ impl Lexer {
                 "try" => Tok::Try,
                 "catch" => Tok::Catch,
                 "throw" => Tok::Throw,
+                "continue" => Tok::Continue,
+                "match" => Tok::Match,
+                "break" => Tok::Break,
                 "breakpoint" => Tok::Breakpoint,
                 "load" => Tok::Load,
                 "lazy" => Tok::Lazy,
@@ -315,6 +377,11 @@ impl Lexer {
                 "as" => Tok::As,
                 "from" => Tok::From,
                 "tmp" => Tok::Tmp,
+                "struct" => Tok::Struct,
+                "class" => Tok::Class,
+                "enum" => Tok::Enum,
+                "async" => Tok::Async,
+                "await" => Tok::Await,
                 "int" => Tok::TInt,
                 "float" => Tok::TFloat,
                 "bool" => Tok::TBool,
@@ -336,6 +403,10 @@ impl Lexer {
 
         // 字符串字面量
         if c == '"' {
+            // 三引号原始字符串："""..."""（必须是三连引号，`""` 为空字符串）
+            if self.peek2() == Some('"') && self.peek3() == Some('"') {
+                return self.lex_multistr();
+            }
             return self.lex_string();
         }
 
@@ -343,11 +414,25 @@ impl Lexer {
         let tok = match c {
             '+' => {
                 self.bump();
-                Tok::Plus
+                if self.peek() == Some('+') {
+                    self.bump();
+                    Tok::PlusPlus
+                } else if self.peek() == Some('=') {
+                    self.bump();
+                    Tok::PlusEq
+                } else {
+                    Tok::Plus
+                }
             }
             '-' => {
                 self.bump();
-                if self.peek() == Some('>') {
+                if self.peek() == Some('-') {
+                    self.bump();
+                    Tok::MinusMinus
+                } else if self.peek() == Some('=') {
+                    self.bump();
+                    Tok::MinusEq
+                } else if self.peek() == Some('>') {
                     self.bump();
                     Tok::Arrow
                 } else {
@@ -356,21 +441,51 @@ impl Lexer {
             }
             '*' => {
                 self.bump();
-                Tok::Star
+                if self.peek() == Some('=') {
+                    self.bump();
+                    Tok::StarEq
+                } else {
+                    Tok::Star
+                }
             }
             '/' => {
                 self.bump();
-                Tok::Slash
+                if self.peek() == Some('=') {
+                    self.bump();
+                    Tok::SlashEq
+                } else {
+                    Tok::Slash
+                }
             }
             '%' => {
                 self.bump();
-                Tok::Percent
+                if self.peek() == Some('=') {
+                    self.bump();
+                    Tok::PercentEq
+                } else {
+                    Tok::Percent
+                }
+            }
+            '?' => {
+                self.bump();
+                if self.peek() == Some('?') {
+                    self.bump();
+                    Tok::QuestionQuestion
+                } else if self.peek() == Some('.') {
+                    self.bump();
+                    Tok::QuestionDot
+                } else {
+                    Tok::Question
+                }
             }
             '=' => {
                 self.bump();
                 if self.peek() == Some('=') {
                     self.bump();
                     Tok::EqEq
+                } else if self.peek() == Some('>') {
+                    self.bump();
+                    Tok::FatArrow
                 } else {
                     Tok::Assign
                 }
@@ -421,12 +536,15 @@ impl Lexer {
                 if self.peek() == Some('|') {
                     self.bump();
                     Tok::OrOr
+                } else if self.peek() == Some('>') {
+                    self.bump();
+                    Tok::Pipe
                 } else {
                     return Err(self.err(
                         crate::error::codes::SYNTAX,
-                        "expected `||` after `|`",
+                        "expected `||` or `|>` after `|`",
                         1,
-                        Some("use `||` for logical OR"),
+                        Some("use `||` for logical OR, or `|>` for piping"),
                     ));
                 }
             }
@@ -631,6 +749,43 @@ impl Lexer {
             }
         }
         Ok(Tok::StrLit(s))
+    }
+
+    /// 词法分析三引号原始字符串 """..."""。调用前已确认当前字符为 `"` 且后随 `""`。
+    /// 内容不做任何转义处理，原样保留（含换行），直到遇到闭合的 `"""`。
+    fn lex_multistr(&mut self) -> Result<Tok, ZError> {
+        self.bump(); // "
+        self.bump(); // "
+        self.bump(); // "
+        let mut s = String::new();
+        loop {
+            match self.peek() {
+                None => {
+                    return Err(self.err(
+                        crate::error::codes::UNTERMINATED_STRING,
+                        "unterminated triple-quoted string",
+                        3,
+                        Some("close the string with `\"\"\"`"),
+                    ));
+                }
+                Some('"') => {
+                    // 检查是否为闭合的 """（三连引号）
+                    if self.peek2() == Some('"') && self.peek3() == Some('"') {
+                        self.bump();
+                        self.bump();
+                        self.bump();
+                        break;
+                    }
+                    s.push('"');
+                    self.bump();
+                }
+                Some(c) => {
+                    s.push(c);
+                    self.bump();
+                }
+            }
+        }
+        Ok(Tok::MultiStr(s))
     }
 
     /// 词法分析插值字符串 f"..."。调用前已消费 `f`，此处消费开头的 `"`。

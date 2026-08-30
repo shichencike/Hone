@@ -4,19 +4,40 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 安装教程</title>
+<meta name="description" content="Hone 安装教程：一行命令安装（Linux/Termux/Windows），手动下载 GitHub Releases，或从源码构建。零依赖、零配置。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
 </head>
 <body>
 <header>
-  <span class="logo">⚡ Hone</span>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
   <nav>
     <a href="index.html">首页</a>
     <a href="docs.html">文档</a>
+    <a href="tutorial.html">教程</a>
     <a href="examples.html">示例</a>
-    <a href="install.html" class="active">安装</a>
     <a href="stdlib.html">标准库</a>
+    <a href="install.html" class="active">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
   </nav>
-  <span class="ver">v0.3.0</span>
+  <span class="ver">v0.7.9</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
 <main>
@@ -26,7 +47,6 @@
   <div class="toc">
     <ol>
       <li><a href="#quick">一键脚本安装（推荐）</a></li>
-      <li><a href="#pkg">包管理器安装（Homebrew / Scoop）</a></li>
       <li><a href="#download">手动下载（GitHub Releases）</a></li>
       <li><a href="#build">源码构建</a></li>
       <li><a href="#verify">验证安装</a></li>
@@ -37,28 +57,26 @@
     <h2><span class="hash">#</span>1. 一键脚本安装（推荐）</h2>
     <h3>Linux / Termux（Android）</h3>
 <pre><code>curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code></pre>
-    <p>脚本自动识别平台（x86_64 → <code class="inline">hone-linux-x86_64</code>；aarch64 / Termux → <code class="inline">hone-termux-aarch64</code>），下载后校验 sha256 并安装到 <code class="inline">~/.hone/bin</code>。</p>
+    <p>脚本自动识别平台（x86_64 → <code class="inline">hone-linux-x86_64</code>；aarch64 / Termux → <code class="inline">hone-termux-aarch64</code>），优先下载 <code class="inline">.tar.gz</code> 压缩包（体积更小），校验 sha256 后原子安装：Linux 默认装到 <code class="inline">~/.hone/bin</code>（Termux 下自动装到 <code class="inline">$PREFIX/bin</code>）并自动写入 shell 配置加入 PATH。</p>
+    <p>脚本支持断点续传与失败重试；已安装相同版本（哈希一致）时自动跳过下载；<code class="inline">HONE_UNINSTALL=1</code> 可一键卸载（删除二进制与 PATH 配置）。</p>
     <h3>Windows（PowerShell 5.1+）</h3>
 <pre><code>irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex</code></pre>
-    <p>安装到 <code class="inline">%LOCALAPPDATA%\hone\bin</code> 并自动加入用户 PATH（新开的终端生效）。</p>
-    <p>指定版本：<code class="inline">HONE_VERSION=v0.3.0 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code>（Windows 同理，先 <code class="inline">$env:HONE_VERSION = "v0.3.0"</code>）。</p>
-  </section>
-
-  <section id="pkg">
-    <h2><span class="hash">#</span>2. 包管理器安装</h2>
-    <h3>Homebrew（Linux）</h3>
-<pre><code>brew tap shichencike/homebrew-hone
-brew install hone</code></pre>
-    <p>新版本发布后 <code class="inline">brew upgrade hone</code> 即可更新。</p>
-    <h3>Scoop（Windows）</h3>
-<pre><code>scoop bucket add hone https://github.com/shichencike/scoop-hone
-scoop install hone</code></pre>
-    <p>新版本发布后 <code class="inline">scoop update hone</code> 即可更新（manifest 配置了自动更新）。</p>
-    <p class="note">macOS 版暂未发布，Homebrew 安装目前面向 Linux；Windows 用户优先推荐脚本或 Scoop 安装。</p>
+    <p>优先使用系统自带的 <code class="inline">curl.exe</code> 下载（更快、支持续传与重试），强制 TLS 1.2，安装到 <code class="inline">%LOCALAPPDATA%\hone\bin</code> 并幂等加入用户 PATH（新开的终端生效）；<code class="inline">HONE_UNINSTALL=1</code> 可卸载。</p>
+    <p>指定版本：<code class="inline">HONE_VERSION=v0.7.9 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code>（Windows 同理，先 <code class="inline">$env:HONE_VERSION = "v0.7.0"</code>）。</p>
+    <p><strong>镜像源（国内加速）</strong>：脚本默认先走<strong>ghproxy.net 前缀代理</strong>，失败自动回退官方 GitHub，无需任何配置。
+      也可用环境变量 <code class="inline">HONE_MIRROR</code> 指定其他镜像，或设 <code class="inline">HONE_MIRROR=off</code> 强制只用官方源：</p>
+<pre><code><span class="c"># 直接从镜像拉取脚本（国内直连，无需加速器）</span>
+curl -fsSL https://ghproxy.net/https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh
+<span class="c"># Windows 同理：直接从镜像拉取脚本</span>
+irm https://ghproxy.net/https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex
+<span class="c"># 指定镜像（任意前缀，自动拼官方完整路径，ghproxy.net 前缀代理结构）</span>
+HONE_MIRROR=https://ghproxy.net/ curl -fsSL .../install.sh | sh
+<span class="c"># 强制只用官方 GitHub（不走镜像）</span>
+HONE_MIRROR=off curl -fsSL .../install.sh | sh</code></pre>
   </section>
 
   <section id="download">
-    <h2><span class="hash">#</span>3. 手动下载（GitHub Releases）</h2>
+    <h2><span class="hash">#</span>2. 手动下载（GitHub Releases）</h2>
     <p>从 <a href="https://github.com/shichencike/Hone/releases">GitHub Releases</a> 下载对应平台的可执行文件（每次发布同时附带 <code class="inline">checksums.txt</code> 供 sha256 校验）：</p>
     <table>
       <tr><th>平台</th><th>文件</th><th>说明</th></tr>
@@ -70,17 +88,17 @@ scoop install hone</code></pre>
   </section>
 
   <section id="build">
-    <h2><span class="hash">#</span>4. 源码构建</h2>
+    <h2><span class="hash">#</span>3. 源码构建</h2>
     <p>需要 Rust 工具链（rustc ≥ 1.71）。</p>
 <pre><code>git clone https://github.com/shichencike/Hone.git
 cd Hone
 cargo build --release
 <span class="c">// 产物: target/release/hone（Windows 为 target/release/hone.exe）</span>
-./target/release/hone --version    <span class="c">// hone 0.3.0</span></code></pre>
+./target/release/hone --version    <span class="c">// hone 0.4.0</span></code></pre>
   </section>
 
   <section id="verify">
-    <h2><span class="hash">#</span>5. 验证安装</h2>
+    <h2><span class="hash">#</span>4. 验证安装</h2>
 <pre><code><span class="c">// hello.hn</span>
 <span class="f">print</span>(<span class="s">"Hello, Hone!"</span>);
 
@@ -91,7 +109,21 @@ hone hello.hn    <span class="c">// Hello, Hone!</span></code></pre>
 </main>
 
 <footer>
-  Hone v0.3.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="tutorial.html">教程</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.7.9 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

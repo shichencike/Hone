@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Hone 编程语言性能基准：与 Python、Rust 的 9 维度对比（递归/纯循环/浮点/字符串/列表/字典/排序），含真实测量数据与环境说明（2026-08-19）。">
+<title>性能基准 — Hone 编程语言</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="favicon.png">
+<script>
+(function() {
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+</head>
+<body>
+<header>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
+  <nav>
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="tutorial.html">教程</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
+  </nav>
+  <span class="ver">v0.7.9</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
+</header>
+
+<main>
+  <h2><span class="hash">#</span>性能基准：Hone vs Python vs Rust</h2>
+  <p>9 个维度、三语言等价实现、同机实测。所有脚本源码见仓库 <code>bench/</code> 目录（<code>bench.sh</code> 一键复现）。</p>
+  <p>相关页面：<a href="index.html">首页</a> · <a href="download.html">下载 Hone</a> · <a href="install.html">安装教程</a> ·
+    <a href="docs.html">文档</a> · <a href="examples.html">示例</a> · <a href="changelog.html">更新日志</a></p>
+
+  <h3>测试环境与时间戳</h3>
+  <table>
+    <tr><th>项目</th><th>信息</th></tr>
+    <tr><td>测试时间</td><td><strong>2026-08-19 10:30</strong>（本地时间，北京时间）</td></tr>
+    <tr><td>CPU</td><td>Intel Core m3-7Y30 @ 1.00GHz（低功耗 4.5W 移动芯片）</td></tr>
+    <tr><td>系统</td><td>Windows x86_64</td></tr>
+    <tr><td>Hone</td><td>v0.7.9（release 构建：fat LTO + opt-level z + strip）</td></tr>
+    <tr><td>Python</td><td>3.12.10（CPython，直接运行）</td></tr>
+    <tr><td>Rust</td><td>1.97.1（<code>rustc -O</code> / opt-level 3）</td></tr>
+  </table>
+
+  <h3>测量方法</h3>
+  <ul>
+    <li>每项均为<strong>单次运行</strong>耗时（毫秒，越小越快）；结果值三语言完全一致（交叉校验通过）。</li>
+    <li>三语言脚本逐项等价：同一算法、同一工作量、确定性输入；源码见 <code>bench/*.hn</code>、<code>bench/py/</code>、<code>bench/rs/</code>。</li>
+    <li>Rust 二进制先运行一次预热（避开杀毒软件对新 exe 的首扫干扰，实测首扫附加约 3.8s），取稳定运行时间。</li>
+    <li>Hone 列表为<strong>值类型</strong>：<code>append</code> 与 <code>a[i] = x</code> 均按拷贝语义实现，
+      故 <code>list_append</code>（构建 2 万元素）与 <code>sort</code>（冒泡 1000）对 Hone 为 O(n²) 负载，耗时显著偏高。</li>
+    <li>本机为 1GHz 低功耗 CPU，绝对数值偏大；<strong>相对比例</strong>更具参考意义。</li>
+  </ul>
+
+  <h3>基准数据表（毫秒，越小越快）</h3>
+  <table>
+    <tr>
+      <th>基准（工作量）</th>
+      <th>Hone</th>
+      <th>Python</th>
+      <th>Rust</th>
+      <th>Hone/Python</th>
+      <th>Hone/Rust</th>
+    </tr>
+    <tr><td>fib · 递归斐波那契 fib(26)</td><td>2,051</td><td>448</td><td>238</td><td>4.6x</td><td>8.6x</td></tr>
+    <tr><td>loop20m · 纯循环整数累加 2000 万次</td><td>42,115</td><td>11,828</td><td>243</td><td>3.6x</td><td>173x</td></tr>
+    <tr><td>loop2m · 纯循环整数累加 200 万次</td><td>4,591</td><td>1,452</td><td>322</td><td>3.2x</td><td>14x</td></tr>
+    <tr><td>str_concat · 字符串拼接 20 万次</td><td>19,317</td><td>6,125</td><td>326</td><td>3.2x</td><td>59x</td></tr>
+    <tr><td>pi · 浮点运算（莱布尼茨级数 2000 万项）</td><td>103,415</td><td>19,531</td><td>294</td><td>5.3x</td><td>352x</td></tr>
+    <tr><td>list_append · 列表构建 2 万 + 求和</td><td>63,227</td><td>374</td><td>296</td><td>169x</td><td>214x</td></tr>
+    <tr><td>dict_lookup · 字典查找 200 万次</td><td>11,032</td><td>1,724</td><td>435</td><td>6.4x</td><td>25x</td></tr>
+    <tr><td>str_replace · 字符串替换 10 万次</td><td>746</td><td>411</td><td>252</td><td>1.8x</td><td>3.0x</td></tr>
+    <tr><td>sort · 冒泡排序 1000 个整数</td><td>142,847</td><td>881</td><td>250</td><td>162x</td><td>571x</td></tr>
+  </table>
+
+  <h3>要点解读</h3>
+  <ul>
+    <li><strong>计算类负载</strong>：Hone 约为 CPython 的 <strong>1.8~6.4 倍耗时</strong>（fib 4.6x / 纯循环 3.2~3.6x / 浮点 5.3x / 字典 6.4x），
+      与 README 公布的优化后基准一致（fib(26) ≈2.1s、2000 万循环 ≈42s、字符串拼接 20 万 ≈19s）。</li>
+    <li><strong>集合值类型语义</strong>：Hone 的列表按值拷贝（<code>append</code>、<code>a[i]=x</code> 均产生新列表），
+      构建/排序类负载为 O(n²)，比 Python 慢 160x+；若后续改为写时共享（copy-on-write）可大幅改善。</li>
+    <li><strong>Rust</strong>：计算本身几乎瞬时，本机测得 ~250ms 主要为进程启动/杀软扫描开销（空程序同为 248ms）。</li>
+    <li><strong>结论</strong>：Hone 作为轻量脚本语言，计算性能处于 CPython 同级（略慢 2~6 倍）、远低于原生 Rust（数十到数百倍）；
+      开箱即用的代价换取零依赖单文件部署。性能热点场景建议用 <code>hone prof</code> 定位后改用 C 扩展（<code>hone build --dll</code>）或内联到 Rust。</li>
+  </ul>
+
+  <p>复现方式：<code>bash bench/bench.sh</code>（编译 Rust 基准并运行三语言各 3 次取最快，输出表格）。</p>
+</main>
+
+<footer>
+  <div class="footer-links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="perf.html">性能</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.7.9 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+</footer>
+</body>
+</html>

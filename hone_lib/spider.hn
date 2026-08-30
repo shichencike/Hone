@@ -1,0 +1,436 @@
+// hone_lib/spider.hn - 爬虫标准库（纯 Hone 编写）
+// 用法: import "spider" from "./hone_lib/spider.hn";
+// 函数统一 sp_ 前缀。设计遵循「渲染服务分离」：Hone 不内置 JS 引擎，
+// 动态页面渲染外包给外部服务（node/puppeteer 或 python/playwright），
+// 通过 sys.run 标准输入输出通信，Hone 只做请求、解析与数据提取。
+//
+// 响应对象（所有请求函数返回同一结构的 dict）:
+//   ok: bool    是否成功
+//   status: int HTTP 状态码（静态 http 请求为 0 表示未知；curl/渲染路径有真实值）
+//   headers: str 响应头（curl 路径为原始文本；渲染路径为 JSON 序列化）
+//   url: str    最终 URL
+//   text: str   响应正文（HTML）
+//   err: str    失败原因（ok=false 时）
+//
+// 典型用法:
+//   import "spider" from "./hone_lib/spider.hn";
+//   r = sp_get("https://example.com/", null);
+//   print(r.ok, r.status, len(r.text));
+//   for t in sp_text_all(r.text, "div.item") { print(t); }
+//   for u in sp_links(r.text, "https://example.com/") { print(u); }
+//   // 动态页面渲染（需 node + puppeteer/playwright）:
+//   r2 = sp_get("https://spa.example.com/", {"render": true});
+//
+// 渲染后端脚本（hone_lib/render/ 目录）:
+//   render_js.js  - node + puppeteer/playwright（npm i puppeteer）
+//   render_py.py  - python + playwright（pip install playwright && playwright install chromium）
+//   脚本输出单行 JSON: {"status":200,"headers":{...},"url":"...","html":"..."}
+
+// ============ 工具函数 ============
+
+// 取正则首个匹配的第 1 个捕获组（Hone 列表无下标，用遍历计数）
+fn sp_grp1(pat : str, text : str) -> str {
+    gs = regex.groups(pat, text);
+    i = 0;
+    for g in gs {
+        if (i == 1) { return g; }
+        i = i + 1;
+    }
+    return "";
+}
+
+// 取正则首个匹配的整体（无捕获组时用，即 groups 第 0 项）
+fn sp_grp0(pat : str, text : str) -> str {
+    gs = regex.groups(pat, text);
+    i = 0;
+    for g in gs {
+        if (i == 0) { return g; }
+        i = i + 1;
+    }
+    return "";
+}
+
+// 取列表第一个元素（无下标，遍历返回）
+fn sp_first(l) -> str {
+    for x in l { return x; }
+    return "";
+}
+
+// 字符串去除所有 HTML 标签
+fn sp_strip_tags(s : str) -> str {
+    t = regex.replace("<[^>]*>", s, "");
+    return str_trim(t);
+}
+
+// ============ 内置 User-Agent 列表与轮换 ============
+
+fn sp_ua_list() {
+    return [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+        "Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
+    ];
+}
+
+// UA 轮换：返回 {"ua": 第 i 个, "next": 下次索引}，调用方保存 next 即可循环
+fn sp_ua_rotate(agents, i : int) {
+    n = len(agents);
+    if (n == 0) { return {"ua": "", "next": 0}; }
+    idx = i % n;
+    k = 0;
+    ua = "";
+    for a in agents {
+        if (k == idx) { ua = a; break; }
+        k = k + 1;
+    }
+    return {"ua": ua, "next": (idx + 1) % n};
+}
+
+// ============ Cookie 管理（字符串 jar："a=1; b=2"）============
+
+// 设置 cookie，返回新 jar（有则替换，无则追加）
+fn sp_cookie_set(jar : str, name : str, value : str) -> str {
+    pat = "(^|;\\s*)" + name + "=[^;]*";
+    if (regex.match(pat, jar)) {
+        // 注意：$1 后紧跟字母会被 regex 解析为命名组，必须用 ${1} 界定边界
+        return regex.replace(pat, jar, "${1}" + name + "=" + value);
+    }
+    if (jar == "") { return name + "=" + value; }
+    return jar + "; " + name + "=" + value;
+}
+
+// 读取 cookie 值
+fn sp_cookie_get(jar : str, name : str) -> str {
+    return sp_grp1("(?:^|;\\s*)" + name + "=([^;]*)", jar);
+}
+
+// 限速：请求之间至少间隔 seconds 秒（配合循环使用）
+fn sp_throttle(seconds : float) {
+    time.sleep(seconds);
+}
+
+// ============ CSS 选择器（轻量子集）============
+// 支持: tag、.class、#id、[attr]、[attr="v"]，及组合如 "div.item"、"a[href]"
+// 实现: 先用开标签正则粗匹配，再用属性校验逐个过滤（规避 regex 无 lookahead 限制）
+// 返回 {"tag": 标签名(可能为空), "open": 开标签正则, "checks": [属性校验正则列表]}
+// 限制: 非贪婪匹配最近闭合标签，嵌套同名标签只取最内层；与浏览器 DOM 有差距
+fn sp_sel(sel : str) {
+    tag = "";
+    for t in regex.find("^[a-zA-Z][\\w-]*", sel) { tag = t; break; }
+    re = "";
+    if (tag == "") { re = "<[a-zA-Z][\\w-]*\\b[^>]*>"; }
+    else { re = "<" + tag + "\\b[^>]*>"; }
+    checks = [];
+    for c in regex.find("\\.[a-zA-Z_][\\w-]*", sel) {
+        n = str_replace(c, ".", "");
+        checks = append(checks, "class=\"[^\"]*\\b" + n + "\\b[^\"]*\"");
+    }
+    for i in regex.find("#[a-zA-Z_][\\w-]*", sel) {
+        n = str_replace(i, "#", "");
+        checks = append(checks, "id=\"" + n + "\"");
+    }
+    for a in regex.find("\\[[^\\]]*\\]", sel) {
+        inner = str_replace(str_replace(a, "[", ""), "]", "");
+        if (str_contains(inner, "=")) {
+            parts = regex.split("=", inner);
+            name = "";
+            val = "";
+            first = true;
+            for p in parts {
+                if (first) { name = p; first = false; }
+                else if (val == "") { val = p; }
+            }
+            val = str_replace(val, "\"", "");
+            checks = append(checks, name + "=\"" + val + "\"");
+        } else {
+            checks = append(checks, "\\b" + inner + "\\b");
+        }
+    }
+    return {"tag": tag, "open": re, "checks": checks};
+}
+
+// 判断开标签是否满足全部属性校验
+fn sp_tag_ok(tag_str : str, checks) -> bool {
+    ok = true;
+    for c in checks {
+        if (!regex.match(c, tag_str)) { ok = false; }
+    }
+    return ok;
+}
+
+// 匹配元素的完整 HTML 列表（含开闭标签），按属性校验过滤
+fn sp_el_all(html : str, sel : str) {
+    info = sp_sel(sel);
+    tag = info.tag;
+    open_re = info.open;
+    checks = info.checks;
+    if (tag == "") {
+        // 无标签名时，从第一个通过校验的开标签提取
+        opens = regex.find(open_re, html);
+        o = "";
+        for x in opens {
+            if (sp_tag_ok(x, checks)) { o = x; break; }
+        }
+        if (o == "") { return []; }
+        tag = str_replace(sp_grp0("^<[a-zA-Z][\\w-]*", o), "<", "");
+        if (tag == "") { return []; }
+    }
+    el_re = "(?s)<" + tag + "\\b[^>]*>([\\s\\S]*?)</" + tag + "\\s*>";
+    els = regex.find(el_re, html);
+    out = [];
+    for el in els {
+        open_tag = sp_grp0("^<[^>]*>", el);
+        if (sp_tag_ok(open_tag, checks)) { out = append(out, el); }
+    }
+    return out;
+}
+
+// 提取匹配元素的文本列表
+fn sp_text_all(html : str, sel : str) {
+    els = sp_el_all(html, sel);
+    out = [];
+    for el in els {
+        t = str_replace(sp_strip_tags(el), "\n", " ");
+        out = append(out, t);
+    }
+    return out;
+}
+
+// 第一个匹配元素的文本
+fn sp_text(html : str, sel : str) -> str {
+    return sp_first(sp_text_all(html, sel));
+}
+
+// 提取匹配元素的指定属性值列表
+fn sp_attr_all(html : str, sel : str, name : str) {
+    info = sp_sel(sel);
+    opens = regex.find(info.open, html);
+    checks = info.checks;
+    out = [];
+    for o in opens {
+        if (sp_tag_ok(o, checks)) {
+            v = sp_grp1(name + "=\"([^\"]*)\"", o);
+            if (v == "") { v = sp_grp1(name + "='([^']*)'", o); }
+            if (v != "") { out = append(out, v); }
+        }
+    }
+    return out;
+}
+
+// 第一个匹配元素的属性值
+fn sp_attr(html : str, sel : str, name : str) -> str {
+    return sp_first(sp_attr_all(html, sel, name));
+}
+
+// 相对/绝对 URL 解析（用于 a[href] 相对链接补全）
+fn sp_abs_url(href : str, base : str) -> str {
+    if (str_contains(href, "://")) { return href; }
+    if (str_contains(href, "javascript:") || str_contains(href, "mailto:")) { return ""; }
+    if (str_contains(href, "//")) {
+        proto = sp_grp1("^([a-z]+):", base);
+        if (proto == "") { proto = "http"; }
+        return proto + ":" + href;
+    }
+    origin = sp_grp0("^[a-z]+://[^/]+", base);
+    if (origin == "") { origin = base; }
+    if (regex.match("^/", href)) { return origin + href; }
+    dir = sp_grp0("^.*/", base);
+    if (dir == "") { dir = origin + "/"; }
+    return dir + href;
+}
+
+// 提取页面全部绝对链接
+fn sp_links(html : str, base : str) {
+    hrefs = sp_attr_all(html, "a", "href");
+    out = [];
+    for h in hrefs {
+        u = sp_abs_url(h, base);
+        if (u != "") { out = append(out, u); }
+    }
+    return out;
+}
+
+// ============ 智能请求 ============
+// 说明：Hone 字典字段访问是字面量的（opts.key 只能读字面键 "key"），
+// 无法按动态键取值；这里把 opts 序列化为 JSON 字符串后用正则提取字段。
+
+// 从 opts 中读取字符串字段（默认值兜底）
+fn sp_opt_str(opts, key : str, def : str) -> str {
+    if (is_dict(opts)) {
+        js = json_stringify(opts);
+        pat = "\"" + key + "\"\\s*:\\s*\"([^\"]*)\"";
+        if (regex.match(pat, js)) { return sp_grp1(pat, js); }
+    }
+    return def;
+}
+
+// 从 opts 中读取数字字段（默认值兜底）
+fn sp_opt_num(opts, key : str, def : float) -> float {
+    if (is_dict(opts)) {
+        js = json_stringify(opts);
+        pat = "\"" + key + "\"\\s*:\\s*(-?[0-9.]+)";
+        if (regex.match(pat, js)) { return to_float(sp_grp1(pat, js)); }
+    }
+    return def;
+}
+
+// 从 opts 中读取布尔字段
+fn sp_opt_bool(opts, key : str, def : bool) -> bool {
+    if (is_dict(opts)) {
+        js = json_stringify(opts);
+        pat = "\"" + key + "\"\\s*:\\s*(true|false)";
+        if (regex.match(pat, js)) {
+            v = sp_grp1(pat, js);
+            if (v == "true") { return true; }
+            return false;
+        }
+    }
+    return def;
+}
+
+// 静态请求：Hone 内置 http.request，轻量零依赖。
+// 注意：内置 http 只返回正文，status 置 0（未知）；需要状态码请用 sp_curl 或渲染路径。
+fn sp_static(url : str, opts) {
+    ua = sp_opt_str(opts, "ua", "");
+    cookie = sp_opt_str(opts, "cookie", "");
+    timeout = sp_opt_num(opts, "timeout", 15.0);
+    retries = to_int(sp_opt_num(opts, "retries", 0.0));
+    delay = sp_opt_num(opts, "delay", 0.5);
+    method = sp_opt_str(opts, "method", "GET");
+    body = sp_opt_str(opts, "body", "");
+    n = 0;
+    while (true) {
+        try {
+            hdrs = {};
+            if (ua != "" && cookie != "") { hdrs = {"User-Agent": ua, "Cookie": cookie}; }
+            else if (ua != "") { hdrs = {"User-Agent": ua}; }
+            else if (cookie != "") { hdrs = {"Cookie": cookie}; }
+            text = "";
+            if (method == "POST" || method == "PUT" || method == "PATCH") {
+                text = http.request(url, {"method": method, "headers": hdrs, "body": body, "timeout": timeout});
+            } else {
+                text = http.request(url, {"method": method, "headers": hdrs, "timeout": timeout});
+            }
+            return {"ok": true, "status": 0, "headers": "", "url": url, "text": text, "err": ""};
+        } catch e {
+            if (n >= retries) {
+                return {"ok": false, "status": 0, "headers": "", "url": url, "text": "", "err": e.message};
+            }
+            n = n + 1;
+            time.sleep(delay);
+        }
+    }
+}
+
+// cmd 特殊字符转义（Windows 下 sys.run 走 cmd /C，& | < > ( ) ^ 需 ^ 前缀）
+fn sp_esc(s : str) -> str {
+    s = str_replace(s, "^", "^^");
+    s = str_replace(s, "&", "^&");
+    s = str_replace(s, "|", "^|");
+    s = str_replace(s, "<", "^<");
+    s = str_replace(s, ">", "^>");
+    s = str_replace(s, "(", "^(");
+    s = str_replace(s, ")", "^)");
+    return s;
+}
+
+// curl 请求：通过 sys.run 调用系统 curl，能拿到真实状态码与响应头。
+// 注意：Windows 下 cmd /C 对引号/括号处理易出错，故 URL 做 ^ 转义、参数不带引号；
+// 需要自定义 UA/Cookie 时请用 sp_static（内置 http.request 支持 headers）或渲染路径。
+// curl 为 Win10+/Linux/macOS 系统自带；未安装或失败时自动回退 sp_static。
+fn sp_curl(url : str, opts) {
+    timeout = sp_opt_num(opts, "timeout", 15.0);
+    retries = to_int(sp_opt_num(opts, "retries", 0.0));
+    delay = sp_opt_num(opts, "delay", 0.5);
+    n = 0;
+    while (true) {
+        tmp_body = "";
+        tmp_head = "";
+        try {
+            tmp_body = temp.file("hone-body");
+            tmp_head = temp.file("hone-head");
+            cmd = "curl -s -L --max-time " + to_str(timeout) + " -o " + tmp_body + " -D " + tmp_head + " -w %{http_code} " + sp_esc(url);
+            out = sys.run(cmd);
+            // stdout 末四位为状态码（-w %{http_code}），如 200/404
+            status = to_int(str_trim(out));
+            body = read_file(tmp_body);
+            head = read_file(tmp_head);
+            try { temp.remove(tmp_body); } catch e1 {}
+            try { temp.remove(tmp_head); } catch e2 {}
+            ok = status >= 200 && status < 400;
+            err = "";
+            if (!ok) { err = "HTTP " + to_str(status); }
+            return {"ok": ok, "status": status, "headers": head, "url": url, "text": body, "err": err};
+        } catch e {
+            try { temp.remove(tmp_body); } catch e1 {}
+            try { temp.remove(tmp_head); } catch e2 {}
+            if (n >= retries) {
+                return sp_static(url, opts); // curl 不可用，降级内置 http
+            }
+            n = n + 1;
+            time.sleep(delay);
+        }
+    }
+}
+
+// 渲染请求：调用外部渲染服务（node 或 python）执行 JS 后返回最终 HTML。
+// 依次尝试用户指定命令 -> node 脚本 -> python 脚本，取第一个输出 JSON 的。
+// 脚本路径可通过 opts.render_cmd / render_js / render_py 覆盖。
+fn sp_render(url : str, opts) {
+    render_cmd = sp_opt_str(opts, "render_cmd", "");
+    js_script = sp_opt_str(opts, "render_js", "./hone_lib/render/render_js.js");
+    py_script = sp_opt_str(opts, "render_py", "./hone_lib/render/render_py.py");
+    cmds = [];
+    if (render_cmd != "") { cmds = append(cmds, render_cmd); }
+    cmds = append(cmds, "node \"" + js_script + "\"");
+    cmds = append(cmds, "python \"" + py_script + "\"");
+    cmds = append(cmds, "python3 \"" + py_script + "\"");
+    last_err = "";
+    for c in cmds {
+        try {
+            out = sys.run(c + " \"" + url + "\"");
+            // 渲染脚本输出单行 JSON，取包含 "html" 字段的那一行
+            lines = regex.split("\n", out);
+            json_line = "";
+            for l in lines {
+                if (str_contains(l, "\"html\"")) { json_line = l; }
+            }
+            if (json_line != "") {
+                data = json_parse(json_line);
+                return {"ok": true, "status": to_int(data.status), "headers": to_str(data.headers), "url": to_str(data.url), "text": to_str(data.html), "err": ""};
+            }
+            last_err = "渲染服务无输出: " + str_trim(out);
+        } catch e {
+            last_err = e.message;
+        }
+    }
+    return {"ok": false, "status": 0, "headers": "", "url": url, "text": "", "err": "渲染失败: " + last_err};
+}
+
+// 智能请求：默认静态直取；opts.render=true 走渲染服务；opts.engine="curl" 走 curl 拿状态码。
+fn sp_get(url : str, opts) {
+    engine = sp_opt_str(opts, "engine", "http");
+    render = sp_opt_bool(opts, "render", false);
+    if (render) { return sp_render(url, opts); }
+    if (engine == "curl") { return sp_curl(url, opts); }
+    return sp_static(url, opts);
+}
+
+// 响应便捷函数：sp_body(r) 取正文；sp_json(r) 解析正文为 JSON
+fn sp_body(resp) -> str {
+    if (is_dict(resp)) {
+        if (has_key(resp, "text")) { return resp.text; }
+    }
+    return "";
+}
+
+fn sp_json(resp) {
+    body = sp_body(resp);
+    if (body == "") { return json_parse("null"); }
+    try {
+        return json_parse(body);
+    } catch e {
+        return json_parse("null");
+    }
+}

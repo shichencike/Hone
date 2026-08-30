@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hone 常见问题（FAQ）</title>
+<meta name="description" content="Hone 编程语言常见问题：安装、使用、报错处理、与其它语言的对比、GUI 与 FFI 等常见疑问解答。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+</head>
+<body>
+<header>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
+  <nav>
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="tutorial.html">教程</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
+  </nav>
+  <span class="ver">v0.7.9</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
+</header>
+
+<main>
+  <h2><span class="hash">#</span>常见问题</h2>
+
+  <details class="faq-item">
+    <summary>Hone 是什么？和 Python / Lua / JavaScript 有什么区别？</summary>
+    <div class="faq-a">Hone 是用 Rust 实现的轻量级脚本语言：<strong>静态强类型</strong>（类型一经推导即锁定、禁止隐式转换）、
+      <strong>单文件分发</strong>（一个可执行程序开箱即用）、<strong>内置工具箱</strong>（文件 / HTTP / JSON / 时间 / 正则 /
+      哈希 / 多线程等零配置可用）。与解释型脚本语言相比，它在编译期就能报出类型错误，且不需要装运行时环境；
+      与 Rust / Go 相比，它没有编译与配置成本，适合快速脚本、自动化与胶水场景。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>如何安装 Hone？支持哪些平台？</summary>
+    <div class="faq-a">一行命令安装（<a href="install.html">详见安装教程</a>）：Linux / Termux 用
+      <code class="inline">curl -fsSL .../install.sh | sh</code>，Windows 用
+      <code class="inline">irm .../install.ps1 | iex</code>；也可从 <a href="download.html">下载中心</a> 手动下载
+      （Windows x86_64、Linux x86_64、Termux aarch64 三平台单文件二进制）。macOS 暂未发布。
+      所有版本都是静态编译，不依赖系统动态库，开箱即用。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么变量不需要 let / var / const？</summary>
+    <div class="faq-a">Hone 采用<strong>无前缀声明</strong>：<code class="inline">x = 10;</code> 自动推导类型并锁定。
+      这是刻意的设计取舍——少写关键字、代码更简洁；类型一经锁定，后续赋值不同类型会直接报
+      <code class="inline">error[H001]</code>，编译期即可发现，并不比显式声明更危险。需要显式类型时可用
+      <code class="inline">y : int = 20;</code>（Rust/TS 风格）或 <code class="inline">int z = 30;</code>（C 风格）。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>报错 <code>error[Hxxx]</code> 看不懂怎么办？</summary>
+    <div class="faq-a">错误统一为 <code class="inline">error[Hxxx]</code> 格式，带文件、行、列与修复建议。用内置命令
+      <code class="inline">hone explain H201</code> 可查看错误码的完整含义与修复方法（如 H001 类型不匹配、
+      H005 参数个数错误、H200 网络错误、H401 文件不存在）。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>脚本崩溃了如何自动恢复？</summary>
+    <div class="faq-a">两条路线：<code class="inline">hone run --restart=3 app.hn</code> 失败自动重启（
+      <code class="inline">--backoff=1,3,10</code> 递增等待，<code class="inline">--restart-on=H200,H401</code> 只对白名单错误码重启）；
+      <code class="inline">hone run --resume app.hn</code> 启用检查点恢复——<code class="inline">db.set</code> 自动落盘到
+      <code class="inline">~/.hone/state/</code>，崩溃后从上次检查点继续，脚本内容变更后检查点自动失效。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>能不能调用 C / C++ 写的库？</summary>
+    <div class="faq-a">可以。v0.4.0 起支持 <strong>typed FFI</strong>：<code class="inline">load "lib" as m { fn f(a: int) -> float; }</code>
+      签名块显式声明 C ABI 类型（int/float/bool/str/ptr/void），调用时精确转换；还可
+      <code class="inline">load "lib" as m from "header.h"</code> 从 C 头文件自动提取原型生成签名，或用
+      <code class="inline">hone bind header.h</code> 离线生成。反之，用 <code class="inline">@export</code> + <code class="inline">hone build --dll</code>
+      也可把 Hone 函数打包成 C ABI 动态库供其他语言调用。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>能写图形界面吗？</summary>
+    <div class="faq-a">能。标准库自带 <code class="inline">hone_lib/gui.hn</code>：浏览器渲染 + 本地 HTTP 服务器双向交互的
+      跨平台 GUI（Windows / Linux / Termux 均有浏览器），button / label / input / select 控件开箱即用，
+      事件回调约定 <code class="inline">on_event(id, value)</code>。见 <a href="stdlib.html">标准库文档</a> 与
+      <code class="inline">examples/gui_demo.hn</code>。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>能不能把脚本打包成独立的可执行文件？</summary>
+    <div class="faq-a">可以。<code class="inline">hone build --exe app.hn [-o my_app.exe]</code> 把解释器与脚本打包为
+      自释放单文件，双击即用（运行后自动清理缓存，<code class="inline">--keep-cache</code> 可保留以加速下次启动）；
+      <code class="inline">--version</code> 查看内嵌版本信息。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>Hone 是开源的么？用什么许可证？</summary>
+    <div class="faq-a">是的，源码托管在 <a href="https://github.com/shichencike/Hone">github.com/shichencike/Hone</a>，
+      MIT 许可证，可自由使用、修改与分发。欢迎提交 issue 与 PR。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>从哪里获得更新？有升级工具吗？</summary>
+    <div class="faq-a">发布信息见 <a href="changelog.html">更新日志</a> 与
+      <a href="https://github.com/shichencike/Hone/releases">GitHub Releases</a>；
+      <code class="inline">hone self-update</code> 可直接下载并替换最新版本。
+      设计上「旧版本永久可用、新版本自由演化」，升级不背兼容包袱。</div>
+  </details>
+
+  <h2 class="faq-group">语言陷阱（常见坑）</h2>
+
+  <details class="faq-item">
+    <summary>为什么 try/catch 块内声明的变量，块外访问报「未定义」？</summary>
+    <div class="faq-a">Hone 是<strong>块作用域</strong>：try 体、catch 处理器各自是独立作用域，
+      块内声明的变量不会泄漏到块外，catch 绑定的 <code class="inline">e</code> 也只在 catch 块内有效。
+      需要跨块共享的变量请<strong>在 try 之前声明</strong>，块内只做赋值：
+<pre><code>x = <span class="n">0</span>;
+<span class="k">try</span> { x = <span class="f">to_int</span>(<span class="s">"42"</span>); }
+<span class="k">catch</span> e { x = <span class="n">-1</span>; }
+<span class="f">print</span>(x);   <span class="c">// 42</span></code></pre></div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 append 之后列表没变？</summary>
+    <div class="faq-a">列表是<strong>值类型</strong>：<code class="inline">append(list, x)</code>
+      返回追加后的<strong>新列表</strong>，不会原地修改原列表。
+      必须把返回值赋回去：<code class="inline">nums = append(nums, 4);</code>。
+      <code class="inline">clone</code> / <code class="inline">copy</code> 同理是深拷贝，改副本不影响原值。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 <code>2</code> 和 <code>2.0</code> 不能比较 / 混算？</summary>
+    <div class="faq-a">字面量 <code class="inline">2</code> 是 int，<code class="inline">2.0</code> 才是 float。
+      Hone 禁止隐式转换（int↔float 也不行），混合运算或比较会报
+      <code class="inline">error[H001]</code>。需要时显式转换：
+      <code class="inline">to_float(x)</code> / <code class="inline">to_int(x)</code>。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 <code>len("你好")</code> 返回 6 而不是 2？</summary>
+    <div class="faq-a"><code class="inline">len</code> 对字符串返回的是 <strong>UTF-8 字节数</strong>，
+      每个汉字占 3 字节。需要按字符处理时，用
+      <code class="inline">str_contains</code> / <code class="inline">str_replace</code> 等字符串函数，
+      不要依赖下标或 len。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么我的函数名报 already defined？</summary>
+    <div class="faq-a">函数名<strong>全局唯一</strong>：所有函数扁平化存在于全局符号表，
+      不支持嵌套作用域遮蔽，重复定义直接报错。模块函数会带前缀
+      （如 <code class="inline">math_clamp</code>），命名时加前缀或分类可避免冲突。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么对字符串用 <code>-=</code> / <code>*=</code> 报错？</summary>
+    <div class="faq-a">字符串只支持 <code class="inline">+=</code>（拼接），
+      其余复合赋值（<code class="inline">-= *= /= %=</code>）只适用于数值（int / float）。
+      需要其它字符串变换请用 <code class="inline">str_replace</code> / <code class="inline">str_trim</code> 等字符串函数。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 lambda 里写 <code>break</code> / <code>continue</code> 报「只能出现在循环内」？</summary>
+    <div class="faq-a">lambda 是<strong>独立的函数体</strong>，循环控制（<code class="inline">break</code> /
+      <code class="inline">continue</code>）不能跨 lambda 边界作用于外层循环。
+      需要在 lambda 内提前结束逻辑时，用条件判断（<code class="inline">if</code>）代替。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 lambda 内修改捕获的变量，原变量没有变化？</summary>
+    <div class="faq-a">Hone 是<strong>值语义</strong>：lambda 创建时<strong>按值捕获</strong>外围变量
+      （捕获的是当时的副本），闭包内修改不会影响创建处的变量。
+      需要跨调用共享/回传状态时，改用函数参数传值并返回结果。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 <code>f()</code> 报「missing argument」？</summary>
+    <div class="faq-a">默认参数只能<strong>省略尾部实参</strong>：必选参数（无默认值）必须位于参数列表
+      前方，调用时也必须提供。若中间参数被跳过或必选参数缺失，会报参数个数 / 缺参错误。
+      给参数补上默认值（<code class="inline">fn f(a, b = 10)</code>）即可省略调用。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary>为什么 <code>input()</code> 在管道 / 无输入时报错？怎么给输入设默认值？</summary>
+    <div class="faq-a"><code class="inline">input</code> / <code class="inline">read_int</code> / <code class="inline">read_float</code>
+      在 EOF（管道关闭 / Ctrl+Z / Ctrl+D）时抛 <code class="inline">error[H306]</code>，
+      <code class="inline">read_int</code> / <code class="inline">read_float</code> 格式非法时抛
+      <code class="inline">error[H006]</code> / <code class="inline">error[H007]</code>。
+      它们<strong>不返回 null</strong>，所以 <code class="inline">??</code> 空值合并兜不住；
+      给输入设默认值的标准做法是用 try-catch 包装：</div>
+    <div class="faq-a"><pre><code><span class="k">fn</span> <span class="f">ask</span>(prompt, fallback) {
+    <span class="k">try</span> { <span class="k">return</span> <span class="f">input</span>(prompt); }
+    <span class="k">catch</span> e { <span class="k">return</span> fallback; }   <span class="c">// H306 EOF → 默认值</span>
+}
+name = <span class="f">ask</span>(<span class="s">"姓名: "</span>, <span class="s">"匿名"</span>);</code></pre>
+      数字输入同理（一个 catch 同时兜住 H006/H007 与 H306），完整示例见
+      <code class="inline">examples/input_default_demo.hn</code> 与
+      <a href="docs.html#builtins">手册 §8 输入默认值教程</a>。</div>
+  </details>
+
+  <details class="faq-item">
+    <summary><code>""</code> 和 <code>"""..."""</code> 有什么区别？</summary>
+    <div class="faq-a"><code class="inline">""</code> 是空字符串（普通字符串）；
+      <code class="inline">"""..."""</code> 是<strong>三引号原始字符串</strong>：多行书写、
+      内容不做转义处理（<code class="inline">\n</code>、<code class="inline">\t</code> 原样保留）、
+      保留换行与缩进。两者同值，可正常用于拼接、比较与字符串函数。</div>
+  </details>
+</main>
+
+<footer>
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="tutorial.html">教程</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.7.9 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+</footer>
+</body>
+</html>

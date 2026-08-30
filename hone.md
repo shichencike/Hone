@@ -1,10 +1,79 @@
-Hone 编程语言 – 完整设计规范 v1.1
+Hone 编程语言 – 完整设计规范 v1.2（对应实现版本 v0.7.9）
 
 项目代号：Hone
 设计者：时辰刺客
 许可证：MIT
 目标定位：轻量级、跨平台（要支持termux）、可嵌入的脚本语言，兼具瑞士军刀式的实用性和玩具的易用性
 设计哲学：效率至上、极简无前缀、不自举、不背兼容包袱、报错精准、开箱即用
+
+快速入门（Quick Start）：从零到第一个脚本
+
+新手请先读完本节（约 5 分钟）：安装 → 写第一个脚本 → 运行 → 基础语法速览。
+详细语法与工具链见后续章节，本节只串起「能跑起来」的最小闭环。
+
+第 1 步：安装（任选一种）
+
+· 一键脚本（推荐）：
+  · Linux / Termux：curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh
+  · Windows（PowerShell 5.1+）：irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex
+· 手动下载：从 GitHub Releases 下载对应平台单文件二进制（Windows x86_64 / Linux x86_64 / Termux aarch64）
+· 源码构建：cargo build --release，产物为 target/release/hone（Windows 下为 hone.exe）
+
+验证安装：
+
+    hone --version
+
+第 2 步：写第一个脚本
+
+新建 hello.hn，内容只有一行：
+
+    print("Hello, Hone!");
+
+第 3 步：运行
+
+    hone hello.hn        # 输出 Hello, Hone!
+    hone run hello.hn    # 等价（run 是默认命令）
+
+第 4 步：基础语法速览
+
+以下代码把变量、控制流、函数、集合串在一起，可直接保存为 tour.hn 运行：
+
+    // 变量：无前缀声明，类型推导后锁定
+    x = 10;               // int
+    f = 3.14;             // float
+    s = "hello";          // str
+    b = true;             // bool
+
+    // 控制流：条件必须是 bool
+    if (x > 5) {
+        print("x 大于 5");
+    } else {
+        print("x 不大于 5");
+    }
+    i = 0;
+    while (i < 3) { i = i + 1; }
+
+    // 函数：返回类型由 return 推导
+    fn add(a, b) {
+        return a + b;
+    }
+    print(add(2, 3));     // 5
+
+    // 集合与遍历
+    nums = [1, 2, 3];
+    for v in nums { print(v); }
+
+    // 字符串插值
+    name = "Hone";
+    print(f"你好, {name}!");
+
+第 5 步：下一步
+
+· 完整语言基础（类型/运算符/match/管道）：见「一、语言基础」
+· 内置函数与各模块（sys/time/random/crypto/archive 等）：见「三、内置模块与功能」
+· 多文件项目组织、调试、性能优化：见「十一、进阶用法」
+· 常见坑（try-catch 变量不可见、append 返回新列表等）：见「十二、FAQ 与已知问题」
+· 更多示例：examples/ 目录（hello.hn、fib.hn、control.hn、gui_demo.hn 等）
 
 一、语言基础
 
@@ -49,6 +118,9 @@ Hone 编程语言 – 完整设计规范 v1.1
 
 · 条件分支：if (条件必须是 bool) { ... } else { ... }
 · 循环：while (条件必须是 bool) { ... }
+· do-while：do { ... } while (条件);  先执行循环体，再判断条件（至少执行一次）
+· C 风格 for：for (init; cond; step) { ... }  三段均可省略（如 for (;;) 为无限循环，配合 break 退出）
+· continue 关键字：跳过本次循环剩余语句，直接进入下一次迭代（仅循环体内合法，与 break 相对）
 · 条件表达式必须显式返回 bool，禁止隐式转换（如 if (1) 视为非法）
 
 1.5 函数定义
@@ -57,6 +129,35 @@ Hone 编程语言 – 完整设计规范 v1.1
 · 参数类型可由调用上下文推导，也可显式声明（推荐在复杂场景显式声明）
 · 函数返回值类型由 return 语句推导，也可在函数首行用 -> type 声明（可选）
 · 若推导失败或无返回语句，默认返回 void（但 Hone 中函数调用可作为表达式，无返回值时返回 null 占位）
+· 泛型：fn 函数名[T, U](参数) { ... } —— 在函数名后、参数列表前用 [T, U] 声明类型参数
+  · 参数与返回类型注解可引用类型参数（x: T、-> T），同一类型参数处调用点必须传同型
+  · 调用时按实参自动推导类型参数（identity(42) → T=int；identity("hi") → T=str），
+    同一泛型函数可以不同类型多次调用，互不锁定
+  · 编译期擦除：运行期与普通函数零差异，无运行时开销、不产生重复代码
+  · 函数名全局唯一，泛型函数与普通函数同名仍报「already defined」
+  · 未声明的类型参数（x: T 而 fn 未写 [T]）报 H002；重复类型参数报 H005
+  · 类方法同样支持泛型（class 中 fn 方法[T](...)）
+· 示例：
+
+fn identity[T](x: T) -> T {
+    return x;
+}
+print(identity(42));          // 42（T=int）
+print(identity("hello"));     // hello（T=str）
+
+fn swap[A, B](a: A, b: B) -> B {
+    return b;
+}
+print(swap(1, "two"));        // two（A=int, B=str）
+
+fn pick[T](a: T, b: T, want_first: bool) -> T {
+    if (want_first) {
+        return a;
+    }
+    return b;
+}
+print(pick("a", "b", true));  // a（T=str）
+print(pick(10, 20, false));   // 20（T=int）
 
 1.6 命名风格
 
@@ -64,19 +165,428 @@ Hone 编程语言 – 完整设计规范 v1.1
 · 命名空间访问：通过点号 别名.函数名 调用，如 sys.msgbox()
 · 不支持 :: 多层路径前缀，所有函数扁平化存在于全局符号表
 
+1.7 结构体（struct）
+
+· 语法：struct 名称 { 字段: 类型, ... };
+· 用于声明确定的数据形态（字段名与类型固定），实例用 dict 表示，字段访问 p.字段
+· 构造：名称(值1, 值2, ...)，按字段顺序传参；检查阶段校验字段个数与类型（H001/H011）
+· 运行时字段访问校验字段存在性（未知字段报 H002），实例可作为 dict 使用（keys/values 等）
+· 示例：
+
+struct Point { x: int, y: float };
+p = Point(3, 2.5);
+print(p.x);   // 3
+print(p.y);   // 2.5
+
+1.8 枚举（enum）
+
+· 语法：enum 名称 { 变体, 变体(类型, ...), ... };  结尾分号可选
+· 简单变体（无载荷）：enum Color { Red, Green, Blue };
+· 带载荷变体：enum Shape { Circle(float), Rect(float, float) };  载荷可多个（类型用 int/float/bool/str）
+· 变体访问（无载荷）：Color.Red  得到枚举值，显示为 Color.Red
+· 变体构造（带载荷）：Shape.Circle(1.5)  按载荷顺序传参，检查阶段校验个数与类型（H001）
+· 比较：== / != 比较 类型 + 变体 + 载荷（不同枚举互不相等；带载荷逐项比较）
+· 枚举值可存列表/字典、作函数参数与返回值；to_str 显示 Color.Red / Shape.Circle(1.5)
+· 枚举名全局唯一（与 struct/class 重名报 H005）；变体名在枚举内唯一
+· 匹配：match 支持变体模式（见 1.10 模式匹配）
+· 示例：
+
+enum Color { Red, Green, Blue };
+enum Shape { Circle(float), Rect(float, float) };
+
+c = Color.Red;
+print(c);                    // Color.Red
+print(c == Color.Red);       // true
+print(c == Color.Green);     // false
+
+s = Shape.Circle(1.5);
+print(s);                    // Shape.Circle(1.5)
+
+area = match s {
+    Shape.Circle(r) => 3.14159 * r * r,
+    Shape.Rect(w, h) => w * h,
+    _ => 0,
+};
+print(area);                 // 7.06858…
+
+1.9 class 类（成员函数不进全局符号表）
+
+· 语法：class 名称 { fn 方法(参数) { ... } ... }
+· 作用：将一组相关函数组织成命名空间，通过 类名.方法(...) 调用（如 Math.double(21)）
+· 关键特性：成员函数不进入全局符号表——
+  · 不能用裸名调用：`double(21)` 报 H002（undefined function），必须写 `Math.double(21)`
+  · 不污染全局命名空间：同名全局函数可与类方法共存，互不影响
+  · 类内方法互相调用也要用限定名：`return Math.fib(n - 1) + Math.fib(n - 2);`
+· 类方法支持参数、返回值（可写 -> type 注解）、递归、return；与普通函数能力一致
+· 类名与 struct 名不能重复（报 H005）；类方法同样全局唯一（同类内重名报错）
+· 结尾分号可选（class 是块结构，与 struct 不同）
+· 示例：
+
+class Math {
+    fn double(x) {
+        return x * 2;
+    }
+    fn fib(n) {
+        if (n <= 1) {
+            return n;
+        }
+        return Math.fib(n - 1) + Math.fib(n - 2);
+    }
+    fn greet(name) -> str {
+        return "Hello, " + name;
+    }
+}
+
+print(Math.double(21));   // 42
+print(Math.fib(10));      // 55
+print(Math.greet("hone"));// Hello, hone
+
+fn double(x) {            // 全局同名函数与类方法共存
+    return "global: " + to_str(x);
+}
+print(double(21));        // global: 21
+print(Math.double(21));   // 42（类方法不受影响）
+
+1.10 模式匹配（match）
+
+· 语法：match 表达式 { 模式 => 分支体, ..., _ => 默认值 }
+· 模式支持：
+  · 字面量（整数/浮点/布尔/字符串）
+  · 枚举变体：Color.Red（无载荷）或 Shape.Circle(r)（带载荷，r 绑定到分支体变量；
+    `_` 忽略某项：Shape.Rect(w, _)）；绑定变量仅在本分支体内可见
+  · `_` 通配符（匹配任意值，只能出现一次且放最后）
+· match 是表达式，返回匹配分支的值；所有分支都不匹配时运行时报错（建议补 `_` 兜底）
+· 各分支类型可以不同，返回值为动态类型
+· 示例：
+
+s = match 2 {
+    1 => "one",
+    2 => "two",
+    _ => "other",
+};
+print(s);   // two
+
+area = match Shape.Circle(2.0) {
+    Shape.Circle(r) => 3.14159 * r * r,
+    Shape.Rect(w, h) => w * h,
+    _ => 0,
+};
+print(area);   // 12.56636…
+
+1.11 管道操作符（|>）
+
+· 语法：x |> f  等价于 f(x)；x |> f(a, b)  等价于 f(x, a, b)
+· 左侧表达式作为第一个参数传入右侧函数调用，可链式：a |> f |> g  等价于 g(f(a))
+· 是语法糖，在解析期转换为普通函数调用
+· 示例：
+
+print("hello world" |> len);      // 11
+print([1, 2, 3] |> len |> to_str); // "3"
+print(3 |> max(7) |> to_str);      // "7"
+
+1.11 复合赋值与自增/自减
+
+· 复合赋值：x += expr;  x -= expr;  x *= expr;  x /= expr;  x %= expr;
+  · 等价于 x = x op expr；要求 x 已声明且与右侧类型兼容
+  · str 仅支持 +=（字符串拼接），其余运算符要求数字
+· 自增/自减：i++ / i--（后缀，返回旧值）；++i / --i（前缀，返回新值）
+  · 仅作用于已声明的数值变量（int 增减 1，float 增减 1.0）
+· 示例：
+
+x = 10;
+x += 5;              // 15
+x -= 3;              // 12
+x *= 2;              // 24
+x /= 4;              // 6
+x %= 4;              // 2
+s = "Hone";
+s += "!";            // "Hone!"（字符串拼接）
+i = 0;
+i++;
+print(i);            // 1
+print(i++);          // 1（后缀返回旧值，i 变为 2）
+print(++i);          // 3（前缀返回新值）
+
+1.12 三元表达式与空值合并
+
+· 三元表达式：cond ? then_expr : else_expr
+  · cond 必须为 bool；两分支类型相同则返回该类型，否则为动态类型
+  · 右结合，可嵌套（a ? b : c ? d : e）
+· 空值合并：a ?? b
+  · 左侧为 null 时取右侧，否则取左侧；短路求值（仅左侧为 null 时才对右侧求值）
+  · Hone 无 null 字面量，null 来自 void 函数调用等占位值
+· 示例：
+
+age = 20;
+label = age >= 18 ? "adult" : "minor";   // adult
+n = -3;
+print(n > 0 ? "pos" : n < 0 ? "neg" : "zero");  // neg（右结合嵌套）
+
+fn void_fn() {
+}
+v = void_fn();
+print(v ?? "default");   // default（void 调用返回 null）
+print(42 ?? 99);         // 42（非 null 取左侧）
+
+1.13 匿名函数（lambda）
+
+· 语法：fn(参数1, 参数2) { ... }，是一等值：
+  · 可赋值给变量：f = fn(x) { return x * 2; };  调用 f(21)
+  · 可作为参数传递（高阶函数）、作为返回值返回（闭包工厂）
+  · 创建时按值捕获当前作用域可见的变量（闭包），调用时环境 = 捕获快照 + 实参
+  · 无函数名、无泛型、无 -> 返回注解；返回类型动态
+· 限制：lambda 是值，不进全局符号表；break/continue/return 只能在其自身函数体内
+· 示例：
+
+double = fn(x) {
+    return x * 2;
+};
+print(double(21));     // 42
+
+base = 10;
+adder = fn(y) {
+    return base + y;   // 捕获外围变量 base（按值）
+};
+print(adder(5));       // 15
+
+fn apply(f, v) {
+    return f(v);       // f 为 lambda 参数，经变量名动态调用
+}
+print(apply(fn(n) { return n * n; }, 6));   // 36
+
+fn make_adder(offset) {
+    return fn(z) { return z + offset; };    // 返回闭包
+}
+add5 = make_adder(5);
+print(add5(10));       // 15
+
+1.14 函数默认参数
+
+· 语法：fn 名称(参数1, 参数2 = 默认值, ...) { ... }
+  · 调用时省略的尾部实参取默认值；必选参数（无默认值）必须位于默认参数之前（否则报错）
+  · 默认表达式在调用时求值，可引用其前面的参数（如 fn f(a, b = a * 2)）
+  · 参数个数检查：最少 = 必选参数个数，最多 = 总参数个数
+  · lambda 参数同样支持默认值
+· 限制：hone build --dll 暂不支持默认参数（报错提示改用解释模式）
+· 示例：
+
+fn greet(name, greeting = "Hello") {
+    return greeting + ", " + name + "!";
+}
+print(greet("Hone"));           // Hello, Hone!
+print(greet("Hone", "Hi"));     // Hi, Hone!
+
+fn repeat_char(ch, times = 3, sep = "-") {
+    s = "";
+    for (i = 0; i < times; i = i + 1) {
+        s = s + ch;
+        if (i < times - 1) {
+            s = s + sep;
+        }
+    }
+    return s;
+}
+print(repeat_char("*"));        // *-*-*
+print(repeat_char("*", 2));     // *-*
+print(repeat_char("*", 4, "+"));// *+*+*+*
+
+1.15 三引号原始字符串
+
+· 语法："""..."""  多行原始字符串：
+  · 内容不做转义处理（\n、\t、\\ 等原样保留），可跨行
+  · 与普通字符串同值（支持 len、拼接、比较、str 函数等）
+· 示例：
+
+text = """line1
+line2
+    indented""";
+print(text);
+print(len(text));    // 24
+
+1.16 多返回值（return a, b, ...）
+
+· 语法：return expr1, expr2, ...;  一个函数可一次返回多个值
+  · 多值在运行时打包为列表，由解构赋值接收：a, b = f();
+  · 仍支持单值 return expr; 与空 return;（返回 null）
+  · 不解构时（x = f();）拿到打包后的列表
+  · 各返回值不做类型强制统一（打包后为动态类型）
+· 限制：hone build --dll 暂不支持多返回值（C ABI 无法表达，报错提示改用解释模式）
+· 示例：
+
+fn divmod(a, b) {
+    return a / b, a % b;
+}
+q, r = divmod(10, 3);
+print(q);   // 3
+print(r);   // 1
+
+fn minmax(a, b) {
+    if (a < b) { return a, b; }
+    return b, a;
+}
+lo, hi = minmax(7, 2);
+print(lo);   // 2
+print(hi);   // 7
+
+packed = divmod(8, 3);
+print(packed);   // [2, 2]（不解构时拿到打包列表）
+
+1.17 解构赋值（a, b = [1, 2] / {a, b} = dict）
+
+· 列表解构：a, b = expr;  右侧为列表（或多返回值），按位置依次绑定变量
+  · 元素不足报错（可被 try/catch 捕获）；多余元素忽略
+  · 典型用途：交换 a, b = [b, a];
+· 字典解构：{a, b} = expr;  右侧为字典，按键取出同名变量
+  · 改名形式：{a: x, b: y} = expr;  等价于 x = dict["a"]、y = dict["b"]
+  · 键缺失报错（可被 try/catch 捕获）
+· 目标变量未声明则隐式声明，已声明则覆盖；元素类型动态（不做静态强制）
+· 示例：
+
+a, b = [1, 2];          // a=1, b=2
+first, second = [9, 8, 7];  // 多余元素忽略：first=9, second=8
+
+user = {"name": "hone", "age": 7};
+{name, age} = user;           // name="hone", age=7
+{name: n, age: a} = user;     // 改名：n="hone", a=7
+
+q, r = divmod(17, 5);         // 与多返回值配合：q=3, r=2
+
+1.18 列表/字典推导式
+
+· 列表推导式：[表达式 for 变量 in 集合 (if 条件)]
+  · 对集合逐元素绑定变量，求值表达式并收集为列表；if 可选，过滤不满足的元素
+  · 集合为列表时单变量绑定元素；为字典时可用双变量（k, v 分别为键、值）
+· 字典推导式：{键表达式: 值表达式 for 变量 in 集合 (if 条件)}
+  · 键必须求值为 str（与字典字面量键为字符串的约束一致，动态键用 to_str 转换）
+· 循环变量为推导式内的局部变量，作用域不泄漏到外部
+· 示例：
+
+nums = [1, 2, 3, 4, 5];
+dbl = [x * 2 for x in nums];              // [2, 4, 6, 8, 10]
+evens = [x for x in nums if x % 2 == 0];  // [2, 4]
+
+grades = {"alice": 90, "bob": 85};
+passed = [k for k, v in grades if v >= 90];   // ["alice"]
+rev = {to_str(v): k for k, v in grades};      // {"90": "alice", "85": "bob"}
+
+1.19 可选链（?.）
+
+· 语法：obj?.field
+  · obj 为 null 时短路返回 null，不再访问 field；否则等价于 obj.field
+  · 可链式：a?.b?.c（其中任一环节为 null 即得 null）
+  · 作用于任何表达式结果：f()?.x
+  · 与空值合并配合：a?.b ?? "默认值"
+· 混合链：a?.b.c（`?.` 只短路其后一个字段，继续的普通字段访问在 null 上仍报错，与 JS 语义一致）
+· 注意：obj 非 null 但字段不存在时仍报错（与普通字段访问一致）；
+  Hone 无 null 字面量，null 来自 void 函数调用等占位值
+· 限制：hone build --dll 暂不支持可选链（报错提示改用解释模式）
+· 示例：
+
+fn get_user() {
+    return {"name": "hone", "age": 7};
+}
+print(get_user()?.name);   // hone
+
+fn void_fn() {
+}
+v = void_fn();
+print(v?.name);            // null（短路）
+print(v?.a?.b);            // null（链式短路）
+print(v?.name ?? "匿名");  // 匿名（与空值合并配合）
+
+1.20 运算符重载（__op 特殊函数）
+
+· 语法：顶层定义特殊函数 `fn __op(参数) { ... }`，仅在内建运算不支持的操作数组合时被调用；
+  内置类型（int/float/str/list/dict/enum 等）的固有行为完全不受影响
+· 支持的重载函数与映射：
+  · 二元：`+`→`__add`、`-`→`__sub`、`*`→`__mul`、`/`→`__div`、`%`→`__mod`、
+    `==`→`__eq`、`!=`→`__ne`、`<`→`__lt`、`<=`→`__le`、`>`→`__gt`、`>=`→`__ge`
+  · 一元：`-x`→`__neg`、`!x`→`__not`
+  · 内置：`len(x)`→`__len`、`x[i]`→`__index`
+· 触发时机：内建运算对操作数组合不支持（类型不匹配）时回退调用对应 `__op` 函数；
+  内建支持的操作数（如 int+int、str 拼接、dict==dict、list 索引）仍走内建路径
+· 典型用途：给 dict/struct 实例或 enum 值自定义运算行为（如复数、向量、货币）
+· 注意：
+  · 重载函数与普通函数一样遵循类型锁定——所有 return 路径的类型需一致（H001）
+  · `__op` 未定义时，不支持的运算维持原有报错（H001/H003）
+  · 定义了重载后，涉及动态值（Unknown）的运算静态检查放宽（交给运行时判定），
+    相等/比较操作数不再被强制成 int 等错误类型
+  · AOT 原生编译支持二元/一元重载（生成「内建组合 → 内建运算，否则 → __op 调用」分派链）
+· 示例（dict 模拟复数，见 examples/overload_demo.hn）：
+
+fn mk_complex(re, im) {
+    return {"re": re, "im": im};
+}
+fn c_re(c) { return c.re; }
+fn c_im(c) { return c.im; }
+
+fn __add(a, b) {
+    if (type_of(a) == "dict" && type_of(b) == "dict") {
+        return mk_complex(c_re(a) + c_re(b), c_im(a) + c_im(b));
+    }
+    return {"re": 0, "im": 0};
+}
+
+z1 = mk_complex(1, 2);
+z2 = mk_complex(3, 4);
+zs = z1 + z2;          // dict + dict 内建不支持 → __add
+print(to_str(zs));     // {re: 4, im: 6}
+print(10 + 20);        // 30（int 内建不受影响）
+
+1.21 异步函数（async fn + await）
+
+· 语法：
+  · `async fn 名称(参数) { ... }`  定义异步函数（与 fn 同构，支持参数/返回值/递归）
+  · 调用：`f = 异步函数名(实参...)`  立即返回 future（不阻塞调用方，后台线程执行）
+  · 等待：`await 表达式`  阻塞等待 future 完成并返回其结果
+· 语义（线程 + future 的最小 promise 模型，与 go 互补）：
+  · go 发后不理（fire-and-forget）；async/await 结构化并发——启动后等待结果
+  · 多个 async 并行启动、依次 await，总耗时约等于最慢者
+  · 错误传播：async 函数体内 throw / 运行时错误存入 future，await 时原样抛出（可 try/catch 捕获）
+  · future 可存储/传递；type_of 为 future；未 await 的 future 随脚本结束回收
+· 限制：AOT 原生编译与 hone build --dll 对 async/await 报「暂不支持」（单线程模型），请用解释器运行
+· 示例（完整见 examples/async_demo.hn）：
+
+async fn compute(n) {
+    return n * 2;
+}
+f = compute(21);          // 立即返回 future（不阻塞）
+print(await f);           // 42（阻塞等待结果）
+
+async fn risky(n) {
+    if (n == 0) { throw "zero not allowed"; }
+    return 100 / n;
+}
+print(await risky(2));    // 50
+try {
+    await risky(0);
+} catch e {
+    print("捕获: " + e.message);   // 捕获: zero not allowed
+}
+
 二、工具链与命令
 
 Hone 提供完整的命令行工具链，所有功能集成在单文件 hone（或 hone.exe）中：
 
 命令 功能说明
-hone run <script.hn> 执行 Hone 脚本（默认命令）
+hone run <script.hn> 执行 Hone 脚本（默认命令，支持 --restart/--resume）
 hone fmt [options] <file.hn> 代码格式化（统一 Tab 缩进、运算符空格、大括号位置）
 hone fmt -w *.hn 直接覆盖写入源文件
+hone test [目录] 递归扫描 *.test.hn 测试文件，运行并汇总 PASS/FAIL（配合 assert/assert_eq 断言，按文件输出断言统计）
+hone watch <script.hn> 监控脚本文件变更自动重跑（跨平台轮询 mtime+大小，[--interval=N] 毫秒，默认 500，Ctrl+C 退出）
 hone build --dll <script.hn> 将脚本打包成 C ABI 动态库（DLL / SO / DYLIB）
+hone build --exe <script.hn> 打包独立可执行文件（解释器 + 脚本自释放，[-o <out>] [--icon <ico>]）
+hone build --exe -c <script.hn> AOT 编译原生可执行文件（脚本 → C 中间文件 → gcc/clang → 原生 exe；默认删除 .c，--keep-c 保留）
+hone build --script <script.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）
+hone bind <header.h> 从 C 头文件生成 typed load 签名块（FFI 自动绑定）
 hone debug <script.hn> 断点调试模式（支持 breakpoint 关键字）
-hone get <module> 远程下载模块依赖并缓存到本地
-hone upgrade <script.hn> 自动迁移旧版本代码到新语法（基于映射表）
-hone lsp 启动语言服务器（代码补全、跳转定义）
+hone get 读取当前目录 hone.json 清单并批量下载全部模块（类似 package.json / Cargo.toml 的依赖清单）
+hone get <module> <url> 下载单个模块并缓存到本地，同时写入/更新 hone.json 清单
+hone self-update [url] 从 URL 下载最新 hone 二进制并替换当前程序（也可用环境变量 HONE_UPDATE_URL）
+hone explain <code> 查看错误码解释与修复建议（如 hone explain H201）
+hone lsp 启动语言服务器（代码补全、跳转定义、语义高亮 semantic tokens）
+hone prof <script.hn> 以剖析模式运行脚本，输出函数级热点报告（总耗时 / 调用次数 / 平均耗时，按总耗时降序）
+hone poop <file.hn> 屎山检测（if 嵌套深度 + 圈复杂度）
 hone --help / --version 帮助信息 / 版本信息
 
 进度条策略：
@@ -89,15 +599,52 @@ hone --help / --version 帮助信息 / 版本信息
 3.1 基础内置函数（直接可用，无需导入）
 
 · print(value)：输出到标准输出，自动换行
-· read_file(path) → str：读取文本文件内容
+· input(prompt?) → str：从标准输入读取一行（去除行尾换行），可选提示文本（须为 str）；EOF（管道关闭 / Ctrl+Z / Ctrl+D）报 error[H306]
+· read_int(prompt?) → int：读取一行并解析为整数，格式非法报 error[H006]
+· read_float(prompt?) → float：读取一行并解析为浮点数，格式非法报 error[H007]
+· read_file(path) → str：读取文本文件内容（文件为二进制/非法 UTF-8 时报错，二进制请用 read_bytes）
 · write_file(path, content)：写入文本文件
 · file_exists(path) → bool：检查文件是否存在
-· len(value) → int：返回字符串长度（字节数）
-· type_of(value) → str：返回变量类型名称（"int"、"float"、"bool"、"str"）
-· http_get(url) → str：发送 HTTP GET 请求，返回响应体（支持 http:// 与 https://，TLS 为纯 Rust 实现、内置 Mozilla 根证书）
+· read_bytes(path) → list[int]：读取文件原始字节（每个元素为 0-255 的 int，二进制安全）
+· write_bytes(path, bytes)：将字节列表（int 0-255）原样写入文件
+· len(value) → int：返回字符串长度（字节数）、列表/字典元素个数
+· type_of(value) → str：返回变量类型名称（"int"、"float"、"bool"、"str"、"list"、"dict"、"null"、"error"、"ptr"）
+· http_get(url) → str：发送 HTTP GET 请求，返回响应体（支持 http:// 与 https://，TLS 为纯 Rust 实现、内置 Mozilla 根证书，
+  校验失败自动回退系统根证书，可经 HONE_CA_BUNDLE / ~/.hn/ca.pem 信任私有 CA 的根证书与中间证书）
 · http_post(url, body) → str：发送 HTTP POST 请求（body 为字符串，支持 http:// 与 https://）
 · json_parse(str) → value：将 JSON 字符串解析为 Hone 值（自动映射为 int/float/bool/str）
 · json_stringify(value) → str：将 Hone 值序列化为 JSON 字符串
+
+3.1.1 输入默认值（EOF 降级）
+
+input / read_int / read_float 在 EOF（管道关闭 / Ctrl+Z / Ctrl+D）时抛 error[H306]，
+read_int / read_float 在格式非法时抛 error[H006] / error[H007]。它们不返回 null，
+因此不能直接用 `??` 空值合并兜底；给输入设默认值的标准做法是用 try-catch 包装：
+
+fn ask(prompt, fallback) {
+    try {
+        return input(prompt);
+    } catch e {
+        return fallback;   // H306 EOF → 返回默认值
+    }
+}
+name = ask("姓名: ", "匿名");
+print("你好, " + name + "!");
+
+数字输入同理（一个 catch 同时兜住格式错误 H006/H007 与 EOF H306）：
+
+fn ask_int(prompt, fallback) {
+    try {
+        return read_int(prompt);
+    } catch e {
+        return fallback;   // H006 格式错 / H306 EOF → 返回默认值
+    }
+}
+age = ask_int("年龄: ", 0);
+print("明年你 " + to_str(age + 1) + " 岁");
+
+· 注意：`??` 空值合并只对 null 值生效（如 void 函数调用占位值）；
+  input 在 EOF 是抛错误而不是返回 null，必须用 try-catch 捕获后降级。
 
 3.2 sys 模块（系统功能封装）
 
@@ -125,6 +672,12 @@ hone --help / --version 帮助信息 / 版本信息
   · HH：两位小时（00–23）
   · mm：两位分钟（00–59）
   · SS：两位秒数（00–59）
+  · WW：ISO 星期几（1=周一 … 7=周日）
+· time.parse(str) → int：解析时间戳字符串（YYYY-MM-DD、YYYY-MM-DD[T ]HH:MM:SS，
+  可选小数秒与 ±HH[:MM] 时区），失败报错
+· time.add(timestamp, seconds) → int：时间戳算术（秒，可为负，溢出报 H010）
+· time.diff(a, b) → int：时间差 a - b（秒）
+· time.weekday(timestamp) → int：ISO 8601 星期几（1=周一 … 7=周日）
 
 示例：
 
@@ -133,6 +686,8 @@ t = time.now();
 print(t);                  // 1698765432
 time.sleep(1.5);
 print(time.format(t, "YYYY-MM-DD HH:mm:SS")); // 2023-10-31 14:30:45
+print(time.weekday(time.parse("2024-08-09T00:00:00Z"))); // 5（周五）
+print(time.add(time.parse("2024-01-01"), 86400));         // 次日 00:00 UTC
 
 
 3.4 random 模块（随机数生成）
@@ -214,6 +769,285 @@ print(to_float("xyz"));         // 抛出 H007
 · 暂停后等待用户按 Enter 继续，或按 Ctrl+C 退出
 · 不提供交互式查询命令（p x 等），全部直接输出
 
+3.10 集合操作与断言
+
+· append(list, value) → list：返回追加了 value 的新列表（列表是值类型，需配合 `l = append(l, x)` 使用）
+· clone(value) / copy(value) → value：深度拷贝（递归复制 list/dict，副本的后续修改不影响原值）
+· contains(list|str, value) → bool：列表是否包含某值 / 字符串是否包含子串
+· index_of(list, value) → int：元素位置（不存在返回 -1）；keys(dict) / values(dict) / has_key(dict, key) 字典操作
+· is_int / is_float / is_bool / is_str / is_list / is_dict / is_null(value) → bool：类型判断
+· assert(条件[, 消息])：条件为 false 时抛 error[H700]（测试框架 hone test 配合使用）
+
+3.11 args 命令行参数模块
+
+· args.get(key) → str 或 null：获取命令行参数值（--key value 格式）
+· args.get(key, type[, default]) → value：按期望类型转换，key 不存在时返回 default（缺省 null）
+  · type 支持 int / float / bool / str（可直接写 `args.get("port", int, 8080)`，类型关键字在表达式位置等价于其名称字符串）
+  · 转换失败报 H006（int）/ H007（float）/ H001（bool），键缺失且无默认值时返回 null
+· args.has(key) → bool：命令行是否包含该参数
+
+3.12 server 本地 HTTP 服务器模块
+
+· server.listen(port) → int：绑定 127.0.0.1 启动后台监听线程，返回实际端口（0=自动分配）
+· server.poll() → str：取出排队请求，返回 JSON 数组 [{id,method,path,body}, ...]
+· server.respond(id, body[, status]) → bool：发送响应体，可指定 HTTP 状态码（默认 200，如 404/500，范围 100..=599）
+· 事件模型：后台线程只做 TCP 收发与请求排队，脚本主线程轮询响应，与解释器单线程模型兼容
+
+3.13 crypto 加密与哈希模块
+
+· crypto.md5(str) → str：MD5 十六进制摘要
+· crypto.sha1(str) → str：SHA-1 十六进制摘要
+· crypto.sha256(str) → str：SHA-256 十六进制摘要
+· crypto.hmac_sha256(key, msg) → str：HMAC-SHA256 十六进制（密钥与消息均为字符串）
+· crypto.base64_encode(str) → str：Base64 编码
+· crypto.base64_decode(str) → str：Base64 解码（输入非法报 H001）
+
+3.14 archive 压缩与归档模块
+
+· archive.zip_list(path) → list：列出 zip 条目名
+· archive.zip_read(path, entry) → str：读取 zip 中指定条目的文本
+· archive.zip_extract(path, dir) → int：解压 zip 到目录，返回文件条目数
+· archive.zip_create(path, entries) → bool：从 dict {条目名: 内容} 创建 zip
+· archive.tgz_list / tgz_read / tgz_extract / tgz_create：同上，针对 tar.gz
+· 安全：解压时拒绝绝对路径与 `..` 穿越条目（防 zip-slip）
+
+3.15 ptr 指针类
+
+· ptr.alloc(size) → ptr：分配 size 字节内存（对齐 8），失败返回 0
+· ptr.free(p) → bool：释放由 ptr.alloc 分配的内存
+· ptr.is_null(p) → bool / ptr.is_valid(p) → bool / ptr.size(p) → int：查询
+· ptr.read_int/read_float/read_byte(p, offset) → value：按偏移读取 8 字节整数 / 8 字节 double / 1 字节
+· ptr.write_int/ptr.write_float/ptr.write_byte(p, offset, v)：对应写入（write_byte 值域 0..=255）
+· 安全模型（防野指针）：分配表跟踪 —— 未分配、已释放（use-after-free）、重复释放（double-free）报 H304，
+  越界访问报 H305，空指针读写报 H304；外部 FFI 句柄不在分配表中，free/read/write 拒绝操作
+
+3.16 plugin 插件系统
+
+· plugin.load(path, alias) → bool：运行期加载动态库并注册（之后可用 `alias.函数(...)` 调用，走 C ABI 通道）
+· plugin.has(alias) → bool：查询插件是否已注册
+· plugin.list() → list：列出已注册插件 [{name, path}, ...]
+· plugin.unload(alias) → bool：注销插件
+· 与 load 语句的区别：load 是编译期声明 + 静态检查；plugin.* 是运行期动态注册，二者调用链相同
+
+3.17 csv 数据处理
+
+· csv.parse(text) → list：解析 CSV 文本为行列表（每行是 str 列表），支持引号包裹、"" 转义、字段内逗号/换行、CRLF
+· csv.parse_dict(text) → list：解析 CSV 文本为 dict 列表（首行为表头，后续行按列名取值）
+· csv.stringify(rows) → str：将行列表（list of list / list of dict）序列化为 CSV 文本（自动转义）
+
+示例：
+
+
+rows = csv.parse("name,age\nAlice,30\n");
+for r in rows { print(r); }        // [name, age] / [Alice, 30]
+d = csv.parse_dict("name,age\nAlice,30\n");
+for x in d { print(x.name); }      // Alice
+
+3.18 glob / temp 系统工具
+
+· glob.match(pattern, path) → bool：判断路径是否匹配 glob 模式
+  （* 单层任意、? 单字符、** 跨目录、[abc]/[a-z] 字符类，路径分隔符统一按 /）
+· glob.list(pattern) → list：递归列出匹配模式的文件相对路径（排序后返回）
+· temp.dir([prefix]) → str：创建唯一临时目录并返回路径（系统临时目录下）
+· temp.file([prefix]) → str：创建唯一临时文件并返回路径
+· temp.remove(path) → bool：删除临时文件/目录（不存在或失败返回 false）
+
+示例：
+
+
+print(glob.match("src/**/*.rs", "src/main.rs")); // true
+files = glob.list("examples/*.hn");
+td = temp.dir("hone-");
+write_file(path.join(td, "a.txt"), "x");
+print(temp.remove(td));            // true
+
+3.19 zlib / gzip 压缩
+
+· zlib.compress(text) → str：zlib 压缩（RFC 1950），结果以 base64 返回
+· zlib.decompress(b64) → str：zlib 解压（输入为 zlib.compress 的 base64 输出）
+· zlib.gzip(text) → str：gzip 压缩（含文件头），结果以 base64 返回
+· zlib.gunzip(b64) → str：gzip 解压
+
+说明：Hone 的 str 无法直接承载二进制，压缩结果统一 base64 编码；解压输入即压缩输出。
+
+示例：
+
+
+c = zlib.compress("hello hello");
+print(zlib.decompress(c));         // hello hello
+g = zlib.gzip("data");
+print(zlib.gunzip(g));             // data
+
+3.20 stat 统计 / matrix 矩阵运算
+
+· stat.sum(nums) → int|float：求和（纯 int 返回 int）
+· stat.mean(nums) → float：算术平均值
+· stat.median(nums) → float：中位数
+· stat.variance(nums) → float：总体方差（需 ≥ 2 个元素）
+· stat.stddev(nums) → float：总体标准差
+· stat.min(nums) / stat.max(nums) → number：最小值 / 最大值
+· matrix.identity(n) → list：n×n 单位矩阵
+· matrix.transpose(m) → list：转置
+· matrix.add(a, b) → list：矩阵相加（形状必须相同）
+· matrix.mul(a, b) → list：矩阵乘法（A 列数必须等于 B 行数）
+· matrix.scale(m, k) → list：矩阵标量乘法
+
+矩阵以「列表的列表」表示：[[a, b], [c, d]]。
+
+示例：
+
+
+nums = [1.0, 2.0, 3.0, 4.0, 5.0];
+print(stat.mean(nums));            // 3
+print(stat.stddev(nums));          // 1.4142...
+m = [[1.0, 2.0], [3.0, 4.0]];
+print(to_str(matrix.mul(m, m)));   // [[7,10],[15,22]]
+
+3.21 diff 文本对比 / regex 增强
+
+· diff.lines(a, b) → list：逐行 LCS 对比，返回操作列表 [{op, line}]（op 为 "-"/"+"/" "）
+· diff.unified(a, b) → str：生成 unified diff 文本（@@ 块头 + -/+ 行）
+· regex.find(pattern, text) → list：返回所有非重叠匹配的子串
+· regex.groups(pattern, text) → list：返回首个匹配的捕获组（第 0 项为整体匹配，未参与组为 null；无匹配返回空列表）
+· regex.split(pattern, text) → list：按正则拆分文本
+
+示例：
+
+
+ops = diff.lines("a\nb\n", "a\nc\n");
+print(ops[0].op);                  // " "
+d = diff.unified("x\n", "y\n");
+print(to_str(regex.find("a+", "aaa b")));   // ["aaa"]
+print(to_str(regex.groups("(\\d+)-(\\d+)", "2024-08"))); // ["2024-08","2024","08"]
+print(to_str(regex.split("[,;]", "a,b;c"))); // ["a","b","c"]
+
+3.22 HTTP Client 增强（http.request）
+
+· http_get(url) → str：GET 请求（默认超时 15 秒，UA: hone/0.1.0）
+· http_post(url, body) → str：POST 请求（body 为字符串）
+· http.request(url, opts) → str：通用请求，opts 为 dict：
+  · method：请求方法（默认 "GET"，可 "POST"/"PUT"/"DELETE" 等）
+  · headers：自定义请求头 dict（可覆盖 User-Agent / Content-Type）
+  · body：请求体字符串（method 为 POST 等时常用）
+  · timeout：超时秒数（int/float，默认 15）
+
+· TLS 根证书回退机制（https:// 与 wss:// 自动生效）：
+  · 优先内置 Mozilla 根证书（webpki-roots，编译进二进制）；证书校验失败时自动重连，
+    回退到系统根证书（Windows ROOT 证书库 / Linux·Termux 系统 CA bundle），防内置根证书过期
+  · 用户信任根：HONE_CA_BUNDLE 环境变量指定 PEM 文件（缺省 ~/.hn/ca.pem），
+    其中的根证书与中间证书均可信任（私有 CA / 自签名场景）
+  · 中间证书注入：用户 CA 文件中的中间证书参与链构建，服务器即使不随链发送中间证书也能验证
+  · 覆盖 http_get / http_post / http.request、smtp.send（隐式 TLS 与 STARTTLS）、ws.request（wss://）
+
+示例：
+
+
+r = http.request("https://api.example.com/data", {
+    "method": "POST",
+    "headers": {"User-Agent": "my-app/1.0", "Content-Type": "application/json"},
+    "body": json_stringify({"q": "hone"}),
+    "timeout": 10
+});
+print(r);
+
+3.23 smtp 发邮件 / ws WebSocket
+
+· smtp.send(host, port, opts) → bool：发送邮件，opts 为 dict：
+  · from：发件人（必填）；to：收件人（字符串或字符串列表，必填）
+  · subject / body：主题与正文
+  · user / password：提供时启用 AUTH LOGIN 认证
+  · starttls：是否 STARTTLS 升级（默认 true；port 465 为隐式 TLS，自动跳过 STARTTLS）
+· ws.request(url, message[, timeout]) → str：WebSocket 一次性请求-响应
+  · 建立连接 + 握手（校验 Sec-WebSocket-Accept），发送一个文本帧，
+    读取服务端文本帧直到 close 帧或超时（默认 30 秒），返回拼接文本
+  · 支持 ws:// 与 wss://（TLS，纯 Rust rustls）
+
+示例：
+
+
+smtp.send("smtp.example.com", 587, {
+    "from": "a@example.com",
+    "to": "b@example.com",
+    "subject": "Hi",
+    "body": "Hello from Hone",
+    "user": "a@example.com",
+    "password": "secret"
+});
+reply = ws.request("wss://echo.websocket.org/", "ping");
+
+3.24 plot 绘图 / yaml 数据格式
+
+· plot.bar(values[, labels]) → str：生成 SVG 柱状图（values 为数值列表，labels 可选）
+· plot.line(xs, ys) → str：生成 SVG 折线图（xs/ys 为等长数值列表，含网格线与数据点）
+· yaml.parse(text) → value：解析 YAML 子集为 Hone 值（map/list/标量/注释/引号字符串/嵌套缩进）
+· yaml.stringify(value) → str：将 Hone 值（dict/list/标量）序列化为 YAML 文本
+
+说明：plot.* 返回 SVG 字符串，用 write_file 保存为 .svg 即可在浏览器查看；
+yaml 支持常用配置子集（锚点/别名/多文档/流式 [] {} 不在支持范围）。
+
+示例：
+
+
+svg = plot.bar([3.0, 1.0, 4.0], ["a", "b", "c"]);
+write_file("chart.svg", svg);
+cfg = yaml.parse("name: hone\nversion: 1.0\nok: true\n");
+print(cfg.name);                 // hone
+print(yaml.stringify({"a": 1, "b": "x"}));
+
+3.25 guipro 原生图形界面模块（Windows: Win32 / Linux: GTK3 优先 + X11 自绘兜底）
+
+原生窗口 + 原生控件标准库（升级版图形界面，区别于 3.x 浏览器的 gui.hn）。
+Rust 内置实现：Windows 用 Win32 标准控件（user32/gdi32/commctrl，零新增依赖、不增体积），
+Linux 运行时优先动态加载 GTK3（libgtk-3.so），缺失时自动回退 X11 自绘后端
+（libX11.so.6 动态加载，单窗口自绘：label/button/input/select/checkbox/radio/slider/table/tree/canvas/菜单/托盘）。
+Hone 层 hone_lib/guipro.hn 提供 guipro_ 前缀统一 API + 闭包分发主循环 + 定时器：
+`guipro.window` 创建窗口，`guipro.add` 添加控件，`guipro.poll` 泵消息取事件 JSON，
+`guipro.set_text/get_text/set_value/get_value` 读写，`guipro.close/msgbox` 关闭与弹窗。
+
+· guipro.available() → bool：当前平台是否有原生 GUI 后端（Windows 恒 true；Linux 需 GTK3 或 X11）
+· guipro.window(title, w, h) → int：创建窗口，返回窗口 id
+· guipro.add(win, widget_dict) → int：添加控件，返回控件 id
+  widget_dict：{"type": "button"|"label"|"input"|"select"|"checkbox"|"radio"|"slider"|"table"|"tree"|"canvas",
+   "text": str, "options": [..], "min"/"max"/"value": int, "columns"/"rows"/"items": [..],
+   "x"/"y"/"w"/"h": int}（Linux/GTK3 忽略 x/y，自动纵向排布；X11 自绘后端按绝对定位）
+· guipro.poll() → str：泵消息（非阻塞）+ 取事件 JSON 数组
+  [{"win":1,"id":2,"type":"click"|"change","value":".."}, {"win":1,"id":0,"type":"close"|"resize"|"menu"|"tray","value":".."}]
+· guipro.set_text(win, id, text) / guipro.get_text(win, id) → str：读写控件文本
+· guipro.set_value(win, id, val) / guipro.get_value(win, id) → int：读写滑块位置
+· guipro.close(win)：销毁窗口（同时推送 close 事件，主循环据此退出）
+· guipro.msgbox(title, msg)：原生消息框（Linux 无后端时回退 zenity/xmessage）
+
+进阶控件（hone_lib/guipro.hn 封装）：
+· 滑块 guipro_slider(win, min, max, value, x, y, w, h)；change 事件 value=当前位置
+· 表格 guipro_table(win, columns, rows, x, y, w, h)；读写 guipro_table_add_row/clear/count/get/get_row/set；
+  change 事件 value=选中行索引，click（双击）同
+· 树 guipro_tree(win, items, x, y, w, h)；读写 guipro_tree_add/clear/get；change 事件 value=选中节点 id
+· 画布 guipro_canvas(win, x, y, w, h)；绘制 guipro_canvas_line/rect/ellipse/text/clear/repaint；
+  click 事件 value="[x,y]"（json_parse 解析）；颜色支持 "#RRGGBB" 字符串或整数 RGB
+· 托盘 guipro_tray_add/tray_tip/tray_remove：Windows 用 Shell_NotifyIcon；Linux X11 用 XEmbed 系统托盘协议
+  （需托盘管理器，如 GNOME Shell / KDE Plasma / stalonetray）；tray 事件 value=left/right/double
+· 菜单栏 guipro_menu(win, items)：items 为嵌套列表 [{"text": "文件", "items": [{"text": "打开"}, ...]}]；
+  menu 事件 value=菜单路径（如 "文件/打开"）；text 为 "-" 表示分隔线
+
+桌宠窗口（guipro.pet_*，Windows 专用，hone_lib/pet.hn 桌宠库使用）：
+· guipro.pet_window(title, w, h) → int：创建桌宠窗（WS_POPUP + 品红键透明 + 置顶 + 任务栏隐藏 + 不抢焦点）
+· guipro.pet_frame(win, w, h, rgb, flip)：推帧；rgb 为 "r g b r g b ..." 十进制文本（w*h*3 个数），
+  Rust 端解析后最近邻放大到窗口尺寸，flip 非 0 水平翻转
+· guipro.pet_text(win, text)：气泡文本（"" 清除）
+· guipro.pet_move(win, x, y)：移动窗口到屏幕坐标
+· guipro.pet_pos(win) → "x,y"：当前窗口位置
+· guipro.pet_cursor(win) → "x,y"：光标屏幕坐标（跟随鼠标模式用）
+· guipro.pet_menu(win, items) → str：光标处弹出右键菜单（items 为字符串列表），返回选中项文本（未选 ""）
+· guipro.pet_close(win)：销毁桌宠窗（推送 close 事件）
+桌宠窗事件（guipro.poll）：click / dblclick / drag（value="x,y" 拖拽后窗口位置，拖拽由 Rust 端
+SetCapture 完成）/ rclick（右键，Hone 侧调 pet_menu 弹菜单）/ close
+
+说明：builtins::call 无解释器上下文，闭包回调无法从 Rust 直接调用，故事件分发
+在 Hone 层完成——hone_lib/guipro.hn 的 guipro_run(handlers) 主循环轮询 poll、
+查 guipro_on 注册表（函数式：注册返回新表）并调用闭包；guipro_timer 定时器
+由 Hone 层 time.now 调度。示例：examples/guipro_demo.hn（基础控件，20 秒后自动关闭演示）、
+examples/guipro_adv_demo.hn（进阶控件：滑块/表格/树/画布/托盘/菜单）。
+
 四、导入与外部集成
 
 4.1 load 动态库加载
@@ -284,10 +1118,30 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · 后续运行直接使用缓存，不重复下载
 · 底层基于 TCP/TLS，由 http_get 实现下载（模块源 URL 支持 http:// 与 https://）
 
+4.3.1 模块清单 hone.json（类似 package.json / Cargo.toml）
+
+· 项目根目录放一个 hone.json 即可集中声明模块依赖，形如：
+
+{
+  "name": "myapp",          // 项目名（新建清单时自动取目录名）
+  "version": "0.1.0",       // 项目版本
+  "modules": {              // 模块依赖：模块名 → 源码 URL（或本地路径）
+    "math_mod": "https://example.com/math_mod.hn",
+    "gui":     "./hone_lib/gui.hn"
+  }
+}
+
+· hone get（不带参数）：读取当前目录 hone.json，批量下载全部模块到 ~/.hone/cache/
+· hone get <module> <url>：下载单个模块，并把 (module, url) 追加写入 hone.json（已存在则更新其 URL）
+· 清单缺失报 error[H404]，JSON 语法错误报 error[H005]，modules 为空报 error[H005]
+· 模块 URL 非 http/https 开头时按本地路径处理，直接读取源码（不联网），便于同仓库共享 hone_lib 等模块
+
 4.4 别名（Alias）
 
 · 支持 as 子句：load "path" as lib;
 · 支持二次重命名：alias 原名称 as 新名称;
+· 原名支持点号路径（模块/类/内置点号函数）：alias time.now as tnow; 之后可 tnow(...) 调用
+· 别名可叠加（别名再起别名），可指向内置函数：alias print as p;
 · 别名作用域为文件级（当前 .hn 文件全局可见）
 
 4.5 DLL 打包（hone build --dll）
@@ -298,6 +1152,23 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · 生成的动态库自包含，不依赖 Hone 解释器（内嵌微型运行时）
 · 类型映射：int → int，float → double，bool → bool，str → const char*
 · 错误时返回错误码，并写入错误缓冲区
+
+4.6 AOT 原生编译（hone build --exe -c）
+
+· 将 .hn 脚本编译为 C 中间文件，再用系统 C 编译器（gcc / clang / cc，可用 CC 环境变量指定）生成原生可执行文件
+· 生成前先做语法与类型检查（parse + checker），错误不产出中间文件
+· 编译参数：-Os -ffunction-sections -fdata-sections + 链接期死代码消除，未用到的内置函数不占体积，常见脚本约 50~70 KB
+· 默认删除中间 .c 文件，--keep-c 保留便于检查；输出名用 [-o <out>]
+· 入口：顶层语句编译进 main()；无顶层语句且有 main 函数时调用之
+· 值语义与解释器一致：列表/字典为值类型（读取/传参深拷贝），lambda 按值捕获，索引赋值克隆写回
+· 支持全语言特性：函数/递归/类方法/结构体/lambda/异常（setjmp+longjmp）/推导式/解构/多返回值/match/可选链/复合赋值等
+· 内置函数支持核心集（print/len/to_str/集合操作/字符串/文件/时间/随机等）；
+  http/crypto/sqlite/guipro 等重内置以及 import/load/go 在编译期报"暂不支持"（附定位与建议）
+· 已知限制：
+  · 错误对象无 file/line/col/context 源码定位（运行时错误只带错误码与消息）
+  · throw 字符串消息在 C 端简化
+  · 函数返回时不显式释放局部变量（int/float/bool 零泄漏；str/list/dict 密集的递归脚本可能累积）
+  · 需系统安装 C 编译器（如 Windows 的 MinGW-w64 / LLVM，Linux/macOS 自带 gcc/clang）
 
 五、错误处理与报错风格
 
@@ -314,15 +1185,38 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 
 5.2 错误码体系（部分示例）
 
-· H001：类型冲突（期望类型 X，得到类型 Y）
+· H001：类型冲突（期望类型 X，得到类型 Y；含泛型同一类型参数处实参类型不一致）
+· H002：未定义的变量或函数（含：类方法裸名调用——成员函数不进全局符号表；泛型注解引用了未声明的类型参数）
 · H003：无法自动推导类型，请添加显式类型
 · H004：运算符重载歧义（如 + 可能为 int 或 str 时）
+· H005：语法错误（含：类型参数重复声明、类名与 struct 名重复、类成员非 fn 定义）
 · H006：字符串转换为整数失败（非数字内容）
 · H007：字符串转换为浮点数失败（格式非法）
+· H008：条件表达式必须是 bool
+· H009：除零错误
+· H010：整数溢出
+· H011：参数数量不匹配（含 struct 构造、类方法调用）
+· H012：递归过深（超过 5000 层）
 · H100：动态库加载失败
 · H110：懒加载依赖函数未找到
-· H200：网络请求失败
+· H200：网络请求失败（http_get / http_post / http.request / smtp.send / ws.request）
+· H201：网络超时（http.request 的 timeout、ws.request 超时）
+· H202：连接被拒绝
+· H203：DNS 解析失败
+· H204：HTTP 非 2xx 状态码
+· H300：系统调用失败（含文件扫描、临时目录等）
+· H301：DLL 加载失败（含 sqlite 库缺失：Linux 安装 libsqlite3，Windows 放置 sqlite3.dll）
+· H302：DLL 参数校验失败
+· H303：权限不足
+· H304：野指针（未分配/已释放/重复释放/空指针，ptr 类）
+· H305：指针越界访问（超出 ptr.alloc 分配大小）
+· H306：标准输入读取失败/EOF（input / read_int / read_float）
+· H401：文件不存在
+· H402：文件权限不足
+· H403：文件被占用/锁定
 · H404：文件或库不存在
+· H600：用户主动抛出（throw）
+· H700：assert 断言失败（测试框架）
 
 5.3 报错原则
 
@@ -348,6 +1242,8 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 Rust Cargo.toml 配置：
 
 toml
+# 实测（2026-08-14）：fat LTO + 单 codegen unit 在 Windows 本机编译最快（约 4min）且体积最小（约 3.7MB）；
+# thin LTO 的两种组合（cgu=1 / cgu=16）反而更慢（4min47s+）且更大（4.0MB+），故保留此配置。
 [profile.release]
 lto = true
 opt-level = "z"
@@ -383,7 +1279,6 @@ codegen-units = 1
 · 不向后兼容：新版本不保证旧版本代码能直接运行
 · 不强制升级：旧版本解释器永久可用
 · 废弃机制：废弃功能仅标记 @deprecated 并输出警告，不删除
-· 迁移工具：hone upgrade 按映射表自动转换旧代码到新语法
 · 文档同步：每个版本发布时提供变更说明和迁移指南
 
 7.2 发布渠道
@@ -567,7 +1462,182 @@ print(str_contains(s, "world"));
 print(str_replace(s, "world", "Hone"));
 
 
-十一、总结：Hone 的定位
+十一、进阶用法
+
+11.1 多文件项目组织
+
+Hone 单文件即可运行，但项目变大后建议拆分模块。三种复用方式：
+
+· import 远程/本地模块（.hn 源码复用，最常用）：
+  · import "模块名" from "URL";        // 远程：首次下载并缓存到 ~/.hone/cache/<模块名>.hn，之后离线使用
+  · import "模块名" from "./路径/x.hn"; // 本地：相对当前工作目录直接读取，不写缓存
+  · import "模块名" from "URL" as 别名; // 别名：模块函数前缀替换为别名前缀（见下）
+  · hone get <script.hn>               // 预下载脚本中所有 import 声明的模块
+  · hone get                           // 按 hone.json 清单批量下载全部模块（见 4.3.1）
+· load / load lazy 动态库（C ABI 复用，见 4.1）：
+  · load "绝对路径";                    // 调用 C 库函数（需绝对路径，或与脚本同目录的库名）
+  · load lazy "绝对路径";               // 函数级懒加载，按需加载依赖链
+  · load "路径" as m { fn ...; }       // typed 签名块：精确声明参数/返回类型
+· use 命名空间：调用 Rust 宿主注册的原生函数（如 use std_io;）
+
+import 的函数名前缀规则：模块内函数以「模块名_」为前缀注册
+（例如 hone_lib/math.hn 中的 clamp → math_clamp，见 examples/test_hone_lib.hn；
+hone_lib/img.hn 中的 new → img_new、to_ppm → img_to_ppm，见 examples/test_img_lib.hn）；
+使用 as 别名后，模块名前缀整体替换为别名前缀。
+
+推荐的项目目录结构：
+
+    myproject/
+      main.hn            # 入口：只做流程编排与参数解析
+      libs/              # 自有模块（import "./libs/xxx.hn"）
+      data/              # 数据文件
+      vendor/            # 第三方 .hn 模块
+
+注意事项：
+· 函数扁平化存在于全局符号表（不支持 :: 多层路径、不支持嵌套遮蔽），
+  模块函数靠前缀隔离命名空间，避免与主脚本函数重名（重名报「already defined」）
+· import 的模块顶层语句会在加载时执行一次，可在模块顶部放常量初始化
+· load 只用于 C 动态库；加载 .hn 源码一律用 import
+
+11.2 调试复杂逻辑
+
+· 断点调试：hone debug <script.hn>，配合 breakpoint; 关键字：
+  · 运行到 breakpoint; 暂停，打印当前作用域全部变量快照
+  · 按 Enter 继续，Ctrl+C 退出；断点仅在 debug 模式生效
+· 条件输出：debug_print(expr); 仅在 hone debug 模式打印，普通运行自动跳过（可留在源码中）
+· 临时函数：tmp fn 名称(...) { ... } 编译时自动忽略，适合开发期草稿
+· 静态检查：hone 运行前先做类型检查，多数错误（H001 类型、H005 参数个数）在跑之前就报出
+· 错误码解释：hone explain H201 查看任意错误码的含义与修复建议
+· 复杂度分析：hone poop <file.hn> 输出 if 嵌套深度与圈复杂度，定位「屎山」热点
+· 自动化测试：hone test [目录] 递归扫描 *.test.hn，配合 assert(条件[, 消息]) 断言，汇总 PASS/FAIL
+· 无人值守：hone run --restart=3 --backoff=1,3,10 --restart-on=H200,H401 <script.hn>
+  崩溃自动重启（仅对可重入错误）；hone run --resume 从上次 db 检查点继续（脚本变更后自动失效）
+
+调试思路：
+1. 先看类型：类型错误用 hone explain H001 确认期望/实际类型，检查变量是否被锁定
+2. 缩小范围：在疑似出错的位置前后加 breakpoint;，观察变量快照
+3. 抓运行时错误：用 try { } catch e { } 捕获，打印 e.code / e.message / e.line / e.context
+4. 用 assert 固化关键不变量，配合 hone test 防止回归
+
+11.3 性能优化
+
+· 避免循环内反复 append：列表是值类型，append 返回新列表（整体拷贝），
+  循环里 l = append(l, x) 是 O(n²)。需要累积时：
+  · 先确定规模再一次性构造；或先用 dict 累积（键值对），最后转列表
+  · 例：统计词频用 dict（has_key + 自增），不要用列表 append + contains
+· 字符串拼接优先 f-string：f"..." 比 + 拼接更简洁；大量拼接场景注意 str 不可变、每次 + 都生成新串
+· 减少深拷贝：clone / copy 是递归深拷贝，大集合频繁拷贝有成本；只在需要独立副本时使用
+· 热点计算交给 C：性能瓶颈函数可用 load 调用 C 库（FFI），或用 hone build --dll 导出后由 C 调用
+· 并行化：go 函数名(参数); 启动独立线程（值传递、不共享变量），
+  适合可拆分的独立任务（如批量请求）；线程间通信走文件 / HTTP / db，不要指望共享变量
+· 用 hone poop 找出复杂度最高的函数优先优化；优化前先用 hone test 固化行为
+· 分发优化：hone build --exe 打包独立可执行文件（启动无解释器依赖）；hone build --script 生成 .hzp 压缩包
+
+十二、FAQ 与已知问题
+
+以下都是新手最容易踩的坑，提前看完能省不少调试时间。
+
+12.1 try/catch 块内声明的变量，块外不可见
+
+    try {
+        x = 10;
+    } catch e { }
+    print(x);    // error：变量 x 未定义
+
+原因：Hone 是块作用域，try 体与 catch 处理器各自独立作用域，
+块内声明的变量不会泄漏到块外；catch 绑定的错误变量 e 也只在 catch 块内有效。
+解决：需要跨块共享的变量，在 try 之前声明：
+
+    x = 0;
+    try {
+        x = to_int("42");
+    } catch e {
+        x = -1;      // 降级值
+    }
+    print(x);    // 42
+
+12.2 append 返回新列表，不会修改原列表
+
+    nums = [1, 2, 3];
+    append(nums, 4);
+    print(nums);    // [1, 2, 3] —— 没变！
+
+原因：列表是值类型，append 返回追加后的新列表，原列表不变。
+解决：必须把返回值赋回去：
+
+    nums = append(nums, 4);
+    print(nums);    // [1, 2, 3, 4]
+
+同理，clone / copy 是深拷贝：对副本的修改不会影响原值。
+
+12.3 类型一经锁定，不可赋其他类型（无隐式转换）
+
+    x = 10;         // 推导为 int
+    x = "abc";      // error[H001]：期望 int，得到 str
+    f = 3.14;       // float
+    f = 3;          // error[H001]：float 不接受 int
+    if (1 == 1.0)   // error：int 与 float 比较无隐式转换
+
+原因：静态强类型 + 禁止隐式转换（int↔float 也不行）。
+解决：需要转换时显式调用 to_int / to_float / to_str。
+
+12.4 浮点字面量必须带小数点
+
+    2     // int
+    2.0   // float
+    1 + 2.0   // error：int 与 float 不能混算
+
+原因：字面量 2 是 int，2.0 才是 float；int 与 float 混合运算报错。
+解决：混合数值运算前用 to_float / to_int 统一类型。
+
+12.5 if / while 条件必须是 bool
+
+    if (1) { }          // 非法：条件必须是 bool
+    if (len(s) > 0) { } // 正确：比较表达式返回 bool
+
+原因：禁止隐式转换，if (1) 不会像 C 一样自动成立。
+
+12.6 函数名全局唯一，且不支持嵌套遮蔽
+
+    fn foo() { ... }
+    fn foo() { ... }   // error：already defined（重名报错）
+
+原因：所有函数扁平化存在于全局符号表，不区分作用域层级。
+嵌套作用域内的同名定义会被提升而非遮蔽（见 1.6）。
+解决：命名加前缀或分类（如 coll_sum、math_clamp），避免重名。
+
+12.7 len(str) 返回的是字节数，不是字符数
+
+    len("hello")   // 5
+    len("你好")    // 6 —— 每个汉字占 3 字节（UTF-8），不是 2
+
+原因：str 按 UTF-8 字节存储。
+解决：需要按字符处理时，请用 str_contains / str_replace 等字符串函数，不要用下标或 len。
+
+12.8 go 线程不共享变量
+
+    x = 1;
+    go task(1);     // 子线程拿到的是 x 的值副本，改它不影响主线程
+
+原因：每个 go 线程拥有独立符号表副本，只传递值类型。
+解决：线程间通信走文件 / HTTP / db / server 等外部通道。
+
+12.9 match 务必写 _ 兜底分支
+
+    s = match 5 { 1 => "one", 2 => "two" };   // 运行时报错：无匹配分支
+
+原因：match 所有分支都不匹配时是运行时错误，不是返回 null。
+解决：总是补一个 _ => 默认值。
+
+12.10 忘记 `#`：f-string 用 {} 插值，不是 #
+
+    print(f"你好, {name}!");   // 正确
+    print(f"你好, #name");     // 错误：# 不是插值语法
+
+原因：Hone 的 f-string 使用 {expr} 插值（见 README 语言速览）。
+解决：需要字面大括号时用 {{ }} 转义。
+
+十三、总结：Hone 的定位
 
 Hone 不是一门工业级语言，而是一把设计精巧的瑞士军刀。它的存在意义在于：
 
