@@ -44,6 +44,11 @@ pub enum Tok {
     Struct,
     // class 类定义（成员函数不进入全局符号表）
     Class,
+    // enum 枚举定义（简单变体 + 带载荷变体）
+    Enum,
+    // 异步：async fn（后台线程执行，返回 future）与 await（等待 future 结果）
+    Async,
+    Await,
     // 类型关键字
     TInt,
     TFloat,
@@ -135,6 +140,9 @@ impl Tok {
             Tok::Tmp => "`tmp`".into(),
             Tok::Struct => "`struct`".into(),
             Tok::Class => "`class`".into(),
+            Tok::Enum => "`enum`".into(),
+            Tok::Async => "`async`".into(),
+            Tok::Await => "`await`".into(),
             Tok::TInt => "type `int`".into(),
             Tok::TFloat => "type `float`".into(),
             Tok::TBool => "type `bool`".into(),
@@ -371,6 +379,9 @@ impl Lexer {
                 "tmp" => Tok::Tmp,
                 "struct" => Tok::Struct,
                 "class" => Tok::Class,
+                "enum" => Tok::Enum,
+                "async" => Tok::Async,
+                "await" => Tok::Await,
                 "int" => Tok::TInt,
                 "float" => Tok::TFloat,
                 "bool" => Tok::TBool,

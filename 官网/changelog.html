@@ -36,13 +36,41 @@ function toggleTheme(){
     <a href="download.html">下载</a>
     <a href="perf.html">性能</a>
   </nav>
-  <span class="ver">v0.7.0</span>
+  <span class="ver">v0.7.9</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
 <main>
   <h2><span class="hash">#</span>更新日志</h2>
   <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
+
+  <div class="release">
+    <span class="ver-tag">v0.7.9</span><span class="date">2026-08-30</span>
+    <h4>新增</h4>
+    <ul>
+      <li><strong>枚举类型 enum + match 变体模式</strong>：<code>enum Name { A, B(int), C(float, float) };</code>
+        简单变体无载荷、带载荷变体携带多个类型化字段；<code>Color.Red</code> 访问、
+        <code>Shape.Circle(1.5)</code> 构造（检查阶段校验个数与类型）；<code>==</code>/<code>!=</code>
+        比较类型 + 变体 + 载荷；match 变体模式 <code>Shape.Circle(r)</code> 载荷绑定到分支体变量
+        （<code>_</code> 忽略项），与字面量/通配符模式共存；全链路支持解析/静态检查/解释器/
+        AOT 原生编译（C 运行时 HnEnum 判别式 + 载荷）/fmt/LSP；示例 <code>examples/enum_demo.hn</code></li>
+      <li><strong>运算符重载（__op 特殊函数）</strong>：顶层定义 <code>fn __add(a, b)</code> 等，
+        仅在内建运算不支持的操作数组合时被调用，内置类型固有行为完全不受影响；覆盖二元
+        <code>+ - * / % == != &lt; &lt;= &gt; &gt;=</code>（<code>__add/__sub/__mul/__div/__mod/
+        __eq/__ne/__lt/__le/__gt/__ge</code>）、一元 <code>-x</code>/<code>!x</code>
+        （<code>__neg/__not</code>）、内置 <code>len(x)</code>/<code>x[i]</code>
+        （<code>__len/__index</code>）；AOT 生成「内建组合 → 内建运算，否则 → __op 调用」分派链；
+        示例 <code>examples/overload_demo.hn</code></li>
+      <li><strong>hone watch 热重载</strong>：<code>hone watch &lt;script.hn&gt; [--interval=N]</code>
+        监控脚本文件变更自动重跑（跨平台轮询 mtime + 大小，std 实现零新增依赖，带时间戳，Ctrl+C 退出）</li>
+      <li><strong>测试框架增强</strong>：新增断言函数 <code>assert_eq(实际, 期望[, 消息])</code>；
+        <code>hone test</code> 输出按文件断言统计（PASS/FAIL 后附 通过/总数），汇总行含总断言通过数</li>
+      <li><strong>异步函数 async fn + await</strong>：<code>async fn name(...)</code> 定义异步函数，
+        调用时后台线程执行并立即返回 future（不阻塞）；<code>await expr</code> 阻塞等待结果；
+        错误经 future 原样传播（可 try/catch 捕获）；与 go 互补（go 发后不理、async/await 等待结果）；
+        AOT 与 --dll 对 async/await 报「暂不支持」；示例 <code>examples/async_demo.hn</code></li>
+    </ul>
+  </div>
 
   <div class="release">
     <span class="ver-tag">v0.7.8</span><span class="date">2026-08-29</span>
@@ -496,7 +524,7 @@ function toggleTheme(){
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.7.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.7.9 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

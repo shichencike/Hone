@@ -192,7 +192,8 @@ fn diagnostic_from_error(e: &ZError) -> Value {
 
 const KEYWORDS: &[&str] = &[
     "fn", "if", "else", "while", "do", "for", "in", "return", "true", "false", "go", "breakpoint",
-    "break", "continue", "try", "catch", "throw", "match", "struct", "class",
+    "break", "continue", "try", "catch", "throw", "match", "struct", "class", "enum",
+    "async", "await",
     "int", "float", "bool", "str", "load", "lazy", "use", "import", "alias", "as", "from", "tmp",
     "null", "go",
 ];
@@ -331,6 +332,8 @@ fn scan_symbols(text: &str) -> Vec<(String, String, u64, u64)> {
             "class"
         } else if trimmed.starts_with("struct ") {
             "struct"
+        } else if trimmed.starts_with("enum ") {
+            "enum"
         } else {
             continue;
         };
@@ -340,6 +343,7 @@ fn scan_symbols(text: &str) -> Vec<(String, String, u64, u64)> {
             .or_else(|| trimmed.strip_prefix("fn "))
             .or_else(|| trimmed.strip_prefix("class "))
             .or_else(|| trimmed.strip_prefix("struct "))
+            .or_else(|| trimmed.strip_prefix("enum "))
             .unwrap_or("");
         let name: String = rest
             .trim_start()
@@ -476,6 +480,7 @@ fn hover_result(docs: &HashMap<String, String>, uri: &str, params: &Value) -> Va
         let kind_cn = match kind.as_str() {
             "class" => "类",
             "struct" => "结构体",
+            "enum" => "枚举",
             _ => "函数",
         };
         format!("**{} `{}`**\n\n定义于第 {} 行", kind_cn, name, l + 1)
@@ -520,6 +525,7 @@ fn document_symbol_result(docs: &HashMap<String, String>, uri: &str, params: &Va
             let kind_id = match kind.as_str() {
                 "class" => 5,
                 "struct" => 23,
+                "enum" => 10,
                 _ => 12,
             };
             json!({
@@ -568,11 +574,13 @@ fn semantic_tokens_result(docs: &HashMap<String, String>, uri: &str, params: &Va
     let mut user_fns: HashSet<String> = HashSet::new();
     let mut user_classes: HashSet<String> = HashSet::new();
     let mut user_structs: HashSet<String> = HashSet::new();
+    let mut user_enums: HashSet<String> = HashSet::new();
     for (kind, name, _, _) in scan_symbols(text) {
         match kind.as_str() {
             "fn" => { user_fns.insert(name); }
             "class" => { user_classes.insert(name); }
             "struct" => { user_structs.insert(name); }
+            "enum" => { user_enums.insert(name); }
             _ => {}
         }
     }
@@ -598,7 +606,7 @@ fn semantic_tokens_result(docs: &HashMap<String, String>, uri: &str, params: &Va
                 | Tok::Try | Tok::Catch | Tok::Throw | Tok::Continue | Tok::Match
                 | Tok::Break | Tok::Breakpoint | Tok::Load | Tok::Lazy | Tok::Use
                 | Tok::Import | Tok::Alias | Tok::As | Tok::From | Tok::Tmp
-                | Tok::Struct | Tok::Class => (ST_KEYWORD, 0),
+                | Tok::Struct | Tok::Class | Tok::Enum | Tok::Async | Tok::Await => (ST_KEYWORD, 0),
                 // 类型关键字
                 Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr => (ST_TYPE, 0),
                 // 数字
@@ -615,6 +623,8 @@ fn semantic_tokens_result(docs: &HashMap<String, String>, uri: &str, params: &Va
                         (ST_CLASS, 1)
                     } else if matches!(prev, Some(Tok::Struct)) {
                         (ST_STRUCT, 1)
+                    } else if matches!(prev, Some(Tok::Enum)) {
+                        (ST_STRUCT, 1) // 枚举定义名（declaration）
                     } else if matches!(next, Some(Tok::LParen)) {
                         (ST_FUNCTION, 0) // 函数调用
                     } else if builtins.contains(name.as_str()) {
@@ -625,6 +635,8 @@ fn semantic_tokens_result(docs: &HashMap<String, String>, uri: &str, params: &Va
                         (ST_CLASS, 0)
                     } else if user_structs.contains(name) {
                         (ST_STRUCT, 0)
+                    } else if user_enums.contains(name) {
+                        (ST_STRUCT, 0) // 枚举类型引用
                     } else if modules.contains(name.as_str()) {
                         (ST_NAMESPACE, 0) // 模块名
                     } else {

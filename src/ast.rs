@@ -189,6 +189,33 @@ pub enum Stmt {
         methods: Vec<Stmt>,
         span: Span,
     },
+    /// enum 名称 { A, B(int), C(float, float) };  枚举定义。
+    /// 简单变体无载荷；带载荷变体为 变体名(类型, ...)，构造 = 枚举名.变体名(实参...)，
+    /// 匹配经 match 变体模式（Pattern::Variant）。
+    EnumDef {
+        name: String,
+        variants: Vec<EnumVariant>,
+        span: Span,
+    },
+    /// async fn 名称(参数) { ... }  异步函数定义。
+    /// 与 fn 同构，但调用时在后台线程执行并立即返回 future，经 `await` 等待结果。
+    AsyncFnDef {
+        name: String,
+        /// 泛型类型参数（async fn name[T](...)）
+        type_params: Vec<String>,
+        params: Vec<Param>,
+        ret: Option<TyName>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+}
+
+/// enum 变体：名称 + 可选载荷字段类型（空 = 简单变体）。
+#[derive(Debug, Clone)]
+pub struct EnumVariant {
+    pub name: String,
+    pub payload: Vec<TyName>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -307,11 +334,11 @@ pub enum Expr {
     Unary { op: UnOp, expr: Box<Expr>, span: Span },
     Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr>, span: Span },
     Call { callee: String, args: Vec<Expr>, span: Span },
-    /// match 表达式 { 模式 => 表达式, ..., _ => 默认值 }  模式匹配，返回匹配分支的值
+    /// match 表达式 { 模式 => 表达式, ..., _ => 默认值 }  模式匹配，返回匹配分支的值。
+    /// 模式为 Pattern：字面量 / 枚举变体（可绑定载荷）/ `_` 通配符。
     Match {
         value: Box<Expr>,
-        /// 模式 + 分支体；模式为 None 表示 `_` 通配符
-        arms: Vec<(Option<Expr>, Expr)>,
+        arms: Vec<(Pattern, Expr)>,
         span: Span,
     },
     /// 自增/自减表达式：i++ / i-- / ++i / --i（仅作用于已声明的变量名）
@@ -336,6 +363,28 @@ pub enum Expr {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// await 表达式：await expr  阻塞等待 expr（async 函数调用的 future）完成并返回其结果。
+    Await {
+        expr: Box<Expr>,
+        span: Span,
+    },
+}
+
+/// match 模式：字面量 / 枚举变体 / `_` 通配符。
+#[derive(Debug, Clone)]
+pub enum Pattern {
+    /// 字面量模式（int / float / bool / str 字面量）
+    Lit(Expr),
+    /// 枚举变体模式：`Color.Red`（无载荷）或 `Shape.Circle(r)`（带载荷，binds 绑定载荷到变量）。
+    /// binds 与变体载荷一一对应：Some(name) 绑定到分支体变量，None 表示 `_` 忽略。
+    Variant {
+        enum_name: String,
+        variant: String,
+        binds: Vec<Option<String>>,
+        span: Span,
+    },
+    /// `_` 通配符（匹配任意值）
+    Wildcard,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -442,6 +491,7 @@ pub fn expr_span(e: &Expr) -> Span {
         | Expr::Match { span: s, .. }
         | Expr::IncDec { span: s, .. }
         | Expr::Ternary { span: s, .. }
-        | Expr::Lambda { span: s, .. } => *s,
+        | Expr::Lambda { span: s, .. }
+        | Expr::Await { span: s, .. } => *s,
     }
 }

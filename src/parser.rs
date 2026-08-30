@@ -271,6 +271,10 @@ impl Parser {
             Tok::Tmp => self.parse_tmp_fn(),
             Tok::Struct => self.parse_struct_def(),
             Tok::Class => self.parse_class_def(),
+            Tok::Enum => self.parse_enum_def(),
+            Tok::Async => self.parse_async_fn(),
+            // 语句级 await：await expr;（如 try 块内的 await 调用）
+            Tok::Await => self.parse_expr_stmt(),
             other => Err(self.err_here(
                 codes::SYNTAX,
                 format!("expected a statement, found {}", other.describe()),
@@ -1353,6 +1357,78 @@ impl Parser {
         Ok(Stmt::ClassDef { name, methods, span })
     }
 
+    /// enum 名称 { A, B(int), C(float, float) };  枚举定义。
+    /// 变体逗号分隔；带载荷变体为 变体名(类型, ...)；结尾分号可选。
+    fn parse_enum_def(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // enum
+        let (tok, _) = self.next();
+        let name = match tok {
+            Tok::Ident(s) => s,
+            other => {
+                return Err(self.err_here(
+                    codes::SYNTAX,
+                    format!("expected an enum name after `enum`, found {}", other.describe()),
+                    Some("`enum` form: `enum Name { A, B(int), ... };`"),
+                ))
+            }
+        };
+        self.expect(&Tok::LBrace, "`{`")?;
+        let mut variants = Vec::new();
+        while !self.at(&Tok::RBrace) {
+            let (vtok, vspan) = self.next();
+            let vname = match vtok {
+                Tok::Ident(s) => s,
+                other => {
+                    return Err(self.err_at(
+                        &vspan,
+                        codes::SYNTAX,
+                        format!("expected a variant name, found {}", other.describe()),
+                        Some("variants look like `Name` or `Name(type, ...)`"),
+                    ))
+                }
+            };
+            let mut payload = Vec::new();
+            if self.at(&Tok::LParen) {
+                self.next();
+                while !self.at(&Tok::RParen) {
+                    payload.push(self.parse_type()?);
+                    if self.at(&Tok::Comma) {
+                        self.next();
+                    } else {
+                        break;
+                    }
+                }
+                self.expect(&Tok::RParen, "`)`")?;
+            }
+            variants.push(EnumVariant { name: vname, payload, span: vspan });
+            if self.at(&Tok::Comma) {
+                self.next();
+            } else {
+                break;
+            }
+        }
+        self.expect(&Tok::RBrace, "`}`")?;
+        // 枚举定义结尾分号可选（与 class 一致）
+        if self.at(&Tok::Semi) {
+            self.next();
+        }
+        Ok(Stmt::EnumDef { name, variants, span })
+    }
+
+    /// async fn 名称(参数) { ... }  异步函数定义。
+    /// 已消费 `async` 关键字；复用 fn 解析并把 FnDef 转为 AsyncFnDef（后台线程执行 + await 等待）。
+    fn parse_async_fn(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // async
+        self.expect(&Tok::Fn, "`fn`")?;
+        let stmt = self.parse_fn_body(false)?;
+        match stmt {
+            Stmt::FnDef { name, type_params, params, ret, body, span, tmp: _ } => {
+                Ok(Stmt::AsyncFnDef { name, type_params, params, ret, body, span })
+            }
+            _ => unreachable!("parse_fn_body always returns FnDef"),
+        }
+    }
+
     /// match 表达式 { 模式 => 分支体, ..., _ => 默认值 }  模式匹配（模式为字面量或 `_`）。
     /// 已消费 `match` 关键字；返回 Match 表达式，其值为匹配分支体的值。
     fn parse_match(&mut self, span: Span) -> Result<Expr, ZError> {
@@ -1363,12 +1439,12 @@ impl Parser {
         while !self.at(&Tok::RBrace) {
             let (ptok, pspan) = self.next();
             let pat = match ptok {
-                Tok::IntLit(v) => Some(Expr::IntLit(v, pspan)),
-                Tok::FloatLit(v) => Some(Expr::FloatLit(v, pspan)),
-                Tok::True => Some(Expr::BoolLit(true, pspan)),
-                Tok::False => Some(Expr::BoolLit(false, pspan)),
-                Tok::StrLit(s) => Some(Expr::StrLit(s, pspan)),
-                // `_` 通配符：匹配任意值（None 标记）
+                Tok::IntLit(v) => Pattern::Lit(Expr::IntLit(v, pspan)),
+                Tok::FloatLit(v) => Pattern::Lit(Expr::FloatLit(v, pspan)),
+                Tok::True => Pattern::Lit(Expr::BoolLit(true, pspan)),
+                Tok::False => Pattern::Lit(Expr::BoolLit(false, pspan)),
+                Tok::StrLit(s) => Pattern::Lit(Expr::StrLit(s, pspan)),
+                // `_` 通配符：匹配任意值
                 Tok::Ident(s) if s == "_" => {
                     if saw_wildcard {
                         return Err(self.err_at(
@@ -1379,14 +1455,54 @@ impl Parser {
                         ));
                     }
                     saw_wildcard = true;
-                    None
+                    Pattern::Wildcard
+                }
+                // 枚举变体模式：Color.Red（无载荷）或 Shape.Circle(r)（带载荷绑定）
+                Tok::Ident(first) => {
+                    let parts = self.join_dotted_parts(first, pspan)?;
+                    if parts.len() != 2 {
+                        return Err(self.err_at(
+                            &pspan,
+                            codes::SYNTAX,
+                            format!("unsupported match pattern `{}`", parts.join(".")),
+                            Some("patterns: literals (`1`, `\"a\"`, `true`), enum variants (`Color.Red`, `Shape.Circle(r)`), or `_` wildcard"),
+                        ));
+                    }
+                    let (enum_name, variant) = (parts[0].clone(), parts[1].clone());
+                    let mut binds = Vec::new();
+                    if self.at(&Tok::LParen) {
+                        self.next();
+                        while !self.at(&Tok::RParen) {
+                            let (btok, bspan) = self.next();
+                            let b = match btok {
+                                Tok::Ident(s) if s == "_" => None,
+                                Tok::Ident(s) => Some(s),
+                                other => {
+                                    return Err(self.err_at(
+                                        &bspan,
+                                        codes::SYNTAX,
+                                        format!("expected a binding name or `_` in variant pattern, found {}", other.describe()),
+                                        Some("form: `Enum.Variant(name, _)`"),
+                                    ))
+                                }
+                            };
+                            binds.push(b);
+                            if self.at(&Tok::Comma) {
+                                self.next();
+                            } else {
+                                break;
+                            }
+                        }
+                        self.expect(&Tok::RParen, "`)`")?;
+                    }
+                    Pattern::Variant { enum_name, variant, binds, span: pspan }
                 }
                 other => {
                     return Err(self.err_at(
                         &pspan,
                         codes::SYNTAX,
                         format!("unsupported match pattern, found {}", other.describe()),
-                        Some("patterns: literals (`1`, `\"a\"`, `true`) or `_` wildcard"),
+                        Some("patterns: literals (`1`, `\"a\"`, `true`), enum variants (`Color.Red`, `Shape.Circle(r)`), or `_` wildcard"),
                     ))
                 }
             };
@@ -1670,6 +1786,14 @@ impl Parser {
             let expr = self.parse_unary()?;
             Ok(Expr::Unary {
                 op: UnOp::Not,
+                expr: Box::new(expr),
+                span,
+            })
+        } else if self.at(&Tok::Await) {
+            // await 表达式：await expr  等待 async 函数调用的 future 完成并返回结果
+            let (_, span) = self.next();
+            let expr = self.parse_unary()?;
+            Ok(Expr::Await {
                 expr: Box::new(expr),
                 span,
             })

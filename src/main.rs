@@ -139,6 +139,7 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
         "fmt" => cmd_fmt(&args[1..]),
         "doc" => cmd_doc(&args[1..]),
         "test" => cmd_test(&args[1..]),
+        "watch" => cmd_watch(&args[1..]),
         "bind" => cmd_bind(&args[1..]),
         "build" => cmd_build(&args[1..]),
         "get" => cmd_get(&args[1..]),
@@ -391,6 +392,7 @@ fn print_help() {
     println!("  hone get                   读取当前目录 hone.json 清单，批量下载全部模块");
     println!("  hone get <module> <url>  下载模块依赖并缓存到 ~/.hone/cache/，并写入 hone.json 清单");
     println!("  hone get <script.hn>     预下载脚本中所有 import 声明的模块");
+    println!("  hone watch <script.hn>   监控脚本文件变更自动重跑（[--interval=N] 毫秒，默认 500，Ctrl+C 退出）");
     println!("  hone prof <script.hn>    以剖析模式运行脚本，输出函数级热点报告（总耗时/调用次数/平均耗时）");
     println!("  hone self-update [url]   从 URL 下载最新 hone 二进制并替换当前程序（需管理员/写权限）");
     println!("  hone lsp                 启动语言服务器（补全/诊断，LSP over stdio）");
@@ -1432,22 +1434,30 @@ fn cmd_test(args: &[String]) -> Result<(), ZError> {
         println!("no *.test.hn files found under `{}`", root);
         return Ok(());
     }
+    // 断言统计清零（assert / assert_eq 进程级累计，按文件差值显示）
+    builtins::reset_assertions();
     let mut passed = 0usize;
     let mut failed = 0usize;
+    let mut total_asserts = 0usize;
     for f in &files {
+        let (ok0, fail0) = builtins::assertion_stats();
         match run_file(f, false) {
             Ok(()) => {
-                println!("PASS  {}", f);
+                let (ok, fail) = builtins::assertion_stats();
+                println!("PASS  {} (断言 {}/{})", f, ok - ok0, ok - ok0 + fail - fail0);
+                total_asserts += ok - ok0;
                 passed += 1;
             }
             Err(e) => {
-                println!("FAIL  {} -> {}", f, e);
+                let (ok, fail) = builtins::assertion_stats();
+                println!("FAIL  {} (断言 {}/{}) -> {}", f, ok - ok0, ok - ok0 + fail - fail0, e);
+                total_asserts += ok - ok0;
                 failed += 1;
             }
         }
     }
     println!();
-    println!("{} passed, {} failed ({} total)", passed, failed, passed + failed);
+    println!("{} passed, {} failed ({} total, {} 断言通过)", passed, failed, passed + failed, total_asserts);
     if failed > 0 {
         return Err(ZError::plain(
             codes::ASSERT,
@@ -1456,6 +1466,70 @@ fn cmd_test(args: &[String]) -> Result<(), ZError> {
         ));
     }
     Ok(())
+}
+
+/// hone watch <script.hn> [--interval=N]：监控脚本文件变更，自动重跑（跨平台轮询，零依赖）。
+/// 轮询文件 mtime + 大小（std 实现，Windows/Linux/Termux 一致），变化即重新执行。
+fn cmd_watch(args: &[String]) -> Result<(), ZError> {
+    let path = args.first().ok_or_else(|| {
+        ZError::plain(
+            codes::SYNTAX,
+            "missing script path: `hone watch <script.hn>`",
+            Some("run `hone --help` for usage"),
+        )
+    })?;
+    let mut interval_ms: u64 = 500;
+    for a in &args[1..] {
+        if let Some(v) = a.strip_prefix("--interval=") {
+            interval_ms = v.parse().unwrap_or(500);
+        }
+    }
+    interval_ms = interval_ms.max(50); // 下限 50ms，避免忙等
+    let now_str = || {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        format!("{:02}:{:02}:{:02}", (t / 3600) % 24, (t / 60) % 60, t % 60)
+    };
+    let run_once = |path: &str| {
+        println!("[{}] 运行 {}", now_str(), path);
+        match run_file_or_pkg(path, false) {
+            Ok(()) => println!("[{}] 运行成功", now_str()),
+            Err(e) => println!("[{}] {}", now_str(), e),
+        }
+    };
+    let fingerprint = |path: &str| -> Result<(u128, u64), ZError> {
+        let md = std::fs::metadata(path).map_err(|e| {
+            ZError::plain(
+                codes::FILE_NOT_FOUND,
+                format!("cannot stat `{}`: {}", path, e),
+                Some("check the path"),
+            )
+        })?;
+        let mtime = md
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        Ok((mtime, md.len()))
+    };
+    run_once(path);
+    let mut last = fingerprint(path)?;
+    println!("watch: 监听 `{}` 变更（--interval={}ms，Ctrl+C 退出）", path, interval_ms);
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(interval_ms));
+        match fingerprint(path) {
+            Ok(fp) if fp != last => {
+                last = fp;
+                run_once(path);
+            }
+            // 文件被删除/不可读：提示后继续监听（恢复后重跑）
+            Err(e) => eprintln!("[{}] {}", now_str(), e),
+            _ => {}
+        }
+    }
 }
 
 /// 递归收集目录下所有以 `.test.hn` 结尾的文件。

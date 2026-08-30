@@ -36,7 +36,7 @@ function toggleTheme(){
     <a href="download.html">下载</a>
     <a href="perf.html">性能</a>
   </nav>
-  <span class="ver">v0.7.0</span>
+  <span class="ver">v0.7.9</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
@@ -471,6 +471,66 @@ v = <span class="f">void_fn</span>();
 <span class="f">print</span>(v?.name ?? <span class="s">"匿名"</span>);  <span class="c">// 匿名（与空值合并配合）</span></code></pre>
   </section>
 
+  <section id="enum">
+    <h2><span class="hash">#</span>7.8 枚举（enum）与 match 变体模式</h2>
+    <p><strong>enum</strong>：<code class="inline">enum 名称 { 变体, 变体(类型, ...), ... };</code>
+      简单变体无载荷、带载荷变体携带多个类型化字段（int/float/bool/str）。变体访问
+      <code class="inline">Color.Red</code>（无载荷）或构造 <code class="inline">Shape.Circle(1.5)</code>
+      （带载荷，按载荷顺序传参，检查阶段校验个数与类型）。<code class="inline">==</code>/<code class="inline">!=</code>
+      比较类型 + 变体 + 载荷（不同枚举互不相等）。枚举名全局唯一（与 struct/class 重名报错），
+      变体名在枚举内唯一。值显示为 <code class="inline">Color.Red</code> / <code class="inline">Shape.Circle(1.5)</code>。</p>
+    <p><strong>match 变体模式</strong>：<code class="inline">Color.Red</code>（无载荷）或
+      <code class="inline">Shape.Circle(r)</code>（载荷绑定到分支体变量，<code class="inline">_</code> 忽略某项），
+      与字面量 / <code class="inline">_</code> 通配符模式共存；绑定变量仅本分支内可见：</p>
+<pre><code><span class="k">enum</span> <span class="t">Shape</span> { Circle(<span class="k">float</span>), Rect(<span class="k">float</span>, <span class="k">float</span>) };
+area = <span class="k">match</span> <span class="f">Shape</span>.Circle(<span class="n">2.0</span>) {
+    <span class="f">Shape</span>.Circle(r) =&gt; <span class="n">3.14159</span> * r * r,
+    <span class="f">Shape</span>.Rect(w, h) =&gt; w * h,
+    _ =&gt; <span class="n">0</span>,
+};
+<span class="f">print</span>(area);   <span class="c">// 12.56636…</span></code></pre>
+    <p>全链路支持解析 / 静态检查 / 解释器 / AOT 原生编译 / fmt / LSP；示例
+      <code class="inline">examples/enum_demo.hn</code>。</p>
+  </section>
+
+  <section id="overload">
+    <h2><span class="hash">#</span>7.9 运算符重载（__op 特殊函数）</h2>
+    <p>顶层定义特殊函数 <code class="inline">fn __op(参数) { ... }</code>，仅在内建运算不支持的
+      操作数组合时被调用；内置类型（int/float/str/list/dict/enum 等）的固有行为完全不受影响。
+      覆盖二元 <code class="inline">+ - * / % == != &lt; &lt;= &gt; &gt;=</code>
+      （<code class="inline">__add/__sub/__mul/__div/__mod/__eq/__ne/__lt/__le/__gt/__ge</code>）、
+      一元 <code class="inline">-x</code>/<code class="inline">!x</code>
+      （<code class="inline">__neg/__not</code>）、内置 <code class="inline">len(x)</code>/
+      <code class="inline">x[i]</code>（<code class="inline">__len/__index</code>）。
+      重载函数与普通函数一样遵循返回类型锁定；定义了重载后涉及动态值的运算静态检查放宽
+      （交给运行时判定）。AOT 原生编译支持二元/一元重载（生成「内建组合 → 内建运算，否则 →
+      __op 调用」分派链）；示例 <code class="inline">examples/overload_demo.hn</code>：</p>
+<pre><code><span class="k">fn</span> <span class="f">__add</span>(a, b) {
+    <span class="k">if</span> (<span class="f">type_of</span>(a) == <span class="s">"dict"</span> &amp;&amp; <span class="f">type_of</span>(b) == <span class="s">"dict"</span>) {
+        <span class="k">return</span> <span class="f">mk_complex</span>(<span class="f">c_re</span>(a) + <span class="f">c_re</span>(b), <span class="f">c_im</span>(a) + <span class="f">c_im</span>(b));
+    }
+    <span class="k">return</span> {<span class="s">"re"</span>: <span class="n">0</span>, <span class="s">"im"</span>: <span class="n">0</span>};
+}
+zs = z1 + z2;        <span class="c">// dict + dict 内建不支持 → __add</span>
+<span class="f">print</span>(<span class="f">to_str</span>(zs));  <span class="c">// {re: 4, im: 6}</span></code></pre>
+  </section>
+
+  <section id="async">
+    <h2><span class="hash">#</span>7.10 异步函数（async fn + await）</h2>
+    <p><code class="inline">async fn 名称(参数) { ... }</code> 定义异步函数（与 fn 同构）。
+      调用时在后台线程执行并立即返回 future（不阻塞调用方）；<code class="inline">await 表达式</code>
+      阻塞等待 future 完成并返回其结果。错误传播：async 函数体内 throw / 运行时错误存入 future，
+      await 时原样抛出（可 try/catch 捕获）。与 <code class="inline">go</code> 互补：
+      go 发后不理、async/await 结构化并发（多个 async 并行启动、依次 await，总耗时约等于最慢者）。
+      AOT 与 <code class="inline">hone build --dll</code> 对 async/await 报「暂不支持」；
+      示例 <code class="inline">examples/async_demo.hn</code>：</p>
+<pre><code><span class="k">async</span> <span class="k">fn</span> <span class="f">compute</span>(n) {
+    <span class="k">return</span> n * <span class="n">2</span>;
+}
+f = <span class="f">compute</span>(<span class="n">21</span>);      <span class="c">// 立即返回 future（不阻塞）</span>
+<span class="f">print</span>(<span class="k">await</span> f);    <span class="c">// 42（阻塞等待结果）</span></code></pre>
+  </section>
+
   <section id="builtins">
     <h2><span class="hash">#</span>8. 内置函数参考</h2>
     <p>全部开箱即用，无需导入：</p>
@@ -480,7 +540,7 @@ v = <span class="f">void_fn</span>();
       <tr><td>标准输入</td><td><code>input(prompt?)</code> 读取一行返回 str（EOF 报 H306）<code>read_int(prompt?)</code>（格式错报 H006）<code>read_float(prompt?)</code>（格式错报 H007）</td></tr>
       <tr><td>集合</td><td><code>append</code> <code>clone</code> <code>copy</code>（深度拷贝）<code>contains</code> <code>index_of</code> <code>keys</code> <code>values</code> <code>has_key</code></td></tr>
       <tr><td>类型判断</td><td><code>is_int</code> <code>is_float</code> <code>is_str</code> <code>is_bool</code> <code>is_list</code> <code>is_dict</code> <code>is_null</code></td></tr>
-      <tr><td>断言 / 测试</td><td><code>assert</code>（条件为 false 抛 H700，配合 <code>hone test</code>）</td></tr>
+      <tr><td>断言 / 测试</td><td><code>assert</code>（条件为 false 抛 H700，配合 <code>hone test</code>）<code>assert_eq</code>（实际≠期望抛 H700，相等语义与 <code>==</code> 一致）</td></tr>
       <tr><td>字符串</td><td><code>str_contains</code> <code>str_replace</code> <code>str_trim</code></td></tr>
       <tr><td>数学</td><td><code>abs</code> <code>max</code> <code>min</code></td></tr>
       <tr><td>类型转换</td><td><code>to_str</code> <code>to_int</code> <code>to_float</code></td></tr>
@@ -1006,7 +1066,7 @@ function searchDocs(q) {
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.7.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.7.9 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

@@ -3,7 +3,7 @@
 轻量级、跨平台、可嵌入的脚本语言。用 Rust 实现，单文件可执行程序，开箱即用。
 
 > 设计规范：`hone.md`（v1.2）
-> 当前版本：v0.7.0（完整工具链，详见 CHANGELOG）
+> 当前版本：v0.7.9（枚举/运算符重载/hone watch/async-await，详见 CHANGELOG）
 
 ## 构建
 
@@ -45,6 +45,7 @@ hone get <module> <url>   # 下载模块依赖并缓存到 ~/.hn/cache/，并写
 hone get <script.hn>      # 预下载脚本中所有 import 声明的模块
 hone upgrade [-w] <file.hn> # 按映射表自动迁移旧版本语法（-w 覆盖写）
 hone lsp                  # 启动语言服务器（补全/诊断，LSP over stdio）
+hone watch <script.hn>    # 监控脚本文件变更自动重跑（[--interval=N] 毫秒，默认 500，Ctrl+C 退出）
 hone repl                 # 交互式解释器（Python 式：表达式回显/多行续行/.vars 查看变量）
 hone prof <file.hn>       # 剖析模式运行脚本，输出函数级热点报告（总耗时/调用次数/平均耗时）
 hone poop <file.hn>       # 屎山检测——分析 if 嵌套深度和圈复杂度
@@ -140,6 +141,25 @@ class Math {
 }
 print(Math.double(21));   // 42
 print(Math.fib(10));      // 55
+
+// enum 枚举：简单变体 + 带载荷变体，match 变体模式匹配
+enum Color { Red, Green, Blue };
+enum Shape { Circle(float), Rect(float, float) };
+c = Color.Red;
+print(c);                         // Color.Red
+print(c == Color.Red);            // true
+s = Shape.Circle(1.5);
+area = match s {
+    Shape.Circle(r) => 3.14159 * r * r,   // r 绑定载荷
+    Shape.Rect(w, h) => w * h,
+    _ => 0,
+};
+print(area);                      // 7.06858…
+
+// async fn + await：异步函数后台线程执行，调用返回 future，await 阻塞等待结果
+async fn compute(n) { return n * 2; }
+f = compute(21);                  // 立即返回 future（不阻塞）
+print(await f);                   // 42（阻塞等待结果）
 
 // 泛型：fn name[T, U](...) 声明类型参数，调用时按实参推导（编译期擦除，运行期零成本）
 fn identity[T](x: T) -> T { return x; }

@@ -458,6 +458,12 @@ impl Codegen {
                 *span,
                 Some("field access (`e.code` etc.) works in interpreted mode only"),
             )),
+            Expr::Await { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "await is not supported in DLL builds",
+                *span,
+                Some("async/await works in interpreted mode only"),
+            )),
             Expr::ListLit(..) | Expr::DictLit(..) | Expr::FStr(..) => Err(self.zerr(
                 codes::NOT_IMPLEMENTED,
                 "list/dict literals and f-strings are not supported in DLL builds",
@@ -1058,6 +1064,12 @@ impl Codegen {
                 *span,
                 Some("field access (`e.code` etc.) works in interpreted mode only"),
             )),
+            Expr::Await { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "await is not supported in DLL builds",
+                *span,
+                Some("async/await works in interpreted mode only"),
+            )),
             Expr::ListLit(..) | Expr::DictLit(..) | Expr::FStr(..) => Err(self.zerr(
                 codes::NOT_IMPLEMENTED,
                 "list/dict literals and f-strings are not supported in DLL builds",
@@ -1316,6 +1328,11 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Break { span, .. }
         | Stmt::Continue { span, .. }
         | Stmt::FnDef { span, .. }
+        | Stmt::AsyncFnDef { span, .. }
+        | Stmt::StructDef { span, .. }
+        | Stmt::EnumDef { span, .. }
+        | Stmt::ClassDef { span, .. }
+        | Stmt::DebugPrint { span, .. }
         | Stmt::ExprStmt { span, .. }
         | Stmt::Breakpoint { span, .. }
         | Stmt::Export { span, .. }

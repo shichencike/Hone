@@ -1,5 +1,43 @@
 # Changelog
 
+## [v0.7.9] - 2026-08-30
+
+### 新增
+- **枚举类型 enum + match 变体模式**：`enum Name { A, B(int), C(float, float) };` 声明枚举，
+  简单变体无载荷、带载荷变体携带多个类型化字段
+  - 变体访问/构造：`Color.Red`（简单变体）、`Shape.Circle(1.5)`（带载荷，按载荷顺序传参，
+    检查阶段校验个数与类型）；值显示为 `Color.Red` / `Shape.Circle(1.5)`
+  - `==` / `!=` 比较 类型 + 变体 + 载荷（不同枚举互不相等，载荷逐项比较）
+  - match 变体模式：`Color.Red`（无载荷）或 `Shape.Circle(r)`（载荷绑定到分支体变量，
+    `_` 忽略某项；绑定变量仅本分支内可见），与字面量/`_` 通配符模式共存
+  - 枚举名全局唯一（与 struct/class 重名报错）；变体名在枚举内唯一
+  - 全链路支持：解析/AST、静态检查（变体存在性、载荷个数与类型）、解释器运行时、
+    AOT 原生编译（C 运行时新增 HnEnum 判别式 + 载荷，匹配走类型名 + tag 快路径）、
+    fmt 格式化、LSP（悬停/大纲/语义高亮）；示例 `examples/enum_demo.hn`
+- **运算符重载（__op 特殊函数）**：顶层定义 `fn __add(a, b)` 等特殊函数，仅在内建运算
+  不支持的操作数组合时被调用；内置类型固有行为完全不受影响
+  - 支持映射：二元 `+ - * / % == != < <= > >=` → `__add/__sub/__mul/__div/__mod/
+    __eq/__ne/__lt/__le/__gt/__ge`；一元 `-x`/`!x` → `__neg/__not`；
+    内置 `len(x)`/`x[i]` → `__len/__index`
+  - 典型用途：给 dict/struct 实例或 enum 值自定义运算（复数、向量、货币等）
+  - 静态检查同步放宽：定义了重载后，涉及动态值（Unknown）的运算不再强制推断类型、
+    相等/比较操作数不再被误强制成 int 等错误类型（避免破坏后续加法推断）
+  - AOT 原生编译支持二元/一元重载（生成「内建组合 → 内建运算，否则 → __op 调用」分派链）；
+    示例 `examples/overload_demo.hn`
+- **hone watch 热重载**：`hone watch <script.hn> [--interval=N]` 监控脚本文件变更自动重跑；
+  跨平台轮询文件 mtime + 大小（std 实现，Windows/Linux/Termux 一致，零新增依赖），
+  每次运行带 HH:MM:SS 时间戳，Ctrl+C 退出
+- **测试框架增强**：新增断言函数 `assert_eq(实际, 期望[, 消息])`（相等语义与 `==` 一致）；
+  `hone test` 输出按文件的断言统计（PASS/FAIL 文件后附 通过/总数），汇总行含总断言通过数；
+  assert / assert_eq 进程级计数（含 go 子线程），支持 REPL 与子进程场景
+- **异步函数 async fn + await**：`async fn name(参数) { ... }` 定义异步函数，调用时在后台线程执行
+  并立即返回 future（不阻塞调用方）；`await expr` 阻塞等待 future 完成并返回结果
+  - 错误传播：async 函数体内 throw/运行时错误存入 future，await 时原样抛出（可 try/catch 捕获）
+  - 与 go 互补：go 发后不理（fire-and-forget），async/await 结构化并发（等待结果）；
+    多个 async 并行启动、依次 await 的总耗时约等于最慢者
+  - 类型检查/AOT/DLL 构建同步支持：AOT 与 --dll 对 async/await 报「暂不支持」；
+    示例 `examples/async_demo.hn`
+
 ## [v0.7.8] - 2026-08-29
 
 ### 新增

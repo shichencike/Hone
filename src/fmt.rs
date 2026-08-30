@@ -31,7 +31,8 @@ struct Item {
 
 const KEYWORDS: &[&str] = &[
     "fn", "if", "else", "while", "do", "for", "in", "return", "true", "false", "go", "breakpoint",
-    "break", "continue", "try", "catch", "throw", "match", "struct", "class",
+    "break", "continue", "try", "catch", "throw", "match", "struct", "class", "enum",
+    "async", "await",
     "int", "float", "bool", "str", "load", "lazy", "use", "import", "alias", "as", "from",
     "tmp",
 ];

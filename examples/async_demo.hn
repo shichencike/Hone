@@ -1,0 +1,80 @@
+// async_demo.hn - 异步函数（async fn + await）验证
+// 运行: hone examples/async_demo.hn
+// 原理：async fn 调用时在后台线程执行并立即返回 future（不阻塞调用方）；
+//       await 阻塞等待 future 完成并返回其结果（错误原样传播，可 try/catch 捕获）。
+// 验证点：
+//   1. async fn 定义与调用（返回 future，type_of 为 future）
+//   2. await 等待结果并参与后续计算
+//   3. 多个 async 并行启动、依次 await
+//   4. async 函数体内调用普通函数
+//   5. 错误传播：async 内 throw，await 时抛出可被捕获
+//   6. 与枚举值等动态类型交互
+//   7. 并行性验证（两个 async 同时运行，总耗时约等于最慢者）
+
+// 1. 基本异步函数：后台计算，await 取结果
+async fn compute(n) {
+    return n * 2;
+}
+f = compute(21);          // 立即返回 future（不阻塞）
+print(type_of(f));        // future
+print(await f);           // 42（阻塞等待结果）
+
+// 2. 多个异步函数并行启动，依次 await
+async fn slow_add(a, b) {
+    return a + b;
+}
+f1 = slow_add(10, 20);
+f2 = slow_add(1, 2);
+print(await f1);          // 30
+print(await f2);          // 3
+
+// 3. await 结果参与后续计算
+x = await slow_add(3, 4);
+print(x * 10);            // 70
+
+// 4. 异步函数内部调用普通函数
+fn helper(v) {
+    return v * 3;
+}
+async fn wrapped(n) {
+    return helper(n);
+}
+print(await wrapped(5));  // 15
+
+// 5. 错误传播：async 内 throw，await 时原样抛出（可 try/catch 捕获）
+async fn risky(n) {
+    if (n == 0) {
+        throw "zero not allowed";
+    }
+    return 100 / n;
+}
+print(await risky(2));    // 50
+try {
+    await risky(0);
+    print("不应到达");
+} catch e {
+    print("捕获: " + e.message);   // 捕获: zero not allowed
+}
+
+// 6. 与枚举等动态类型交互
+enum Status { Ok, Err };
+async fn report(ok) {
+    if (ok) {
+        return Status.Ok;
+    }
+    return Status.Err;
+}
+print(to_str(await report(true)));   // Status.Ok
+print(to_str(await report(false)));  // Status.Err
+
+// 7. 并行性验证：两个 async 同时运行（各自 sleep），总耗时约等于最慢者
+async fn task(label, secs) {
+    time.sleep(secs);
+    return label;
+}
+t1 = task("first", 0.3);
+t2 = task("second", 0.1);
+print(await t1);          // first（两者并行，await t1 等 0.3s，随后 t2 已完成）
+print(await t2);          // second（立即返回）
+
+print("== async/await 验证完成 ==");

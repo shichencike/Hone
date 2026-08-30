@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::io::{self, Write};
 use std::os::raw::c_char;
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 
 use crate::ast::*;
 use crate::builtins;
@@ -67,6 +67,58 @@ pub enum Value {
     Ptr(usize),
     /// 匿名函数值（lambda / 闭包）
     Lambda(Arc<LambdaVal>),
+    /// 枚举值（enum 类型实例：Color.Red / Shape.Circle(1.5)）。ty 为枚举名，payload 为变体载荷。
+    Enum(Arc<EnumVal>),
+    /// async 函数调用的 future：await 等待结果
+    Future(Arc<FutureVal>),
+}
+
+/// 枚举值内容：枚举名 + 变体名 + 可选载荷（简单变体载荷为空）。
+#[derive(Debug, Clone)]
+pub struct EnumVal {
+    pub ty: String,
+    pub variant: String,
+    pub payload: Vec<Value>,
+}
+
+/// async 函数调用的 future：后台线程执行，`await` 阻塞等待结果。
+#[derive(Debug)]
+pub struct FutureVal {
+    state: Mutex<FutureState>,
+    cv: Condvar,
+}
+
+#[derive(Debug)]
+enum FutureState {
+    Pending,
+    Done(Result<Value, ZError>),
+}
+
+impl FutureVal {
+    fn new() -> Arc<Self> {
+        Arc::new(FutureVal {
+            state: Mutex::new(FutureState::Pending),
+            cv: Condvar::new(),
+        })
+    }
+
+    /// 后台线程完成后写入结果并唤醒等待者。
+    fn complete(&self, result: Result<Value, ZError>) {
+        let mut s = self.state.lock().unwrap();
+        *s = FutureState::Done(result);
+        self.cv.notify_one();
+    }
+
+    /// 阻塞等待结果（错误原样传播，ZError 带子线程执行位置）。
+    fn wait(&self) -> Result<Value, ZError> {
+        let mut s = self.state.lock().unwrap();
+        loop {
+            match &*s {
+                FutureState::Done(r) => return r.clone(),
+                FutureState::Pending => s = self.cv.wait(s).unwrap(),
+            }
+        }
+    }
 }
 
 impl PartialEq for Value {
@@ -83,6 +135,10 @@ impl PartialEq for Value {
             (Value::Ptr(a), Value::Ptr(b)) => a == b,
             // lambda 无结构性相等：同一创建点的引用视为相等
             (Value::Lambda(a), Value::Lambda(b)) => Arc::ptr_eq(a, b),
+            // 枚举值：类型 + 变体 + 载荷全部相等才相等
+            (Value::Enum(a), Value::Enum(b)) => a.ty == b.ty && a.variant == b.variant && a.payload == b.payload,
+            // future 无结构相等：同一创建点的引用视为相等
+            (Value::Future(a), Value::Future(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -101,6 +157,8 @@ impl Value {
             Value::Error(_) => "error",
             Value::Ptr(_) => "ptr",
             Value::Lambda(_) => "fn",
+            Value::Enum(_) => "enum",
+            Value::Future(_) => "future",
         }
     }
 
@@ -125,6 +183,16 @@ impl Value {
             Value::Error(e) => format!("error[{}]: {}", e.code, e.message),
             Value::Ptr(p) => format!("0x{:x}", p),
             Value::Lambda(f) => format!("fn({})", f.params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")),
+            // 枚举显示：Color.Red / Shape.Circle(1.5, 2.5)
+            Value::Enum(e) => {
+                if e.payload.is_empty() {
+                    format!("{}.{}", e.ty, e.variant)
+                } else {
+                    let inner: Vec<String> = e.payload.iter().map(|v| v.display()).collect();
+                    format!("{}.{}({})", e.ty, e.variant, inner.join(", "))
+                }
+            }
+            Value::Future(_) => "future".to_string(),
         }
     }
 }
@@ -276,6 +344,10 @@ pub struct Interp {
     alias_map: HashMap<String, String>,
     /// 结构体定义：名称 → 字段名（构造时按顺序生成 dict 实例）
     structs: HashMap<String, Vec<String>>,
+    /// 枚举定义：名称 → 变体名列表（变体访问/构造/匹配时校验存在性）
+    enums: HashMap<String, Vec<String>>,
+    /// 异步函数名集合（async fn 定义）：调用时后台线程执行并返回 future
+    async_fns: HashSet<String>,
     /// 类定义：类名 → (方法名 → FnDef)。成员函数不进全局 fns 表，
     /// 只能经 `类.方法(...)` 调用（call_fn 按限定名解析）。
     classes: HashMap<String, HashMap<String, Arc<FnDef>>>,
@@ -379,6 +451,7 @@ fn run_impl(
     }
     ip.collect_fns(&program.stmts)?;
     ip.collect_structs(&program.stmts);
+    ip.collect_enums(&program.stmts);
     ip.collect_classes(&program.stmts);
     let mut env = Env::new();
     let exec = ip.exec_stmts(&mut env, &program.stmts);
@@ -413,6 +486,8 @@ impl Interp {
             ffi_sigs: HashMap::new(),
             alias_map: HashMap::new(),
             structs: HashMap::new(),
+            enums: HashMap::new(),
+            async_fns: HashSet::new(),
             classes: HashMap::new(),
             prof: None,
             last_expr: None,
@@ -454,6 +529,17 @@ impl Interp {
                         );
                     }
                 }
+                Stmt::AsyncFnDef { name, params, body, .. } => {
+                    // 异步函数：注册到 fns（函数体可调用），并登记到 async_fns（调用时后台执行）
+                    self.fns.insert(
+                        name.clone(),
+                        Arc::new(FnDef {
+                            params: params.clone(),
+                            body: body.clone(),
+                        }),
+                    );
+                    self.async_fns.insert(name.clone());
+                }
                 Stmt::Block { stmts, .. } => self.collect_fns(stmts)?,
                 Stmt::If { then_branch, else_branch, .. } => {
                     self.collect_fns(then_branch)?;
@@ -488,6 +574,32 @@ impl Interp {
                 Stmt::Try { body, handler, .. } => {
                     self.collect_structs(body);
                     self.collect_structs(handler);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// 收集所有枚举定义（含嵌套），扁平化注册；解释执行时 EnumDef 语句为 no-op。
+    pub fn collect_enums(&mut self, stmts: &[Stmt]) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::EnumDef { name, variants, .. } => {
+                    let names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
+                    self.enums.insert(name.clone(), names);
+                }
+                Stmt::Block { stmts, .. } => self.collect_enums(stmts),
+                Stmt::If { then_branch, else_branch, .. } => {
+                    self.collect_enums(then_branch);
+                    if let Some(eb) = else_branch {
+                        self.collect_enums(eb);
+                    }
+                }
+                Stmt::While { body, .. } => self.collect_enums(body),
+                Stmt::ForIn { body, .. } => self.collect_enums(body),
+                Stmt::Try { body, handler, .. } => {
+                    self.collect_enums(body);
+                    self.collect_enums(handler);
                 }
                 _ => {}
             }
@@ -907,6 +1019,8 @@ impl Interp {
                 Ok(Flow::Normal)
             }
             Stmt::StructDef { .. } => Ok(Flow::Normal), // 已扁平化注册
+            Stmt::EnumDef { .. } => Ok(Flow::Normal), // 已扁平化注册
+            Stmt::AsyncFnDef { .. } => Ok(Flow::Normal), // 已扁平化注册
             Stmt::ClassDef { .. } => Ok(Flow::Normal), // 已注册到 classes 表（成员函数不进全局 fns）
             Stmt::Go { callee, args, span } => self.exec_go(env, callee, args, *span),
             Stmt::DebugPrint { expr, span: _ } => {
@@ -1059,6 +1173,56 @@ impl Interp {
 
     // ---------- go 多线程 ----------
 
+    /// async 函数调用：后台线程执行（状态克隆与 go 一致），立即返回 future。
+    /// 错误原样存入 future，由 `await` 阻塞等待并传播。
+    fn exec_async_fn(&mut self, callee: &str, args: Vec<Value>, span: Span) -> Result<Value, ZError> {
+        let fns = self.fns.clone();
+        let alias_map = self.alias_map.clone();
+        let lazy_libs = self.lazy_libs.clone();
+        let structs = self.structs.clone();
+        let enums = self.enums.clone();
+        let async_fns = self.async_fns.clone();
+        let classes = self.classes.clone();
+        let file = self.file.clone();
+        let src = self.src.clone();
+        let callee = callee.to_string();
+        let span = span;
+        let future = FutureVal::new();
+        let fut = future.clone();
+        std::thread::spawn(move || {
+            let mut t = Interp {
+                file,
+                src,
+                fns,
+                debug: false,
+                depth: 0,
+                libs: HashMap::new(),
+                lazy_libs,
+                ffi_sigs: HashMap::new(),
+                alias_map,
+                structs,
+                enums,
+                async_fns,
+                classes,
+                prof: None,
+                last_expr: None,
+                watch: Vec::new(),
+                prof_stack: Vec::new(),
+                prof_edges: HashMap::new(),
+            };
+            // 直接执行函数体（exec_user_fn）而非 call_fn：
+            // call_fn 会再次命中 async 分支造成无限递归启动线程。
+            // 函数体内调用其他 async 函数时仍走 call_fn 的 async 分支（嵌套线程，语义正确）。
+            let result = if let Some(f) = t.fns.get(&callee).cloned() {
+                t.exec_user_fn(&callee, &f, args, span)
+            } else {
+                t.call_fn(&callee, args, span)
+            };
+            fut.complete(result);
+        });
+        Ok(Value::Future(future))
+    }
+
     fn exec_go(
         &mut self,
         env: &mut Env,
@@ -1075,6 +1239,8 @@ impl Interp {
         let alias_map = self.alias_map.clone();
         let lazy_libs = self.lazy_libs.clone();
         let structs = self.structs.clone();
+        let enums = self.enums.clone();
+        let async_fns = self.async_fns.clone();
         let classes = self.classes.clone();
         let file = self.file.clone();
         let src = self.src.clone();
@@ -1094,6 +1260,8 @@ impl Interp {
                 ffi_sigs: HashMap::new(),
                 alias_map,
                 structs,
+                enums,
+                async_fns,
                 classes,
                 prof: None,
                 last_expr: None,
@@ -1513,8 +1681,21 @@ impl Interp {
 
     // ---------- 函数调用 ----------
 
+    /// 运算符重载回退：调用顶层特殊函数 `__op(...)`（若已定义）。
+    /// 仅在内建运算不支持的操作数组合时由运算符求值路径调用。
+    fn call_overload(&mut self, name: &str, args: Vec<Value>, span: Span) -> Option<Result<Value, ZError>> {
+        if self.fns.contains_key(name) {
+            Some(self.call_fn(name, args, span))
+        } else {
+            None
+        }
+    }
+
     fn call_fn(&mut self, callee: &str, args: Vec<Value>, span: Span) -> Result<Value, ZError> {
-        if let Some(f) = self.fns.get(callee).cloned() {
+        if self.async_fns.contains(callee) {
+            // 异步函数调用：后台线程执行，返回 future（await 等待结果）
+            self.exec_async_fn(callee, args, span)
+        } else if let Some(f) = self.fns.get(callee).cloned() {
             self.exec_user_fn(callee, &f, args, span)
         } else if let Some(fields) = self.structs.get(callee).cloned() {
             // 结构体构造：按字段顺序生成 dict 实例
@@ -1531,10 +1712,26 @@ impl Interp {
                 ));
             }
             Ok(Value::Dict(fields.into_iter().zip(args).collect()))
+        } else if let Some(v) = self.try_enum_construct(callee, &args, span)? {
+            // 枚举变体构造：Shape.Circle(1.5) → 枚举值
+            Ok(v)
         } else if let Some(result) = self.call_class_method(callee, &args, span) {
             // 类方法（类名.方法名）：成员函数不进全局 fns 表，经此解析执行
             result
         } else if builtins::is_builtin(callee) {
+            // len 重载：内建失败（值类型不支持）时回退 __len
+            if callee == "len" && self.fns.contains_key("__len") {
+                match builtins::call(callee, args.clone(), span, &self.file, &self.src) {
+                    Ok(v) => return Ok(v),
+                    Err(e) if e.code == codes::TYPE_MISMATCH => {
+                        return match self.call_overload("__len", args, span) {
+                            Some(r) => r,
+                            None => Err(e),
+                        };
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
             // 内置函数优先（含 time.now / random.int / sys.* 等点号内置）
             builtins::call(callee, args, span, &self.file, &self.src)
         } else if let Some(orig) = self.alias_map.get(callee).cloned() {
@@ -1544,6 +1741,30 @@ impl Interp {
         } else {
             builtins::call(callee, args, span, &self.file, &self.src)
         }
+    }
+
+    /// 枚举变体构造：callee 形如 `Enum.Variant` 且枚举已注册 → 返回 Some(枚举值)；
+    /// 非枚举限定名返回 None（由调用方继续解析为类方法/内置/模块函数）。
+    fn try_enum_construct(&self, callee: &str, args: &[Value], span: Span) -> Result<Option<Value>, ZError> {
+        let Some((enum_name, variant)) = callee.split_once('.') else {
+            return Ok(None);
+        };
+        let Some(vs) = self.enums.get(enum_name) else {
+            return Ok(None);
+        };
+        if !vs.iter().any(|v| v == variant) {
+            return Err(self.runtime_err(
+                codes::UNDEFINED,
+                format!("enum `{}` has no variant `{}`", enum_name, variant),
+                span,
+                Some(format!("variants: {}", vs.join(", "))),
+            ));
+        }
+        Ok(Some(Value::Enum(Arc::new(EnumVal {
+            ty: enum_name.to_string(),
+            variant: variant.to_string(),
+            payload: args.to_vec(),
+        }))))
     }
 
     /// 执行用户函数/类方法体：绑定参数到新环境，执行函数体，处理 return。
@@ -1992,6 +2213,24 @@ impl Interp {
                 )),
             },
             Expr::Field { obj, field, span } => {
+                // 枚举变体访问：Color.Red（obj 为已注册枚举名）→ 校验变体并构造枚举值
+                if let Expr::Ident { name, .. } = obj.as_ref() {
+                    if let Some(vs) = self.enums.get(name) {
+                        if !vs.iter().any(|v| v == field) {
+                            return Err(self.runtime_err(
+                                codes::UNDEFINED,
+                                format!("enum `{}` has no variant `{}`", name, field),
+                                *span,
+                                Some(format!("variants: {}", vs.join(", "))),
+                            ));
+                        }
+                        return Ok(Value::Enum(Arc::new(EnumVal {
+                            ty: name.clone(),
+                            variant: field.clone(),
+                            payload: Vec::new(),
+                        })));
+                    }
+                }
                 let v = self.eval_expr(env, obj)?;
                 self.field_value(v, field, *span)
             }
@@ -2006,29 +2245,53 @@ impl Interp {
             Expr::Index { obj, index, span } => {
                 let v = self.eval_expr(env, obj)?;
                 let idx = self.eval_expr(env, index)?;
-                self.index_value(v, idx, *span)
+                // 定义了 __index 时先试内建索引，类型不支持则回退重载
+                if self.fns.contains_key("__index") {
+                    match self.index_value(v.clone(), idx.clone(), *span) {
+                        Ok(r) => Ok(r),
+                        Err(e) if e.code == codes::TYPE_MISMATCH => {
+                            match self.call_overload("__index", vec![v, idx], *span) {
+                                Some(res) => res,
+                                None => Err(e),
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    self.index_value(v, idx, *span)
+                }
             }
             Expr::Unary { op, expr, span } => {
                 let v = self.eval_expr(env, expr)?;
+                // 先取类型名（match 会移动 v，错误分支仍需展示类型）
+                let tn = v.type_name();
                 match op {
                     UnOp::Neg => match v {
                         Value::Int(x) => Ok(Value::Int(-x)),
                         Value::Float(x) => Ok(Value::Float(-x)),
-                        other => Err(self.runtime_err(
-                            codes::TYPE_MISMATCH,
-                            format!("unary `-` requires a number, got `{}`", other.type_name()),
-                            *span,
-                            None::<&str>,
-                        )),
+                        // 类型不支持：若定义了 __neg 则回退重载
+                        other => match self.call_overload("__neg", vec![other], *span) {
+                            Some(res) => res,
+                            None => Err(self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                format!("unary `-` requires a number, got `{}`", tn),
+                                *span,
+                                None::<&str>,
+                            )),
+                        },
                     },
                     UnOp::Not => match v {
                         Value::Bool(b) => Ok(Value::Bool(!b)),
-                        other => Err(self.runtime_err(
-                            codes::TYPE_MISMATCH,
-                            format!("`!` requires a `bool`, got `{}`", other.type_name()),
-                            *span,
-                            None::<&str>,
-                        )),
+                        // 类型不支持：若定义了 __not 则回退重载
+                        other => match self.call_overload("__not", vec![other], *span) {
+                            Some(res) => res,
+                            None => Err(self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                format!("`!` requires a `bool`, got `{}`", tn),
+                                *span,
+                                None::<&str>,
+                            )),
+                        },
                     },
                 }
             }
@@ -2036,15 +2299,51 @@ impl Interp {
             Expr::Match { value, arms, span } => {
                 let v = self.eval_expr(env, value)?;
                 for (pat, body) in arms {
-                    let matched = match pat {
-                        None => true, // `_` 通配符
-                        Some(p) => {
-                            let pv = self.eval_expr(env, p)?;
-                            self.values_eq(&v, &pv, *span)?
+                    match pat {
+                        Pattern::Wildcard => {
+                            // `_` 通配符
+                            return self.eval_expr(env, body);
                         }
-                    };
-                    if matched {
-                        return self.eval_expr(env, body);
+                        Pattern::Lit(p) => {
+                            let pv = self.eval_expr(env, p)?;
+                            if self.values_eq(&v, &pv, *span)? {
+                                return self.eval_expr(env, body);
+                            }
+                        }
+                        Pattern::Variant { enum_name, variant, binds, .. } => {
+                            if let Value::Enum(ev) = &v {
+                                if &ev.ty == enum_name && &ev.variant == variant {
+                                    // 运行时兜底校验载荷个数（checker 已静态校验）
+                                    if binds.len() != ev.payload.len() {
+                                        return Err(self.runtime_err(
+                                            codes::ARG_COUNT,
+                                            format!(
+                                                "variant `{}` of enum `{}` expects {} payload value(s), pattern binds {}",
+                                                variant,
+                                                enum_name,
+                                                ev.payload.len(),
+                                                binds.len()
+                                            ),
+                                            *span,
+                                            Some("check the binding count in the pattern"),
+                                        ));
+                                    }
+                                    // 有绑定：新作用域声明绑定变量，求值分支体后弹出
+                                    if binds.iter().any(|b| b.is_some()) {
+                                        env.scopes.push(HashMap::new());
+                                        for (b, pv) in binds.iter().zip(ev.payload.iter()) {
+                                            if let Some(name) = b {
+                                                env.declare(name, pv.clone());
+                                            }
+                                        }
+                                        let r = self.eval_expr(env, body)?;
+                                        env.scopes.pop();
+                                        return Ok(r);
+                                    }
+                                    return self.eval_expr(env, body);
+                                }
+                            }
+                        }
                     }
                 }
                 Err(self.runtime_err(
@@ -2099,6 +2398,19 @@ impl Interp {
                     body: body.clone(),
                     captured,
                 })))
+            }
+            Expr::Await { expr, span } => {
+                // await：阻塞等待 async 函数调用的 future 完成，返回其结果
+                let v = self.eval_expr(env, expr)?;
+                match v {
+                    Value::Future(f) => f.wait(),
+                    other => Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("`await` requires an async function call result (future), got `{}`", other.type_name()),
+                        *span,
+                        Some("await an async function call: `await fetch_data()`"),
+                    )),
+                }
             }
             Expr::Call { callee, args, span } => {
                 let mut arg_vals = Vec::new();
@@ -2213,25 +2525,81 @@ impl Interp {
             BinOp::Eq | BinOp::Ne => {
                 let l = self.eval_expr(env, lhs)?;
                 let r = self.eval_expr(env, rhs)?;
-                let eq = self.values_eq(&l, &r, span)?;
-                Ok(Value::Bool(if op == BinOp::Eq { eq } else { !eq }))
+                match self.values_eq(&l, &r, span) {
+                    Ok(eq) => Ok(Value::Bool(if op == BinOp::Eq { eq } else { !eq })),
+                    // 类型不匹配：若定义了 __eq / __ne 则回退重载
+                    Err(e) => {
+                        let ov = if op == BinOp::Eq { "__eq" } else { "__ne" };
+                        match self.call_overload(ov, vec![l, r], span) {
+                            Some(res) => res,
+                            None => Err(e),
+                        }
+                    }
+                }
             }
             BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                 let l = self.eval_expr(env, lhs)?;
                 let r = self.eval_expr(env, rhs)?;
-                let c = self.values_cmp(&l, &r, span)?;
-                Ok(Value::Bool(match op {
-                    BinOp::Lt => c == std::cmp::Ordering::Less,
-                    BinOp::Le => c != std::cmp::Ordering::Greater,
-                    BinOp::Gt => c == std::cmp::Ordering::Greater,
-                    BinOp::Ge => c != std::cmp::Ordering::Less,
-                    _ => unreachable!(),
-                }))
+                match self.values_cmp(&l, &r, span) {
+                    Ok(c) => Ok(Value::Bool(match op {
+                        BinOp::Lt => c == std::cmp::Ordering::Less,
+                        BinOp::Le => c != std::cmp::Ordering::Greater,
+                        BinOp::Gt => c == std::cmp::Ordering::Greater,
+                        BinOp::Ge => c != std::cmp::Ordering::Less,
+                        _ => unreachable!(),
+                    })),
+                    Err(e) => {
+                        // float 比较是内建语义（含 NaN 错误），不回退；其余类型不匹配回退重载
+                        let native = matches!((&l, &r), (Value::Float(_), Value::Float(_)) | (Value::Int(_), Value::Int(_)));
+                        if native {
+                            Err(e)
+                        } else {
+                            let ov = match op {
+                                BinOp::Lt => "__lt",
+                                BinOp::Le => "__le",
+                                BinOp::Gt => "__gt",
+                                BinOp::Ge => "__ge",
+                                _ => unreachable!(),
+                            };
+                            match self.call_overload(ov, vec![l, r], span) {
+                                Some(res) => res,
+                                None => Err(e),
+                            }
+                        }
+                    }
+                }
             }
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
                 let l = self.eval_expr(env, lhs)?;
                 let r = self.eval_expr(env, rhs)?;
-                self.arith(op, l, r, span)
+                // 内建组合（数字 / str+str）直接内建运算（零克隆热路径）；
+                // 非内建组合：先试内建（除零/溢出错误不回退），类型不匹配时回退 __op 重载
+                let native = matches!(
+                    (&l, &r),
+                    (Value::Int(_) | Value::Float(_), Value::Int(_) | Value::Float(_)) | (Value::Str(_), Value::Str(_))
+                );
+                if native {
+                    self.arith(op, l, r, span)
+                } else {
+                    match self.arith(op, l.clone(), r.clone(), span) {
+                        Ok(v) => Ok(v),
+                        Err(e) if e.code == codes::TYPE_MISMATCH => {
+                            let ov = match op {
+                                BinOp::Add => "__add",
+                                BinOp::Sub => "__sub",
+                                BinOp::Mul => "__mul",
+                                BinOp::Div => "__div",
+                                BinOp::Mod => "__mod",
+                                _ => unreachable!(),
+                            };
+                            match self.call_overload(ov, vec![l, r], span) {
+                                Some(res) => res,
+                                None => Err(e),
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
             }
             BinOp::Coalesce => {
                 // a ?? b：a 为 null 时取 b，否则取 a（短路：null 时才对 b 求值）
@@ -2270,6 +2638,8 @@ impl Interp {
             (Value::Ptr(x), Value::Int(y)) => Ok(*x as i64 == *y),
             (Value::Int(x), Value::Ptr(y)) => Ok(*x == *y as i64),
             (Value::Null, Value::Null) => Ok(true),
+            // 枚举值：类型 + 变体 + 载荷全部相等才相等
+            (Value::Enum(x), Value::Enum(y)) => Ok(x.ty == y.ty && x.variant == y.variant && x.payload == y.payload),
             _ => Err(self.runtime_err(
                 codes::TYPE_MISMATCH,
                 format!("cannot compare `{}` with `{}`", a.type_name(), b.type_name()),

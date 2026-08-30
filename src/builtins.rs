@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -22,6 +22,22 @@ use crate::lexer::Span;
 
 /// 全局键值存储（db.set / db.get）
 static KV_STORE: LazyLock<Mutex<HashMap<String, String>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// 断言统计（assert / assert_eq）：测试框架用例级报告用。
+/// 计数为进程级累计（含 go 子线程），cmd_test 按文件前后差值显示。
+static ASSERT_OK: AtomicUsize = AtomicUsize::new(0);
+static ASSERT_FAIL: AtomicUsize = AtomicUsize::new(0);
+
+/// 读取累计断言统计：(通过数, 失败数)。
+pub fn assertion_stats() -> (usize, usize) {
+    (ASSERT_OK.load(Ordering::Relaxed), ASSERT_FAIL.load(Ordering::Relaxed))
+}
+
+/// 清零断言统计（hone test 每次运行前调用）。
+pub fn reset_assertions() {
+    ASSERT_OK.store(0, Ordering::Relaxed);
+    ASSERT_FAIL.store(0, Ordering::Relaxed);
+}
 
 /// SSE 长连接句柄注册表（http.sse_open / http.sse_next / http.sse_close）。
 /// 句柄从 1 递增；连接保持到 sse_close 显式关闭（或脚本退出时随进程回收）。
@@ -189,6 +205,7 @@ pub fn is_builtin(name: &str) -> bool {
             | "is_null"
             | "type_of"
             | "assert"
+            | "assert_eq"
             | "to_str"
             | "to_int"
             | "to_float"
@@ -528,10 +545,29 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                     ))
                 }
             };
-            if !ok {
+            if ok {
+                ASSERT_OK.fetch_add(1, Ordering::Relaxed);
+            } else {
+                ASSERT_FAIL.fetch_add(1, Ordering::Relaxed);
                 let msg = match args.get(1) {
                     Some(Value::Str(s)) => s.clone(),
                     _ => "assertion failed".to_string(),
+                };
+                return Err(err(codes::ASSERT, msg, span, file, src, None::<&str>));
+            }
+            Ok(Value::Null)
+        }
+        "assert_eq" => {
+            // assert_eq(实际, 期望[, 消息])：两个值不相等时抛 H700（测试框架用）。
+            // 相等语义与 == 一致（values_eq：int/float/bool/str/list/dict/null/ptr/enum）。
+            ASSERT_OK.fetch_add(1, Ordering::Relaxed);
+            let a = args.get(0).ok_or_else(|| arg_err(name, 2, 0, span, file, src))?;
+            let b = args.get(1).ok_or_else(|| arg_err(name, 2, 1, span, file, src))?;
+            if !values_eq(a, b) {
+                ASSERT_FAIL.fetch_add(1, Ordering::Relaxed);
+                let msg = match args.get(2) {
+                    Some(Value::Str(s)) => s.clone(),
+                    _ => format!("assertion failed: {} != {}", a.display(), b.display()),
                 };
                 return Err(err(codes::ASSERT, msg, span, file, src, None::<&str>));
             }
@@ -572,7 +608,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                     Ok(Value::Str(v.display()))
                 }
                 Value::Str(s) => Ok(Value::Str(s.clone())),
-                Value::List(_) | Value::Dict(_) | Value::Lambda(_) => Ok(Value::Str(v.display())),
+                Value::List(_) | Value::Dict(_) | Value::Lambda(_) | Value::Enum(_) | Value::Future(_) => Ok(Value::Str(v.display())),
                 Value::Null => Ok(Value::Str("null".to_string())),
             }
         }
@@ -2863,6 +2899,10 @@ fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String,
             .ok_or_else(|| err(codes::TYPE_MISMATCH, "cannot serialize NaN/infinity to JSON", span, file, src, None::<&str>))?,
         Value::Bool(b) => serde_json::Value::Bool(*b),
         Value::Str(s) => serde_json::Value::String(s.clone()),
+        // 枚举值序列化为显示字符串（Color.Red / Shape.Circle(1.5)），与 to_str 一致
+        Value::Enum(e) => serde_json::Value::String(Value::Enum(e.clone()).display()),
+        // future 不可序列化：显示为字符串
+        Value::Future(_) => serde_json::Value::String("future".to_string()),
         Value::List(items) => {
             let mut arr = Vec::with_capacity(items.len());
             for it in items {

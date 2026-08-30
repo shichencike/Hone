@@ -34,15 +34,18 @@ typedef struct HnList HnList;
 typedef struct HnDict HnDict;
 typedef struct HnFn HnFn;
 typedef struct HnErr HnErr;
+typedef struct HnEnum HnEnum;
 typedef HnValue (*HnFnPtr)(HnValue* args, int nargs, HnValue* cap, int ncap);
 
-enum { HN_INT, HN_FLOAT, HN_BOOL, HN_STR, HN_LIST, HN_DICT, HN_NULL, HN_ERR, HN_FN };
+enum { HN_INT, HN_FLOAT, HN_BOOL, HN_STR, HN_LIST, HN_DICT, HN_NULL, HN_ERR, HN_FN, HN_ENUM };
 
 struct HnStr { int refs; int len; char* data; };
 struct HnList { int refs; int len; int cap; HnValue* items; };
 struct HnDict { int refs; int len; int cap; char** keys; HnValue* vals; };
 struct HnFn { int refs; HnFnPtr ptr; HnValue* cap; int ncap; };
 struct HnErr { int refs; int code; char* msg; char* file; int line; int col; char* context; };
+/* 枚举值：枚举名 + 变体名 + 载荷（简单变体 n=0）；tag 为变体序号（用于快速匹配） */
+struct HnEnum { int refs; int tag; char* ty; char* var; int n; HnValue* payload; };
 
 struct HnValue {
     int type;
@@ -55,6 +58,7 @@ struct HnValue {
         HnDict* dict;
         HnFn* fn;
         HnErr* err;
+        HnEnum* enm;
     } as;
 };
 
@@ -87,6 +91,7 @@ static HnValue hn_retain_v(HnValue v) {
         case HN_DICT: v.as.dict->refs++; break;
         case HN_FN: v.as.fn->refs++; break;
         case HN_ERR: v.as.err->refs++; break;
+        case HN_ENUM: v.as.enm->refs++; break;
         default: break;
     }
     return v;
@@ -128,6 +133,14 @@ static void hn_free_value(HnValue v) {
             if (--e->refs == 0) { free(e->msg); free(e->file); free(e->context); free(e); }
             break;
         }
+        case HN_ENUM: {
+            HnEnum* e = v.as.enm;
+            if (--e->refs == 0) {
+                for (int i = 0; i < e->n; i++) hn_free_value(e->payload[i]);
+                free(e->payload); free(e->ty); free(e->var); free(e);
+            }
+            break;
+        }
         default: break;
     }
 }
@@ -157,6 +170,18 @@ static HnValue hn_str_len(const char* s, int len) {
     o->data[len] = '\0';
     o->refs = 1;
     v.as.s = o;
+    return v;
+}
+
+/* 构造枚举值：tag 为变体序号；payload 数组（可为 NULL）与 n 所有权转移给枚举 */
+static HnValue hn_enum(int tag, const char* ty, const char* var, HnValue* payload, int n) {
+    HnValue v; v.type = HN_ENUM;
+    HnEnum* e = (HnEnum*)malloc(sizeof(HnEnum));
+    e->refs = 1; e->tag = tag;
+    e->ty = (char*)malloc(strlen(ty) + 1); strcpy(e->ty, ty);
+    e->var = (char*)malloc(strlen(var) + 1); strcpy(e->var, var);
+    e->n = n; e->payload = payload;
+    v.as.enm = e;
     return v;
 }
 
@@ -330,6 +355,31 @@ static char* hn_display(HnValue v) {
             snprintf(buf, sizeof buf, "fn(%d)", v.as.fn->ncap);
             return strdup(buf);
         }
+        case HN_ENUM: {
+            HnEnum* e = v.as.enm;
+            size_t total = strlen(e->ty) + strlen(e->var) + 4;
+            for (int i = 0; i < e->n; i++) { char* s = hn_display(e->payload[i]); total += strlen(s) + 3; free(s); }
+            char* out = (char*)malloc(total);
+            size_t p = 0;
+            size_t nty = strlen(e->ty);
+            memcpy(out + p, e->ty, nty); p += nty;
+            out[p++] = '.';
+            size_t nvar = strlen(e->var);
+            memcpy(out + p, e->var, nvar); p += nvar;
+            if (e->n > 0) {
+                out[p++] = '(';
+                for (int i = 0; i < e->n; i++) {
+                    if (i) { out[p++] = ','; out[p++] = ' '; }
+                    char* s = hn_display(e->payload[i]);
+                    size_t n = strlen(s);
+                    memcpy(out + p, s, n); p += n;
+                    free(s);
+                }
+                out[p++] = ')';
+            }
+            out[p] = '\0';
+            return out;
+        }
     }
     return strdup("?");
 }
@@ -497,6 +547,13 @@ static int hn_eq_raw(HnValue a, HnValue b) {
         return 1;
     }
     if (a.type == HN_ERR && b.type == HN_ERR) return a.as.err->code == b.as.err->code;
+    if (a.type == HN_ENUM && b.type == HN_ENUM) {
+        HnEnum *x = a.as.enm, *y = b.as.enm;
+        if (x->tag != y->tag || x->n != y->n) return 0;
+        if (strcmp(x->ty, y->ty) != 0 || strcmp(x->var, y->var) != 0) return 0;
+        for (int i = 0; i < x->n; i++) if (!hn_eq_raw(x->payload[i], y->payload[i])) return 0;
+        return 1;
+    }
     return 0;
 }
 
@@ -1074,6 +1131,7 @@ struct AotGen {
     // ---- 定义表（收集阶段填充，生成阶段只读） ----
     fns: HashMap<String, AotFn>,              // 全局函数名 → 定义
     structs: HashMap<String, Vec<String>>,    // 结构体名 → 字段名
+    enums: HashMap<String, Vec<(String, usize)>>, // 枚举名 → (变体名, 变体序号 tag)
     classes: HashMap<String, Vec<(String, AotFn)>>, // 类名 → 方法列表
     alias: HashMap<String, String>,           // 函数别名（新名 → 原名）
     fn_slots: HashMap<String, usize>,         // 函数/类方法全名 → 槽位
@@ -1098,6 +1156,7 @@ pub fn generate(program: &Program, file: &str, src: &str) -> Result<String, ZErr
         src: src.to_string(),
         fns: HashMap::new(),
         structs: HashMap::new(),
+        enums: HashMap::new(),
         classes: HashMap::new(),
         alias: HashMap::new(),
         fn_slots: HashMap::new(),
@@ -1282,6 +1341,7 @@ fn count_lambdas_stmts(stmts: &[Stmt], n: &mut usize) {
             }
             Stmt::Throw { value, .. } => count_lambdas_expr(value, n),
             Stmt::FnDef { body, .. } => count_lambdas_stmts(body, n),
+            Stmt::AsyncFnDef { body, .. } => count_lambdas_stmts(body, n),
             _ => {}
         }
     }
@@ -1352,7 +1412,63 @@ fn count_lambdas_expr(e: &Expr, n: &mut usize) {
             *n += 1;
             count_lambdas_stmts(body, n);
         }
+        Expr::Await { expr, .. } => {
+            count_lambdas_expr(expr, n);
+        }
         _ => {}
+    }
+}
+
+/// 二元运算符对应的重载函数名（And/Or/Coalesce 无重载 → None）。
+fn overload_fn_name(op: BinOp) -> Option<&'static str> {
+    match op {
+        BinOp::Add => Some("__add"),
+        BinOp::Sub => Some("__sub"),
+        BinOp::Mul => Some("__mul"),
+        BinOp::Div => Some("__div"),
+        BinOp::Mod => Some("__mod"),
+        BinOp::Eq => Some("__eq"),
+        BinOp::Ne => Some("__ne"),
+        BinOp::Lt => Some("__lt"),
+        BinOp::Le => Some("__le"),
+        BinOp::Gt => Some("__gt"),
+        BinOp::Ge => Some("__ge"),
+        BinOp::And | BinOp::Or | BinOp::Coalesce => None,
+    }
+}
+
+/// AOT 分派链的「内建组合」C 条件（_a / _b 为操作数变量名）。
+fn native_bin_cond(op: BinOp) -> &'static str {
+    match op {
+        BinOp::Add => "(_a.type == HN_INT || _a.type == HN_FLOAT) && (_b.type == HN_INT || _b.type == HN_FLOAT) || (_a.type == HN_STR && _b.type == HN_STR)",
+        BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+            "(_a.type == HN_INT || _a.type == HN_FLOAT) && (_b.type == HN_INT || _b.type == HN_FLOAT)"
+        }
+        // 同类型内建深度比较（hn_eq_raw 全类型支持）；不同类型 → 重载
+        BinOp::Eq | BinOp::Ne => "_a.type == _b.type",
+        // hn_cmp_raw 支持 int / float / str
+        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+            "(_a.type == HN_INT || _a.type == HN_FLOAT) && (_b.type == HN_INT || _b.type == HN_FLOAT) || (_a.type == HN_STR && _b.type == HN_STR)"
+        }
+        BinOp::And | BinOp::Or | BinOp::Coalesce => unreachable!(),
+    }
+}
+
+/// 内建二元运算的 C 函数名（AOT 分派链内建分支用）。
+fn builtin_bin_fn(op: BinOp) -> &'static str {
+    match op {
+        BinOp::Add => "hn_add_v",
+        BinOp::Sub => "hn_sub_v",
+        BinOp::Mul => "hn_mul_v",
+        BinOp::Div => "hn_div_v",
+        BinOp::Mod => "hn_mod_v",
+        BinOp::Eq => "hn_eq_v",
+        BinOp::Ne => "hn_ne_v",
+        BinOp::Lt => "hn_lt_v",
+        BinOp::Le => "hn_le_v",
+        BinOp::Gt => "hn_gt_v",
+        BinOp::Ge => "hn_ge_v",
+        BinOp::And | BinOp::Or | BinOp::Coalesce => unreachable!(),
     }
 }
 
@@ -1384,6 +1500,11 @@ impl AotGen {
                 }
                 Stmt::StructDef { name, fields, .. } => {
                     self.structs.insert(name.clone(), fields.iter().map(|(f, _)| f.clone()).collect());
+                }
+                Stmt::EnumDef { name, variants, .. } => {
+                    // 收集枚举：变体名 + 序号（tag 用于生成的 C 代码快速匹配）
+                    let list: Vec<(String, usize)> = variants.iter().enumerate().map(|(i, v)| (v.name.clone(), i)).collect();
+                    self.enums.insert(name.clone(), list);
                 }
                 Stmt::ClassDef { name, methods, .. } => {
                     let mut list = Vec::new();
@@ -1798,6 +1919,7 @@ impl AotGen {
             Stmt::Export { .. } => Ok(()),              // 仅 --dll 相关
             Stmt::FnDef { .. } => Ok(()),               // 已收集
             Stmt::StructDef { .. } => Ok(()),           // 已收集
+            Stmt::EnumDef { .. } => Ok(()),             // 已收集
             Stmt::ClassDef { .. } => Ok(()),            // 已收集
             Stmt::Use { .. } => Ok(()),                 // 命名空间声明，无运行语义
             Stmt::Alias { .. } => Ok(()),               // 已收集（调用时解析）
@@ -1824,6 +1946,14 @@ impl AotGen {
                 format!("go 并发调用 `{}` 在 AOT 模式暂不支持", callee),
                 *span,
                 Some("AOT 模式为单线程；请用解释器运行并发脚本"),
+            )),
+            Stmt::AsyncFnDef { name, span, .. } => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                format!("async 异步函数 `{}` 在 AOT 模式暂不支持", name),
+                *span,
+                Some("AOT 模式为单线程；async/await 请用解释器运行"),
             )),
             Stmt::Try { body, catch_var, handler, span } => {
                 let saved = format!("_sv{}", self.temp());
@@ -2116,6 +2246,22 @@ impl AotGen {
                 Ok(s)
             }
             Expr::Field { obj, field, span } => {
+                // 枚举变体访问：Color.Red（obj 为已注册枚举名）→ 生成枚举值构造
+                if let Expr::Ident { name, .. } = obj.as_ref() {
+                    if let Some(vs) = self.enums.get(name) {
+                        if let Some((_, tag)) = vs.iter().find(|(vn, _)| vn == field) {
+                            return Ok(format!("hn_enum({}, {}, {}, NULL, 0)", tag, c_str_lit(name), c_str_lit(field)));
+                        }
+                        return Err(zerr(
+                            &self.file,
+                            &self.src,
+                            codes::UNDEFINED,
+                            format!("enum `{}` has no variant `{}`", name, field),
+                            *span,
+                            Some(format!("variants: {}", vs.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", "))),
+                        ));
+                    }
+                }
                 let o = self.gen_expr(obj)?;
                 Ok(format!("hn_field_v({}, {})", o, c_str_lit(field)))
             }
@@ -2134,6 +2280,21 @@ impl AotGen {
             }
             Expr::Unary { op, expr, span } => {
                 let x = self.gen_expr(expr)?;
+                // 运算符重载：存在 __neg / __not 时生成「内建 → 内建运算，否则 → __op 调用」分派链
+                let (ov, native, builtin) = match op {
+                    UnOp::Neg => ("__neg", "(_x.type == HN_INT || _x.type == HN_FLOAT)", "hn_neg_v"),
+                    UnOp::Not => ("__not", "(_x.type == HN_BOOL)", "hn_not_v"),
+                };
+                if self.fns.contains_key(ov) {
+                    let slot = self.slot_for(ov);
+                    return Ok(format!(
+                        "({{\n  HnValue _x = {};\n  HnValue _r;\n  if ({}) {{ _r = {}(hn_copy(_x)); }}\n  else {{ HnValue _av[1] = {{ hn_copy(_x) }}; _r = hn_f{}(_av, 1, NULL, 0); hn_free_value(_av[0]); }}\n  hn_free_value(_x);\n  _r;\n}})",
+                        x,
+                        native,
+                        builtin,
+                        slot
+                    ));
+                }
                 Ok(match op {
                     UnOp::Neg => format!("hn_neg_v({})", x),
                     UnOp::Not => format!("hn_not_v({})", x),
@@ -2142,6 +2303,20 @@ impl AotGen {
             Expr::Binary { op, lhs, rhs, span } => {
                 let l = self.gen_expr(lhs)?;
                 let r = self.gen_expr(rhs)?;
+                // 运算符重载：存在 __op 顶层函数时，生成「内建组合 → 内建运算，否则 → __op 调用」分派链
+                if let Some(ov) = overload_fn_name(*op) {
+                    if self.fns.contains_key(ov) {
+                        let slot = self.slot_for(ov);
+                        return Ok(format!(
+                            "({{\n  HnValue _a = {};\n  HnValue _b = {};\n  HnValue _r;\n  if ({}) {{ _r = {}(hn_copy(_a), hn_copy(_b)); }}\n  else {{ HnValue _av[2] = {{ hn_copy(_a), hn_copy(_b) }}; _r = hn_f{}(_av, 2, NULL, 0); hn_free_value(_av[0]); hn_free_value(_av[1]); }}\n  hn_free_value(_a); hn_free_value(_b);\n  _r;\n}})",
+                            l,
+                            r,
+                            native_bin_cond(*op),
+                            builtin_bin_fn(*op),
+                            slot
+                        ));
+                    }
+                }
                 Ok(match op {
                     BinOp::Add => format!("hn_add_v({}, {})", l, r),
                     BinOp::Sub => format!("hn_sub_v({}, {})", l, r),
@@ -2175,17 +2350,93 @@ impl AotGen {
                 let mut s = String::from("({ HnValue _m = ");
                 s.push_str(&v);
                 s.push_str("; HnValue _r;\n");
-                // 模式比较链：模式 → 分支体（模式为 None 表示 _ 通配符，作默认）
+                // 模式比较链：模式 → 分支体（Wildcard 作默认）
                 let mut done = false;
                 let mut indent = String::from("  ");
                 for (pat, body) in arms {
-                    let be = self.gen_expr(body)?;
                     match pat {
-                        Some(p) => {
+                        Pattern::Lit(p) => {
                             let pe = self.gen_expr(p)?;
+                            let be = self.gen_expr(body)?;
                             s.push_str(&format!("{}if (hn_eq_raw(_m, {})) {{ _r = {}; }}\n", indent, pe, be));
                         }
-                        None => {
+                        Pattern::Variant { enum_name, variant, binds, span: pspan } => {
+                            // 枚举变体匹配：类型名 + 变体序号比较（快路径，避免构造临时枚举值）。
+                            // 先提取 tag（Copy）结束 self.enums 借用，再生成 body（需要 &mut self）。
+                            let tag = self
+                                .enums
+                                .get(enum_name)
+                                .and_then(|vs| vs.iter().find(|(vn, _)| vn == variant))
+                                .map(|(_, t)| *t);
+                            if let Some(tag) = tag {
+                                if binds.is_empty() {
+                                    // 无载荷绑定：仅比较类型名 + 序号
+                                    let be = self.gen_expr(body)?;
+                                    s.push_str(&format!(
+                                        "{}if (_m.type == HN_ENUM && strcmp(_m.as.enm->ty, {}) == 0 && _m.as.enm->tag == {}) {{ _r = {}; }}\n",
+                                        indent,
+                                        c_str_lit(enum_name),
+                                        tag,
+                                        be
+                                    ));
+                                    continue;
+                                }
+                                // 有载荷绑定：先注册绑定变量（分支体可见），再生成 body
+                                let scope_idx = self.scopes.len();
+                                let mut cnames: Vec<Option<String>> = Vec::new();
+                                for (i, b) in binds.iter().enumerate() {
+                                    match b {
+                                        Some(name) => {
+                                            let cname = format!("_b{}_{}", i, self.var_counter);
+                                            self.var_counter += 1;
+                                            self.scopes.push(HashMap::new());
+                                            self.scopes
+                                                .last_mut()
+                                                .expect("scope")
+                                                .insert(name.clone(), cname.clone());
+                                            cnames.push(Some(cname));
+                                        }
+                                        None => cnames.push(None),
+                                    }
+                                }
+                                let be = self.gen_expr(body)?;
+                                self.scopes.truncate(scope_idx);
+                                // 生成 if 块：声明绑定变量（复制载荷）→ 求值分支体 → 释放绑定
+                                let mut cond = format!(
+                                    "_m.type == HN_ENUM && strcmp(_m.as.enm->ty, {}) == 0 && _m.as.enm->tag == {}",
+                                    c_str_lit(enum_name),
+                                    tag
+                                );
+                                cond.push_str(&format!(" && _m.as.enm->n == {}", binds.len()));
+                                s.push_str(&format!("{}if ({}) {{\n", indent, cond));
+                                for (i, cn) in cnames.iter().enumerate() {
+                                    if let Some(cname) = cn {
+                                        s.push_str(&format!(
+                                            "    {}HnValue {} = hn_copy(_m.as.enm->payload[{}]);\n",
+                                            indent, cname, i
+                                        ));
+                                    }
+                                }
+                                s.push_str(&format!("    {}_r = {};\n", indent, be));
+                                for cn in cnames.iter().flatten() {
+                                    s.push_str(&format!("    {}hn_free_value({});\n", indent, cn));
+                                }
+                                s.push_str(&format!("{}}}", indent));
+                                s.push('\n');
+                                continue;
+                            }
+                            // 枚举未注册或变体不存在：AOT 静态报错（与 checker 一致）
+                            return Err(zerr(
+                                &self.file,
+                                &self.src,
+                                codes::UNDEFINED,
+                                format!("undefined enum variant `{}.{}` in match pattern", enum_name, variant),
+                                *pspan,
+                                Some("declare the enum before matching, or check the variant name"),
+                            ));
+                        }
+                        Pattern::Wildcard => {
+                            let be = self.gen_expr(body)?;
                             s.push_str(&format!("{}else {{ _r = {}; }}\n", indent, be));
                             done = true;
                         }
@@ -2234,6 +2485,14 @@ impl AotGen {
                 ))
             }
             Expr::Lambda { params, body, span } => self.gen_lambda(params, body, *span),
+            Expr::Await { expr, span } => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                "await 表达式在 AOT 模式暂不支持".to_string(),
+                *span,
+                Some("AOT 模式为单线程；async/await 请用解释器运行"),
+            )),
         }
     }
 
@@ -2386,6 +2645,48 @@ impl AotGen {
             }
             s.push_str(" _d; })");
             return Ok(s);
+        }
+
+        // 3.5) 枚举变体构造：Enum.Variant(载荷...) → 枚举值（hn_enum 带载荷数组）
+        if let Some((enum_name, variant)) = callee.split_once('.') {
+            if let Some(vs) = self.enums.get(enum_name) {
+                if let Some((_, tag)) = vs.iter().find(|(vn, _)| vn == variant) {
+                    if vs.iter().any(|(vn, _)| vn == variant) {
+                        let mut s = String::from("({ ");
+                        if n > 0 {
+                            s.push_str(&format!("HnValue _a[{}] = {{ {} }}; ", n, arg_exprs.join(", ")));
+                            s.push_str(&format!(
+                                "HnValue _r = hn_enum({}, {}, {}, _a, {}); ",
+                                tag,
+                                c_str_lit(enum_name),
+                                c_str_lit(variant),
+                                n
+                            ));
+                        } else {
+                            s.push_str(&format!(
+                                "HnValue _r = hn_enum({}, {}, {}, NULL, 0); ",
+                                tag,
+                                c_str_lit(enum_name),
+                                c_str_lit(variant)
+                            ));
+                        }
+                        s.push_str("_r; })");
+                        return Ok(s);
+                    }
+                }
+                return Err(zerr(
+                    &self.file,
+                    &self.src,
+                    codes::UNDEFINED,
+                    format!("enum `{}` has no variant `{}`", enum_name, variant),
+                    span,
+                    Some(format!(
+                        "variants: {}",
+                        vs.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
+                    )),
+                ));
+            }
+            // 非枚举限定名 → 落入下方内置/动态调用
         }
 
         // 4) 内置函数

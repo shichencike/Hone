@@ -1,4 +1,4 @@
-Hone 编程语言 – 完整设计规范 v1.2（对应实现版本 v0.7.0）
+Hone 编程语言 – 完整设计规范 v1.2（对应实现版本 v0.7.9）
 
 项目代号：Hone
 设计者：时辰刺客
@@ -178,7 +178,38 @@ p = Point(3, 2.5);
 print(p.x);   // 3
 print(p.y);   // 2.5
 
-1.8 class 类（成员函数不进全局符号表）
+1.8 枚举（enum）
+
+· 语法：enum 名称 { 变体, 变体(类型, ...), ... };  结尾分号可选
+· 简单变体（无载荷）：enum Color { Red, Green, Blue };
+· 带载荷变体：enum Shape { Circle(float), Rect(float, float) };  载荷可多个（类型用 int/float/bool/str）
+· 变体访问（无载荷）：Color.Red  得到枚举值，显示为 Color.Red
+· 变体构造（带载荷）：Shape.Circle(1.5)  按载荷顺序传参，检查阶段校验个数与类型（H001）
+· 比较：== / != 比较 类型 + 变体 + 载荷（不同枚举互不相等；带载荷逐项比较）
+· 枚举值可存列表/字典、作函数参数与返回值；to_str 显示 Color.Red / Shape.Circle(1.5)
+· 枚举名全局唯一（与 struct/class 重名报 H005）；变体名在枚举内唯一
+· 匹配：match 支持变体模式（见 1.10 模式匹配）
+· 示例：
+
+enum Color { Red, Green, Blue };
+enum Shape { Circle(float), Rect(float, float) };
+
+c = Color.Red;
+print(c);                    // Color.Red
+print(c == Color.Red);       // true
+print(c == Color.Green);     // false
+
+s = Shape.Circle(1.5);
+print(s);                    // Shape.Circle(1.5)
+
+area = match s {
+    Shape.Circle(r) => 3.14159 * r * r,
+    Shape.Rect(w, h) => w * h,
+    _ => 0,
+};
+print(area);                 // 7.06858…
+
+1.9 class 类（成员函数不进全局符号表）
 
 · 语法：class 名称 { fn 方法(参数) { ... } ... }
 · 作用：将一组相关函数组织成命名空间，通过 类名.方法(...) 调用（如 Math.double(21)）
@@ -216,10 +247,14 @@ fn double(x) {            // 全局同名函数与类方法共存
 print(double(21));        // global: 21
 print(Math.double(21));   // 42（类方法不受影响）
 
-1.9 模式匹配（match）
+1.10 模式匹配（match）
 
 · 语法：match 表达式 { 模式 => 分支体, ..., _ => 默认值 }
-· 模式支持字面量（整数/浮点/布尔/字符串）与 `_` 通配符（匹配任意值，只能出现一次且放最后）
+· 模式支持：
+  · 字面量（整数/浮点/布尔/字符串）
+  · 枚举变体：Color.Red（无载荷）或 Shape.Circle(r)（带载荷，r 绑定到分支体变量；
+    `_` 忽略某项：Shape.Rect(w, _)）；绑定变量仅在本分支体内可见
+  · `_` 通配符（匹配任意值，只能出现一次且放最后）
 · match 是表达式，返回匹配分支的值；所有分支都不匹配时运行时报错（建议补 `_` 兜底）
 · 各分支类型可以不同，返回值为动态类型
 · 示例：
@@ -231,7 +266,14 @@ s = match 2 {
 };
 print(s);   // two
 
-1.10 管道操作符（|>）
+area = match Shape.Circle(2.0) {
+    Shape.Circle(r) => 3.14159 * r * r,
+    Shape.Rect(w, h) => w * h,
+    _ => 0,
+};
+print(area);   // 12.56636…
+
+1.11 管道操作符（|>）
 
 · 语法：x |> f  等价于 f(x)；x |> f(a, b)  等价于 f(x, a, b)
 · 左侧表达式作为第一个参数传入右侧函数调用，可链式：a |> f |> g  等价于 g(f(a))
@@ -452,6 +494,76 @@ print(v?.name);            // null（短路）
 print(v?.a?.b);            // null（链式短路）
 print(v?.name ?? "匿名");  // 匿名（与空值合并配合）
 
+1.20 运算符重载（__op 特殊函数）
+
+· 语法：顶层定义特殊函数 `fn __op(参数) { ... }`，仅在内建运算不支持的操作数组合时被调用；
+  内置类型（int/float/str/list/dict/enum 等）的固有行为完全不受影响
+· 支持的重载函数与映射：
+  · 二元：`+`→`__add`、`-`→`__sub`、`*`→`__mul`、`/`→`__div`、`%`→`__mod`、
+    `==`→`__eq`、`!=`→`__ne`、`<`→`__lt`、`<=`→`__le`、`>`→`__gt`、`>=`→`__ge`
+  · 一元：`-x`→`__neg`、`!x`→`__not`
+  · 内置：`len(x)`→`__len`、`x[i]`→`__index`
+· 触发时机：内建运算对操作数组合不支持（类型不匹配）时回退调用对应 `__op` 函数；
+  内建支持的操作数（如 int+int、str 拼接、dict==dict、list 索引）仍走内建路径
+· 典型用途：给 dict/struct 实例或 enum 值自定义运算行为（如复数、向量、货币）
+· 注意：
+  · 重载函数与普通函数一样遵循类型锁定——所有 return 路径的类型需一致（H001）
+  · `__op` 未定义时，不支持的运算维持原有报错（H001/H003）
+  · 定义了重载后，涉及动态值（Unknown）的运算静态检查放宽（交给运行时判定），
+    相等/比较操作数不再被强制成 int 等错误类型
+  · AOT 原生编译支持二元/一元重载（生成「内建组合 → 内建运算，否则 → __op 调用」分派链）
+· 示例（dict 模拟复数，见 examples/overload_demo.hn）：
+
+fn mk_complex(re, im) {
+    return {"re": re, "im": im};
+}
+fn c_re(c) { return c.re; }
+fn c_im(c) { return c.im; }
+
+fn __add(a, b) {
+    if (type_of(a) == "dict" && type_of(b) == "dict") {
+        return mk_complex(c_re(a) + c_re(b), c_im(a) + c_im(b));
+    }
+    return {"re": 0, "im": 0};
+}
+
+z1 = mk_complex(1, 2);
+z2 = mk_complex(3, 4);
+zs = z1 + z2;          // dict + dict 内建不支持 → __add
+print(to_str(zs));     // {re: 4, im: 6}
+print(10 + 20);        // 30（int 内建不受影响）
+
+1.21 异步函数（async fn + await）
+
+· 语法：
+  · `async fn 名称(参数) { ... }`  定义异步函数（与 fn 同构，支持参数/返回值/递归）
+  · 调用：`f = 异步函数名(实参...)`  立即返回 future（不阻塞调用方，后台线程执行）
+  · 等待：`await 表达式`  阻塞等待 future 完成并返回其结果
+· 语义（线程 + future 的最小 promise 模型，与 go 互补）：
+  · go 发后不理（fire-and-forget）；async/await 结构化并发——启动后等待结果
+  · 多个 async 并行启动、依次 await，总耗时约等于最慢者
+  · 错误传播：async 函数体内 throw / 运行时错误存入 future，await 时原样抛出（可 try/catch 捕获）
+  · future 可存储/传递；type_of 为 future；未 await 的 future 随脚本结束回收
+· 限制：AOT 原生编译与 hone build --dll 对 async/await 报「暂不支持」（单线程模型），请用解释器运行
+· 示例（完整见 examples/async_demo.hn）：
+
+async fn compute(n) {
+    return n * 2;
+}
+f = compute(21);          // 立即返回 future（不阻塞）
+print(await f);           // 42（阻塞等待结果）
+
+async fn risky(n) {
+    if (n == 0) { throw "zero not allowed"; }
+    return 100 / n;
+}
+print(await risky(2));    // 50
+try {
+    await risky(0);
+} catch e {
+    print("捕获: " + e.message);   // 捕获: zero not allowed
+}
+
 二、工具链与命令
 
 Hone 提供完整的命令行工具链，所有功能集成在单文件 hone（或 hone.exe）中：
@@ -460,7 +572,8 @@ Hone 提供完整的命令行工具链，所有功能集成在单文件 hone（�
 hone run <script.hn> 执行 Hone 脚本（默认命令，支持 --restart/--resume）
 hone fmt [options] <file.hn> 代码格式化（统一 Tab 缩进、运算符空格、大括号位置）
 hone fmt -w *.hn 直接覆盖写入源文件
-hone test [目录] 递归扫描 *.test.hn 测试文件，运行并汇总 PASS/FAIL（配合 assert 断言）
+hone test [目录] 递归扫描 *.test.hn 测试文件，运行并汇总 PASS/FAIL（配合 assert/assert_eq 断言，按文件输出断言统计）
+hone watch <script.hn> 监控脚本文件变更自动重跑（跨平台轮询 mtime+大小，[--interval=N] 毫秒，默认 500，Ctrl+C 退出）
 hone build --dll <script.hn> 将脚本打包成 C ABI 动态库（DLL / SO / DYLIB）
 hone build --exe <script.hn> 打包独立可执行文件（解释器 + 脚本自释放，[-o <out>] [--icon <ico>]）
 hone build --exe -c <script.hn> AOT 编译原生可执行文件（脚本 → C 中间文件 → gcc/clang → 原生 exe；默认删除 .c，--keep-c 保留）

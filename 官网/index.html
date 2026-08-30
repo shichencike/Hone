@@ -36,7 +36,7 @@ function toggleTheme(){
     <a href="download.html">下载</a>
     <a href="perf.html">性能</a>
   </nav>
-  <span class="ver">v0.7.0</span>
+  <span class="ver">v0.7.9</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
@@ -109,7 +109,8 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
       <tr><td><code>hone explain &lt;code&gt;</code></td><td>查询错误码含义与修复建议</td></tr>
       <tr><td><code>hone get</code></td><td>读取 hone.json 清单批量下载模块（类似 package.json / Cargo.toml）</td></tr>
       <tr><td><code>hone get &lt;module&gt; &lt;url&gt;</code></td><td>下载模块依赖并缓存，同时写入 hone.json 清单</td></tr>
-      <tr><td><code>hone test [目录]</code></td><td>扫描并运行 *.test.hn 测试（配合 assert 断言，汇总 PASS/FAIL）</td></tr>
+      <tr><td><code>hone test [目录]</code></td><td>扫描并运行 *.test.hn 测试（配合 assert / assert_eq 断言，按文件输出断言统计）</td></tr>
+      <tr><td><code>hone watch &lt;script.hn&gt;</code></td><td>监控脚本文件变更自动重跑（热重载，[--interval=N] 毫秒）</td></tr>
       <tr><td><code>hone build --script &lt;file.hn&gt;</code></td><td>生成仅脚本压缩包 .hzp（不内嵌解释器，用 hone run 执行）</td></tr>
       <tr><td><code>hone self-update [url]</code></td><td>下载最新 hone 二进制并替换当前程序</td></tr>
       <tr><td><code>hone lsp</code></td><td>语言服务器（补全/诊断/hover/跳转定义/文档大纲/语义高亮）</td></tr>
@@ -132,6 +133,7 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
       <li>✅ <strong>阶段 8</strong>：typed FFI 签名块（int/float/bool/str/ptr/void 精确类型映射）、头文件自动绑定（from "header.h"）、hone bind 离线生成签名</li>
       <li>✅ <strong>阶段 9</strong>：struct 结构体、match 模式匹配、<code>|&gt;</code> 管道操作符、hone test 测试框架、build --script 仅脚本包、self-update 自动更新</li>
       <li>✅ <strong>阶段 10</strong>：crypto 扩展（sha1/HMAC/base64）、archive 压缩归档（zip/tar.gz）、ptr 指针类（防野指针）、plugin 插件系统</li>
+      <li>✅ <strong>阶段 11</strong>：枚举 enum + match 变体模式、运算符重载（__op 特殊函数）、hone watch 热重载、assert_eq 断言统计、async fn + await 异步函数</li>
      </ul>
     <p>可视化编辑器：浏览器打开 <code class="inline">editor/index.html</code>，拖拽代码块即可生成 .hn 代码。</p>
   </section>
@@ -152,7 +154,7 @@ y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">/
     <a href="about.html">关于</a>
     <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.7.0 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.7.9 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

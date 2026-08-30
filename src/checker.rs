@@ -104,6 +104,8 @@ pub struct Checker {
     builtins: HashSet<&'static str>,
     /// 结构体定义：名称 → (字段名, 字段类型)
     structs: HashMap<String, Vec<(String, Ty)>>,
+    /// 枚举定义：名称 → 变体列表（变体名, 载荷类型列表）
+    enums: HashMap<String, Vec<(String, Vec<Ty>)>>,
     /// 类定义：类名 → (方法名 → FnInfo)。成员函数不进入全局符号表，
     /// 只能经 `类.方法(...)` 调用（resolve_call 按限定名解析）。
     classes: HashMap<String, HashMap<String, FnInfo>>,
@@ -129,6 +131,7 @@ impl Checker {
             header_cache: HashMap::new(),
             builtins,
             structs: HashMap::new(),
+            enums: HashMap::new(),
             classes: HashMap::new(),
         };
 
@@ -174,6 +177,10 @@ impl Checker {
                 if !tmp {
                     self.register_fn(name, type_params, params, ret.clone(), body, *span)?;
                 }
+            }
+            Stmt::AsyncFnDef { name, type_params, params, ret, body, span } => {
+                // 异步函数与普通函数同样注册到全局符号表（调用时在后台线程执行）
+                self.register_fn(name, type_params, params, ret.clone(), body, *span)?;
             }
             Stmt::Block { stmts, .. } => {
                 self.global_scopes.push(HashMap::new());
@@ -266,6 +273,30 @@ impl Checker {
                     }
                 }
                 self.classes.insert(name.clone(), methods_map);
+            }
+            Stmt::EnumDef { name, variants, span } => {
+                // 注册枚举定义：名称唯一（不与 struct/class 冲突）；变体名在枚举内唯一
+                if self.structs.contains_key(name) || self.classes.contains_key(name) || self.enums.contains_key(name) {
+                    return Err(self.zerr(
+                        codes::SYNTAX,
+                        format!("enum `{}` is already defined", name),
+                        *span,
+                        Some("enum names must be unique and not clash with struct/class names"),
+                    ));
+                }
+                let mut list = Vec::with_capacity(variants.len());
+                for v in variants {
+                    if list.iter().any(|(vn, _)| vn == &v.name) {
+                        return Err(self.zerr(
+                            codes::SYNTAX,
+                            format!("duplicate variant `{}` in enum `{}`", v.name, name),
+                            v.span,
+                            Some("variant names must be unique within an enum"),
+                        ));
+                    }
+                    list.push((v.name.clone(), v.payload.iter().map(|t| Ty::from_annot(t.clone())).collect()));
+                }
+                self.enums.insert(name.clone(), list);
             }
             Stmt::Assign { name, .. } => {
                 if self.globals.get(name).is_none() {
@@ -757,6 +788,8 @@ impl Checker {
 
     fn check_stmt(&mut self, stmt: &Stmt) -> Result<(), ZError> {
         match stmt {
+            Stmt::EnumDef { .. } => Ok(()), // 注册已在 Phase A 完成，检查阶段无运行语义
+            Stmt::AsyncFnDef { .. } => Ok(()), // 注册已在 Phase A 完成，检查阶段无运行语义
             Stmt::VarDecl { name, ty, init, span } => {
                 let annot = Ty::from_annot(ty.clone());
                 if let Some(e) = init {
@@ -1047,6 +1080,8 @@ impl Checker {
         ret_slot: usize,
     ) -> Result<(), ZError> {
         match stmt {
+            Stmt::EnumDef { .. } => Ok(()), // 注册已在 Phase A 完成，检查阶段无运行语义
+            Stmt::AsyncFnDef { .. } => Ok(()), // 注册已在 Phase A 完成，检查阶段无运行语义
             Stmt::VarDecl { name, ty, init, span } => {
                 let annot = Ty::from_annot(ty.clone());
                 if let Some(e) = init {
@@ -1373,6 +1408,8 @@ impl Checker {
             Ty::Str => Ok(TyRes { ty: Ty::Str, slot: None }),
             // 列表/动态值：元素类型动态，返回 Unknown
             Ty::Unknown => Ok(TyRes { ty: Ty::Unknown, slot: None }),
+            // 类型不支持但定义了 __index → 放行（运行时回退重载）
+            _ if self.fns.contains_key("__index") => Ok(TyRes { ty: Ty::Unknown, slot: None }),
             other => Err(self.zerr(
                 codes::TYPE_MISMATCH,
                 format!("cannot index a value of type `{}`", other.name()),
@@ -1420,9 +1457,7 @@ impl Checker {
                 // 模式匹配：值可为任意类型，各分支类型可不同 → 动态类型
                 self.check_expr(value)?;
                 for (pat, body) in arms {
-                    if let Some(p) = pat {
-                        self.check_expr(p)?;
-                    }
+                    self.check_pattern(pat)?;
                     self.check_expr(body)?;
                 }
                 Ok(TyRes { ty: Ty::Unknown, slot: None })
@@ -1469,12 +1504,34 @@ impl Checker {
                 self.check_lambda_body(params, body, &mut scopes, &mut scope_stack)?;
                 Ok(TyRes { ty: Ty::Unknown, slot: None })
             }
+            Expr::Await { expr, .. } => {
+                // await 等待 async 函数调用的 future 完成；结果为动态类型
+                self.check_expr(expr)?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
             Expr::Binary { op, lhs, rhs, span } => {
                 let l = self.check_expr(lhs)?;
                 let r = self.check_expr(rhs)?;
                 self.check_binary(*op, l, r, *span)
             }
             Expr::Field { obj, field, span } => {
+                // 枚举变体访问：Color.Red（obj 为已注册枚举名）→ 校验变体存在
+                if let Expr::Ident { name, .. } = obj.as_ref() {
+                    if let Some(vs) = self.enums.get(name) {
+                        if vs.iter().any(|(n, _)| n == field) {
+                            return Ok(TyRes { ty: Ty::Unknown, slot: None });
+                        }
+                        return Err(self.zerr(
+                            codes::UNDEFINED,
+                            format!("enum `{}` has no variant `{}`", name, field),
+                            *span,
+                            Some(format!(
+                                "variants: {}",
+                                vs.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
+                            )),
+                        ));
+                    }
+                }
                 let res = self.check_expr(obj)?;
                 self.check_field(res, field, *span)
             }
@@ -1598,10 +1655,13 @@ impl Checker {
             Expr::Match { value, arms, .. } => {
                 self.check_expr_in_fn(value, scopes, scope_stack, param_slots, ret_slot)?;
                 for (pat, body) in arms {
-                    if let Some(p) = pat {
-                        self.check_expr_in_fn(p, scopes, scope_stack, param_slots, ret_slot)?;
-                    }
+                    // 变体模式的载荷绑定变量在本分支体可见：每个分支一个独立作用域
+                    let idx = scopes.len();
+                    scopes.push(HashMap::new());
+                    scope_stack.push(idx);
+                    self.check_pattern_in_fn(pat, scopes, scope_stack, param_slots, ret_slot)?;
                     self.check_expr_in_fn(body, scopes, scope_stack, param_slots, ret_slot)?;
+                    scope_stack.pop();
                 }
                 Ok(TyRes { ty: Ty::Unknown, slot: None })
             }
@@ -1644,12 +1704,34 @@ impl Checker {
                 self.check_lambda_body(params, body, scopes, scope_stack)?;
                 Ok(TyRes { ty: Ty::Unknown, slot: None })
             }
+            Expr::Await { expr, .. } => {
+                // await 等待 async 函数调用的 future 完成；结果为动态类型
+                self.check_expr_in_fn(expr, scopes, scope_stack, param_slots, ret_slot)?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
             Expr::Binary { op, lhs, rhs, span } => {
                 let l = self.check_expr_in_fn(lhs, scopes, scope_stack, param_slots, ret_slot)?;
                 let r = self.check_expr_in_fn(rhs, scopes, scope_stack, param_slots, ret_slot)?;
                 self.check_binary(*op, l, r, *span)
             }
             Expr::Field { obj, field, span } => {
+                // 枚举变体访问：Color.Red（obj 为已注册枚举名）→ 校验变体存在
+                if let Expr::Ident { name, .. } = obj.as_ref() {
+                    if let Some(vs) = self.enums.get(name) {
+                        if vs.iter().any(|(n, _)| n == field) {
+                            return Ok(TyRes { ty: Ty::Unknown, slot: None });
+                        }
+                        return Err(self.zerr(
+                            codes::UNDEFINED,
+                            format!("enum `{}` has no variant `{}`", name, field),
+                            *span,
+                            Some(format!(
+                                "variants: {}",
+                                vs.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
+                            )),
+                        ));
+                    }
+                }
                 let res = self.check_expr_in_fn(obj, scopes, scope_stack, param_slots, ret_slot)?;
                 self.check_field(res, field, *span)
             }
@@ -1781,6 +1863,110 @@ impl Checker {
         }
     }
 
+    // ---------- 枚举与 match 模式 ----------
+
+    /// 校验枚举与变体存在，并校验绑定个数与载荷一致。
+    fn check_enum_variant(&self, enum_name: &str, variant: &str, binds: usize, span: Span) -> Result<(), ZError> {
+        let vs = self.enums.get(enum_name).ok_or_else(|| {
+            self.zerr(
+                codes::UNDEFINED,
+                format!("undefined enum `{}`", enum_name),
+                span,
+                Some("define it with `enum Name { A, ... };`"),
+            )
+        })?;
+        let (_, payload) = vs.iter().find(|(n, _)| n == variant).ok_or_else(|| {
+            self.zerr(
+                codes::UNDEFINED,
+                format!("enum `{}` has no variant `{}`", enum_name, variant),
+                span,
+                Some(format!(
+                    "variants: {}",
+                    vs.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
+                )),
+            )
+        })?;
+        if binds != payload.len() {
+            return Err(self.zerr(
+                codes::ARG_COUNT,
+                format!(
+                    "variant `{}` of enum `{}` expects {} payload value(s), pattern binds {}",
+                    variant,
+                    enum_name,
+                    payload.len(),
+                    binds
+                ),
+                span,
+                Some(format!(
+                    "pattern form: `{}.{}({})`",
+                    enum_name,
+                    variant,
+                    payload.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ")
+                )),
+            ));
+        }
+        Ok(())
+    }
+
+    /// match 模式检查（顶层作用域）：校验枚举变体模式并把载荷绑定登记为变量。
+    fn check_pattern(&mut self, pat: &Pattern) -> Result<(), ZError> {
+        match pat {
+            Pattern::Lit(e) => {
+                self.check_expr(e)?;
+                Ok(())
+            }
+            Pattern::Wildcard => Ok(()),
+            Pattern::Variant { enum_name, variant, binds, span } => {
+                self.check_enum_variant(enum_name, variant, binds.len(), *span)?;
+                let payload = self
+                    .enums
+                    .get(enum_name)
+                    .and_then(|vs| vs.iter().find(|(n, _)| n == variant))
+                    .map(|(_, p)| p.clone())
+                    .unwrap_or_default();
+                for (b, ty) in binds.iter().zip(payload) {
+                    if let Some(name) = b {
+                        self.bind_or_unify(name, Some(ty), *span)?;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// match 模式检查（函数内作用域）：校验变体模式并把载荷绑定到当前分支作用域。
+    fn check_pattern_in_fn(
+        &mut self,
+        pat: &Pattern,
+        scopes: &mut Vec<HashMap<String, usize>>,
+        scope_stack: &mut Vec<usize>,
+        param_slots: &[usize],
+        ret_slot: usize,
+    ) -> Result<(), ZError> {
+        match pat {
+            Pattern::Lit(e) => {
+                self.check_expr_in_fn(e, scopes, scope_stack, param_slots, ret_slot)?;
+                Ok(())
+            }
+            Pattern::Wildcard => Ok(()),
+            Pattern::Variant { enum_name, variant, binds, span } => {
+                self.check_enum_variant(enum_name, variant, binds.len(), *span)?;
+                let payload = self
+                    .enums
+                    .get(enum_name)
+                    .and_then(|vs| vs.iter().find(|(n, _)| n == variant))
+                    .map(|(_, p)| p.clone())
+                    .unwrap_or_default();
+                for (b, ty) in binds.iter().zip(payload) {
+                    if let Some(name) = b {
+                        self.bind_in_stack(name, Some(ty), *span, scopes, scope_stack)?;
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
     // ---------- 运算符与条件 ----------
 
     fn check_binary(&mut self, op: BinOp, l: TyRes, r: TyRes, span: Span) -> Result<TyRes, ZError> {
@@ -1791,16 +1977,55 @@ impl Checker {
                 Ok(TyRes { ty: Ty::Bool, slot: None })
             }
             BinOp::Eq | BinOp::Ne => {
-                self.unify_pair(l, r, span, op.symbol())?;
-                Ok(TyRes { ty: Ty::Bool, slot: None })
+                let ov = if op == BinOp::Eq { "__eq" } else { "__ne" };
+                // 定义了重载且操作数含动态值：跳过类型统一（避免 Unknown 槽位被强制成错误类型，
+                // 例如动态 dict 与 int 比较时把 dict 槽位强制成 int，破坏后续加法推断）
+                if self.fns.contains_key(ov) && (l.ty == Ty::Unknown || r.ty == Ty::Unknown) {
+                    return Ok(TyRes { ty: Ty::Bool, slot: None });
+                }
+                match self.unify_pair(l, r, span, op.symbol()) {
+                    Ok(()) => Ok(TyRes { ty: Ty::Bool, slot: None }),
+                    // 类型不匹配但定义了运算符重载 → 放行（运行时由 __eq/__ne 处理）
+                    Err(_) if self.fns.contains_key(ov) => Ok(TyRes { ty: Ty::Bool, slot: None }),
+                    Err(e) => Err(e),
+                }
             }
             BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                self.unify_numeric(l, r, span, op.symbol())?;
-                Ok(TyRes { ty: Ty::Bool, slot: None })
+                let ov = match op {
+                    BinOp::Lt => "__lt",
+                    BinOp::Le => "__le",
+                    BinOp::Gt => "__gt",
+                    BinOp::Ge => "__ge",
+                    _ => unreachable!(),
+                };
+                // 定义了重载且操作数含动态值：跳过类型统一（避免 Unknown 槽位被强制）
+                if self.fns.contains_key(ov) && (l.ty == Ty::Unknown || r.ty == Ty::Unknown) {
+                    return Ok(TyRes { ty: Ty::Bool, slot: None });
+                }
+                match self.unify_numeric(l, r, span, op.symbol()) {
+                    Ok(()) => Ok(TyRes { ty: Ty::Bool, slot: None }),
+                    Err(_) if self.fns.contains_key(ov) => Ok(TyRes { ty: Ty::Bool, slot: None }),
+                    Err(e) => Err(e),
+                }
             }
             BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
-                let ty = self.unify_arith(l, r, span, op)?;
-                Ok(TyRes { ty, slot: None })
+                let ov = match op {
+                    BinOp::Add => "__add",
+                    BinOp::Sub => "__sub",
+                    BinOp::Mul => "__mul",
+                    BinOp::Div => "__div",
+                    BinOp::Mod => "__mod",
+                    _ => unreachable!(),
+                };
+                // 定义了重载函数且操作数含动态值：不推断具体类型（交给运行时决定内建或 __op）
+                if self.fns.contains_key(ov) && (l.ty == Ty::Unknown || r.ty == Ty::Unknown) {
+                    return Ok(TyRes { ty: Ty::Unknown, slot: None });
+                }
+                match self.unify_arith(l, r, span, op) {
+                    Ok(ty) => Ok(TyRes { ty, slot: None }),
+                    Err(_) if self.fns.contains_key(ov) => Ok(TyRes { ty: Ty::Unknown, slot: None }),
+                    Err(e) => Err(e),
+                }
             }
             BinOp::Coalesce => {
                 // a ?? b：a 为 null 时取 b。Hone 无 null 字面量，null 仅来自 void 调用，
@@ -2207,6 +2432,10 @@ impl Checker {
         match op {
             UnOp::Neg => match res.ty {
                 Ty::Unknown => {
+                    // 定义了 __neg → 放行（运行时回退重载，无需推断操作数类型）
+                    if self.fns.contains_key("__neg") {
+                        return Ok(TyRes { ty: Ty::Unknown, slot: None });
+                    }
                     if self.strict {
                         return Err(self.zerr(
                             codes::CANNOT_INFER,
@@ -2218,6 +2447,8 @@ impl Checker {
                     Ok(res)
                 }
                 t if t.is_numeric() => Ok(TyRes { ty: t, slot: None }),
+                // 类型不支持但定义了 __neg → 放行（运行时回退重载）
+                _ if self.fns.contains_key("__neg") => Ok(TyRes { ty: Ty::Unknown, slot: None }),
                 other => Err(self.zerr(
                     codes::TYPE_MISMATCH,
                     format!("unary `-` requires a number, got `{}`", other.name()),
@@ -2228,6 +2459,10 @@ impl Checker {
             UnOp::Not => match res.ty {
                 Ty::Bool => Ok(TyRes { ty: Ty::Bool, slot: None }),
                 Ty::Unknown => {
+                    // 定义了 __not → 放行（运行时回退重载，无需推断操作数类型）
+                    if self.fns.contains_key("__not") {
+                        return Ok(TyRes { ty: Ty::Unknown, slot: None });
+                    }
                     if let Some(slot) = res.slot {
                         if !self.strict {
                             self.unify_slot_ty(slot, Ty::Bool, span, "`!` operand".to_string())?;
@@ -2244,12 +2479,17 @@ impl Checker {
                     }
                     Ok(TyRes { ty: Ty::Unknown, slot: None })
                 }
-                other => Err(self.zerr(
-                    codes::TYPE_MISMATCH,
-                    format!("`!` requires a `bool` operand, got `{}`", other.name()),
-                    span,
-                    Some("logical NOT works on `bool` values"),
-                )),
+                other => {
+                    if self.fns.contains_key("__not") {
+                        return Ok(TyRes { ty: Ty::Unknown, slot: None });
+                    }
+                    Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("`!` requires a `bool` operand, got `{}`", other.name()),
+                        span,
+                        Some("logical not works on `bool` values"),
+                    ))
+                }
             },
         }
     }
@@ -2412,6 +2652,65 @@ impl Checker {
             }
             // struct 实例为动态类型（字段访问在运行时校验，字段类型可查定义）
             Ok(TyRes { ty: Ty::Unknown, slot: None })
+        } else if let Some((enum_name, variant)) = callee.split_once('.') {
+            // 枚举变体构造：Shape.Circle(1.5) —— 校验变体存在与载荷类型。
+            // 先 clone 枚举条目结束 self.enums 借用，再执行可能 &mut self 的 unify。
+            let entry = self.enums.get(enum_name).cloned();
+            if let Some(vs) = entry {
+                if let Some((_, payload)) = vs.iter().find(|(n, _)| n == variant) {
+                    if payload.len() != arg_tys.len() {
+                        return Err(self.zerr(
+                            codes::ARG_COUNT,
+                            format!(
+                                "wrong number of arguments: variant `{}` of enum `{}` expects {} payload value(s), got {}",
+                                variant,
+                                enum_name,
+                                payload.len(),
+                                arg_tys.len()
+                            ),
+                            span,
+                            Some(format!(
+                                "construct with `{}.{}({})`",
+                                enum_name,
+                                variant,
+                                payload.iter().map(|t| t.name()).collect::<Vec<_>>().join(", ")
+                            )),
+                        ));
+                    }
+                    for (vty, aty) in payload.iter().zip(arg_tys) {
+                        self.unify_with(*vty, *aty, span, format!("payload of variant `{}` of enum `{}`", variant, enum_name))?;
+                    }
+                    // 枚举值为动态类型（与 struct/dict 一致）
+                    return Ok(TyRes { ty: Ty::Unknown, slot: None });
+                }
+                return Err(self.zerr(
+                    codes::UNDEFINED,
+                    format!("enum `{}` has no variant `{}`", enum_name, variant),
+                    span,
+                    Some(format!(
+                        "variants: {}",
+                        vs.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>().join(", ")
+                    )),
+                ));
+            }
+            // 非枚举限定名（模块函数 / load 库 / import 模块）→ 落入下方动态放行
+            if self.builtins.contains(callee) {
+                self.builtin_result(callee, arg_tys, span)
+            } else if let Some(sig) = self.ffi_sigs.get(callee).cloned() {
+                // load 签名块声明的 FFI 函数：按签名静态校验参数，返回声明类型
+                self.check_ffi_call(&sig, arg_tys, span)
+            } else if self.has_external || callee.contains('.') {
+                // 动态外部加载（未声明签名的 load 库函数 / import 模块函数 / alias 别名）：
+                // 类型在运行时才能确定，静态阶段放行
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            } else {
+                Err(self.zerr(
+                    codes::UNDEFINED,
+                    format!("undefined function `{}`", callee),
+                    span,
+                    Some("define it with `fn`, or check the spelling"),
+                ))
+            }
         } else if self.builtins.contains(callee) {
             self.builtin_result(callee, arg_tys, span)
         } else if let Some(sig) = self.ffi_sigs.get(callee).cloned() {
@@ -2725,6 +3024,21 @@ impl Checker {
                 self.require_bool(args[0], &span, "`assert` condition")?;
                 if n == 2 {
                     self.expect_str(name, args, 1, span, "the assertion message")?;
+                }
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            "assert_eq" => {
+                if !(2..=3).contains(&n) {
+                    return Err(self.zerr(
+                        codes::ARG_COUNT,
+                        format!("wrong number of arguments: `assert_eq` expects 2-3 (actual, expected[, message]), got {}", n),
+                        span,
+                        Some("form: assert_eq(actual, expected) or assert_eq(actual, expected, \"message\")"),
+                    ));
+                }
+                // 实际/期望为动态类型（任意值可比较）；第 3 个可选参数为消息
+                if n == 3 {
+                    self.expect_str(name, args, 2, span, "the assertion message")?;
                 }
                 Ok(TyRes { ty: Ty::Void, slot: None })
             }
@@ -3492,6 +3806,11 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Break { span, .. }
         | Stmt::Continue { span, .. }
         | Stmt::FnDef { span, .. }
+        | Stmt::StructDef { span, .. }
+        | Stmt::EnumDef { span, .. }
+        | Stmt::AsyncFnDef { span, .. }
+        | Stmt::ClassDef { span, .. }
+        | Stmt::DebugPrint { span, .. }
         | Stmt::ExprStmt { span, .. }
         | Stmt::Breakpoint { span, .. }
         | Stmt::Export { span, .. }
@@ -3542,6 +3861,7 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "is_null",
         "type_of",
         "assert",
+        "assert_eq",
         "to_str",
         "to_int",
         "to_float",
