@@ -1,13 +1,13 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-page-node-id="k5w0ArxjC1cLNCabP2ikpo">
-<head data-page-node-id="yDeISbrCvIceMe6Cx3S5Rf">
-<meta charset="UTF-8" data-page-node-id="UVrbUVTV7pF9Kr2uLk1oVZ">
-<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="ATJ7n66LGJrKRhccpUiomr">
-<title>Hone 文档 - 语言手册</title>
-<meta name="description" content="Hone 语言手册：类 C 语法的轻量脚本语言，静态强类型、解释执行、单文件分发。从第一个程序到工具链，10 分钟上手。" data-page-node-id="Q3odAi9rRnl00nPgIthiOb">
-<meta name="theme-color" content="#0d1117" data-page-node-id="xnSkeLznubBSPAV3GjKE4l">
-<link rel="icon" href="favicon.png" type="image/png" data-page-node-id="1Vbi6SrCqHAVzHbQgUhBap">
-<link rel="stylesheet" href="style.css" data-page-node-id="ych6VUsx1uQ8sJLSQ99iDG">
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hone 语言参考 - 权威语法规范</title>
+<meta name="description" content="Hone 语言参考：语法、数据类型、运算符、控制流（含 goto 标签与 macro 宏，H105/H106 编译期校验）、函数、集合、class、枚举、运算符重载、异步、内置函数、错误码 H001–H999 的精确规范。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="style.css">
 <script>
 /* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
 function toggleTheme(){
@@ -23,110 +23,52 @@ function toggleTheme(){
 })();
 </script>
 </head>
-<body data-page-node-id="fv1gLPWYmBKt6ZsJ6N16mq">
-<header data-page-node-id="dOiZvBhL5ULgSi0yFyFhIp">
-  <span class="logo" data-page-node-id="X7NVU1swbnEQZuBzhE8BE8"><span class="mark" data-page-node-id="WxbGp8TUctyRz2WPg0ycGO">⚡</span> Hone</span>
-  <nav data-page-node-id="URYP19DsJ5YjeFyiRXFnDW">
-    <a href="index.html" data-page-node-id="hFFdN16C2IWbGUWIVV9AjY">首页</a>
-    <a href="docs.html" class="active" data-page-node-id="2nQTe1bHATKXrMUWiIOgBV">文档</a>
-    <a href="language.html">语言</a>
-    <a href="tutorial.html" data-page-node-id="wtXXavDuT0BQoEVltbHdOX">教程</a>
-    <a href="examples.html" data-page-node-id="6fBibj9Su3QkRErtr88rBU">示例</a>
-    <a href="stdlib.html" data-page-node-id="Gsa6IEC15CRB9jhJuCKK5k">标准库</a>
-    <a href="install.html" data-page-node-id="wht5m3cVTReNuaXvBYF0YN">安装</a>
-    <a href="download.html" data-page-node-id="3XyPhLE86QDnSaKA3OasJs">下载</a>
-    <a href="perf.html" data-page-node-id="1819TFgy5yPhbqGRrrWb7M">性能</a>
+<body>
+<header>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
+  <nav>
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="language.html" class="active">语言</a>
+    <a href="tutorial.html">教程</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
   </nav>
-  <span class="ver" data-page-node-id="q9sUy8wzoPCzkEBFoAhUFB">v0.7.11</span>
-  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题" data-page-node-id="btZFOHmpx2FjWR7fyLV4mt"><span class="ti-light" data-page-node-id="2vqGMXMOPj1jeef7BGvlkS">☀️</span><span class="ti-dark" data-page-node-id="Hj9iNKAUlGGdGS5ywxn7B7">🌙</span></button>
+  <span class="ver">v0.7.11</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
 </header>
 
-<main data-page-node-id="gHlMauWULyFXBOkO3EhnnC">
-  <h2 data-page-node-id="CrLkeVO4dKTJG4AT8SzGKi"><span class="hash" data-page-node-id="5lvciVwdfZzCAfKM1OQoHK">#</span>Hone 语言手册</h2>
-  <p data-page-node-id="MyXQHnL4PG4jAJAdMgrNOE">类 C 语法的轻量脚本语言：静态强类型、解释执行、单文件分发。按章节循序渐进，10 分钟上手。</p>
+<main>
+  <h2><span class="hash">#</span>Hone 语言参考</h2>
+  <p>本页是 Hone 语言的<strong>权威参考手册</strong>：对语言自身的语法与语义做精确、最小化的规范说明——语法结构、类型系统、运算符、控制流及其编译期安全约束、函数、集合、class、枚举、运算符重载、异步、内置函数、错误码。每个条目均可在源码与 <code class="inline">hone explain &lt;错误码&gt;</code> 中核对。</p>
+  <p class="note">📘 本页与 <a href="docs.html">docs.html（综合使用手册）</a> 互补：集成（import / hone.json 清单）、工具链（hone run/build/repl/...）、GUI·进程·定时·图片·桌宠库、进阶用法与常见坑，仍在 docs.html 中。</p>
 
-<p class="note">📘 <strong>权威语言参考：</strong><a href="language.html">language.html</a> —— 语法、数据类型、运算符、控制流（含 <code>goto</code> 标签与 <code>macro</code> 宏，H105/H106 编译期校验）、函数、集合、class、枚举、运算符重载、异步、内置函数、错误码 H001–H999 的精确规范。综合使用手册（集成 / 工具链 / GUI·进程·定时库 / 进阶 / 常见坑）仍见本文档后续章节。</p>
+  <input type="text" id="search" class="search-box" placeholder="搜索参考…（如 goto、macro、运算符、list）" oninput="searchDocs(this.value)">
+  <div id="search-count" class="search-count"></div>
 
-  <input type="text" id="search" class="search-box" placeholder="搜索手册…（如 http_get、if、list）" oninput="searchDocs(this.value)" data-page-node-id="uCr1lEHGBjKKp8Ow4OYLXy">
-  <div id="search-count" class="search-count" data-page-node-id="KvmQbooUlOGNPRu5SP1lfq"></div>
-
-  <div class="toc" data-page-node-id="BFAMXHHoCEeDpSbl8G5l1q">
-    <ol data-page-node-id="HKp1kvz8mO0zk68isQJzBA">
-      <li data-page-node-id="zYyHqdAtALpuQxL1JCppIH"><a href="#quickstart" data-page-node-id="A5UnKqkcOOyO1Qpatumy4H">快速入门</a></li>
-      <li data-page-node-id="C6gm5tTmz7HqfQRQEVodFV"><a href="#hello" data-page-node-id="G8JbeMSZxotzYGOSdri6NA">第一个程序</a></li>
-      <li data-page-node-id="zLAyYW5TEvwJxobN4LoDzH"><a href="#syntax" data-page-node-id="6kdT36DlGEqgIxknb5D1EZ">基础语法</a></li>
-      <li data-page-node-id="hbhLOu0mpC7QeQpA6EhxS2"><a href="#vars" data-page-node-id="lffuGoNmXfop8KLbwx1LHM">数据类型与变量</a></li>
-      <li data-page-node-id="M2aGXDMxLMIZDLjGlVj98A"><a href="#operators" data-page-node-id="YiWm0kM88vd0HWKtc0korI">运算符</a></li>
-      <li data-page-node-id="TXGviBCyhEpGm2Xjrtd2tp"><a href="#control" data-page-node-id="yH5i7wRIOMPkSyesvA8NYc">控制流</a></li>
-      <li data-page-node-id="Vvm2pcQb4gHxXAAIxFlveX"><a href="#fn" data-page-node-id="Co9wGutdQHcWEN0DiVJ80H">函数</a></li>
-      <li data-page-node-id="KAAI4ocVRk6wkhFGd6fYah"><a href="#collections" data-page-node-id="3zPIUuRLnyfKzCHJGK5q7a">集合与字符串</a></li>
-      <li data-page-node-id="TcBzXDEx3dFbJJBVSVfb6M"><a href="#class" data-page-node-id="EsjdPnxMALOv2SjrV3biLm">class 类</a></li>
-      <li data-page-node-id="6cCs2XqxvxmKkp13KksQmU"><a href="#builtins" data-page-node-id="E7DXgH4rCcSO1J4MwMei74">内置函数参考</a></li>
-      <li data-page-node-id="ll4f10gUnQJODb75eL54Ab"><a href="#integ" data-page-node-id="l3Egmaom53QwiOvRl8eVnX">导入与外部集成</a></li>
-      <li data-page-node-id="D0CkAcKPDihVJG96H7CXRa"><a href="#tools" data-page-node-id="7pRysWgaYPSDWVdXl1yu7O">工具链</a></li>
-      <li data-page-node-id="3oDtFCu297dVWN16b24LbZ"><a href="#gui" data-page-node-id="EpFxtkNAoqhMJTdUFKfy6G">图形界面库</a></li>
-      <li data-page-node-id="bFUkkapQhsRPU9IFAwkSfl"><a href="#process" data-page-node-id="HhuRPyC9FRkJIXybKqo4N2">进程检测库</a></li>
-      <li data-page-node-id="JUUChEUAbiOM1gIUXjIBCA"><a href="#sched" data-page-node-id="aSFtTh9NixxsBSwRp8oBZW">定时任务库</a></li>
-      <li data-page-node-id="XJJdis4NAWukZrJAwRMXgi"><a href="#errors" data-page-node-id="wKqgBJWPZUCQDyB6fEiTAT">错误处理</a></li>
-      <li data-page-node-id="eafBEgzUoFdhvfUY6HJD8h"><a href="#principles" data-page-node-id="LLIFhVDLyS6uaCfBx9bZxD">设计原则</a></li>
-      <li data-page-node-id="rZCf4DwDWyr86kxkO7ZTdx"><a href="#advanced" data-page-node-id="VxHC5flZr6QpTPa5w8j90K">进阶用法</a></li>
-      <li data-page-node-id="vF0c4RjYecAQ1pGSIEY7Pr"><a href="#pitfalls" data-page-node-id="qtrGUzf9JfaRBfQOmvedbt">已知问题与常见坑</a></li>
+  <div class="toc">
+    <ol>
+      <li><a href="#syntax">基础语法</a></li>
+      <li><a href="#vars">数据类型与变量</a></li>
+      <li><a href="#operators">运算符</a></li>
+      <li><a href="#control">控制流（标签 / goto / 宏）</a></li>
+      <li><a href="#fn">函数</a></li>
+      <li><a href="#collections">集合与字符串</a></li>
+      <li><a href="#lang-ext">结构体 · 模式匹配 · 管道</a></li>
+      <li><a href="#class">class 类</a></li>
+      <li><a href="#lang-new">多返回值 · 解构赋值 · 推导式 · 可选链</a></li>
+      <li><a href="#enum">枚举（enum）与 match 变体模式</a></li>
+      <li><a href="#overload">运算符重载（__op 特殊函数）</a></li>
+      <li><a href="#async">异步函数（async fn + await）</a></li>
+      <li><a href="#builtins">内置函数参考</a></li>
+      <li><a href="#errors">错误处理 / 错误码 H001–H999</a></li>
     </ol>
   </div>
 
-  <section id="quickstart" data-page-node-id="BBMnDXfPijVJ1uBpX5WD1i">
-    <h2 data-page-node-id="reY5uNgnMiniedq4wBFjZG"><span class="hash" data-page-node-id="IlZQ2z28VRqougTcsu3D9F">#</span>0. 快速入门：从零到第一个脚本</h2>
-    <p data-page-node-id="CEFO9BZOtiHxsvDWE4CfIZ">新手请先走完本节（约 5 分钟）：<strong data-page-node-id="HMtzfEGcYPSo0WJGAgfwTC">安装 → 写第一个脚本 → 运行 → 基础语法</strong>，跑通最小闭环后再逐章深入。</p>
-
-    <h3 data-page-node-id="SfB3YZsb590UcRMJQuBFdK">第 1 步：安装（任选一种，详见<a href="install.html" data-page-node-id="tB08iDvww1YLOX5FjVaNfS">安装教程</a>）</h3>
-<pre data-page-node-id="dISGqsWFMwCbhs099UUiOZ"><code data-page-node-id="C4WubN0SBO2oEu8nTrB7FF"><span class="c" data-page-node-id="3taYFK1xuHLDAdvG1bFSNS">// Linux / Termux</span>
-curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh
-<span class="c" data-page-node-id="LsmQtXyPpFfyEga2TJZLNE">// Windows（PowerShell 5.1+）</span>
-irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex</code></pre>
-    <p data-page-node-id="bfm9yj0Z27pes0xEQEXDyn">验证：<code class="inline" data-page-node-id="XYaxdAKLOGfk5ymnm508Ez">hone --version</code></p>
-
-    <h3 data-page-node-id="IyBTfBobkEKULWkwWdFvyu">第 2 步：写第一个脚本</h3>
-    <p data-page-node-id="eY0ITBbGI6eZAgOD68cHda">新建 <code class="inline" data-page-node-id="WTFvnAFTIDDwyHGODBwhFz">hello.hn</code>，内容只有一行：</p>
-<pre data-page-node-id="3NTAI4ElsmVGxRsP9wMWjC"><code data-page-node-id="L9KFKgR1vBRk8hBWWcSBxH"><span class="f" data-page-node-id="1jWUfsTV9XjSalthkzUSaS">print</span>(<span class="s" data-page-node-id="sLG1tPI5sGCCkNAq7ap8C1">"Hello, Hone!"</span>);</code></pre>
-
-    <h3 data-page-node-id="IFwKFQuwmjJGa6Hun7oY6y">第 3 步：运行</h3>
-<pre data-page-node-id="BVn5qQzrCoygMmk21GOGDv"><code data-page-node-id="34DAzOp8OsBT74TzGv6I0E">hone hello.hn     <span class="c" data-page-node-id="4iv7gCZdcOvDTtbgvFLwzf">// 输出 Hello, Hone!（hone run hello.hn 等价）</span></code></pre>
-    <p data-page-node-id="ErLRvFpOh8vDrZQSC2yvO0">Hone 是解释型脚本语言：无需编译、无需 <code class="inline" data-page-node-id="SOUcChb4YrMEXVG2boQzdC">main</code> 函数，顶层语句从上到下顺序执行。</p>
-
-    <h3 data-page-node-id="HSkdIoCng04M3pwolKB5aI">第 4 步：基础语法速览</h3>
-<pre data-page-node-id="fYmLcKXw7btRntLcEGMLhH"><code data-page-node-id="csPm3bGXIWEqtDOBZ6BII8"><span class="c" data-page-node-id="7CeYdEcXlACZsMuoBQ2sqS">// 变量：无前缀声明，类型推导后锁定</span>
-x = <span class="n" data-page-node-id="tW9FMUNHXdhxvlvC0DBlrp">10</span>;              <span class="c" data-page-node-id="q3VYGRHMtiErl2EsBDIZGF">// int</span>
-f = <span class="n" data-page-node-id="Fe8c68RHIW958BSYei9VpB">3.14</span>;            <span class="c" data-page-node-id="ZWyb68WwjCvq3XyqLHkVSs">// float</span>
-s = <span class="s" data-page-node-id="R9T1CSa8zLeWiQjxhuDDAU">"hello"</span>;         <span class="c" data-page-node-id="6A2HG8gWMXV1GmetwLvcyd">// str</span>
-b = <span class="k" data-page-node-id="qCttBDxTjMdwK5bQAlXLi5">true</span>;            <span class="c" data-page-node-id="KIAOYcoWYCHzVsceotu179">// bool</span>
-c = <span class="s" data-page-node-id="51knECujJuIFHr3jAB4q2m">'中'</span>;            <span class="c" data-page-node-id="t9bq6DGQhUZafXlltOxTnQ">// char（单个 Unicode 字符）</span>
-
-<span class="c" data-page-node-id="TiFfoDnLFmycMsRboePoTh">// 控制流：条件必须是 bool</span>
-<span class="k" data-page-node-id="mqh09ySx30Q6GF29OWOspo">if</span> (x &gt; <span class="n" data-page-node-id="SFn8WyWkLkgRhULuQv1Fgt">5</span>) { <span class="f" data-page-node-id="TdBcAVHSsbdVje6IhOerwa">print</span>(<span class="s" data-page-node-id="3pBzaaYEwbIzGYOKfBt9uN">"大"</span>); } <span class="k" data-page-node-id="I4aPCTF6zRZzV4vk3nsImD">else</span> { <span class="f" data-page-node-id="GZ0iSmc8v7yegFQSyZsbLc">print</span>(<span class="s" data-page-node-id="IGJ9c6zC2gU4GnAbK5szYW">"小"</span>); }
-
-<span class="c" data-page-node-id="h1ZkLeLoYcoHSrXC3gx7fa">// 函数：返回类型由 return 推导</span>
-<span class="k" data-page-node-id="IiQTnxLi7kfJ56DJQx1yJC">fn</span> <span class="f" data-page-node-id="DLm1JlsZksybodtImpArCk">add</span>(a, b) { <span class="k" data-page-node-id="S32ItnR0yXIid6XMEB9B3r">return</span> a + b; }
-<span class="f" data-page-node-id="pmRAGFe2p1Gsnz8atUHQGX">print</span>(add(<span class="n" data-page-node-id="E6pm6QTc4QfXCtJgNiMM7B">2</span>, <span class="n" data-page-node-id="6Dh409fmCmwbAugwSKft6c">3</span>));   <span class="c" data-page-node-id="thri4LbRukhVnadnUMkCWG">// 5</span>
-
-<span class="c" data-page-node-id="tua9KJGIddUDFk5sefHGdv">// 集合与遍历</span>
-nums = [<span class="n" data-page-node-id="dcqh11rys5du3p2pG9N1TO">1</span>, <span class="n" data-page-node-id="sCuz0F2IGHhakwNMUIUbsv">2</span>, <span class="n" data-page-node-id="P0bmwE3jEFZylDhjPzRKzN">3</span>];
-<span class="k" data-page-node-id="aYgTxz30vo6agxuQTA0eiX">for</span> v <span class="k" data-page-node-id="NuOL34lax7D0JWN1fnIWk5">in</span> nums { <span class="f" data-page-node-id="GltUHTYD6YfXPh2DUqQy2F">print</span>(v); }</code></pre>
-
-    <p data-page-node-id="NqRxhCLm8nuDTkEBJ0vCvW">下一步：从第 1 章起循序渐进；赶时间可先看
-      <a href="#advanced" data-page-node-id="IG94CvdoxtMFQr2d2ZCxsk">进阶用法</a>（多文件 / 调试 / 性能）与 <a href="#pitfalls" data-page-node-id="HfXmzODOkXd2F2eq76uUHV">已知问题与常见坑</a>。</p>
-  </section>
-
-  <section id="hello" data-page-node-id="mSAc44H66lBHFnzO6n4JWo">
-    <h2 data-page-node-id="iU90PlnVnfBAM8trVSzNMG"><span class="hash" data-page-node-id="HY88mKvk8dW4doReOKPSqD">#</span>1. 第一个程序</h2>
-    <p data-page-node-id="oUtl9GjtcTNjwG0slqTrZF">和 C 语言一样，从 Hello World 开始。保存为 <code data-page-node-id="MtxWmBEo80vhkCrhExmjhT">hello.hn</code>：</p>
-<pre data-page-node-id="bGWXYOEj2UVKBE1o1WlCH5"><code data-page-node-id="5pEsFKC5go5gfEhtbW7WuH"><span class="c" data-page-node-id="G02ShowEN1Z6bXMIrXB7Ir">// 这是 Hone 的第一个程序</span>
-<span class="f" data-page-node-id="35MHjiwDpy7ExHAMfRjvvW">print</span>(<span class="s" data-page-node-id="pfa7pKP3xzOdtYLISJVWSB">"Hello, Hone!"</span>);</code></pre>
-    <p data-page-node-id="7zUpMlWFnXa1Bx0DsuTv2D">运行：<code class="inline" data-page-node-id="HoIgjtvS7NgeK1TA0TaUMR">hone hello.hn</code>（或 <code class="inline" data-page-node-id="aQB6s3kOOPBAuxHuylrAmV">hone run hello.hn</code>）。</p>
-    <p data-page-node-id="0cfm4h5sBa51fXG3RJRf8K">Hone 是解释型脚本语言：无需编译、无需 <code class="inline" data-page-node-id="foWdH8L2pumd09s6SrJuFB">main</code> 函数，
-      顶层语句从上到下顺序执行。<code class="inline" data-page-node-id="gVgQUXQlaYL3abTcWafP2a">print</code> 自动换行。</p>
-  </section>
-
-  <section id="syntax" data-page-node-id="UUOepykxogbLrFyo0HiaHe">
+<section id="syntax" data-page-node-id="UUOepykxogbLrFyo0HiaHe">
     <h2 data-page-node-id="2EwtvY0qEYJp8lweXkJ9Cb"><span class="hash" data-page-node-id="VADqc18tyFo8Wx26koeUQl">#</span>2. 基础语法</h2>
     <table data-page-node-id="dKEdMNRCqViD9GRTVhPMWA">
       <tr data-page-node-id="3R0fkFvEr0cQZf8ItRxzjh"><th data-page-node-id="cKto4CDbHWNzSCTbD6iF5Y">项目</th><th data-page-node-id="EBMBhFuBZLzuKWw6uAIngg">约定</th></tr>
@@ -140,8 +82,7 @@ nums = [<span class="n" data-page-node-id="dcqh11rys5du3p2pG9N1TO">1</span>, <sp
       <tr data-page-node-id="tJDQGdSC7s74usodNIu1BH"><td data-page-node-id="7opVDPrYJ1n8UvLocVbnj3">调试输出</td><td data-page-node-id="j1nUHB3AcdxjPgzGLtDE3m"><code data-page-node-id="xKAGQjrANQeGfsjDt573T0">debug_print(expr);</code> 仅 debug 模式生效</td></tr>
     </table>
   </section>
-
-  <section id="vars" data-page-node-id="Wj5VXv5HAbgDzYB6jiIcQ9">
+<section id="vars" data-page-node-id="Wj5VXv5HAbgDzYB6jiIcQ9">
     <h2 data-page-node-id="bwFJvdbJRNtLMeGP0F1dVc"><span class="hash" data-page-node-id="8ifPL6I6FxqyUucADT7aBE">#</span>3. 数据类型与变量</h2>
     <p data-page-node-id="X6rbD2GlhpwweApocA37xM">静态强类型：类型一经推导或显式声明即锁定，禁止隐式转换。</p>
 <pre data-page-node-id="vi0CAPRcoESZSwR9iIAX4h"><code data-page-node-id="wgg93fbfai6AObuxNqFazi">x = <span class="n" data-page-node-id="WjgC9eGyML8bK3o27HemHk">10</span>;              <span class="c" data-page-node-id="VP51UTdAb5KTky0zsX9uH5">// 自动推导为 int</span>
@@ -163,8 +104,7 @@ ch = <span class="s" data-page-node-id="SkrvDorKRag069H2nUEtYQ">'a'</span>;     
       <tr data-page-node-id="TKBje6Gp2CjHNlyJKp8Hzk"><td data-page-node-id="qVpYgtzFl4DI7jOtLxm5pN"><code data-page-node-id="2enZTAQlg9UiH1p2dwSaBd">dict</code></td><td data-page-node-id="0POX7z3dxSAU1ncmj9ySSq">动态字典（字符串键 → 任意值）</td><td data-page-node-id="ylAbVE9joYZrKBcIKx26j3"><code data-page-node-id="TlbVn3rSy3xDC4aShuu0mH">{"name": "hone", "ver": 1}</code></td></tr>
     </table>
   </section>
-
-  <section id="operators" data-page-node-id="tnbrlLFF1l9BFK8uKScIeL">
+<section id="operators" data-page-node-id="tnbrlLFF1l9BFK8uKScIeL">
     <h2 data-page-node-id="n9xkYYln1YG34CA4efZEkB"><span class="hash" data-page-node-id="j5VS2aK7TGf4xDBBvZ1g5m">#</span>4. 运算符</h2>
     <table data-page-node-id="KIFE7Jlszr6B86UIu2DuqG">
       <tr data-page-node-id="oZl7wpVal9GO6SzWaKTaaP"><th data-page-node-id="f5hGgN08RWq7FLCp1X6bMA">类别</th><th data-page-node-id="vrHyLms85xQKBoXEXxnmQt">运算符</th><th data-page-node-id="pZHBlE102YfGVKCD6E3EC8">说明</th></tr>
@@ -181,8 +121,7 @@ ch = <span class="s" data-page-node-id="SkrvDorKRag069H2nUEtYQ">'a'</span>;     
     <p data-page-node-id="oiEpQFUWe2bJiB31YKWsRT">字符串插值优先使用 f-string（见第 7 章），比拼接更简洁。</p>
     <p data-page-node-id="AUz90eHti0qorZfEnq4blE">自增/自减、三元、空值合并的完整示例见 <code class="inline" data-page-node-id="LDnXuqqOOG5ej2Lgl9529Z">examples/new_syntax_demo.hn</code>。</p>
   </section>
-
-  <section id="control" data-page-node-id="5lI6EITi2XLkGStaiMx2ck">
+<section id="control" data-page-node-id="5lI6EITi2XLkGStaiMx2ck">
     <h2 data-page-node-id="LDgqgQuxx5o67WJHVAqd7C"><span class="hash" data-page-node-id="ztQeJo1Z1XX0x4HhGUFqVn">#</span>5. 控制流</h2>
     <p data-page-node-id="sJqzoFJsuucchvGU0o2P7q">条件表达式必须显式返回 bool，禁止隐式转换（<code data-page-node-id="BfqEMdHalzzE2xxmuKZ7oW">if (1)</code> 视为非法）。</p>
 <pre data-page-node-id="9cckBYXg8gT464eixo6M2R"><code data-page-node-id="zY2yOFPUeR0EJviAaQZebP">x = <span class="n" data-page-node-id="sEaHjjTLfyE9Xj9iqTBOS3">7</span>;                  <span class="c" data-page-node-id="jJ9O4jyEAe0R7h8HpNeOOp">// 先定义再判断</span>
@@ -283,8 +222,7 @@ n = <span class="n" data-page-node-id="BzdBWPntoHmiqI23C0qqLO">0</span>; <span c
     <p data-page-node-id="ooPEg1G5RsZrHE2JerEhAn">与函数的分工：需要返回值、递归、一等值（传参 / 存变量）时用 <code class="inline" data-page-node-id="VUgtHyvLHfZv6QDudDa1Pd">fn</code>；只想去掉一层样板写法时用宏。排查宏报错：<code class="inline" data-page-node-id="045y5ZvtwCE1j6lJsrNMmU">hone explain H106</code>。</p>
 
   </section>
-
-  <section id="fn" data-page-node-id="gZ4jfYCnLYFPrWn0N35411">
+<section id="fn" data-page-node-id="gZ4jfYCnLYFPrWn0N35411">
     <h2 data-page-node-id="g3JDLIfRi1cd66ZptJNk3A"><span class="hash" data-page-node-id="BQZtVgC1bCiJjyK23MIl3A">#</span>6. 函数</h2>
 <pre data-page-node-id="w582s8ldtunvfcGHNmwr44"><code data-page-node-id="TGY9BsxZ7tU63e2yoJ9Aa0"><span class="k" data-page-node-id="rnYID2XnpKsdABMLSDIApr">fn</span> <span class="f" data-page-node-id="2LIh6W4YIXkmOnlWrk6L5V">add</span>(a : <span class="k" data-page-node-id="BBfLKDEQuE7DexeME1a8PB">int</span>, b : <span class="k" data-page-node-id="OS4i0zA2H6ZjemJ4wBDQSG">int</span>) -&gt; <span class="k" data-page-node-id="rk2Mb2Fi7lKEbn9dOmtIKT">int</span> {
     <span class="k" data-page-node-id="Rx05k7U0AqNux52tPQGMrN">return</span> a + b;
@@ -377,8 +315,7 @@ adder = <span class="k" data-page-node-id="os8nWF2ahnXpAs9wbMMzSw">fn</span>(y) 
 add5 = <span class="f" data-page-node-id="Ddd4IEkU5w96uvrUpo5iSW">make_adder</span>(<span class="n" data-page-node-id="oJQ07c78EdcbsPzbvqTKhp">5</span>);
 <span class="f" data-page-node-id="KJW4Jk8PhMGlvgwP2lvas7">print</span>(add5(<span class="n" data-page-node-id="09Hkp0rqjvJdwjGNhEAMyC">10</span>));       <span class="c" data-page-node-id="4ByUDZPoH7FvKntKX4a6E7">// 15</span></code></pre>
   </section>
-
-  <section id="collections" data-page-node-id="HeheCOoxfeFet8DpDFRAnI">
+<section id="collections" data-page-node-id="HeheCOoxfeFet8DpDFRAnI">
     <h2 data-page-node-id="rziSlwzZJQc1qjNb9Bq9xU"><span class="hash" data-page-node-id="TLeVy3gyqeI5kYQMt3dIY5">#</span>7. 集合与字符串</h2>
     <p data-page-node-id="a8nvrViP9bwQiJuVuAQmNj">列表 <code data-page-node-id="oM6mYvzwWJjxRmUXytAaEx">[a, b, c]</code> 与字典 <code data-page-node-id="Io5OX6EHxo0t2WvHASw192">{"k": v}</code> 为动态集合类型：元素类型不锁定、可混合，
       变量本身仍遵循类型锁定规则（不能把列表赋给已锁定的标量变量）。</p>
@@ -411,8 +348,7 @@ line2
     <p data-page-node-id="hyhuGLitH5KwlhOfi1wAYG"><strong data-page-node-id="Qj2J4DeDtGGXIjxJJV0c2x">类型判断</strong>：<code data-page-node-id="y3lkMGfNhYLrCPArkR7A5A">is_int</code> <code data-page-node-id="K9Z9w2I8F7VtRVC0pP7XSV">is_float</code> <code data-page-node-id="jqrzkxd50lQj8RsYnv2iVn">is_str</code> <code data-page-node-id="OqtlhhVPeNvGd1poRUY4hE">is_bool</code>
       <code data-page-node-id="D0eJYuKohVmN6Aa1v62I52">is_list</code> <code data-page-node-id="JcKrGO1lhdLi3T4OXT5drX">is_dict</code> <code data-page-node-id="ytKD9fSTyqvPUF4R9pPFCI">is_null</code>，判断运行期值类型，常用于分支处理混合集合。</p>
   </section>
-
-  <section id="lang-ext" data-page-node-id="LCwlTLRF9pCtUXgmQ6y02Q">
+<section id="lang-ext" data-page-node-id="LCwlTLRF9pCtUXgmQ6y02Q">
     <h2 data-page-node-id="VxUoLa9xpf54NDlo20jnHo"><span class="hash" data-page-node-id="5l0uGrIUqzs9GyU2DOjRAE">#</span>7.5 结构体 · 模式匹配 · 管道</h2>
     <p data-page-node-id="IChYIhxusPNBljiC2k4Flt"><strong data-page-node-id="EtloTVQnWmsaTk0Z0fdlHx">struct 结构体</strong>：声明确定的数据形态（字段名与类型固定），实例用 dict 表示、字段访问 <code data-page-node-id="iYefDFiAAZkmEwp5zc64NZ">p.字段</code>；
       构造时按字段顺序传参，检查阶段校验字段个数与类型（H001/H011）：</p>
@@ -433,8 +369,7 @@ p = <span class="f" data-page-node-id="lO2eEZOYp3XMHygftESMjx">Point</span>(<spa
 <pre data-page-node-id="YA3YhXugrTotHNOEdMV0qI"><code data-page-node-id="BFXPjDxOlBppYo2BPo3eK8"><span class="f" data-page-node-id="fIttVBWO8Mbk1PQhfSPDX2">print</span>(<span class="s" data-page-node-id="LGtFZrIdqYC5G1aKFERMuv">"hello world"</span> |&gt; <span class="f" data-page-node-id="SS26tIYPXm9jrSo9El0t5k">len</span>);       <span class="c" data-page-node-id="FgHKQ2YCJtsJBLy6kBVTu1">// 11</span>
 <span class="f" data-page-node-id="0iM39zBGe1skC7UV0GCsB4">print</span>([<span class="n" data-page-node-id="Ese5sYwnR8SBBLbwgm8rvV">1</span>, <span class="n" data-page-node-id="y2jfT4ki6tkNm3jHzEyPk5">2</span>, <span class="n" data-page-node-id="4prgxF5f6BmRJNUjJeR7wT">3</span>] |&gt; <span class="f" data-page-node-id="IvUwaOhqeiCCFoORjrcuBB">len</span> |&gt; <span class="f" data-page-node-id="zlMspzx3JdxMDCCGzAaFbW">to_str</span>); <span class="c" data-page-node-id="az4lBfmbRvgr6npLuMaH1O">// "3"</span></code></pre>
   </section>
-
-  <section id="class" data-page-node-id="5wnCvIf0mwbaYfsbWAtkIZ">
+<section id="class" data-page-node-id="5wnCvIf0mwbaYfsbWAtkIZ">
     <h2 data-page-node-id="uWd8dNpM1bIAWiPMlsUNxw"><span class="hash" data-page-node-id="XF2LxXqftNnlu4AI17C6KM">#</span>7.6 class 类（成员函数不进全局符号表）</h2>
     <p data-page-node-id="oDjAz5vVfIjuSGHtLlEZZ9"><strong data-page-node-id="bslNRzdcZEQWAXK6nlV8qH">class 类</strong>：将一组相关函数组织成命名空间，通过 <code class="inline" data-page-node-id="7U2gIxduMKSLt251PryzuC">类名.方法(...)</code> 调用
       （如 <code class="inline" data-page-node-id="XfgejXXWv9C6tYsBjfAOzT">Math.double(21)</code>）。关键特性：<strong data-page-node-id="x9gwy60EJzlzajWdJlef0J">成员函数不进入全局符号表</strong>——
@@ -469,8 +404,7 @@ p = <span class="f" data-page-node-id="lO2eEZOYp3XMHygftESMjx">Point</span>(<spa
       类名与 struct 名不能重复（报 H005）；结尾分号可选（class 是块结构，与 struct 不同）。
       完整示例见 <code class="inline" data-page-node-id="8om6WR63yDBXDYg7vjYFf5">examples/class_test.hn</code>。</p>
   </section>
-
-  <section id="lang-new" data-page-node-id="QGl9byP2OeiEn78nXkTSvr">
+<section id="lang-new" data-page-node-id="QGl9byP2OeiEn78nXkTSvr">
     <h2 data-page-node-id="jgFfZbsYzAL8hCE8RcdDtk"><span class="hash" data-page-node-id="j4871HhagutERxR3VVKlGS">#</span>7.7 多返回值 · 解构赋值 · 推导式 · 可选链</h2>
     <p data-page-node-id="PBNiIwaX7N0sbdWb7A3zLZ"><strong data-page-node-id="XspRqynNB0cfVpvrZBYVwq">多返回值</strong>：<code class="inline" data-page-node-id="GCad5apIp5IxQzD6Xqo1xd">return a, b, ...;</code> 一个函数可一次返回多个值，
       运行时打包为列表，由解构赋值接收；不解构时（<code class="inline" data-page-node-id="7RKzp3L02SmB1eEbeCWu5K">x = f();</code>）拿到打包后的列表。
@@ -533,8 +467,7 @@ v = <span class="f" data-page-node-id="vIAA1xjMMx1bm6cDne6f3E">void_fn</span>();
 <span class="f" data-page-node-id="NBHSUQg6lUiBK6MguR0Aoa">print</span>(v?.a?.b);             <span class="c" data-page-node-id="5ctDWJG0CiAEzN1wYBXZpN">// null（链式短路）</span>
 <span class="f" data-page-node-id="GJFsZoCj6ersSnCN5pjIEJ">print</span>(v?.name ?? <span class="s" data-page-node-id="bEblyQcZ9kT1WnCgUgEQCn">"匿名"</span>);  <span class="c" data-page-node-id="D4xgF0KOq2dOVGweKzMHVB">// 匿名（与空值合并配合）</span></code></pre>
   </section>
-
-  <section id="enum" data-page-node-id="E7k777YZTLk0G5k5sDdeLO">
+<section id="enum" data-page-node-id="E7k777YZTLk0G5k5sDdeLO">
     <h2 data-page-node-id="am3nmr2iISOUnM5gl7NpjC"><span class="hash" data-page-node-id="8be7lEc4rtkhw3dzOH5azO">#</span>7.8 枚举（enum）与 match 变体模式</h2>
     <p data-page-node-id="gJNoGEu1YJMM9jNUMEVHsC"><strong data-page-node-id="Tr9d4hMwKELO8xFmKuHYtu">enum</strong>：<code class="inline" data-page-node-id="X6l758xzuUkssHKn0mrgjY">enum 名称 { 变体, 变体(类型, ...), ... };</code>
       简单变体无载荷、带载荷变体携带多个类型化字段（int/float/bool/str）。变体访问
@@ -555,8 +488,7 @@ area = <span class="k" data-page-node-id="DAHUhGgfgVlWL0yEzSRwli">match</span> <
     <p data-page-node-id="FgkQPUPQ16desRznH9xJgf">全链路支持解析 / 静态检查 / 解释器 / AOT 原生编译 / fmt / LSP；示例
       <code class="inline" data-page-node-id="uEacZGP8TBbWPbJbrcRMHS">examples/enum_demo.hn</code>。</p>
   </section>
-
-  <section id="overload" data-page-node-id="6mBjqVLGzOJrdjM2EaOyAA">
+<section id="overload" data-page-node-id="6mBjqVLGzOJrdjM2EaOyAA">
     <h2 data-page-node-id="NrTbKiyJBNqnjGCstKG5g4"><span class="hash" data-page-node-id="m7ZKFZrQu734byETne2cWb">#</span>7.9 运算符重载（__op 特殊函数）</h2>
     <p data-page-node-id="XJ83IgZg6gkD1BR4B7MqmC">顶层定义特殊函数 <code class="inline" data-page-node-id="YPGaNPc0jDzrCbUyvlJXza">fn __op(参数) { ... }</code>，仅在内建运算不支持的
       操作数组合时被调用；内置类型（int/float/str/list/dict/enum 等）的固有行为完全不受影响。
@@ -577,8 +509,7 @@ area = <span class="k" data-page-node-id="DAHUhGgfgVlWL0yEzSRwli">match</span> <
 zs = z1 + z2;        <span class="c" data-page-node-id="DfjGNPhUjGWYASCy4xPuWK">// dict + dict 内建不支持 → __add</span>
 <span class="f" data-page-node-id="DwSlVbhDLzJawd8WQhwqti">print</span>(<span class="f" data-page-node-id="ySd5bwyAATs4bDZs3PW1is">to_str</span>(zs));  <span class="c" data-page-node-id="t4iGEHCoHkmId4E3YOWOsk">// {re: 4, im: 6}</span></code></pre>
   </section>
-
-  <section id="async" data-page-node-id="NwQzTBNyGZF1ZR5rV2yZWt">
+<section id="async" data-page-node-id="NwQzTBNyGZF1ZR5rV2yZWt">
     <h2 data-page-node-id="VDVqsS0XZJDtWZ17NJrvbb"><span class="hash" data-page-node-id="ImrLvDPsst1CFiGwBMQteR">#</span>7.10 异步函数（async fn + await）</h2>
     <p data-page-node-id="AGuQ5jXfAgLAP1rHj3aZzz"><code class="inline" data-page-node-id="4Pm9YjY9jSlFPEE5d5nQdS">async fn 名称(参数) { ... }</code> 定义异步函数（与 fn 同构）。
       调用时在后台线程执行并立即返回 future（不阻塞调用方）；<code class="inline" data-page-node-id="vqtmynPcwXzP4Kw7lrfmPp">await 表达式</code>
@@ -593,8 +524,7 @@ zs = z1 + z2;        <span class="c" data-page-node-id="DfjGNPhUjGWYASCy4xPuWK">
 f = <span class="f" data-page-node-id="4UK51pHs319Woq7uQ4epqy">compute</span>(<span class="n" data-page-node-id="xVSWqTQK1qn8gjIRRi8yeB">21</span>);      <span class="c" data-page-node-id="PM3gzDQbHy675pcGYwR1dg">// 立即返回 future（不阻塞）</span>
 <span class="f" data-page-node-id="GalySGcPj9LIdsuVrATlj6">print</span>(<span class="k" data-page-node-id="13kSiRqjd0F45Qk8K43ozu">await</span> f);    <span class="c" data-page-node-id="QInDFBW57LAMyFYA0Db1Kl">// 42（阻塞等待结果）</span></code></pre>
   </section>
-
-  <section id="builtins" data-page-node-id="CnLYrvifExov4BnVrS1ksI">
+<section id="builtins" data-page-node-id="CnLYrvifExov4BnVrS1ksI">
     <h2 data-page-node-id="KHytXnt8pKFB5v3QnwRe1q"><span class="hash" data-page-node-id="XDMrV8Uiz2W4jdG1D5KDYG">#</span>8. 内置函数参考</h2>
     <p data-page-node-id="S8SCNCX94ZLxY2X0W6K4pA">全部开箱即用，无需导入：</p>
     <table data-page-node-id="s8yUwQM96hrndxOZrknub5">
@@ -671,173 +601,7 @@ age = <span class="f" data-page-node-id="7Lcgd142iudopYflqNMHBD">ask_int</span>(
     <p data-page-node-id="PfI5sDSI9H62BqRaTNfufM">注意：<code class="inline" data-page-node-id="tWhRvBokoCtND2AWFngPHo">??</code> 空值合并只对 null 值生效（如 void 函数调用占位值）；
       input 在 EOF 是抛错误而不是返回 null，必须用 try-catch 捕获后降级。</p>
   </section>
-
-  <section id="integ" data-page-node-id="AORmpMGOsvrLY6844YZEcM">
-    <h2 data-page-node-id="RWxkcnhoIwVJq5JzasK4Y3"><span class="hash" data-page-node-id="tQeNJ5e3I2EFbnfCCngGau">#</span>9. 导入与外部集成</h2>
-<pre data-page-node-id="Ln8JPNLH8ihlNsds00B1cQ"><code data-page-node-id="8qRnLSlrCUU7dm9BYo6v9d"><span class="c" data-page-node-id="i4tG0abvxorsYGeljhGRew">// import：远程模块下载并缓存到 ~/.hone/cache/（URL 支持 http/https）</span>
-<span class="k" data-page-node-id="ofWxzNEysnqKNZhgXZB0Ap">import</span> <span class="s" data-page-node-id="Myrr3Wy5deai0TSrW1DnQd">"math_mod"</span> <span class="k" data-page-node-id="ELRs6CjLMhzSiKOVFvG7gw">from</span> <span class="s" data-page-node-id="6lEPPDcggw7qfCFAbv86k2">"http://example.com/math_mod.hn"</span>;
- <span class="f" data-page-node-id="p4VzWmcIdAtbDzUYO3bBRr">print</span>(<span class="f" data-page-node-id="IGtpLDGEYSthdC9VdYOC8F">module_add</span>(<span class="n" data-page-node-id="iJvYjNQGsCsymcb7emRyl0">20</span>, <span class="n" data-page-node-id="fj3qPfokz7Uyxm3495qYqc">22</span>));
-
- <span class="c" data-page-node-id="qoaCKmNXYggxggQPfviHN0">// import as：以别名导入，函数名前缀自动替换</span>
- <span class="k" data-page-node-id="Ew0lQrVBgsdrGMSXK9Hlqr">import</span> <span class="s" data-page-node-id="cHgQqaEXJLqAVPeCUpkX7b">"math_mod"</span> <span class="k" data-page-node-id="Hlk1TPJyjytf0wBwR8Gw8O">from</span> <span class="s" data-page-node-id="CmWVqFq9sODhq73NbWjjQ5">"http://example.com/math_mod.hn"</span> <span class="k" data-page-node-id="9EiRpovzyEdK5FqOGmIn2o">as</span> m;
- <span class="f" data-page-node-id="Ptn0MV48S7Z3YUSVSUx4wr">print</span>(<span class="f" data-page-node-id="lonxaGq90WQdpGtMPssarl">m_add</span>(<span class="n" data-page-node-id="AS5yuB94zRlHC5VfWgeVyD">20</span>, <span class="n" data-page-node-id="8kkh3T0fLRKLYYJjwJp0mH">22</span>));
-
- <span class="c" data-page-node-id="kvE3w0wVbapJSX24AHUAGv">// load：动态库加载（C ABI，int64 参数/返回值）</span>
- <span class="k" data-page-node-id="PNsihkQVotVH006jzN75RJ">load</span> <span class="s" data-page-node-id="dIip7K5sRyLsyAuDkvgtsq">"path/to/hone_lib.dll"</span> <span class="k" data-page-node-id="h3Ye6sy9gB0vEJD3rIZV8V">as</span> m;
- <span class="f" data-page-node-id="dZpEICAGoYo8PTC5DzZud2">print</span>(m.<span class="f" data-page-node-id="8B8PuX8Cmfymb2Ai2DSKbb">lib_add</span>(<span class="n" data-page-node-id="t8StDmmShGKK0Dy4CBWZmD">1</span>, <span class="n" data-page-node-id="JkxBaPzQ6CvlY0bw6FTCQG">2</span>));
-
- <span class="c" data-page-node-id="NbLVvf1f3KBMswkaCFdPoE">// typed FFI 签名块（v0.4+）：显式声明参数/返回类型，精确转换</span>
- <span class="k" data-page-node-id="U2Lvv3EzlvrbLFFTDGWYLt">load</span> <span class="s" data-page-node-id="BG0JMPDoWhgaufviySLmUz">"path/to/hone_lib.dll"</span> <span class="k" data-page-node-id="6c6UMkCzvHBaU3nU03yqQ6">as</span> tm {
-     <span class="k" data-page-node-id="MCDGVClAUceSri3nWdOvmC">fn</span> <span class="f" data-page-node-id="zpHfwrNku9Gd9TwZMuTZ79">lib_add_f</span>(a: <span class="k" data-page-node-id="pl0Cy6h97QgIzDNDMl9e8C">float</span>, b: <span class="k" data-page-node-id="p77URJGd94G87CGUnq7EGS">float</span>) -&gt; <span class="k" data-page-node-id="hmbjLxHyTZtA8OmGJk5SfP">float</span>;
-     <span class="k" data-page-node-id="yb8VPRHLavJKZzColv5WLJ">fn</span> <span class="f" data-page-node-id="kID2xmnwNT0Zdz0nHRpFHe">lib_strlen</span>(s: <span class="k" data-page-node-id="EeOfuhsNjsl1cFR3jAdkwm">str</span>) -&gt; <span class="k" data-page-node-id="fL8akfBNTbIt5efADbKGuM">int</span>;
-     <span class="k" data-page-node-id="veIKHKS6aldJhixfcJ5Ndz">fn</span> <span class="f" data-page-node-id="ftBjTAow64wsfCNhKWW4Da">lib_not</span>(b: <span class="k" data-page-node-id="7llqUENxpzBvIHDibNWXXJ">bool</span>) -&gt; <span class="k" data-page-node-id="jVhBkGD56ShDRZ5bRAOdaO">bool</span>;
-     <span class="k" data-page-node-id="cqGYCuFqKARfIBFi7NRUQW">fn</span> <span class="f" data-page-node-id="4LDSUAk7UhT6cfeClNVRQx">lib_echo_ptr</span>(p: <span class="k" data-page-node-id="thnu5GFf4FNCGRUJ0iE05m">ptr</span>) -&gt; <span class="k" data-page-node-id="ho7QYRC9DSnAM0BMe9Ur3l">ptr</span>;
-     <span class="k" data-page-node-id="G7FOone0Ko9TfzPPU9WNYV">fn</span> <span class="f" data-page-node-id="9xgFRT4y1bkQrwyRs6ofzq">lib_bump</span>() -&gt; <span class="k" data-page-node-id="hIIpjOmIPmsXS5rYDBpKdC">void</span>;
- }
- <span class="f" data-page-node-id="cAwUSgAxNe1ax1VJEEBSoo">print</span>(tm.<span class="f" data-page-node-id="rldF9QbfRhvLdzIMMKf9Ij">lib_add_f</span>(<span class="n" data-page-node-id="LYP5BWlk0p6ZpHhaux7HDG">1.5</span>, <span class="n" data-page-node-id="oGl1bpFFlKCjNfwWrggUZL">2.25</span>));  <span class="c" data-page-node-id="WXVbLReG8zBpfMnVvCSe7o">// 3.75（float 通道）</span>
-
- <span class="c" data-page-node-id="bhCO38764Et8e2ojThgP3k">// from 头文件自动绑定（v0.4+）：从 C 头文件提取原型生成签名</span>
- <span class="k" data-page-node-id="deaUOn6UV8MYs6N3YvzTE3">load</span> <span class="s" data-page-node-id="xwosKV82Xc2lwmXxpEybnr">"path/to/hone_lib.dll"</span> <span class="k" data-page-node-id="K0xlV3PbRCOdWk3HtxDCMw">as</span> hm <span class="k" data-page-node-id="enhOui3lGhPDCxFHSJ1zTR">from</span> <span class="s" data-page-node-id="6BJjOJXmnL9pxzSMAka42R">"path/to/hone_lib.h"</span>;
- <span class="f" data-page-node-id="mgVHW5juBSz5QOASswuMRI">print</span>(hm.<span class="f" data-page-node-id="T9QqUufaRs3hHg12W2VtMD">lib_strlen</span>(<span class="s" data-page-node-id="gfqUF2ayKxWDGMbAP0dPX7">"hello"</span>));  <span class="c" data-page-node-id="FFbpQB3vPIqPkVWKHTpMR3">// 5</span>
-
- <span class="c" data-page-node-id="82JrAimgA3Zmobt3yuVccV">// hone bind：离线从头文件生成签名块，粘贴进脚本即可</span>
- <span class="c" data-page-node-id="1AHCy7wGMXbizaL8ao6Uc3">// hone bind path/to/hone_lib.h  →  输出 load 签名块到 stdout</span></code></pre>
-<h3 id="manifest" data-page-node-id="5qqVn5nejokK2PaF7pbXT8">模块清单 hone.json（类似 package.json / Cargo.toml）</h3>
-<p data-page-node-id="EMRf6iKPwP1OkEr65ImRH3">项目根目录放一个 <code class="inline" data-page-node-id="5rJwEl6r42qqSLEeM7LQ8j">hone.json</code>，即可集中声明全部模块依赖（含元信息），
-  换机器 / 分享项目时用一条命令拉齐所有模块：</p>
-<pre data-page-node-id="alK6QYTDX7cZwA83HumUUL"><code data-page-node-id="ljxk7sySSvFbLACys0jC6y">{
-<span class="s" data-page-node-id="rZErG70Itz3KeF2Ijmo76z">"name"</span>: <span class="s" data-page-node-id="oLCbqGK7BVirWp7gBCbsnA">"myapp"</span>,      <span class="c" data-page-node-id="6NGdpdVCsuLzn8579yEfnB">// 项目名（新建清单时自动取目录名）</span>
-<span class="s" data-page-node-id="QhJqKmL2Cn19oMxfVF1SAN">"version"</span>: <span class="s" data-page-node-id="XztoP1lo2f0OV45vz2ZHOe">"0.1.0"</span>,   <span class="c" data-page-node-id="EGZpKF411es534kfdiNan3">// 项目版本</span>
-<span class="s" data-page-node-id="xeu98cj3oNiQB22YLWO8Z1">"modules"</span>: {        <span class="c" data-page-node-id="BnL8AHQ7djHG7Irz5UHYEb">// 模块依赖：模块名 → 源码 URL（或本地路径）</span>
-    <span class="s" data-page-node-id="iGY03eXVY8DBUZDsoB8HaJ">"math_mod"</span>: <span class="s" data-page-node-id="LLvsJvYBYqCOlaCwWi3GAh">"https://example.com/math_mod.hn"</span>,
-    <span class="s" data-page-node-id="cIY9gB572SWk2Hje0NKQdN">"gui"</span>:     <span class="s" data-page-node-id="DXDAsVosEaj0LfKSzOFeJN">"./hone_lib/gui.hn"</span>
-}
-}</code></pre>
-<p data-page-node-id="jFDbVzEY3Ftj0zdOLlUJVW">用法：</p>
-<ul data-page-node-id="AQyTgmvE9Z04XG65lrwehq">
-  <li data-page-node-id="vQhqV4b7OAGkWFrKgv3lCO"><code class="inline" data-page-node-id="n24GPxzm0vQmEIAlFf8ffY">hone get</code>（不带参数）：读取当前目录 <code class="inline" data-page-node-id="wknav970gE6aolbSbR4iqC">hone.json</code>，
-    批量下载全部模块到 <code class="inline" data-page-node-id="dvhnlP06pDY2Bf0U1FHjcv">~/.hone/cache/</code>（已缓存则跳过）</li>
-  <li data-page-node-id="LNuppMhtJnIof3hfEPkhWM"><code class="inline" data-page-node-id="H43OYRPwl3XDnjuhlqMiv4">hone get &lt;module&gt; &lt;url&gt;</code>：下载单个模块，
-    并把 (module, url) 追加写入 <code class="inline" data-page-node-id="nJ77GQ2W66EEaHzva5FAtj">hone.json</code>（已存在则更新其 URL；清单不存在则自动新建）</li>
-  <li data-page-node-id="UrGmIUXpHSZ1CMUatad04D"><code class="inline" data-page-node-id="pH8mWrcIGWl2j40LFTaKnz">hone get &lt;script.hn&gt;</code>：扫描脚本内所有 <code class="inline" data-page-node-id="qXkHM7ooPe0fYgdAxN4WRe">import</code> 声明批量预下载</li>
-</ul>
-<p data-page-node-id="tCwv6GRgMFGwDDpn1BBg7D">要点：模块 URL 非 http/https 开头按<strong data-page-node-id="UJPVv66MSpGk1nRnUDAWFp">本地路径</strong>处理，直接读取源码（不联网），
-  便于同仓库共享 <code class="inline" data-page-node-id="zBGXNWygvDeMGLsJbcCxaR">hone_lib/</code> 等模块；
-  清单缺失报 <code class="inline" data-page-node-id="2CTiEh5ygms6FnzXglOi3u">error[H404]</code>，JSON 语法错误 / modules 为空报 <code class="inline" data-page-node-id="DrtCqPB0FfJNg0hnmBgZ6S">error[H005]</code>。</p>
-<p data-page-node-id="Sy8t44yieXPrv9jjOp7FaB"><strong data-page-node-id="huxhiYRBWiFoa1ZgL2jURf">typed FFI（v0.4+）</strong>：签名块内 <code class="inline" data-page-node-id="zg7kBkMiAFvsU4uT7d3T0B">fn</code> 声明仅描述 C 函数 ABI，不定义 Hone 函数体。
-      支持类型映射：<code class="inline" data-page-node-id="0zudKaVE9ExFj5EJlaxxe6">int</code> → int64_t、<code class="inline" data-page-node-id="BLhMOQ1h4PCl86uiPrUJKN">float</code> → double、<code class="inline" data-page-node-id="oMffpkcF5t6N26bnPZ9tlH">bool</code> → C bool、
-      <code class="inline" data-page-node-id="gz9PhXWXK5XBvvP7rSECFB">str</code> → const char*、<code class="inline" data-page-node-id="IwUwnivOgnDlbSZUO1AfvD">ptr</code> → void*；返回类型额外支持 <code class="inline" data-page-node-id="3djrVml6kfBWVPuxe2aafi">void</code>；
-      参数最多 8 个，回调 <code class="inline" data-page-node-id="31zW8atjG3wTJFLvbQUuqv">fn(...)</code> 与可变参数 <code class="inline" data-page-node-id="fezaTLhIdQkuBFz8FCN3hE">...</code> 暂不支持。
-      调用在检查阶段校验参数个数与类型（H001/H005），返回类型参与类型推导。
-      未声明签名的库函数保持旧 int64 通道调用（向后兼容）。</p>
-    <p data-page-node-id="sdTSMHrEMhjrTK3oLRglKL"><strong data-page-node-id="Tflve93Y2lEgfiqOB7cGvS">头文件自动绑定（v0.4+）</strong>：<code class="inline" data-page-node-id="FLUB3zKqnSqb7HAV5ZxAmh">load ... from "header.h"</code> 用受限解析器
-      （纯 Rust，无 libclang 依赖）从 C 头文件提取函数原型自动生成签名：跳过注释/预处理/struct 定义/extern "C" 块，
-      typedef 简单展开，属性宏跳过；类型映射 int/size_t→int、float/double→float、bool→bool、char*→str、
-      其余指针→ptr、void→void。回调/变参/数组/结构体按值/long double 标记 unsupported，调用时直接报错而非 ABI 崩溃。
-      <code class="inline" data-page-node-id="N2tgzpRCWlf6zFkwCywGpk">hone bind &lt;header.h&gt;</code> 离线生成签名块输出到 stdout，unsupported 原型列为注释。</p>
-    <p data-page-node-id="ix8Q7lht5bqRNPiHpVdHEU">示例：<code class="inline" data-page-node-id="1eSGP8gFMH7Hhl2usv5vGI">examples/ffi_demo.hn</code>（typed FFI 全类型）、<code class="inline" data-page-node-id="kl5o7sIJP4aA6cHr02j8R0">examples/ffi_header.hn</code>（头文件绑定）。</p>
-  </section>
-
-  <section id="tools" data-page-node-id="DklHwfl8PVPaM24SrEYrH8">
-    <h2 data-page-node-id="fE1tR6zBUjviHAuvvF5nwO"><span class="hash" data-page-node-id="y1WrXzzlYkAaAzRn9KPrjH">#</span>10. 工具链</h2>
-    <table data-page-node-id="i53tzSGhkUEw6p8D5QBxs6">
-      <tr data-page-node-id="cN8tQjBG7a37emoIrQ48oL"><th data-page-node-id="CTUvfh68AXsIO1IyH7uUlT">命令</th><th data-page-node-id="CYvEMNCGFl8UITTqTiFOyJ">说明</th></tr>
-      <tr data-page-node-id="mAlu3lN1buCGLbQ5oIWa0a"><td data-page-node-id="h95DjJDGESXNN7wWoxjDCH"><code data-page-node-id="OiFG2z41hGzqprIS6UJDR0">hone run &lt;script.hn&gt;</code></td><td data-page-node-id="xMWoQDjt1KlPPwDICS322f">执行脚本（默认命令）</td></tr>
-      <tr data-page-node-id="vmr0aZ3KbQ5oIWa0a"><td data-page-node-id="vmc0h95DjJDGESXNN7wWoxjDCH"><code data-page-node-id="vmc0OiFG2z41hGzqprIS6UJDR0">hone run --vm &lt;script.hn&gt;</code></td><td data-page-node-id="vmc0xMWoQDjt1KlPPwDICS322f">使用寄存器式字节码虚拟机执行（默认走 AST 解释器）；goto 在解释器与字节码 VM 均完整支持，AOT 暂不支持（报 H999）</td></tr>
-      <tr data-page-node-id="dmr0aZ3KbQ5oIWa0a"><td data-page-node-id="dmc0h95DjJDGESXNN7wWoxjDCH"><code data-page-node-id="dmc0OiFG2z41hGzqprIS6UJDR0">hone run --disasm &lt;script.hn&gt;</code></td><td data-page-node-id="dmc0xMWoQDjt1KlPPwDICS322f">仅编译为字节码文本 IR 并打印（不执行），用于调试 / 对照解释器与 VM 的一致性</td></tr>
-      <tr data-page-node-id="u5EBeSfeSIVVFyq271SBnz"><td data-page-node-id="BEAWMZxxLUFSuHxHVCQHd1"><code data-page-node-id="gixmesSKCEk4PSuYB36O4K">hone run --restart[=N] &lt;script.hn&gt;</code></td><td data-page-node-id="eKpZwQHa0pQahm5Np5DSYy">失败自动重启；<code data-page-node-id="GMJCZOnW735hACTp2NIwnp">--backoff=a,b,c</code> 间隔递增，<code data-page-node-id="EoZZal5mq6zQOiZOE66T0C">--restart-on=Hxxx</code> 错误码白名单</td></tr>
-      <tr data-page-node-id="Z8qEGUYmd89C5e3nWXgVG5"><td data-page-node-id="3c9a3BOWBJJb1QfrFzs8tC"><code data-page-node-id="AaD31jc0b5gKO59XsNsSnl">hone run --resume &lt;script.hn&gt;</code></td><td data-page-node-id="7o1VucdmYKo3lgwZsryVfD">恢复 db 检查点继续执行（db.set 自动落盘，脚本变更后检查点失效）</td></tr>
-      <tr data-page-node-id="xJkdR15X8Xynom5pQQcu1s"><td data-page-node-id="vwRdKKQD2EA1b3ht473UZ3"><code data-page-node-id="BU4esLCGtPzJ5YnwJ2uDX9">hone debug &lt;script.hn&gt;</code></td><td data-page-node-id="B2vFJN3oPihlAmBVn1ekiT">断点调试：breakpoint 打印变量快照，等待 Enter 继续</td></tr>
-      <tr data-page-node-id="8KihFzVDM2QtJdXh3UdK3n"><td data-page-node-id="7w2lv4foNpThP0x71n3Ar0"><code data-page-node-id="G73Kfgv5FkLk2z5njoJJdT">hone fmt [-w|-c] &lt;file.hn&gt;</code></td><td data-page-node-id="ZDeSZhCfg8ur2SMGEPDsN2">代码格式化（Tab 缩进、运算符空格、大括号位置；-w 覆盖写，-c 只检查差异）</td></tr>
-      <tr data-page-node-id="6sGK9eEFiq7B6GnMQPyJOZ"><td data-page-node-id="9HqJje9lzjaS0QAGC6yZpE"><code data-page-node-id="2qxpzqvpJDmeEDzJMd679d">hone build --dll &lt;file.hn&gt;</code></td><td data-page-node-id="eey2ZbxvifRmF4LGtvGucT">打包 C ABI 动态库；类型映射 int→int64_t、float→double、bool→bool、str→const char*；需系统 C 编译器</td></tr>
-      <tr data-page-node-id="elO1AUJHqBvbLPRGi1XyE4"><td data-page-node-id="jG7ae8TQK6EAHIcTAsEjKZ"><code data-page-node-id="C3aPqSzWnQvHADBWVnsC4l">hone build --exe &lt;file.hn&gt;</code></td><td data-page-node-id="usHbDn2NbRP31yfdYibzPM">打包独立可执行文件（解释器+脚本自释放，<code data-page-node-id="omOyehz2cflY4kyBMcWfuL">[-o &lt;out&gt;]</code>）。<strong>打包产物</strong>自身支持 <code data-page-node-id="tIJE9r2D0WYhzAl1P47BsP">--version</code> 查看版本、<code data-page-node-id="oEOrLVJZ8dE6OXLCOpC8NN">--keep-cache</code> 保留释放出的缓存</td></tr>
-      <tr data-page-node-id="zO4CqLSnx6gH29TUBuqLxS"><td data-page-node-id="yMfVCfK4fEkRFdRAoEDq5h"><code data-page-node-id="f00xptulht2db8M42Yvmdj">hone build --exe -c &lt;file.hn&gt;</code></td><td data-page-node-id="yCjDENAbaZ8ok7AeTWQDuj">AOT 原生编译：脚本 → C 中间文件 → gcc/clang → 原生可执行文件（几十 KB 级体积，需系统 C 编译器；默认删除 .c，<code data-page-node-id="GsKM2n7nigyWCM6U0y8rCC">--keep-c</code> 保留，<code data-page-node-id="VPRzs9Rmz59HBrqiSNw9X8">[-o &lt;out&gt;]</code>）</td></tr>
-      <tr data-page-node-id="JLvBsmVGRG9IyL3MdzDtem"><td data-page-node-id="iZUZKB3h2vyy8UWq53D63P"><code data-page-node-id="vEagds9JAwRXhFisBjXCxL">hone build --script &lt;file.hn&gt;</code></td><td data-page-node-id="n2QK5PkGq87JoDW662lvjE">生成仅脚本压缩包 <code data-page-node-id="aBFS9vd6KzaX7DV0wQrSyk">.hzp</code>（不内嵌解释器，<code data-page-node-id="Kl9Fb8NxMiYIRlbl1cEAHP">[-o &lt;out&gt;]</code>，用 <code data-page-node-id="Rwwph4OGeIK2gqEm8ayWRD">hone run</code> 执行）</td></tr>
-      <tr data-page-node-id="KPBUO0xtCw734HiRlLpxz9"><td data-page-node-id="iuIUFr4tv67uhWBuLhHCYX"><code data-page-node-id="OY7ZR5Sx77lWClzigaPkF4">hone test [目录]</code></td><td data-page-node-id="2pmRvLtUvP2DOj6jZqJqau">递归扫描 <code data-page-node-id="geXDhWfqXQhbP0EE0pA14a">*.test.hn</code> 运行测试并汇总 PASS/FAIL（配合 <code data-page-node-id="XfVQEt2abtv5gs4pr7hOUu">assert</code> 断言，失败退出码非 0）</td></tr>
-      <tr data-page-node-id="i807oaHwURUaTEBJax1Bgt"><td data-page-node-id="Q5yLSpYL8OMP8taNfrQQkh"><code data-page-node-id="oChRQNkyXzsHD9TCKvGURs">hone bind &lt;header.h&gt;</code></td><td data-page-node-id="91aNUnkCTBqfrbsUmLBop0">从 C 头文件离线生成 typed load 签名块（输出到 stdout，unsupported 原型列为注释）</td></tr>
-      <tr data-page-node-id="gS9PYLOHgDkbBhd34dsEgj"><td data-page-node-id="imcNBrPW0TBsRkPoHks7hW"><code data-page-node-id="nHIKj5e9jQzGJLebC9oHoR">hone explain &lt;code&gt;</code></td><td data-page-node-id="aDmjX8VGFxVRRPO2PFmhHA">查看错误码解释与修复建议（如 <code data-page-node-id="fMpMmmfM6fd3BStmvfigok">hone explain H201</code>）</td></tr>
-      <tr data-page-node-id="cr9CxHOJiMASIW5SGl6qFr"><td data-page-node-id="klzB3aCV7ORJu7zcVEhM2N"><code data-page-node-id="4LOXa2AqAhHRzw6HlHAY1K">hone get</code></td><td data-page-node-id="rG4U9PEDgdja8GoSm1hKX1">读取当前目录 <code data-page-node-id="BoWwTSSnBRxLM9qJHgLgBM">hone.json</code> 清单，批量下载全部模块（类似 package.json / Cargo.toml 的依赖清单）</td></tr>
-      <tr data-page-node-id="toEWVdDMv2B0Kb61Hcj8f2"><td data-page-node-id="fVEa2va3kXNvcfdrEvsyCE"><code data-page-node-id="3HmceGhNifBleFUYrXI5zG">hone get &lt;module&gt; &lt;url&gt;</code></td><td data-page-node-id="ecePRLrTR25EY9yk7SxpnY">下载模块依赖并缓存到 ~/.hone/cache/，同时写入/更新 hone.json 清单（也支持扫描脚本 import 批量预下载）</td></tr>
-      <tr data-page-node-id="1NVp7GTYXkyG2ZFDRQOdeZ"><td data-page-node-id="kjlXa1H3GpisHAlRSd8SrQ"><code data-page-node-id="ruhSnGicFLLwiDiA4AiTfC">hone self-update [url]</code></td><td data-page-node-id="PvA8dxegfWHJyOTo8KbhZP">从 URL（或环境变量 <code data-page-node-id="qpowrCGe4gYcJVyjokzEjx">HONE_UPDATE_URL</code>）下载最新 hone 二进制并替换当前程序，魔数校验防误下载</td></tr>
-      <tr data-page-node-id="lpdDJbZTMq5dkwWKSbV6vD"><td data-page-node-id="3vPadpEDo7b28F4N7CDSgl"><code data-page-node-id="uBhs7ccbS3GoneoqFbvxFj">hone lsp</code></td><td data-page-node-id="Rbcf0ELaC6xBt6ZA3uvH03">语言服务器（补全/诊断/hover/跳转定义/文档大纲/语义高亮，LSP over stdio）</td></tr>
-      <tr data-page-node-id="0So1urrRH16KJxYavc8ZgH"><td data-page-node-id="BLoIaE03yCWtG7vShuUDHX"><code data-page-node-id="7sy6On1cUD4FPsvs5Bk3bC">hone repl</code></td><td data-page-node-id="dmyTBQUNfMeMwLrR4FGzJW">交互式解释器（Python 式：表达式自动回显、多行续行、.vars 查看变量 / .help 帮助 / .exit 退出）</td></tr>
-      <tr data-page-node-id="a6urcSGPZjA53M7IMC9p3J"><td data-page-node-id="uhGWjRGvhBEZdFZUC9666b"><code data-page-node-id="QqPUE7pcCCXFrFkUxKVAsX">hone prof &lt;file.hn&gt;</code></td><td data-page-node-id="ANFLRvObCYQYDtfdwNHS70">剖析模式运行脚本，统计每个用户函数的总耗时 / 调用次数 / 平均耗时，按总耗时降序输出热点表格</td></tr>
-      <tr data-page-node-id="ED80EMxtsBHNM6awF6HMt8"><td data-page-node-id="G2b9Yk2YjcV2WPFNDRtXFZ"><code data-page-node-id="zLclpYwVSrq76cL2VrE5oa">hone poop &lt;file.hn&gt;</code></td><td data-page-node-id="kFeZsHy8tj6AP3OO7PTMbe">屎山检测——分析 if 嵌套深度和圈复杂度</td></tr>
-      <tr data-page-node-id="wtr0aZ3KbQ5oIWa0a"><td data-page-node-id="wtc0h95DjJDGESXNN7wWoxjDCH"><code data-page-node-id="wtc0OiFG2z41hGzqprIS6UJDR0">hone watch &lt;script.hn&gt;</code></td><td data-page-node-id="wtc0xMWoQDjt1KlPPwDICS322f">监控脚本文件变更自动重跑（[--interval=N] 毫秒，默认 500，Ctrl+C 退出）</td></tr>
-      <tr data-page-node-id="dcr0aZ3KbQ5oIWa0a"><td data-page-node-id="dcc0h95DjJDGESXNN7wWoxjDCH"><code data-page-node-id="dcc0OiFG2z41hGzqprIS6UJDR0">hone doc &lt;file.hn&gt;</code></td><td data-page-node-id="dcc0xMWoQDjt1KlPPwDICS322f">从 fn / class 定义与上方 // 注释生成 Markdown API 文档</td></tr>
-    </table>
-    <h3 data-page-node-id="aotsec0001">AOT 原生编译与 C 后端架构</h3>
-    <p data-page-node-id="aotsec0002"><code class="inline" data-page-node-id="aotsec0003">hone build --exe -c</code> 把脚本翻译为 C 中间文件，
-      再交给系统 C 编译器产出原生可执行文件。三个执行后端（AST 解释器、寄存器式字节码 VM、AOT）
-      语义一致，差别只在性能与部署形态。</p>
-
-    <h4 data-page-node-id="aotsec0004">实测性能</h4>
-    <p data-page-node-id="aotsec0005">相对解释器有<strong data-page-node-id="aotsec0006">接近一个数量级</strong>的稳定加速
-      （MinGW-w64 gcc 16.2.0，预热后取多轮最快值），产物体积约 <strong data-page-node-id="aotsec0007">58.6 KB</strong>、零运行时依赖：</p>
-    <table data-page-node-id="aotsec0008">
-      <tr data-page-node-id="aotsec0009"><th data-page-node-id="aotsec0010">基准</th><th data-page-node-id="aotsec0011">AOT</th><th data-page-node-id="aotsec0012">解释器</th><th data-page-node-id="aotsec0013">加速比</th></tr>
-      <tr data-page-node-id="aotsec0014"><td data-page-node-id="aotsec0015">递归 fib(26)</td><td data-page-node-id="aotsec0016">267 ms</td><td data-page-node-id="aotsec0017">2,530 ms</td><td data-page-node-id="aotsec0018"><strong data-page-node-id="aotsec0019">9.5x</strong></td></tr>
-      <tr data-page-node-id="aotsec0020"><td data-page-node-id="aotsec0021">循环累加 200 万次</td><td data-page-node-id="aotsec0022">514 ms</td><td data-page-node-id="aotsec0023">6,203 ms</td><td data-page-node-id="aotsec0024"><strong data-page-node-id="aotsec0025">12.1x</strong></td></tr>
-    </table>
-
-    <h4 data-page-node-id="aotsec0026">性能短板（如实说明）</h4>
-    <ul data-page-node-id="aotsec0027">
-      <li data-page-node-id="aotsec0028"><strong data-page-node-id="aotsec0029">并非「接近 C 的性能」</strong>：等价 <code class="inline" data-page-node-id="aotsec0030">rustc -O</code> 跑 2000 万次循环约 274 ms，AOT 版约 2,962 ms——慢约 10 倍。</li>
-      <li data-page-node-id="aotsec0031">原因是生成的 C 对<strong data-page-node-id="aotsec0032">每次整数运算</strong>都做装箱（<code class="inline" data-page-node-id="aotsec0033">hn_int()</code>）、
-        深拷贝（<code class="inline" data-page-node-id="aotsec0034">hn_copy()</code>）与释放，例如
-        <code class="inline" data-page-node-id="aotsec0035">hn_truthy(hn_le_v(hn_copy(v0), hn_int(1)))</code>，gcc 无法优化成寄存器运算。</li>
-      <li data-page-node-id="aotsec0036">这是「列表/字典值语义 + 统一装箱 <code class="inline" data-page-node-id="aotsec0037">HnValue</code>」的<strong data-page-node-id="aotsec0038">必然代价</strong>，
-        调高优化级别（<code class="inline" data-page-node-id="aotsec0039">-O3</code>）无效。纯计算密集的热循环建议用
-        <code class="inline" data-page-node-id="aotsec0040">hone prof</code> 定位后改用 C 扩展（<code class="inline" data-page-node-id="aotsec0041">hone build --dll</code>）。</li>
-    </ul>
-
-    <h4 data-page-node-id="aotsec0042">两个 C 后端的共用与分界</h4>
-    <p data-page-node-id="aotsec0043"><code class="inline" data-page-node-id="aotsec0044">--exe -c</code>（AOT）与 <code class="inline" data-page-node-id="aotsec0045">--dll</code> 都在做「Hone AST → C」，
-      但<strong data-page-node-id="aotsec0046">值模型完全不同</strong>：AOT 统一装箱 <code class="inline" data-page-node-id="aotsec0047">struct HnValue</code>（union + 引用计数），
-      <code class="inline" data-page-node-id="aotsec0048">--dll</code> 用 <code class="inline" data-page-node-id="aotsec0049">int64_t</code> / <code class="inline" data-page-node-id="aotsec0050">double</code> / <code class="inline" data-page-node-id="aotsec0051">const char*</code> 直连 C ABI。
-      因此<strong data-page-node-id="aotsec0052">代码生成主体不共用</strong>——强制合并需要让 <code class="inline" data-page-node-id="aotsec0053">--dll</code> 也装箱，
-      会破坏所有既有调用方。共用的只是与值模型无关的机械部分，
-      收敛在 <code class="inline" data-page-node-id="aotsec0054">src/cgen_util.rs</code>（字符串字面量转义等）。</p>
-    <p data-page-node-id="aotsec0055">这一收敛修掉过一个<strong data-page-node-id="aotsec0056">静默 bug</strong>：<code class="inline" data-page-node-id="aotsec0057">--dll</code> 原先用十六进制
-      <code class="inline" data-page-node-id="aotsec0058">\x01</code> 转义控制字符，而 <strong data-page-node-id="aotsec0059">C 的 <code class="inline" data-page-node-id="aotsec0060">\x</code> 转义是贪婪的</strong>——
-      <code class="inline" data-page-node-id="aotsec0061">"\x01a"</code> 会被解析成单字节 <code class="inline" data-page-node-id="aotsec0062">\x1a</code>，
-      含控制字符的字符串会被截短、内容错误且不报编译错误。现统一为三位八进制。</p>
-
-    <h3 data-page-node-id="9XRHpI4C6Mn7qR0ueN979c">交互式解释器 hone repl</h3>
-    <p data-page-node-id="em9ssDHTjDDVFDnjP4EYax"><code class="inline" data-page-node-id="kWlXXOzkZhX99xOOLDi8au">hone repl</code> 启动 Python 式交互环境：逐行执行、自动回显表达式结果，
-      跨输入共享变量与函数定义，适合快速实验、验证语法与调试算法。</p>
-    <ul data-page-node-id="Azts3ia1EfBJBUdxd4cnzm">
-      <li data-page-node-id="ZavAFSTb6WTgue3o71vdlE"><strong data-page-node-id="hODC0vaqOyhUWPsKaV2oY9">表达式回显</strong>：输入表达式自动打印其值（void 调用不回显 <code class="inline" data-page-node-id="CxP76fr7l1IwV5ZdCeHNfL">null</code>）</li>
-      <li data-page-node-id="cKY7XNEm9YvBvtvDGK4SvO"><strong data-page-node-id="iX8jBh2BWZcSjAzPZJ4uHq">多行续行</strong>：函数 / if / while 等未闭合大括号时显示 <code class="inline" data-page-node-id="zONBbnnqggRR67YViD3Vsq">...</code> 续行提示</li>
-      <li data-page-node-id="uqdoYfWn9erk5bDN0vt5tV"><strong data-page-node-id="oeiu8kWwkpbyBR089SKkpQ">自动补分号</strong>：语句省略结尾 <code class="inline" data-page-node-id="ImuKk8gVe1lF9AiXqedqMy">;</code> 也能执行；裸字面量（如 <code class="inline" data-page-node-id="j0CCYaP4DA2GJHKnCkFZpV">1+1</code>）按单表达式解析</li>
-      <li data-page-node-id="JsuwpiuYqcGi5vjG4B8dih"><strong data-page-node-id="fVjTtdnxF0BUbXmm1UUxg7">跨行状态</strong>：变量与函数定义在后续输入中持续有效；不做静态类型检查，类型错误在运行期报出</li>
-    </ul>
-    <table data-page-node-id="NI9DkNDxAVE1KtnuSjz6l3">
-      <tr data-page-node-id="TmOiAOZEC3Qnd46AEc0L5g"><th data-page-node-id="GJrOManMP3tThQjG98bbtk">特殊命令</th><th data-page-node-id="fjCtdNAlGgO1rrAHkPLNAW">作用</th></tr>
-      <tr data-page-node-id="mLi1fpFMpSzxNdCtlEZLCv"><td data-page-node-id="1fkFhz7ozZzN2BjvhnFG3n"><code class="inline" data-page-node-id="e3BsbCaoqHNVU8SEBS2JNy">exit()</code> / <code class="inline" data-page-node-id="pvblVzZ8XYIfSWyER7UnAV">quit()</code> / <code class="inline" data-page-node-id="jlNAc2h3Dq9NiGQSPVrPIc">.exit</code> / <code class="inline" data-page-node-id="wIk38u8BpwTe8QjyrVREvG">.quit</code></td><td data-page-node-id="hyiEH3Xd4JFxEiiAOop25V">退出交互模式</td></tr>
-      <tr data-page-node-id="3hwnFAyJdPixngyDuS0EI2"><td data-page-node-id="RvUICf45lQQUISpHVOMvQz"><code class="inline" data-page-node-id="AfjN2VAk9F5M3HyCtByMBk">.vars</code></td><td data-page-node-id="5rVzwoq3I3mZKqWkTngFJS">列出当前已定义变量与函数</td></tr>
-      <tr data-page-node-id="VHIyFnIUD4YuLmKmM43W7R"><td data-page-node-id="KXIDDCpd2YdGZkhsK0fMio"><code class="inline" data-page-node-id="fudLks6df9xC8mvtJexMJ0">.help</code></td><td data-page-node-id="rRrGpBCtJ673YKuBCwR78h">显示内置帮助</td></tr>
-      <tr data-page-node-id="DSD9GsSU7gptuXPhFPVQzf"><td data-page-node-id="HjfHoUv3MlFZHBu6Rxjylf"><code class="inline" data-page-node-id="VN0k1qZASKxxq6c5Ui8PUc">Ctrl+D</code>（Unix）/ <code class="inline" data-page-node-id="CCq0LQn1hwmi32diZVd2os">Ctrl+Z</code>（Windows）</td><td data-page-node-id="OwhSLg2UN4uzh4C6CxsB2X">结束输入并退出</td></tr>
-    </table>
-<pre data-page-node-id="LhYjVw4giTW3cuPoPrqJpn"><code data-page-node-id="ybBZw8WJr4vfLpiMW1dqJv">$ hone repl
-<span class="c" data-page-node-id="XBdLdg1Zo4r92hFdy7NdE1">&gt;&gt;&gt; </span><span class="n" data-page-node-id="sLDWDh2vghBFgGfXGLnnoH">1</span> + <span class="n" data-page-node-id="ZKdqgyAWNCdClQ05YD2Msx">1</span>
-<span class="n" data-page-node-id="3DjZg0tQjFWlyXQYEbFtLJ">2</span>
-<span class="c" data-page-node-id="UdpL99NBttUFVXu5yEBJ31">&gt;&gt;&gt; </span>x = <span class="n" data-page-node-id="Voiq6EbnYlRcJ2Gq2V7fxd">10</span>
-<span class="c" data-page-node-id="g7uFNeG5j1JhMaeb6rORyu">&gt;&gt;&gt; </span>x * <span class="n" data-page-node-id="BAxIQEazc960xTPjXVGhiX">2</span>
-<span class="n" data-page-node-id="yx739ZfKQedQ6JzSZdfucn">20</span>
-<span class="c" data-page-node-id="oCc09F9hj6pDHh2J0ebXfu">&gt;&gt;&gt; </span><span class="k" data-page-node-id="9GJrJPdiY5gC5QSsTBpw4u">fn</span> <span class="f" data-page-node-id="1GJoPPlTJQra5otPpxORWh">fib</span>(n) {
-...     <span class="k" data-page-node-id="bH4l0tYBiVmk5mYq8BiDp2">if</span> (n &lt;= <span class="n" data-page-node-id="erqybdOhnnEJ3WoS3JX9ee">1</span>) { <span class="k" data-page-node-id="D16FlBb8GlMJ4zCKi8YBWb">return</span> n; }
-...     <span class="k" data-page-node-id="1rJngF4hHnVDI4l0A5aD0W">return</span> <span class="f" data-page-node-id="C8Dmhp182zYTPB8ywNRyw7">fib</span>(n - <span class="n" data-page-node-id="IF44HdHHDuLddiEF080HJN">1</span>) + <span class="f" data-page-node-id="p1vKiqS2V26eaVp0beTse2">fib</span>(n - <span class="n" data-page-node-id="no9oj9X01UqyTpFW85x98D">2</span>);
-... }
-<span class="c" data-page-node-id="Ux3g8rRKB8AvGN8aaGQoR6">&gt;&gt;&gt; </span><span class="f" data-page-node-id="JoDtLSgjwZESqaYlVUAtqV">fib</span>(<span class="n" data-page-node-id="x1cDnICS4PtCuF7LqB5Zv0">10</span>)
-<span class="n" data-page-node-id="Kv58oEwHU9ixE4Fm7VgenA">55</span>
-<span class="c" data-page-node-id="OBOrEEtnOGPnvl8WbKwDWi">&gt;&gt;&gt; </span>.vars
-x = <span class="n" data-page-node-id="LaJu5hYRr8H31GImDoc3YM">10</span>
-fn fib
-<span class="c" data-page-node-id="GccyirfozIcSsdFDvQhA2N">&gt;&gt;&gt; </span><span class="f" data-page-node-id="mCTiFsKYVJY8SV7ioqElrh">exit</span>()</code></pre>
-  </section>
-
-  <section id="errors" data-page-node-id="A24AJbtIAi7kaLrkIEs942">
+<section id="errors" data-page-node-id="A24AJbtIAi7kaLrkIEs942">
     <h2 data-page-node-id="tZOjEyUTvC9ljgSengJDJL"><span class="hash" data-page-node-id="mfGYmdxx53MEoAYorgY7pz">#</span>11. 错误处理</h2>
     <p data-page-node-id="pi1FkK2LP5ngH0qRIlo2aH">错误统一为 <code data-page-node-id="rsSCC7SmP6GS1wS3iFhnMC">error[Hxxx]</code> 格式：编译期静态检查报错，运行期可恢复错误用 try-catch 捕获。</p>
 <pre data-page-node-id="OEBfmGSJv0GDL1CNfBZFc2"><code data-page-node-id="diSasz750FLhAOsBiWO9C3">error[H001]: type mismatch: variable `x` is locked to `int`, got `str`
@@ -887,261 +651,9 @@ help: Hone types are locked after inference; no implicit conversion is allowed</
     </table>
     <p data-page-node-id="rrSJEbb62uLee28DPuTDYr">注意：Hone 为块作用域，try/catch 块内赋值的变量在块外不可见，跨块共享的变量需在块前声明。示例见 <code class="inline" data-page-node-id="TgazMCkhHKbhSq2Y1k0tlZ">examples/try_catch.hn</code>、<code class="inline" data-page-node-id="XwMnVHHc2TKEccfjivDryj">examples/restart_demo.hn</code>、<code class="inline" data-page-node-id="a7HdkF0wDcR2pw2fzPpk9f">examples/resume_demo.hn</code>。</p>
   </section>
-
-  <section id="principles" data-page-node-id="gK9Qyhnt2rY9aD91Tns1yN">
-    <h2 data-page-node-id="SV8Ptx5uiX1ggjNEL3fxqE"><span class="hash" data-page-node-id="BIgDKWqMs9pLcorN97y4K8">#</span>12. 设计原则</h2>
-    <ul data-page-node-id="CMYvLU4iMUR6erZFMtyJvD">
-      <li data-page-node-id="xvWsew2qAlZssmoPYIqUsr"><strong data-page-node-id="oqKhjBrn83ArrQl9EgxKMo">不自举</strong>：Hone 不用于开发自己的编译器，保持设计与实现的灵活性</li>
-      <li data-page-node-id="kweqiNsGvy8qSUE10cUPXC"><strong data-page-node-id="ARC8OaTdKiGZHRS8cfUBbe">不背兼容包袱</strong>：旧版本永久可用，新版本自由演化</li>
-      <li data-page-node-id="wIjBkSTI45olBOf2Hut91H"><strong data-page-node-id="o3PwR5F3uYLLMCA6RqYk36">无前缀声明</strong>：变量不需要 let / var / const</li>
-      <li data-page-node-id="iaK2RZPnZcElPidVVuefrW"><strong data-page-node-id="KZ2qaYnVGHMsFrTt8tbG3o">静态强类型</strong>：类型锁定，不隐式转换，报错精准</li>
-      <li data-page-node-id="CAF3ShxdGVYwoSo3DppS73"><strong data-page-node-id="iW9vroA60XxWaUMET6Loif">单文件分发</strong>：下载 → 解压 → 运行，零配置；多版本共存互不干扰</li>
-    </ul>
-  </section>
-
-  <section id="gui" data-page-node-id="CBMKyMc39NoTEC4RtBzBId">
-    <h2 data-page-node-id="NZh9L8qgwLhicxaRqNBhDq"><span class="hash" data-page-node-id="zGJbDg9l3qByCWjCRL8oPy">#</span>13. 图形界面库（hone_lib/gui.hn）</h2>
-    <p data-page-node-id="h0wPcNdJQ41hxZqJt1iWGQ">纯 Hone 编写的跨平台 GUI：浏览器渲染 + 本地 HTTP 服务器双向交互（Windows / Linux / Termux 均有浏览器）。依赖 <code class="inline" data-page-node-id="5j3bjB02bXz6xSj7CDWexI">server.*</code> 内置函数。</p>
-<pre data-page-node-id="JsrAcRjA90H4n7lBKircJE"><code data-page-node-id="JWCvVvWFRE1uJaE9mPEXaE"><span class="k" data-page-node-id="cKICDZNMCtlA2peDz5sxtj">import</span> <span class="s" data-page-node-id="yl43Wu0oA7j1lnWB8lV3Oa">"gui"</span> <span class="k" data-page-node-id="z9nPqgYTQ9zCZvgherSEoG">from</span> <span class="s" data-page-node-id="rJHXTJtgQFhI4mox9i5XAl">"./hone_lib/gui.hn"</span>;
-
-<span class="c" data-page-node-id="onwplCd1HX3Un9G1T4PYjs">// 界面事件处理：id 为控件 id，value 为用户输入值（约定函数名 on_event）</span>
-<span class="k" data-page-node-id="98qCJjJl6TLbhovfJb84RI">fn</span> <span class="f" data-page-node-id="gKJQJEFrdnNLwVxK5c7YTi">on_event</span>(id : <span class="k" data-page-node-id="aGxYHLZlHXY4Bb3w3lHQzH">str</span>, value) -&gt; <span class="k" data-page-node-id="S8wjEzP6HRtiQAG2v091gL">str</span> {
-    <span class="k" data-page-node-id="WELTq3BjFy4uge0ms9SBDR">if</span> (id == <span class="s" data-page-node-id="m6KqdwSJMN2iCR1WUvcASD">"btn_hi"</span>) {
-        <span class="k" data-page-node-id="lwgdEU92zWp4VBNsDX6s3R">return</span> <span class="f" data-page-node-id="Ey7MZ3uYxOM7GkWeZHlJeJ">json_stringify</span>({<span class="s" data-page-node-id="TUsT57bxFc1pHsTf1OAum5">"update"</span>: [[<span class="s" data-page-node-id="WN9agKmWgZUdf2SfAD8KOE">"lbl_out"</span>, <span class="s" data-page-node-id="UHWcYFXbkaBT9uZOb3UVCl">"你好，Hone GUI！"</span>]]});
-    }
-    <span class="k" data-page-node-id="uVDBeBECyW4AmWgLptji0u">return</span> <span class="s" data-page-node-id="BPDuaGLzhceIXSWD0ieNFi">""</span>;
-}
-
-widgets = [
-    <span class="f" data-page-node-id="36Q0BHbnqgMCCpdF0L7dFm">gui_button</span>(<span class="s" data-page-node-id="MC0XIOQYdOoe0JHVZx0Pym">"btn_hi"</span>, <span class="s" data-page-node-id="z44Im1TuUXU5gtgejvZ98h">"打招呼"</span>),
-    <span class="f" data-page-node-id="mzJKA3IUVKQn77wmtdIR8M">gui_input</span>(<span class="s" data-page-node-id="aehDSfOboiy4W396ZT9fMA">"txt_name"</span>, <span class="s" data-page-node-id="5oVtIlNCgY1BuOJzupo9AP">"姓名"</span>, <span class="s" data-page-node-id="I2ciddyjYwoODcbmDy112O">"输入名字"</span>),
-    <span class="f" data-page-node-id="vmWUUt5YjoAUxR0gjPWlJ9">gui_label</span>(<span class="s" data-page-node-id="HLc0mgYt6KRIbzy17XkQ0S">"lbl_out"</span>, <span class="s" data-page-node-id="cSYJh7S7gLaEz5It8sztLo">"(事件输出)"</span>),
-];
-<span class="f" data-page-node-id="Sa7SamaQzG4B46QGte8m3d">gui_run</span>(<span class="s" data-page-node-id="qTWnIVG1zJmanIbdbVaJGF">"Hone GUI 演示"</span>, widgets);  <span class="c" data-page-node-id="qsVIYAGzyKEg3lqivJAgLJ">// 启动本地服务器并自动打开浏览器，Ctrl+C 退出</span></code></pre>
-    <p data-page-node-id="3pcPl4wQDO2VDJ3Gr328Ud">控件：<code class="inline" data-page-node-id="zj7T0ysVCLagHBghPxujpu">gui_button</code> <code class="inline" data-page-node-id="4AZB2mXXnLqbZBoe7FJnIL">gui_label</code> <code class="inline" data-page-node-id="PDAyENMwjR1WUlk9CCdzvv">gui_input</code> <code class="inline" data-page-node-id="wmXBenHEbJ8XKKxTwr88v5">gui_select</code> <code class="inline" data-page-node-id="LWzjHgTTDbsANGGF7HuaGm">gui_html</code>；<code class="inline" data-page-node-id="AIUBngMDnUsubcaDEImcBh">on_event</code> 返回值按 JSON 协议解释：<code class="inline" data-page-node-id="3Ge6AHpMpE9Bscqgu3lWjO">{"update": [[元素id, 新文本], ...]}</code> 更新元素、<code class="inline" data-page-node-id="LGUVbFosaxkXNdtHosNtnB">{"alert": "消息"}</code> 弹窗、其他文本显示在页面底部状态栏。</p>
-    <p data-page-node-id="ol0E7wCqeUhVZEYvKs4Q0l">底层 <code class="inline" data-page-node-id="AjD2l8a36ZhWzrepb1S9DU">server.*</code> API：<code class="inline" data-page-node-id="ceeW2UZ6nMQiT0EfA8sKoX">server.listen(port)</code> 启动后台监听（0=自动分配，返回实际端口）、<code class="inline" data-page-node-id="2a2sksSgRlA49zSUfAf2PN">server.poll()</code> 取出排队请求（返回 JSON 数组）、<code class="inline" data-page-node-id="hqUhk3wrUn9MgKTPWwyEWX">server.respond(id, body)</code> 发送响应体（HTTP 200）。事件模型为后台线程收发 + 脚本主线程轮询响应，与解释器单线程模型兼容。示例：<code class="inline" data-page-node-id="uY4ftWNwIVq7a3jZBaeIPE">examples/gui_demo.hn</code>、<code class="inline" data-page-node-id="eFrAPlUK7qeOYDyeG4Xelp">examples/server_demo.hn</code>。</p>
-  </section>
-
-  <section id="process" data-page-node-id="nyBBnMCdEsAEgGmE8SK3lY">
-    <h2 data-page-node-id="Dcmvn8dWZbvanWkucGL0fJ"><span class="hash" data-page-node-id="wHeTuD4aS05DAfdrOnxnGD">#</span>14. 进程检测库（hone_lib/process.hn）</h2>
-    <p data-page-node-id="1HNrOMOfwlOz2Rig4aBd8B">纯 Hone 编写的跨平台进程检测库（Windows / Linux / macOS）：枚举进程、按名称/PID 查找、结束进程。Hone 无内置进程 API，本库经 <code class="inline" data-page-node-id="Kr59ncFOcIt65EHitTOCfL">sys.run</code> 调用系统命令实现（Windows 用 <code class="inline" data-page-node-id="4V77CkKy0DQtzpm2YWzMmV">tasklist</code> / <code class="inline" data-page-node-id="M1fQMKQxCTlxqFtFxvonjb">taskkill</code>，Unix 用 <code class="inline" data-page-node-id="CTAhhbe1sIOs2jXPsePsYD">ps</code> / <code class="inline" data-page-node-id="RN8UbOEceIS3bQyoxQlKpU">kill -9</code>）。查询函数返回进程对象 <code class="inline" data-page-node-id="A384oGcVCNlC5LbvdJnBvZ">{pid, name, mem, cmdline}</code>（<code class="inline" data-page-node-id="CzYqHKKwVpU9Pp72jnDz3W">mem</code> 为 KB；<code class="inline" data-page-node-id="qzSaoXEgP2qMnGWwYZO1f6">cmdline</code> 仅 Unix 有值）。</p>
-<pre data-page-node-id="DBBAHKcxizxGMDy96HwsIF"><code data-page-node-id="0gsvk9R7rY40ahpQ0TWFeN"><span class="k" data-page-node-id="RmGuQZN3R7jDx3xhgGNFp2">import</span> <span class="s" data-page-node-id="TpG53xYzvLaChCvTAwpkzf">"process"</span> <span class="k" data-page-node-id="KfKCo2Rt9oK2AEn5gX7knc">from</span> <span class="s" data-page-node-id="WMiW76sHItwdEdrZggfCQm">"./hone_lib/process.hn"</span>;
-
-<span class="k" data-page-node-id="DxACPZHOZao2wOHvJ0Axgj">if</span> (<span class="f" data-page-node-id="1C1yZOd9SSt1gSElTrRh5c">proc_exists</span>(<span class="s" data-page-node-id="ZENJWmWD51aHdE2CLGlEGt">"hone.exe"</span>)) { <span class="f" data-page-node-id="XAFJJF415ONGEAqFIk2HZ2">print</span>(<span class="s" data-page-node-id="hSsepoRfpXK4nNw4HRqTuS">"hone 正在运行"</span>); }
-
-<span class="c" data-page-node-id="z7BWeH3vmufu9DRt7GLME9">// 枚举 / 模糊查找（不区分大小写）</span>
-<span class="k" data-page-node-id="OO2il0WxE6xCtrdUpd2W12">for</span> p <span class="k" data-page-node-id="UL2EF2rMcHSmb7dJCT8iOo">in</span> <span class="f" data-page-node-id="jKZBgvMqFEjzjeqL59UkCd">proc_find</span>(<span class="s" data-page-node-id="QTViTWuL1cZpFXhaAeYSzJ">"chrome"</span>) {
-    <span class="f" data-page-node-id="RBgUfEAgnbBRj1B1qBpv3u">print</span>(p.pid, p.name, p.mem);
-}
-
-<span class="c" data-page-node-id="Fy4O2URoCSs6WeflPdSAyL">// 结束进程（taskkill /F /PID 或 kill -9）</span>
-<span class="f" data-page-node-id="JCUBbioaOIhKUrRBTeXGgY">proc_kill</span>(<span class="n" data-page-node-id="lOPqPw3YlzMHLDGq2Kyr1q">1234</span>);
-n = <span class="f" data-page-node-id="oCgGurNbsVVT8fDb8WKodV">proc_kill_by_name</span>(<span class="s" data-page-node-id="PSc5JaDf1GcFWHfEYc0IuQ">"notepad.exe"</span>);  <span class="c" data-page-node-id="bheHSw8nDPC4d3jBEuWEiN">// 返回成功数</span></code></pre>
-    <p data-page-node-id="IBtI6rSfHMPLFkLNIpai9B">函数：<code class="inline" data-page-node-id="wOiLR82v5n4fCuM7fiDtSX">proc_os</code> <code class="inline" data-page-node-id="C1EWUYMhhN4VClVNE1txY2">proc_list</code> <code class="inline" data-page-node-id="HA3r0wH4ic8V8wIMF5TXbO">proc_find</code> <code class="inline" data-page-node-id="9HSWJegEqx5mow1x2vh13o">proc_exists</code> <code class="inline" data-page-node-id="uzhdecbvY5tA8vZ4FAg0ab">proc_by_pid</code> <code class="inline" data-page-node-id="eX3rx6AXi4SgCg3DEFkSvM">proc_count</code> <code class="inline" data-page-node-id="Zj44uEOoiFtFI6Sxx32eVE">proc_pids</code> <code class="inline" data-page-node-id="O8wJmDtekpRr6F9GpFo4Sv">proc_names</code> <code class="inline" data-page-node-id="LtGd9npGsYh9wMMCThNGHT">proc_kill</code> <code class="inline" data-page-node-id="EjSNd4YSAd7TLqG97UdVT2">proc_kill_by_name</code>。跨平台差异：Windows 进程名含 <code class="inline" data-page-node-id="axBy8YDwJdruCwZJEv9sC7">.exe</code>、Unix 不含，用子串匹配（如 <code class="inline" data-page-node-id="V7pErX1xhgwOeHx1xTzQBg">proc_find("chrome")</code>）两边通用。完整函数表与测试脚本见 <a href="stdlib.html#process" data-page-node-id="zh12iPELgZ0V9IZ59LPaDi">标准库 · process 进程模块</a>。</p>
-  </section>
-
-  <section id="sched" data-page-node-id="JzYOIbHzfYAUkmRyaRFKvU">
-    <h2 data-page-node-id="0MxviO28ZSyekCcOruWZJL"><span class="hash" data-page-node-id="9UNJf0Hn48hEZoO2OXNpbZ">#</span>15. 定时任务库（hone_lib/sched.hn）</h2>
-    <p data-page-node-id="IVnQuzCfeyOLwp8vOgwXjf">纯 Hone 编写的跨平台定时任务库（Windows / Linux / macOS）：按间隔秒、每天指定时刻、或 cron 表达式调度命令执行。
-      任务动作以「命令字符串 + <code class="inline" data-page-node-id="jNjJwqXwcpgwb4uaAQKk1J">sys.run</code>」描述——命令字符串便于调度与序列化，与 cron 心智模型一致。</p>
-<pre data-page-node-id="o5NvcT5RQ1VPHOmG8a9dLC"><code data-page-node-id="O2fHCRJpGv9kDfwsrUxHkU"><span class="k" data-page-node-id="Gu4J9mqRYprgmJO8yfPLnt">import</span> <span class="s" data-page-node-id="5x1iiwdrNdT9aN0HRrUUAc">"sched"</span> <span class="k" data-page-node-id="BUVuiq3u6EmC9CcHdvKVkB">from</span> <span class="s" data-page-node-id="ekkIIAIzNarscGxumGFV8K">"./hone_lib/sched.hn"</span>;
-
-tasks = [
-    <span class="f" data-page-node-id="xfEdq5HaC5QI3LHJijhD4h">sch_every</span>(<span class="n" data-page-node-id="9HfTgqzQ4A3phhluo8XRbe">60</span>, <span class="s" data-page-node-id="vDPFjFEsuADm3YgHxwmBDq">"hone backup.hn"</span>, <span class="s" data-page-node-id="HpXEsTMHNbdSlLNrcuoAIr">"backup"</span>),          <span class="c" data-page-node-id="QVWWd0Htb2HIw87g8HGy5i">// 每分钟备份</span>
-    <span class="f" data-page-node-id="SdCFyYau6x4pa6OimbLHj1">sch_at</span>(<span class="s" data-page-node-id="KY8Qgj0OEXbu4rhYsFModX">"09:30"</span>, <span class="s" data-page-node-id="rc73RsZoNoru34S6GXniqM">"hone report.hn"</span>, <span class="s" data-page-node-id="tArMCxNhN8A9M1zj7RxE4W">"daily-report"</span>),  <span class="c" data-page-node-id="5nt2i8oVS2aBfCcIHiEjXg">// 每天 9:30</span>
-    <span class="f" data-page-node-id="7qDzsqLZ2G2pZgOcKrFb2B">sch_cron</span>(<span class="s" data-page-node-id="a6BxcVRJQVnF6zRBtIREeR">"0 2 * * 1"</span>, <span class="s" data-page-node-id="ZRyBZ54UYywrtcc74zCdaZ">"hone cleanup.hn"</span>, <span class="s" data-page-node-id="LviD4lOd5lwiuC5RL0vrc5">"weekly"</span>), <span class="c" data-page-node-id="GEaWEJAQHwNdmLt8iBnGGS">// 每周一凌晨 2 点</span>
-];
-<span class="f" data-page-node-id="vG27ZZfaK7XE7OXztqH63w">sch_run</span>(tasks, <span class="n" data-page-node-id="YhErQ8BRo92VLbiZFZtKbA">0</span>);   <span class="c" data-page-node-id="aYjiKPAS0Y6MPP62lLzRoH">// 一直运行，Ctrl+C 退出</span></code></pre>
-    <p data-page-node-id="xsqkVTnz7l0KgBi0TeFRNd">函数：<code class="inline" data-page-node-id="9rKfVGl1PjxlBWOj7D7bDz">sch_every</code> <code class="inline" data-page-node-id="4B43FsT9Y4j2k3XcbKCsR7">sch_at</code> <code class="inline" data-page-node-id="6sbCvQNFdg79k4jaBOGkS6">sch_cron</code> <code class="inline" data-page-node-id="DvjU5dDMYe2i6R7pUtjgG7">sch_run</code> <code class="inline" data-page-node-id="HPiu2gVLUVgvL17JGUSqiy">sch_tick</code> <code class="inline" data-page-node-id="B5tIVwRciHSLmE9jpxAaKu">sch_next_hhmm</code> <code class="inline" data-page-node-id="QXvHYUTesAa2TuBFiT6arm">sch_cron_match</code> <code class="inline" data-page-node-id="nKln7JBMiqTcnoFeT4SCCv">sch_cron_next</code> <code class="inline" data-page-node-id="PqAdk2LTVXvwB5i3D4zPK9">sch_now</code> <code class="inline" data-page-node-id="Nf6uflAq9WtH42LakVWg2R">sch_hhmm_to_sec</code>。cron 为 5 段表达式（分 时 日 月 周），字段支持 <code class="inline" data-page-node-id="gYNSfz2rraLm665akPmYwF">*</code> / 数字 / <code class="inline" data-page-node-id="Rt1GFuWkPrHo22ARSJTjvN">a-b</code> / <code class="inline" data-page-node-id="4qGq3SQLS7AYBPy0q8ZJwv">*/n</code> / <code class="inline" data-page-node-id="dynSm1bFECeoNZzk2pcjLb">a-b/n</code> / 逗号列表。注意列表/字典是值语义，<code class="inline" data-page-node-id="Ax71BDRS0kDdJhLjSGtmzT">sch_run</code> 返回重建后的任务列表需重新赋值。完整函数表与测试脚本见 <a href="stdlib.html#sched" data-page-node-id="C3f5bUasIHDx1V6K78u5Uz">标准库 · sched 定时任务模块</a>。</p>
-  </section>
-
-  <section id="img" data-page-node-id="umoJL0Z7QS3RjOBWDeTYtW">
-    <h2 data-page-node-id="gT3aFajKhKQzxwAqpEnhqg"><span class="hash" data-page-node-id="3G5mQwcK4jCFByeEonPv9g">#</span>16. 图片库（hone_lib/img.hn）</h2>
-    <p data-page-node-id="B9302iIJvL39BHA00m4tPY">纯 Hone 编写的图片标准库：像素网格 + 绘图/滤镜/变换 + PPM P3 / SVG 读写。
-      图像表示为 dict <code class="inline" data-page-node-id="bJaC9uLuoO3Umzd0w4KpWV">{"w": 宽, "h": 高, "rows": [[[r,g,b],...],...]}</code>，
-      <code class="inline" data-page-node-id="jmApgc2W2dnW7Lscn5plDv">rows[y][x]</code> 为像素（各通道 0-255，原点在左上角）。
-      Hone 的 str 无法承载二进制（见手册 §3.19），故采用文本格式：<strong data-page-node-id="FnihhIDegiccXNxVr1t9kr">PPM P3</strong>
-      （ASCII 光栅，GIMP/ImageMagick 可查看）与 <strong data-page-node-id="SKbp6HmmCds90qA73xOtOl">SVG</strong>（文本矢量，浏览器直接打开），不支持 PNG/BMP。
-      列表为值类型、索引赋值整体拷贝，绘图/滤镜适合 ≤128×128 的小图。</p>
-<pre data-page-node-id="UvvFIyEYfDeWkImPLiPeBJ"><code data-page-node-id="OBBmNCU6pGwmErlsM2vTQQ"><span class="k" data-page-node-id="NIhxqhY7yHVIniO5NDYCAZ">import</span> <span class="s" data-page-node-id="zd66Hfg4Mq8Ya51X08QL01">"img"</span> <span class="k" data-page-node-id="EHdlys66Yi0ucowmHAdxK4">from</span> <span class="s" data-page-node-id="sfFbGjrgqw9EhOu1KHzH3X">"./hone_lib/img.hn"</span>;
-
-im = <span class="f" data-page-node-id="9jEwL3zD8LKZ4Lz6sbM5WF">img_new</span>(<span class="n" data-page-node-id="dkmTWO5UTKFtsgXqtI9CLw">64</span>, <span class="n" data-page-node-id="ymPBAmphA5Q6JBCen89QeE">64</span>, <span class="n" data-page-node-id="kSi1HTRYoOhflYB2lJRQDE">255</span>, <span class="n" data-page-node-id="P379ErCWtxeYYsYfypko8g">255</span>, <span class="n" data-page-node-id="uUOF25kMyih8OPWD4haYyL">255</span>);         <span class="c" data-page-node-id="BX6tGARGSXMepprEjBIDVR">// 白色画布</span>
-im = <span class="f" data-page-node-id="yCumJK5bI4DJkTnVmLJJyn">img_rect</span>(im, <span class="n" data-page-node-id="RY4N9NMzg00IQu59RVk2QX">8</span>, <span class="n" data-page-node-id="P0bIWM6PnDKgkoc4UfOwsf">8</span>, <span class="n" data-page-node-id="R7U2HI4cqKidZ484bIUwQt">40</span>, <span class="n" data-page-node-id="aBFZBP1fcArMpjDskb3GjG">40</span>, <span class="n" data-page-node-id="9KXyGKkG6xpcvdkuigViGZ">255</span>, <span class="n" data-page-node-id="SmRle1Kx4Emly0J8xih1Xo">0</span>, <span class="n" data-page-node-id="E2zFgcROEk70AGryu9qlzC">0</span>);  <span class="c" data-page-node-id="Ax0nwT2XikqnfXgwhRW5bY">// 红色实心矩形</span>
-im = <span class="f" data-page-node-id="xTZvKtKPKML82pAKGVcAdD">img_circle</span>(im, <span class="n" data-page-node-id="aVTbubUyNPFihwEofoJjbc">32</span>, <span class="n" data-page-node-id="0RZUFFyWbHF1aAuI9G5LiM">32</span>, <span class="n" data-page-node-id="9xnWlC2cDgVhTLWTijw6tK">16</span>, <span class="n" data-page-node-id="4MIbqnS5EzrMF14aGTQk4x">0</span>, <span class="n" data-page-node-id="0rYxIcD9V6i7MOsnSgM3By">0</span>, <span class="n" data-page-node-id="F0I7H1u3RxHvs4ujpBGvHO">255</span>);  <span class="c" data-page-node-id="ETG2ZldhGOXiAVtvodh8IB">// 蓝色实心圆</span>
-im = <span class="f" data-page-node-id="yWXKypeCQzs2AcLvIqz8cX">img_grayscale</span>(im);                          <span class="c" data-page-node-id="bH6gOLUnq41BOemlBFh5jq">// 灰度滤镜</span>
-<span class="f" data-page-node-id="FBawbtLcjKo11nmYbB0TNW">img_save_ppm</span>(im, <span class="s" data-page-node-id="9CZ3YQpCNCRqvwlgYrkHP5">"out.ppm"</span>);                    <span class="c" data-page-node-id="hYoDv2fS45CuR5CxNVmfWR">// 保存 PPM P3</span>
-<span class="f" data-page-node-id="cYfJcwaOT2STTHw7S5QdD7">img_save_svg</span>(im, <span class="s" data-page-node-id="B7Lr9BE9NkZELffhvb72C5">"out.svg"</span>, <span class="n" data-page-node-id="jK17UJD7Y3BtzXGxlXbKzf">4</span>);              <span class="c" data-page-node-id="29mnH30OAgGP7h2lC1cEOS">// 保存 SVG（每像素放大 4 倍）</span></code></pre>
-    <p data-page-node-id="5IBaeyyaGovzN9NZUnM7cx">函数：创建/基础 <code class="inline" data-page-node-id="0VNZaZTx9KcIvvziAgUClc">img_new</code> <code class="inline" data-page-node-id="r20mnrkOwiBiENCFzFgrUy">img_fill</code> <code class="inline" data-page-node-id="5IS6NRZlhPHSxYHMrhFMgb">img_get</code> <code class="inline" data-page-node-id="YBDnsv8K8GTjmjAj9y24i6">img_set</code> <code class="inline" data-page-node-id="xtgafWEtc5rw9MxeHOyYd3">img_size</code>；
-      绘图 <code class="inline" data-page-node-id="Gj1grvDeZC2QWPrtHqc18u">img_rect</code> <code class="inline" data-page-node-id="tgbpUcwQCF7KNIFcGAHJuO">img_line</code> <code class="inline" data-page-node-id="JccWkURZckRSmUOIqhixVe">img_circle</code>
-      <code class="inline" data-page-node-id="1trTYQkoCHlD468dMcf32d">img_gradient_h/v</code> <code class="inline" data-page-node-id="uMIC1qXlQBbN7kSjcWhDFa">img_checker</code> <code class="inline" data-page-node-id="xHB2NPMxEcKZbtPISsmtNT">img_noise</code>；
-      滤镜 <code class="inline" data-page-node-id="rGOJZ9j7aTwaVpNlwzlSe7">img_grayscale</code> <code class="inline" data-page-node-id="ZnijxvK8FnxjFBtWCOU64K">img_invert</code> <code class="inline" data-page-node-id="24nv9HYLLHnvLkOhxVuoj6">img_brightness</code>
-      <code class="inline" data-page-node-id="VSz4jmQzOwfnNGOnurgg8K">img_contrast</code> <code class="inline" data-page-node-id="5cchA2jHzu4ex6etj9w93q">img_threshold</code>；
-      变换 <code class="inline" data-page-node-id="vj4EorDYBlJQcRPl5jBPPj">img_flip_h/v</code> <code class="inline" data-page-node-id="cLbmZr4eIXuhT1FCNGUx2S">img_rotate90</code> <code class="inline" data-page-node-id="jOTbRt61Af3r2FRjzYof5l">img_crop</code> <code class="inline" data-page-node-id="pFYcrFiQkFSAXs2mavkUAx">img_scale</code>；
-      读写 <code class="inline" data-page-node-id="92SaI0NCH5qQqc1TwA5xRr">img_to_ppm</code> <code class="inline" data-page-node-id="Yu9FMGA0C6CzfXesVpve6x">img_save_ppm</code> <code class="inline" data-page-node-id="YuqrQLREGTzZKzC5eHWB8d">img_from_ppm</code>
-      <code class="inline" data-page-node-id="2PsElxjCQuIrwkqLLL7b1p">img_load_ppm</code> <code class="inline" data-page-node-id="bPfvF0AYPefJ0Z0H3UMWwh">img_to_svg</code> <code class="inline" data-page-node-id="zF4C1OxFs9HEJK41wsaymF">img_save_svg</code>。
-      完整函数表与测试脚本见 <a href="stdlib.html#img" data-page-node-id="7PN0L4EgUj8yiSNKoa3cl8">标准库 · img 图片模块</a>。</p>
-  </section>
-
-  <section id="pet" data-page-node-id="P9FSKsUgHQ7avopXnmNn1l">
-    <h2 data-page-node-id="N6kncFou59WZbPv6JyX2N8"><span class="hash" data-page-node-id="iDXFB46AqJgyMFqXvjwlVO">#</span>17. 桌宠库（hone_lib/pet.hn）</h2>
-    <p data-page-node-id="oHLJG7LtpiOO25OoKI3Zo9">Windows 桌面宠物标准库（仅支持 Windows，需 PowerShell 5.1+）：Hone 驱动状态机 +
-      PowerShell 透明置顶窗渲染。内置像素猫 8 帧动画（idle 眨眼 / walk 走路镜像 / sleep 睡觉 /
-      happy 开心 / surprise 惊讶），说话气泡、点击/拖拽交互、右键菜单（换装/静音/跟随鼠标/
-      隐藏显示台词/退出）、全屏游荡、自动入睡、整点报时、CPU/内存播报（wmic）。
-      提供阻塞 <code class="inline" data-page-node-id="XjcFUlJHtJV8tsIhrDQohL">pet_run(cfg)</code> 与非阻塞 <code class="inline" data-page-node-id="LSfGcgxpjDqs4ud0ssNRzi">pet_tick(st)</code> 两种形态。
-      运行示例：<code class="inline" data-page-node-id="ebCTdYPbYHQSC3O0rDjzWc">hone examples/pet_demo.hn</code>（Ctrl+C 或右键菜单退出）。</p>
-<pre data-page-node-id="ypO1BCrRSyv9h9bOczR6kK"><code data-page-node-id="TTgAK2aKwyEqTx2ksQhTp9"><span class="k" data-page-node-id="avM8KsGdYCvhfiC6ljQ5fi">import</span> <span class="s" data-page-node-id="9T7VFgoMurEBv6S6yqyOrg">"pet"</span> <span class="k" data-page-node-id="Mkxpj0mzSTDyjarhAh21jS">from</span> <span class="s" data-page-node-id="gLfIk6NAwplnWLNlCuGtyK">"./hone_lib/pet.hn"</span>;
-
-cfg = {<span class="s" data-page-node-id="jMBxsFdEaszSVzNRrhCe5U">"pal"</span>: <span class="n" data-page-node-id="xOKRb2snwI7DwUFG32tRXk">0</span>, <span class="s" data-page-node-id="xgeQkMt3U72vkK4vW9cpIt">"scale"</span>: <span class="n" data-page-node-id="XjHorwDIUr6PZzNNqeaaTH">2</span>, <span class="s" data-page-node-id="W2ycJ35oGwTBsOcxbjQrRm">"speed"</span>: <span class="n" data-page-node-id="IoDd1RGnGNp14VN7RA0xGM">3</span>, <span class="s" data-page-node-id="OfCMVsM7qhdYKzGphIFT2f">"sleep_after"</span>: <span class="n" data-page-node-id="E60uqUF5xzZuGy4qodHu4z">90</span>};
-<span class="f" data-page-node-id="qxKSV3OCkzfCeHzgT5j34R">pet_run</span>(cfg);   <span class="c" data-page-node-id="HjFOc8fhIGTW8EvTYv72Lx">// 阻塞运行（Ctrl+C 或右键菜单退出）</span>
-
-<span class="c" data-page-node-id="A59kCXA4ZCDduPaSgvv4JY">// 非阻塞：st = pet_init(cfg); while (st.quit == false) { st = pet_tick(st); time.sleep(st.cfg.tick); }</span></code></pre>
-    <p data-page-node-id="V8TlZjw1B3ladc9dIW6kGM">配置项（均可省略，用默认值）：<code class="inline" data-page-node-id="XAlSLfQRH6H1FjIKX9Lola">pal</code> 调色板（0 橘猫/1 黑猫/2 白猫）、
-      <code class="inline" data-page-node-id="ykOr4wqA7op37Q4ghLEsiD">scale</code> 显示缩放（默认 2 → 96×96 窗口）、<code class="inline" data-page-node-id="h1Dbe0CQd5mgDbJgPXhuHm">speed</code> 移动速度、
-      <code class="inline" data-page-node-id="M7QdVzc2zMLPUG25oB8zOz">tick</code> 帧间隔（默认 0.125 = 8fps）、<code class="inline" data-page-node-id="J26M0NM4Sw8aEXaVEFvuUA">sleep_after</code> 入睡阈值秒、
-      <code class="inline" data-page-node-id="LUM6YRqPSgvpgoMIGyeA3n">wander</code> 游荡间隔秒、<code class="inline" data-page-node-id="EvdZMasW1I6YF7MIJLtyzF">bubble</code> 随机台词间隔秒、
-      <code class="inline" data-page-node-id="xtbIVh0PPPcFwEBfCTxuj7">mute</code> 静音、<code class="inline" data-page-node-id="psen89ZZpoiFhvungscjzu">hourly</code> 整点报时、
-      <code class="inline" data-page-node-id="idG8FpLog5yDYvSDaOil5X">res_report</code> 资源播报间隔秒、<code class="inline" data-page-node-id="WQXEQK4aOz1mkATyg1oQ9Y">lines_file</code> 自定义台词 JSON、
-      <code class="inline" data-page-node-id="eJlSBxFcDX2Cf7DAsGj0PR">frames_dir</code> 外部 PPM 帧目录、<code class="inline" data-page-node-id="vzVXELtqTBJCMpb8ym3kXs">start_x/start_y</code> 初始位置。
-      帧构建用 <code class="inline" data-page-node-id="uMmIqWeoxa1ssVDjNlVFBN">ptr.alloc</code> 缓冲 + 24×24 内联整数判定 + 2× 最近邻放大到 48×48，8 帧约 2s。
-      完整函数表与配置说明见 <a href="stdlib.html#pet" data-page-node-id="9oYctW0rtwNhBvUg7bN3N6">标准库 · pet 桌宠模块</a>。</p>
-  </section>
-
-  <section id="guipro" data-page-node-id="LK3mydAMPfzIcqB0nwhX4X">
-    <h2 data-page-node-id="cNNHbGTejg9IfMkNdbUMIz"><span class="hash" data-page-node-id="nLXxWKnyvCYJPcBEEZwg4J">#</span>18. 原生图形界面库（hone_lib/guipro.hn）</h2>
-    <p data-page-node-id="3TuB34CD6EIMRyMECSrAyP">原生窗口 + 原生控件标准库（<code class="inline" data-page-node-id="w2gjiHCbZaOmDtllotLGHb">gui.hn</code> 的升级版，§13 为浏览器方案）：直接创建系统原生窗口与控件。
-      Windows 用 Win32 标准控件（user32/gdi32/commctrl，零新增依赖、不增体积），Linux 运行时优先动态加载 GTK3
-      （<code class="inline" data-page-node-id="bZ0c1pcIjTynV3fwkY5QDt">libgtk-3.so</code>），缺失时自动回退 X11 自绘后端（<code class="inline" data-page-node-id="bfryR5spS2N88iCyWPrFcK">libX11.so.6</code> 动态加载，单窗口自绘）。
-      Rust 内置 <code class="inline" data-page-node-id="mHV5xoqRntlSRlQbY7qs2X">guipro.*</code> 原语 + Hone 层统一 API：窗口 / button / label / input / select / checkbox / radio /
-      slider / table / tree / canvas 控件、VBox 布局、闭包事件分发、定时器、消息框、托盘图标（XEmbed）、菜单栏。
-      运行示例：<code class="inline" data-page-node-id="Ud171HjhU0mVx3IW2AyxvA">hone examples/guipro_demo.hn</code>（基础控件，20 秒后自动关闭演示）、
-      <code class="inline" data-page-node-id="SYVU5tUE8tkF8WxOn8g2oI">hone examples/guipro_adv_demo.hn</code>（进阶控件：滑块/表格/树/画布/托盘/菜单）。</p>
-<pre data-page-node-id="0gomtPKkmGjW4mO67ShXmC"><code data-page-node-id="XlA5pjtHcwoAjQwagvOvMY"><span class="k" data-page-node-id="D8xVa0JbTQU9aYtqLnAWVX">import</span> <span class="s" data-page-node-id="n1g2jB1kjg6SAxblZnry5R">"guipro"</span> <span class="k" data-page-node-id="bUqlBJBnSC6wZDfOyVVjRI">from</span> <span class="s" data-page-node-id="Ig3WV0taYc6EZMAEb3wN1P">"./hone_lib/guipro.hn"</span>;
-
-win = <span class="f" data-page-node-id="AkeDY6J4atBdVuMsAqoErA">guipro_window</span>(<span class="s" data-page-node-id="cz91EzwsGD1AV2pBKhSc3x">"示例"</span>, <span class="n" data-page-node-id="nkstGVVsMLe1SpWPN9iEtJ">420</span>, <span class="n" data-page-node-id="3fXygJoYMaAzngARNLPC9H">320</span>);
-b1  = <span class="f" data-page-node-id="1p280Xf8licJDebKOi7OaS">guipro_button</span>(win, <span class="s" data-page-node-id="IwoZJjckGv7USMmkSvCIBQ">"点我"</span>, <span class="n" data-page-node-id="FeHo3ynQxi0lavCq0o8Adb">10</span>, <span class="n" data-page-node-id="Twj7bSpkuvWcWjLxTChBG2">10</span>, <span class="n" data-page-node-id="ckL0dGiRTpFqDbWvB4IGzA">100</span>, <span class="n" data-page-node-id="vEH50dJPKAygGnr3DGszAT">32</span>);
-out = <span class="f" data-page-node-id="iknpxxDgqrbu8A6gIsKIKg">guipro_label</span>(win, <span class="s" data-page-node-id="jzsMunj8ntXOTZBCPJcP4X">"尚未点击"</span>, <span class="n" data-page-node-id="nRiEtAv0frGOIH8zN1Gilu">10</span>, <span class="n" data-page-node-id="BmDPD26wwhzetMAwsUzK7r">52</span>, <span class="n" data-page-node-id="MW0yUJoBFFHvR8C4K0q1Wy">200</span>, <span class="n" data-page-node-id="Ne5nrNZmdsDQrzs5IwSkL0">24</span>);
-handlers = [];
-handlers = <span class="f" data-page-node-id="JwmoO2oiFd4OwaFzwafAGB">guipro_on</span>(handlers, win, b1, <span class="s" data-page-node-id="47GHp93qGsFTXyAkLS5lIn">"click"</span>, <span class="k" data-page-node-id="1qEhoHr2Hxj6dXj66aaisq">fn</span>(id, value) {
-    <span class="f" data-page-node-id="UUGEf7PD6virUdouiVpx8d">guipro_set_text</span>(win, out, <span class="s" data-page-node-id="yhAu4CmwEdAn6Vg7FB8Af4">"点击了按钮 #"</span> + <span class="f" data-page-node-id="WxPfLrctaJLxw75uVMGyol">to_str</span>(id));
-});
-<span class="f" data-page-node-id="zHOVgNOrTFOd998w3mbkGr">guipro_run</span>(handlers);   <span class="c" data-page-node-id="XBRG7kvTgkfNAFjt0sWar5">// 阻塞主循环，窗口关闭后返回</span></code></pre>
-    <p data-page-node-id="lOjVmHQ92AFRITUYUaTHHi"><strong data-page-node-id="YFheEWherTZBOJSdcAvYn8">控件</strong>：<code class="inline" data-page-node-id="7EFBndxSEhKRe7YBv7zFwP">guipro_button/label/input/select/checkbox/radio(win, ..., x, y, w, h)</code> 绝对定位，
-      <code class="inline" data-page-node-id="vIl9E9djzERRz7I20p7T9h">guipro_vbox(win, specs, x, y, gap)</code> 纵向布局（specs 为控件 dict 列表，返回控件 id 列表）。
-      Linux GTK3 后端忽略 x/y，控件自动纵向排布；X11 自绘后端按绝对定位。</p>
-    <p data-page-node-id="ZNGj6n7VCPU6keFjcz4NIk"><strong data-page-node-id="eCNjBL44Yg2n6wPNANWH09">进阶控件</strong>：滑块 <code class="inline" data-page-node-id="QtQAbQb96DiF4DB5bBNx8M">guipro_slider(win, min, max, value, x, y, w, h)</code>（读写
-      <code class="inline" data-page-node-id="wzcc5uLAcrs2WjD0ngx9ea">guipro_set_value/get_value</code>，change 事件 value=当前位置）、表格
-      <code class="inline" data-page-node-id="uCctpH2L2k0KpeRSQaKQ6c">guipro_table(win, columns, rows, x, y, w, h)</code>（读写
-      <code class="inline" data-page-node-id="WKzsM1Gt5Kec7YMzO5GFnO">guipro_table_add_row/clear/count/get/get_row/set</code>，change 事件 value=选中行索引，click 双击同）、树
-      <code class="inline" data-page-node-id="JQEHGWLdjcEcwaEJHGJtwF">guipro_tree(win, items, x, y, w, h)</code>（读写 <code class="inline" data-page-node-id="QcrMG7XR1HqYnuSWDoab9s">guipro_tree_add/clear/get</code>，
-      change 事件 value=选中节点 id）、画布 <code class="inline" data-page-node-id="Zaj8ClSTEUYu7PLfNmmkRU">guipro_canvas(win, x, y, w, h)</code>（绘制
-      <code class="inline" data-page-node-id="g1xJfeDBhtkKmTzHCaoEKr">guipro_canvas_line/rect/ellipse/text/clear/repaint</code>，click 事件 value="[x,y]"，
-      颜色支持 "#RRGGBB" 字符串或整数 RGB）。</p>
-    <p data-page-node-id="KTa4BacCSbDg1HgoTDoI0L"><strong data-page-node-id="dhzebnwl5KF2RgUfAGioHQ">托盘与菜单</strong>：<code class="inline" data-page-node-id="OBAL2mzBWQZiNeWmPZvp3e">guipro_tray_add/tray_tip/tray_remove</code> 托盘图标
-      （Windows 用 Shell_NotifyIcon；Linux X11 用 XEmbed 系统托盘协议，需托盘管理器），tray 事件 value=left/right/double；
-      <code class="inline" data-page-node-id="Ecnxlc2zz3aH0S3e6OIAlk">guipro_menu(win, items)</code> 菜单栏（items 为嵌套列表，text 为 "-" 表示分隔线），
-      menu 事件 value=菜单路径（如 "文件/打开"）。</p>
-    <p data-page-node-id="w9L56Qq9p2kfuK8GjG5aRn"><strong data-page-node-id="e0wgo1DAf10nbay72gCDIN">事件与定时器</strong>：<code class="inline" data-page-node-id="2PfbUr1gKIuUMIKrD7tzQg">guipro_on(handlers, win, id, evt, fn)</code> 注册 click/change 回调
-      （<code class="inline" data-page-node-id="cLGGIbCbCUs3FHr5zcPMd9">fn(id, value)</code>，value 为文本/勾选态 "1"/"0"），<code class="inline" data-page-node-id="i1yGP8cTL8Ro65XlYRQkTz">guipro_on_win(handlers, win, "close", fn)</code>
-      窗口级事件，<code class="inline" data-page-node-id="uEjMrrfEF2Ct0bA10jvEQo">guipro_timer(handlers, ms, fn)</code> 周期定时器（<code class="inline" data-page-node-id="JFGN111V1gaougC1hNKLNZ">fn</code> 无参）；
-      <code class="inline" data-page-node-id="pCoxhqmXRgWVEOnWwd8blD">guipro_run(handlers)</code> 阻塞分发，窗口 close 后返回。</p>
-    <p data-page-node-id="BwIvyYxZDWDKvWDDv0GVoT"><strong data-page-node-id="Gt46lg1G5DiGsCFlrIhlSd">架构</strong>：内置 <code class="inline" data-page-node-id="uyMLaAAPv37adcgi0LZX3k">builtins::call</code> 无解释器上下文，闭包无法从 Rust 直接回调，
-      故 Rust 层只推送事件队列（<code class="inline" data-page-node-id="4FszTtbttYnhxxEZziCXKR">guipro.poll()</code> 返回 JSON，含 click/change/close/resize/menu/tray 事件），
-      闭包分发在 Hone 层主循环完成；注册表函数式传递（Hone 函数内不能改全局变量）。
-      完整函数表与事件协议见 <a href="stdlib.html#guipro" data-page-node-id="HKUsldAUEo2ZCyxRm24l6T">标准库 · guipro 原生图形界面模块</a>。</p>
-  </section>
-
-  <section id="advanced" data-page-node-id="H4nhpHA6EEc4zmNxOX4YO4">
-    <h2 data-page-node-id="5HF8IjouMvKLqh6U3ofsBC"><span class="hash" data-page-node-id="cQxpgWsb95mXB0fQUQ3edp">#</span>19. 进阶用法（多文件 / 调试 / 性能）</h2>
-
-    <h3 data-page-node-id="7ISz0aZRvP80omzSm6HSfQ">19.1 多文件项目组织</h3>
-    <p data-page-node-id="AsN1dZu3Ld2Whx7o5ndjdu">单文件即可运行，项目变大后建议拆分模块。三种复用方式：</p>
-<pre data-page-node-id="EridkMHTcYR3Qy3zvRoGTd"><code data-page-node-id="aZKPQOUsCIrCtFgsD2ydpp"><span class="c" data-page-node-id="dwNEz4bFBtvrLKnIKW64sC">// import：.hn 源码复用（最常用）</span>
-<span class="k" data-page-node-id="WzWxpe1PxyjGvEkjIH0pOT">import</span> <span class="s" data-page-node-id="37GS7O2c8od9QnGjX1UIyt">"math"</span> <span class="k" data-page-node-id="PHdri82SMojoLRSwkKRA3D">from</span> <span class="s" data-page-node-id="KRUIct5skxJkHTMx4t8Ari">"./hone_lib/math.hn"</span>;   <span class="c" data-page-node-id="E2WFjMCOo680vJbhyWqdlQ">// 本地：相对当前目录</span>
-<span class="k" data-page-node-id="LvGZRQTUnVYya5ZBH87Q0k">import</span> <span class="s" data-page-node-id="ktP45zBBEfDeTFlLnqr9ek">"mod"</span> <span class="k" data-page-node-id="DjBb1oK2ccx4E4dq6CLp68">from</span> <span class="s" data-page-node-id="bJH8GJMeRIqvFU5Z8rfzA6">"https://.../mod.hn"</span>;   <span class="c" data-page-node-id="MPeEFlvxhuoEvhudGR7UIp">// 远程：缓存到 ~/.hone/cache/</span>
-<span class="k" data-page-node-id="LyP22Z535EriCPP3X69Eqf">import</span> <span class="s" data-page-node-id="CWuhchcJYqyg3EAsyHg4Du">"mod"</span> <span class="k" data-page-node-id="eL4OVO1LUtIr6ovmT7PKku">from</span> <span class="s" data-page-node-id="bItxzvUxXI6KkdemfVXkqG">"https://.../mod.hn"</span> <span class="k" data-page-node-id="p0zs3Adby6VQYIdCh5muPZ">as</span> m; <span class="c" data-page-node-id="1pqgKvlGp8UVflwBH3pBDD">// 别名：前缀替换为 m</span>
-
-<span class="c" data-page-node-id="ltUOQHHLUphGwlGx5ghzYf">// load：C 动态库（typed 签名块见第 9 章）</span>
-<span class="k" data-page-node-id="I9RTwhFwIMdF0DgBZvsiTK">load</span> <span class="s" data-page-node-id="CO10TjcjKnfP4gHD2wNy3Y">"libm.so.6"</span> <span class="k" data-page-node-id="WGnohC11rbhehKYcMemtcf">as</span> m {
-    <span class="k" data-page-node-id="LFCEkHyr1D99aG917NUOny">fn</span> <span class="f" data-page-node-id="AOFHZZdvf7AkbBW6TUBZAL">cos</span>(x: <span class="k" data-page-node-id="TG9CpOzGhE50BE7YdU4mI4">float</span>) -&gt; <span class="k" data-page-node-id="vAEwP6EJLbe19OQNRtfExa">float</span>;
-}</code></pre>
-    <p data-page-node-id="tobJP3MUusDYX3wZ9mO3wS">模块函数以「模块名_」为前缀注册（如 <code class="inline" data-page-node-id="9nZ0uWi6Gw4RCRL91zkq1A">math_clamp</code>、<code class="inline" data-page-node-id="KYKP4o5H1hBkV5g2CCMZ4R">coll_sum</code>），
-      <code class="inline" data-page-node-id="bNyHsQhjA09aMw8E5YMvhh">as 别名</code>可整体替换前缀。函数名全局唯一、不支持嵌套遮蔽，命名加前缀避免冲突。
-      推荐目录：入口 <code class="inline" data-page-node-id="yiuoOOAucnCH6lDHM9i00F">main.hn</code> + <code class="inline" data-page-node-id="XrGDqnmgGR15LJn6b3mKiZ">libs/</code> 自有模块 + <code class="inline" data-page-node-id="tZAXaElwvI717ele3y2mWj">data/</code> 数据；
-      用 <code class="inline" data-page-node-id="OW3Q53f3tPjTGghuqgeXyz">hone get &lt;script.hn&gt;</code> 预下载脚本中所有 import 的模块，
-      或在项目根目录放 <code class="inline" data-page-node-id="w4Dsrr3Mai2wCTAB34o0GV">hone.json</code> 清单（name / version / modules），用
-      <code class="inline" data-page-node-id="ChFqV4ewHXfEPthZdBRoBc">hone get</code> 批量下载全部模块（见 §15 工具链）。</p>
-
-    <h3 data-page-node-id="P0c9k7B888OYSuaz8a2HOC">19.2 函数别名（alias）</h3>
-    <p data-page-node-id="bO7IQfDNBFq7NsC1FgPdVP">给已有函数起新名字再调用，原名保持不变：</p>
-<pre data-page-node-id="N5YjUvwcKGiflSJHyHu1D9"><code data-page-node-id="WmN7A8zZwfDz8r7DCB1dY3"><span class="c" data-page-node-id="IyTTE9DTM0xgm5VO2Jp5Ng">// 基础：alias 原名 as 新名;  之后用新名调用</span>
-<span class="k" data-page-node-id="54tBPbaYH8YzEmz4GPlrg4">fn</span> <span class="f" data-page-node-id="Li8sS3JQb9sZZ4SMgwn5pR">greet</span>(name) { <span class="k" data-page-node-id="mtIzt9RjNfNjU7xZaavOfZ">return</span> <span class="s" data-page-node-id="CrcsrwQZKfqJ6ft4quWsVP">"你好 "</span> + name; }
-<span class="k" data-page-node-id="oyGgTGhoFeefswYJTf5Dcu">alias</span> <span class="f" data-page-node-id="DpaB2cPL3lji5VYKiMDHDV">greet</span> <span class="k" data-page-node-id="puksug0mPRkqXyfOHZUP4D">as</span> hi;
-<span class="f" data-page-node-id="9hIcVvunZfLtXact4ETgmB">hi</span>(<span class="s" data-page-node-id="pAiw0JiIbhhhrGYhaRGq1t">"Hone"</span>);          <span class="c" data-page-node-id="WnaOhtcuhsOouG0Dj60eXC">// 你好 Hone</span>
-
-<span class="c" data-page-node-id="RtFDMdEmzlYwAg5MpEEz5O">// 原名支持点号路径（模块 / 类 / 内置点号函数）</span>
-<span class="k" data-page-node-id="IUfdPZeVSDRvdrLtd9mGlQ">alias</span> <span class="f" data-page-node-id="aUxeQRfFaA1deDLwOq3Aji">random.int</span> <span class="k" data-page-node-id="3B9BZn0fSJha1Brfjp30vE">as</span> rint;
-<span class="f" data-page-node-id="DrpywoCVNVYIH6EPqfgz35">rint</span>(<span class="n" data-page-node-id="PRDTRrNGtDHMqLY1KMFBH8">1</span>, <span class="n" data-page-node-id="ccODrEkUKiJk4aP3uUkyCp">100</span>);         <span class="c" data-page-node-id="hWqjHqReIKVBwKDiHEtaoC">// [1, 100] 随机整数</span>
-
-<span class="c" data-page-node-id="IuHAT4uEy6I4Kz43syXM06">// 别名可叠加（别名再起别名）、可指向内置函数</span>
-<span class="k" data-page-node-id="6hS39asiJMuT9dTbG6U94U">alias</span> <span class="f" data-page-node-id="Rik9u0QwV58hLc4jbhrAzW">greet</span> <span class="k" data-page-node-id="kZu9j5c9UpMoFr5CKpDO3y">as</span> hello;
-<span class="k" data-page-node-id="yPWBfyNoOmdJsHiwZnlJG0">alias</span> <span class="f" data-page-node-id="fRGhHthX7ZhoDVqcLmB8RV">hello</span> <span class="k" data-page-node-id="5D3BdNK4oKg9qC8RpImvqI">as</span> hey;
-<span class="k" data-page-node-id="82u57GXyLLibcRHPDkeMbc">alias</span> <span class="f" data-page-node-id="SIPENDDzovQ11WrDQP92F8">print</span> <span class="k" data-page-node-id="Fw2tDv315XC188B7RCeqhq">as</span> p;
-<span class="f" data-page-node-id="XvVmpOaaby1cviN2f2TxYS">p</span>(<span class="s" data-page-node-id="ZzbgJ1UtvX4HQVLKLHLYBV">"OK"</span>);</code></pre>
-    <p data-page-node-id="2HVXaWFu7WUNccbmXXFjkn">别名作用域为文件级（当前 .hn 文件全局可见），在 <code class="inline" data-page-node-id="f4FrRsqpyzum2FQyofROKt">alias</code> 语句之后即可用新名调用。
-      完整示例见 <code class="inline" data-page-node-id="oBgLZeTR2hH0bsjyhrKBu5">examples/alias_demo.hn</code>。</p>
-
-    <h3 data-page-node-id="7HT0zOnJw7wyqsZ5LYe3fI">19.3 调试复杂逻辑</h3>
-    <table data-page-node-id="bbmy0KGcrMaqZsgVbvZBsb">
-      <tr data-page-node-id="zRBn7FpuOH0UWXcKotHhHn"><th data-page-node-id="qi6oG7FkpVQyCsJpga7gPS">工具</th><th data-page-node-id="Ov8GI5cJOGH8Cdsbomi9dk">用途</th></tr>
-      <tr data-page-node-id="UzbcTbSXGwoRB0ReolBCIq"><td data-page-node-id="DT3UaHTiRCGKslWVopWU1a"><code class="inline" data-page-node-id="rAPQXOLijqbJBR3jJD4PBD">hone debug &lt;script.hn&gt;</code> + <code class="inline" data-page-node-id="7Z4GgEQEAUOdgQLtPYIsUM">breakpoint;</code></td><td data-page-node-id="YpbyLaoeyHALYSTgIA6BsA">运行到断点暂停，打印当前作用域全部变量快照，Enter 继续 / Ctrl+C 退出</td></tr>
-      <tr data-page-node-id="qfY0PTGWNk6NI7vrSAuJC1"><td data-page-node-id="LRh3uREtPKH0rQ8jZUrKcA"><code class="inline" data-page-node-id="WgD9UxpMDe6ptiDRS627x3">debug_print(expr);</code></td><td data-page-node-id="qn7SltFodcmXpCRIEzOJXy">仅 debug 模式输出，普通运行自动跳过，可留在源码中</td></tr>
-      <tr data-page-node-id="0r0uyqmvdN0FouwsX2rpAD"><td data-page-node-id="9jiCFHGX5AQG7XISbgtmtz"><code class="inline" data-page-node-id="ep0WKFpAUOKsZcrWeLyP3v">tmp fn 名称() { }</code></td><td data-page-node-id="UT1F3dEOHw1lhF4pPoVXgi">临时函数，编译时自动忽略，适合开发期草稿</td></tr>
-      <tr data-page-node-id="cXiMUA9FUKzuci7M36mooy"><td data-page-node-id="eBPqQ3ByH8goNVDipYJqpj"><code class="inline" data-page-node-id="2qJZd9D9OEYIx7f5dGhjBC">hone explain H201</code></td><td data-page-node-id="uXyQeO9JONGLUHFSEYV2zB">查看任意错误码的含义与修复建议</td></tr>
-      <tr data-page-node-id="DxHJdwMyCDBv3evTO1xHK6"><td data-page-node-id="SHgL03FArdpSgKlZh684CI"><code class="inline" data-page-node-id="7ZvqSVEWHBMWXKWTjnQGAl">hone poop &lt;file.hn&gt;</code></td><td data-page-node-id="c2FvwjSnztzjR12a4q3kTQ">输出 if 嵌套深度与圈复杂度，定位「屎山」热点</td></tr>
-      <tr data-page-node-id="jU0JuEVcK94nEMux32bVab"><td data-page-node-id="C0UtTLO0IzIvEDFyVNQodB"><code class="inline" data-page-node-id="8TUDPmxpgAbBJqaAwHkeH3">hone prof &lt;file.hn&gt;</code></td><td data-page-node-id="4fuHvsy5NdjxOzECMlRrmz">剖析模式运行，输出函数级热点报告（总耗时 / 调用次数 / 平均耗时），量化优化收益</td></tr>
-      <tr data-page-node-id="nsZKStwjsOpXw0h9aDaN4y"><td data-page-node-id="GcGoNxr1qeWiNIIkGOk0K7"><code class="inline" data-page-node-id="XwAqdGy6KZWcDjMZVKmyis">hone test [目录]</code></td><td data-page-node-id="YtvYotBJe98Yvyv8RxWf1N">递归扫描 <code class="inline" data-page-node-id="rovCapqXZUbu3bp4vOEHjG">*.test.hn</code>，配合 <code class="inline" data-page-node-id="Dy1CWGW6VV5brLezBTIh8C">assert(条件[, 消息])</code> 汇总 PASS/FAIL</td></tr>
-      <tr data-page-node-id="HqJDqVVcGzn5UhoEFfDpL5"><td data-page-node-id="nxEI7kVj5zyipJaeFF4ePd"><code class="inline" data-page-node-id="FoiiH9HmLpy1eATsN1cCGi">hone run --restart=3 --backoff=1,3,10 --restart-on=H200,H401</code></td><td data-page-node-id="2142LXx6NQR6oetkMyPbsq">崩溃自动重启（仅对可重入错误）；<code class="inline" data-page-node-id="yuQ6dHBAT3ljCiw6YYctBa">--resume</code> 从上次 db 检查点继续</td></tr>
-    </table>
-    <p data-page-node-id="jEjQJJ96rsQsMqSqrmQs88">调试思路：先用 <code class="inline" data-page-node-id="2DvFOiOROjbT1PX9153nPs">hone explain</code> 确认错误码含义 → 在疑似出错处加
-      <code class="inline" data-page-node-id="FxDMR9Vsp1RL38IuV599Vj">breakpoint;</code> 观察变量快照 → 用 try/catch 捕获运行时错误并打印
-      <code class="inline" data-page-node-id="89L9wGvWJKgUP9n6M7XMIJ">e.code / e.message / e.line</code> → 用 <code class="inline" data-page-node-id="5RgxRolZ4kU1Lq6CBjZGEM">assert</code> 固化关键不变量防止回归。</p>
-
-    <h3 data-page-node-id="do066IKFXPk1iV3i0GzIeo">19.4 性能优化</h3>
-    <ul data-page-node-id="IUOnFoFhNRcZQCjr1H47DH">
-      <li data-page-node-id="DE7A6zwDsat9Rn5UnOuxR9"><strong data-page-node-id="2TXiFVlE7x2fjWeqCU66fH">避免循环内反复 append</strong>：列表是值类型，<code class="inline" data-page-node-id="KdCXPFI6b16mQaoM6aRLV1">append</code> 返回新列表（整体拷贝），
-        循环里 <code class="inline" data-page-node-id="9mDpH0GeG4ZNj7SuCLVlNC">l = append(l, x)</code> 是 O(n²)。累积数据时优先用 dict，或先确定规模再一次性构造</li>
-      <li data-page-node-id="Al1ooKNjE6bEprQ5klmpWT"><strong data-page-node-id="wiRSXjKQFk7dymcoIeBG0P">字符串拼接优先 f-string</strong>：<code class="inline" data-page-node-id="uW6NtgHj2bmWdHepMyD7Yb">f"..."</code> 比 <code class="inline" data-page-node-id="AKYRyDckAqySwlf0U8VWIg">+</code> 简洁；str 不可变，大量拼接每次都会生成新串</li>
-      <li data-page-node-id="HpDtoBVka3HspQursZrkLb"><strong data-page-node-id="7jsqVAWJK9a3VQNuxC6vGb">减少深拷贝</strong>：<code class="inline" data-page-node-id="gMgTNR33QBk8Fw5J9VsRBL">clone</code> / <code class="inline" data-page-node-id="33JtOTvr56z59gM6Lcc7lg">copy</code> 是递归深拷贝，只在需要独立副本时使用</li>
-      <li data-page-node-id="a1flehAEAGiDEWqXX8APVT"><strong data-page-node-id="YOMRLsiDICu0O7tUW5QEFO">热点计算交给 C</strong>：瓶颈函数用 <code class="inline" data-page-node-id="F5FqYFwekVNKHMLXEeTAb8">load</code> 调用 C 库（FFI），或用 <code class="inline" data-page-node-id="djFCJmIaYHdsSVhEcIYCGs">hone build --dll</code> 导出后由 C 调用</li>
-      <li data-page-node-id="B1yDijvvJPW07nBTGu4vjc"><strong data-page-node-id="FMmR1m6hLEOfSwnN44vlje">并行化</strong>：<code class="inline" data-page-node-id="HAArPXwl41sDTfAA3A7RHA">go 函数名(参数);</code> 启动独立线程（值传递、不共享变量），
-        适合可拆分的独立任务；线程间通信走文件 / HTTP / db</li>
-      <li data-page-node-id="zGnFZ6VU3SHebUwQHja5fY"><strong data-page-node-id="hePLvZFouC4JXKzHClPOAO">先用 hone prof 找热点</strong>：剖析模式输出各函数总耗时排名，优先优化耗时最长的；
-        再配合 hone poop 评估嵌套与圈复杂度；优化前先用 hone test 固化行为</li>
-    </ul>
-  </section>
-
-  <section id="pitfalls" data-page-node-id="ZvYJkhD6Nv5qBchKWtovAH">
-    <h2 data-page-node-id="c9noqLTQGzIq6gbLnEIY5q"><span class="hash" data-page-node-id="FGz24fcYRtrzAZfv8QgTab">#</span>20. 已知问题与常见坑</h2>
-    <p data-page-node-id="2T0VMUoAU8yryVTOXNtGHu">以下都是新手最容易踩的坑，提前看完能省不少调试时间。完整版见
-      <a href="faq.html" data-page-node-id="YMTRatVOaIFFJVqrXJuEeA">FAQ</a> 与仓库 <code class="inline" data-page-node-id="KJ0Hy8nT7hxnZZsRxBFhSV">hone.md</code> 的「FAQ 与已知问题」章节。</p>
-    <table data-page-node-id="PVe8kG23f9qfr2f9lKpJky">
-      <tr data-page-node-id="B4ERfJO5CmY4p2jOW2nOZv"><th data-page-node-id="c7x9ulz9qdVckLlv5T8ffi">坑</th><th data-page-node-id="1asnfzPS79B1usLvd17jki">现象</th><th data-page-node-id="gI4zWzwpP79phMj5PZt8cE">解决</th></tr>
-      <tr data-page-node-id="Hr1hEuJfL7jQmpPDEqVFsL"><td data-page-node-id="Pg7q8WGH20FAwaFyhBftEH">try/catch 块内变量块外不可见</td><td data-page-node-id="O5IxCBPcb1hePeH4xb72kT">try 内声明的变量，块外访问报「未定义」</td><td data-page-node-id="jvE8K3OWAgmQFHIXyJt9VI">变量在 try 之前声明，块内只赋值</td></tr>
-      <tr data-page-node-id="U90r8GgNDQsR5CqxpBBiYs"><td data-page-node-id="vedNMdD64NPv4pBGiHGLVd"><code class="inline" data-page-node-id="o43KOGSFmu7ov0rV0ZfQyG">append</code> 返回新列表</td><td data-page-node-id="G4rao2ENFEMiTQrbHo8n5L"><code class="inline" data-page-node-id="hd4BbdLCzN8yLxRxHeaiCz">append(nums, 4)</code> 后 nums 没变</td><td data-page-node-id="T6PGEsP7noZk8RdLYoREl5"><code class="inline" data-page-node-id="zcNa9vmQ6S13TTNF4jYhm1">nums = append(nums, 4);</code></td></tr>
-      <tr data-page-node-id="wV5xIBJL2tUgALmULxVree"><td data-page-node-id="mCPABNDc66JFkiEA77ghO4">类型锁定、无隐式转换</td><td data-page-node-id="sxD4tcOHEtQK59FNYbETox">int 变量赋 str、int 与 float 混算报 <code class="inline" data-page-node-id="BkobG4pKODaAFgsS6YpX5K">error[H001]</code></td><td data-page-node-id="jRS2GGY6RdHTuOWTLUjrDU">显式 <code class="inline" data-page-node-id="HBvAwnNFM6ZN9vYXYE9Qje">to_int / to_float / to_str</code></td></tr>
-      <tr data-page-node-id="OgiUQ7yyH8ftP9XINty9w7"><td data-page-node-id="HfCQQV82UVvlgQom6KlHYP">浮点字面量必须带小数点</td><td data-page-node-id="1QU6Sg5YHQgybHiNcJ0s0r"><code class="inline" data-page-node-id="vgCv5LpbyANCBBeFW8lpli">2</code> 是 int，<code class="inline" data-page-node-id="Ns03xXlj9ES3SCBDNxlqEP">2.0</code> 才是 float；<code class="inline" data-page-node-id="DpGSCNF2cQcv1tD80pqhtR">1 + 2.0</code> 报错</td><td data-page-node-id="KDVguFTXKPF5yFOKx25vjz">写 <code class="inline" data-page-node-id="SzoF6kC9DAIks3x7iKtous">2.0</code>，混算前先统一类型</td></tr>
-      <tr data-page-node-id="0e4hVHF38sRZE7FFLGS3Ao"><td data-page-node-id="antZIQ1cMSndhYnA0Kmj05">if / while 条件必须是 bool</td><td data-page-node-id="GezozNU7xp3qryDHz7y7dp"><code class="inline" data-page-node-id="u2j85o3zj8m7v7lZZQkRyw">if (1)</code> 非法</td><td data-page-node-id="M3mvTui73XOFAHDppzj1T8">用比较表达式，如 <code class="inline" data-page-node-id="3UsCLoK87FP5culkwFDz2R">if (len(s) &gt; 0)</code></td></tr>
-      <tr data-page-node-id="yz6b95pNsviKSHFnZ6AJRy"><td data-page-node-id="MaYpSWUycxYGfY39UHYdJU">函数名全局唯一</td><td data-page-node-id="NZFuEhCsVcnYDRKAOLVPCI">重名报 <code class="inline" data-page-node-id="Wu8pCy5Dr56TrL0SORAE4G">already defined</code></td><td data-page-node-id="icNcG7AMSjtOVjK1X7LFtn">命名加前缀（如 <code class="inline" data-page-node-id="i51Kze27aQUXsiwl3kpXn3">coll_sum</code>）</td></tr>
-      <tr data-page-node-id="phWny9AtbdHaoQR8Iy3V3d"><td data-page-node-id="zOnANERPy6pG57PxuoUxTQ"><code class="inline" data-page-node-id="TuJtQVmP06CIPYfNuTPyLH">len(str)</code> 返回字节数</td><td data-page-node-id="3DOrw8MhanihQR2yxbKPsB"><code class="inline" data-page-node-id="fXJwoZYPFfA00mDkLmccZ1">len("你好")</code> 是 6 不是 2（UTF-8）</td><td data-page-node-id="BDNFkBCyFZtfGsN3jvb3HZ">按字符处理用 <code class="inline" data-page-node-id="aOipxHBCKkgdBhdvuU6b5l">str_contains</code> 等</td></tr>
-      <tr data-page-node-id="gwtkxyljREbup37sv8fDSd"><td data-page-node-id="YllUv6ZPUOFavZXVjauThi">go 线程不共享变量</td><td data-page-node-id="y8EzamFHPh9nJFDZdxnKeo">子线程改变量不影响主线程</td><td data-page-node-id="mwneOWI6l3VPvH1ZL6R1M5">线程间通信走文件 / HTTP / db / server</td></tr>
-      <tr data-page-node-id="ivd7bYiEbGjrXPqiwQg7Ds"><td data-page-node-id="w0V81Ib5huZ9jhrE5Etix9">match 缺 <code class="inline" data-page-node-id="CkxH1wfE7a8ByZj9IJHi29">_</code> 兜底</td><td data-page-node-id="503ArnfHcK7vh4T7K5RvEH">所有分支都不匹配时运行时报错</td><td data-page-node-id="nRqdCyGlpzAaABtwrC632V">补 <code class="inline" data-page-node-id="oxpHERPJdQDomJ2Q9Tzd22">_ =&gt; 默认值</code></td></tr>
-    </table>
-  </section>
 </main>
-
 <script>
-// 手册即时搜索：按关键词过滤章节（匹配标题/正文/代码）
+// 参考手册即时搜索：按关键词过滤章节（匹配标题/正文/代码）
 function searchDocs(q) {
   q = (q || "").trim().toLowerCase();
   var secs = document.querySelectorAll("section");
@@ -1156,24 +668,23 @@ function searchDocs(q) {
     q === "" ? "" : "匹配 " + count + " / " + secs.length + " 章";
 }
 </script>
-
-<footer data-page-node-id="dlObfo5kZr2OMsfOfb2V7z">
-  <div class="links" data-page-node-id="KFaBfgADFJoE4lprNyvO4Z">
-    <a href="index.html" data-page-node-id="LpjEJKzDaot8AcAr4VDxJ4">首页</a>
-    <a href="docs.html" data-page-node-id="3LI3B7rcMAEZVMpODUGLQh">文档</a>
+<footer>
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
     <a href="language.html">语言</a>
-    <a href="tutorial.html" data-page-node-id="rTMouYA17Q7nbGsRf7OSji">教程</a>
-    <a href="examples.html" data-page-node-id="ntaHujfCjvcYKRG7pFnQpl">示例</a>
-    <a href="stdlib.html" data-page-node-id="g6BMkoSGiWQ56HR20eGJoG">标准库</a>
-    <a href="install.html" data-page-node-id="MCNJZBVvYcoQMPH3e9RKwj">安装</a>
-    <a href="download.html" data-page-node-id="wgHXESzIR1vb9O3LMmqihC">下载</a>
-    <a href="perf.html" data-page-node-id="Ub9H1P3ekjUwrrqxNBBFkA">性能</a>
-    <a href="changelog.html" data-page-node-id="UkQyOIl7o94yd8c0yFIh2u">更新日志</a>
-    <a href="faq.html" data-page-node-id="qRpeAJ75FCR07OqirfDqzz">FAQ</a>
-    <a href="about.html" data-page-node-id="DZks4utrJ7R5paFwyLMBsl">关于</a>
-    <a href="https://github.com/shichencike/Hone" data-page-node-id="DKBUbtIVawNedexzEnAMMI">GitHub</a>
+    <a href="tutorial.html">教程</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
   </div>
-  Hone v0.7.11 · MIT License · <span class="sword" data-page-node-id="tlhooQSwTkXRMwulKGQPFb">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.7.11 · MIT License · 🗡️ Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

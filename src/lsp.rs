@@ -147,7 +147,7 @@ fn initialize_result() -> Value {
                 "full": true
             }
         },
-        "serverInfo": { "name": "hone-lsp", "version": "0.7.0" }
+        "serverInfo": { "name": "hone-lsp", "version": env!("CARGO_PKG_VERSION") }
     })
 }
 

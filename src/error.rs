@@ -134,6 +134,9 @@ pub mod codes {
     pub const UNTERMINATED_STRING: &str = "H102"; // 字符串未闭合
     pub const UNTERMINATED_COMMENT: &str = "H103"; // 注释未闭合
     pub const MISSING_SEMI: &str = "H104"; // 语句缺少分号
+    // --- H105/H106：控制流标签与宏 ---
+    pub const LABEL: &str = "H105"; // 标签/跳转错误（未定义标签、重复标签、跨函数跳转、跳过声明）
+    pub const MACRO: &str = "H106"; // 宏定义/展开错误
     // --- H200 区段：网络细分 ---
     pub const NET_TIMEOUT: &str = "H201"; // 连接/请求超时
     pub const NET_CONN_REFUSED: &str = "H202"; // 连接被拒绝
@@ -174,6 +177,8 @@ pub fn explain(code: &str) -> Option<&'static str> {
         "H102" => "字符串未闭合：双引号字符串缺少结束引号。\n  修复：在字符串末尾补上 `\"`。",
         "H103" => "注释未闭合：`/*` 多行注释缺少 `*/`。\n  修复：在注释末尾补上 `*/`。",
         "H104" => "语句缺少分号：Hone 要求每条语句以 `;` 结束。\n  修复：在语句末尾补上 `;`。",
+        "H105" => "标签或跳转错误：`goto` 目标标签不存在、标签重复定义、跨函数跳转，或向前跳过了变量声明。\n  修复：确认标签拼写与其所在函数（`goto` 只能跳到同一函数内、且能向外层语句块看到的标签）；同一函数内标签名需唯一；不要让 `goto` 向前跳过 `x = ...` / `int x = ...` 这类声明语句（否则跳转后变量未初始化）。",
+        "H106" => "宏定义或展开错误：宏必须在顶层定义且先定义后使用、名字不能与函数/宏重名、调用实参个数须与形参一致。\n  修复：把 `macro` 移到文件顶层；检查宏名与实参个数；语句宏只能作为独立语句调用，表达式宏只能用于表达式位置；宏体内不可使用 `return`/`break`/`continue`/`goto`/`label`。",
         "H200" => "网络请求失败（通用）：http_get / http_post / http.request / smtp.send / ws.request 未能完成请求。\n  修复：检查网络连通性、URL 与代理设置；可使用 try-catch 做重试或降级。",
         "H201" => "网络连接/请求超时：在规定时间内未收到响应（http.request 的 timeout 选项、ws.request 超时）。\n  修复：检查远端服务状态、增大超时，或稍后重试。",
         "H202" => "连接被拒绝：目标端口无服务监听或防火墙拦截。\n  修复：确认服务已启动、端口与地址正确。",

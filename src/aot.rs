@@ -11,6 +11,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
+use crate::cgen_util::c_str_lit;
 use crate::error::codes;
 use crate::error::ZError;
 use crate::lexer::Span;
@@ -1658,7 +1659,26 @@ impl AotGen {
     /// 生成一个语句
     fn gen_stmt(&mut self, s: &Stmt, out: &mut String) -> Result<(), ZError> {
         match s {
-            Stmt::Assign { name, value, span } => {
+            // 标签：无运行期动作。`goto` 在 AOT 原生构建中暂不支持（解释器与 VM 均支持）。
+            Stmt::Label { .. } => Ok(()),
+            Stmt::Goto { span, .. } => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                "`goto` is not supported in AOT native builds".to_string(),
+                *span,
+                Some("用 `hone run`（解释器）或 `hone run --vm`（字节码 VM）运行含 goto 的程序"),
+            )),
+            // 宏已在解析后的预处理阶段完全展开并从 AST 移除
+            Stmt::MacroDef { span, .. } => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                "`macro` should have been expanded before AOT codegen".to_string(),
+                *span,
+                Some("内部错误：宏应在 preproc 阶段展开，请提交 issue"),
+            )),
+            Stmt::Assign { name, value, span: _ } => {
                 let e = self.gen_expr(value)?;
                 out.push_str(&self.assign_var(name, &e));
                 Ok(())
@@ -1714,11 +1734,11 @@ impl AotGen {
                 ));
                 Ok(())
             }
-            Stmt::IndexAssign { target, value, span } => {
+            Stmt::IndexAssign { target, value, span: _ } => {
                 // 索引赋值：克隆容器链并写回基变量（保持拷贝语义）
                 self.gen_index_assign(target, value, out)
             }
-            Stmt::DestructAssign { targets, value, span } => {
+            Stmt::DestructAssign { targets, value, span: _ } => {
                 let e = self.gen_expr(value)?;
                 let t = self.temp();
                 out.push_str(&format!("    HnValue _t{} = {};\n", t, e));
@@ -1732,7 +1752,7 @@ impl AotGen {
                 out.push_str(&format!("    hn_free_value(_t{});\n", t));
                 Ok(())
             }
-            Stmt::Block { stmts, span } => {
+            Stmt::Block { stmts, span: _ } => {
                 out.push_str("    {\n");
                 self.scopes.push(HashMap::new());
                 self.gen_stmts(stmts, out)?;
@@ -1740,7 +1760,7 @@ impl AotGen {
                 out.push_str("    }\n");
                 Ok(())
             }
-            Stmt::If { cond, then_branch, else_branch, span } => {
+            Stmt::If { cond, then_branch, else_branch, span: _ } => {
                 let c = self.gen_expr(cond)?;
                 out.push_str(&format!("    if (hn_truthy({})) {{\n", c));
                 self.scopes.push(HashMap::new());
@@ -1755,7 +1775,7 @@ impl AotGen {
                 out.push_str("    }\n");
                 Ok(())
             }
-            Stmt::While { cond, body, span } => {
+            Stmt::While { cond, body, span: _ } => {
                 let c = self.gen_expr(cond)?;
                 let ls = format!("_ls{}", self.temp());
                 out.push_str(&format!("    jmp_buf* {} = hn_jmp_top;\n", ls));
@@ -1770,7 +1790,7 @@ impl AotGen {
                 out.push_str("    }\n");
                 Ok(())
             }
-            Stmt::DoWhile { body, cond, span } => {
+            Stmt::DoWhile { body, cond, span: _ } => {
                 let ls = format!("_ls{}", self.temp());
                 out.push_str(&format!("    jmp_buf* {} = hn_jmp_top;\n", ls));
                 out.push_str("    do {\n");
@@ -1785,7 +1805,7 @@ impl AotGen {
                 out.push_str(&format!("    }} while (hn_truthy({}));\n", c));
                 Ok(())
             }
-            Stmt::ForC { init, cond, step, body, span } => {
+            Stmt::ForC { init, cond, step, body, span: _ } => {
                 // init 在循环外执行一次；continue 需跳到 step 前（用 goto 标签）
                 let ls = format!("_ls{}", self.temp());
                 let cont_label = format!("hn_cont{}", self.temp());
@@ -1812,7 +1832,7 @@ impl AotGen {
                 out.push_str("    }\n");
                 Ok(())
             }
-            Stmt::ForIn { var, var2, iter, body, span } => {
+            Stmt::ForIn { var, var2, iter, body, span: _ } => {
                 let it = self.gen_expr(iter)?;
                 let itn = self.temp();
                 out.push_str(&format!("    HnValue _it{} = {};\n", itn, it));
@@ -1873,7 +1893,7 @@ impl AotGen {
                 out.push_str(&format!("    hn_free_value(_it{});\n", itn));
                 Ok(())
             }
-            Stmt::Return { values, span } => {
+            Stmt::Return { values, span: _ } => {
                 // 先恢复 hn_jmp_top（若在 try 内，避免 jmp_buf 悬挂）
                 if !self.try_saves.is_empty() {
                     let top = self.try_saves.last().expect("try");
@@ -1896,7 +1916,7 @@ impl AotGen {
                 }
                 Ok(())
             }
-            Stmt::Break { span } => {
+            Stmt::Break { span: _ } => {
                 // 跳出循环：若 try 在循环内，恢复循环入口的 hn_jmp_top
                 if let Some(ls) = self.loop_saves.last() {
                     out.push_str(&format!("    hn_jmp_top = {};\n", ls));
@@ -1904,7 +1924,7 @@ impl AotGen {
                 out.push_str("    break;\n");
                 Ok(())
             }
-            Stmt::Continue { span } => {
+            Stmt::Continue { span: _ } => {
                 if let Some(ls) = self.loop_saves.last() {
                     out.push_str(&format!("    hn_jmp_top = {};\n", ls));
                 }
@@ -1916,12 +1936,12 @@ impl AotGen {
                 }
                 Ok(())
             }
-            Stmt::DebugPrint { expr, span } => {
+            Stmt::DebugPrint { expr, span: _ } => {
                 let e = self.gen_expr(expr)?;
                 out.push_str(&format!("    hn_free_value({});\n", e));
                 Ok(())
             }
-            Stmt::ExprStmt { expr, span } => {
+            Stmt::ExprStmt { expr, span: _ } => {
                 let e = self.gen_expr(expr)?;
                 out.push_str(&format!("    hn_free_value({});\n", e));
                 Ok(())
@@ -1934,7 +1954,7 @@ impl AotGen {
             Stmt::ClassDef { .. } => Ok(()),            // 已收集
             Stmt::Use { .. } => Ok(()),                 // 命名空间声明，无运行语义
             Stmt::Alias { .. } => Ok(()),               // 已收集（调用时解析）
-            Stmt::Import { name, url, span, .. } => Err(zerr(
+            Stmt::Import { name, url: _, span, .. } => Err(zerr(
                 &self.file,
                 &self.src,
                 codes::NOT_IMPLEMENTED,
@@ -1966,7 +1986,7 @@ impl AotGen {
                 *span,
                 Some("AOT 模式为单线程；async/await 请用解释器运行"),
             )),
-            Stmt::Try { body, catch_var, handler, span } => {
+            Stmt::Try { body, catch_var, handler, span: _ } => {
                 let saved = format!("_sv{}", self.temp());
                 out.push_str("    {\n");
                 out.push_str("        jmp_buf _jb;\n");
@@ -1996,7 +2016,7 @@ impl AotGen {
                 out.push_str("    }\n");
                 Ok(())
             }
-            Stmt::Throw { value, span } => {
+            Stmt::Throw { value, span: _ } => {
                 let e = self.gen_expr(value)?;
                 out.push_str(&format!("    hn_throw_expr({});\n", e));
                 Ok(())
@@ -2026,7 +2046,9 @@ impl AotGen {
         // 收集索引链：从基变量向外 [i0, i1, ...]，基变量为链底 Ident
         let mut indices: Vec<&Expr> = Vec::new(); // 从外到内
         let mut cur = target;
-        let mut base_name: Option<String> = None;
+        // 基变量名在循环内必然被赋值一次（否则走 `_` 分支报错返回），
+        // 故无需初始值；此处用 Option 承接并延后到循环外消费。
+        let base_name: Option<String>;
         loop {
             match cur {
                 Expr::Index { obj, index, .. } => {
@@ -2107,26 +2129,6 @@ impl AotGen {
         }
         Ok(())
     }
-}
-
-/// C 字符串字面量转义（用于生成 hn_str("...")）；控制字符用三位八进制（避免 \x 吞掉后续十六进制位）
-fn c_str_lit(s: &str) -> String {
-    let mut out = String::from("\"");
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => {
-                out.push_str(&format!("\\{:03o}", c as u32));
-            }
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 /// AOT 支持的核心内置函数集合（与 RUNTIME_C 的 hn_call_builtin 分发一致）
@@ -2284,7 +2286,7 @@ impl AotGen {
                 let o = self.gen_expr(obj)?;
                 Ok(format!("hn_field_v({}, {})", o, c_str_lit(field)))
             }
-            Expr::OptionalField { obj, field, span } => {
+            Expr::OptionalField { obj, field, span: _ } => {
                 let o = self.gen_expr(obj)?;
                 Ok(format!(
                     "({{ HnValue _o = {}; HnValue _r; if (_o.type == HN_NULL) {{ _r = hn_null(); hn_free_value(_o); }} else {{ _r = hn_field_v(_o, {}); }} _r; }})",
@@ -2292,12 +2294,12 @@ impl AotGen {
                     c_str_lit(field)
                 ))
             }
-            Expr::Index { obj, index, span } => {
+            Expr::Index { obj, index, span: _ } => {
                 let o = self.gen_expr(obj)?;
                 let i = self.gen_expr(index)?;
                 Ok(format!("hn_index_v({}, {})", o, i))
             }
-            Expr::Unary { op, expr, span } => {
+            Expr::Unary { op, expr, span: _ } => {
                 let x = self.gen_expr(expr)?;
                 // 运算符重载：存在 __neg / __not 时生成「内建 → 内建运算，否则 → __op 调用」分派链
                 let (ov, native, builtin) = match op {
@@ -2319,7 +2321,7 @@ impl AotGen {
                     UnOp::Not => format!("hn_not_v({})", x),
                 })
             }
-            Expr::Binary { op, lhs, rhs, span } => {
+            Expr::Binary { op, lhs, rhs, span: _ } => {
                 let l = self.gen_expr(lhs)?;
                 let r = self.gen_expr(rhs)?;
                 // 运算符重载：存在 __op 顶层函数时，生成「内建组合 → 内建运算，否则 → __op 调用」分派链
@@ -2364,15 +2366,16 @@ impl AotGen {
                 })
             }
             Expr::Call { callee, args, span } => self.gen_call(callee, args, *span),
-            Expr::Match { value, arms, span } => {
+            Expr::Match { value, arms, span: _ } => {
                 let v = self.gen_expr(value)?;
                 let mut s = String::from("({ HnValue _m = ");
                 s.push_str(&v);
                 s.push_str("; HnValue _r;\n");
                 // 模式比较链：模式 → 分支体（Wildcard 作默认）
                 let mut done = false;
-                let mut indent = String::from("  ");
+                let indent = String::from("  ");
                 for (pat, body) in arms {
+                    let _ = body;
                     match pat {
                         Pattern::Lit(p) => {
                             let pe = self.gen_expr(p)?;
@@ -2494,7 +2497,7 @@ impl AotGen {
                     ))
                 }
             }
-            Expr::Ternary { cond, then_expr, else_expr, span } => {
+            Expr::Ternary { cond, then_expr, else_expr, span: _ } => {
                 let c = self.gen_expr(cond)?;
                 let t = self.gen_expr(then_expr)?;
                 let e2 = self.gen_expr(else_expr)?;
@@ -2504,7 +2507,7 @@ impl AotGen {
                 ))
             }
             Expr::Lambda { params, body, span } => self.gen_lambda(params, body, *span),
-            Expr::Await { expr, span } => Err(zerr(
+            Expr::Await { expr: _, span } => Err(zerr(
                 &self.file,
                 &self.src,
                 codes::NOT_IMPLEMENTED,
@@ -2526,7 +2529,7 @@ impl AotGen {
         iter: &Expr,
         cond: &Option<Box<Expr>>,
         is_list: bool,
-        span: Span,
+        _span: Span,
     ) -> Result<String, ZError> {
         let it = self.gen_expr(iter)?;
         // 循环变量名（每次迭代重新赋值；continue 无泄漏）
@@ -2731,7 +2734,7 @@ impl AotGen {
     }
 
     /// lambda 生成：创建闭包值（捕获当前可见变量），并生成 hn_lm<k> 函数
-    fn gen_lambda(&mut self, params: &[Param], body: &[Stmt], span: Span) -> Result<String, ZError> {
+    fn gen_lambda(&mut self, params: &[Param], body: &[Stmt], _span: Span) -> Result<String, ZError> {
         let k = self.lambda_counter;
         self.lambda_counter += 1;
         // 捕获列表：当前作用域栈全部可见变量（外→内，内层覆盖外层，去重）

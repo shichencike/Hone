@@ -6,6 +6,7 @@ mod archmod;
 mod aot;
 mod builtins;
 mod bundle;
+mod cgen_util;
 mod checker;
 mod codegen;
 mod datamod;
@@ -14,6 +15,9 @@ mod fmt;
 mod guimod;
 #[cfg(not(windows))]
 mod guimod_gtk;
+// X11 自绘后端仅在 Linux/BSD 上参与编译；Windows/macOS 上引用处均不可达，
+// 无条件声明会让整模块变成 dead_code（约 190 条警告）并拖慢构建。
+#[cfg(all(unix, not(target_os = "macos")))]
 mod guimod_x11;
 mod header;
 mod interp;
@@ -23,8 +27,10 @@ mod netmod;
 mod parser;
 mod pluginmod;
 mod plotmod;
+mod preproc;
 mod ptrmod;
 mod repl;
+mod vm;
 mod srvmod;
 mod sqlitemod;
 mod statmod;
@@ -94,6 +100,25 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
         print_help();
         return Ok(());
     }
+    // 剥离全局开关 --vm / --disasm：可出现在脚本名前或后（两种形式都支持）。
+    // 剥离后剩余参数交给各子命令处理，开关状态由 flag_vm / flag_disasm 携带。
+    let mut flag_vm = false;
+    let mut flag_disasm = false;
+    let args: Vec<String> = args
+        .iter()
+        .filter(|a| {
+            if *a == "--vm" {
+                flag_vm = true;
+                false
+            } else if *a == "--disasm" {
+                flag_disasm = true;
+                false
+            } else {
+                true
+            }
+        })
+        .cloned()
+        .collect();
     match args[0].as_str() {
         "--help" | "-h" | "help" => {
             print_help();
@@ -117,11 +142,45 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
             if opts.resume {
                 load_resume_state(path)?;
             }
-            builtins::init_args(&rest[1..]);
-            match opts.restart {
-                Some(p) => run_with_restart(path, &p),
-                None => run_file_or_pkg(path, false),
+            // --disasm：仅编译为字节码文本 IR 并打印，不执行（对接调试/对照解释器）
+            if opts.disasm || flag_disasm {
+                let src = std::fs::read_to_string(path).map_err(|e| {
+                    ZError::plain(
+                        codes::FILE_NOT_FOUND,
+                        format!("cannot read `{}`: {}", path, e),
+                        Some("check the path"),
+                    )
+                })?;
+                let program = parser::Parser::parse(path, &src)?;
+                let text = vm::disassemble_program(&program, path, &src)?;
+                println!("{}", text);
+                return Ok(());
             }
+            builtins::init_args(&rest[1..]);
+            let use_vm = opts.use_vm || flag_vm;
+            match opts.restart {
+                Some(p) => run_with_restart(path, &p, use_vm),
+                None => run_file_or_pkg(path, false, use_vm),
+            }
+        }
+        "runir" => {
+            // 直接执行文本 IR（`hone run --disasm` 的产物）：反向装配后运行，跳过解析/检查/编译。
+            let path = args.get(1).ok_or_else(|| {
+                ZError::plain(
+                    codes::SYNTAX,
+                    "missing IR path: `hone runir <program.ir>`",
+                    Some("生成方式：`hone run --disasm <script.hn> > program.ir`"),
+                )
+            })?;
+            let text = std::fs::read_to_string(path).map_err(|e| {
+                ZError::plain(
+                    codes::FILE_NOT_FOUND,
+                    format!("cannot read `{}`: {}", path, e),
+                    Some("check the path"),
+                )
+            })?;
+            builtins::init_args(&args[2..]);
+            vm::run_ir(&text, path, false)
         }
         "debug" => {
             let path = args
@@ -134,7 +193,7 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
                     )
                 })?;
             builtins::init_args(&args[2..]);
-            run_file(path, true)
+            run_file(path, true, false)
         }
         "fmt" => cmd_fmt(&args[1..]),
         "doc" => cmd_doc(&args[1..]),
@@ -172,8 +231,24 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
             }
         }
         other if other.ends_with(".hn") || other.ends_with(".hzp") => {
-            builtins::init_args(&args[1..]);
-            run_file_or_pkg(other, false)
+            // 直接执行脚本。--vm / --disasm 已由 run_cli 顶部剥离并存入 flag_vm / flag_disasm。
+            // --disasm 时仅反汇编字节码文本 IR 后退出（不执行）。
+            if flag_disasm {
+                let src = std::fs::read_to_string(other).map_err(|e| {
+                    ZError::plain(
+                        codes::FILE_NOT_FOUND,
+                        format!("cannot read `{}`: {}", other, e),
+                        Some("check the path"),
+                    )
+                })?;
+                let program = parser::Parser::parse(other, &src)?;
+                let text = vm::disassemble_program(&program, other, &src)?;
+                println!("{}", text);
+                Ok(())
+            } else {
+                builtins::init_args(&args[1..]);
+                run_file_or_pkg(other, false, flag_vm)
+            }
         }
         other => Err(ZError::plain(
             codes::SYNTAX,
@@ -183,8 +258,8 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
     }
 }
 
-/// 执行一个 .hn 脚本：读取 → 解析 → 类型检查 → 解释执行。
-fn run_file(path: &str, debug: bool) -> Result<(), ZError> {
+/// 执行一个 .hn 脚本：读取 → 解析 → 类型检查 → 解释/VM 执行。
+fn run_file(path: &str, debug: bool, use_vm: bool) -> Result<(), ZError> {
     let src = std::fs::read_to_string(path).map_err(|e| {
         ZError::plain(
             codes::FILE_NOT_FOUND,
@@ -192,11 +267,11 @@ fn run_file(path: &str, debug: bool) -> Result<(), ZError> {
             Some("check the path"),
         )
     })?;
-    run_script(path, &src, debug)
+    run_script(path, &src, debug, use_vm)
 }
 
 /// 执行脚本或仅脚本包（.hzp）：先尝试解包，不是包则按普通 .hn 执行。
-fn run_file_or_pkg(path: &str, debug: bool) -> Result<(), ZError> {
+fn run_file_or_pkg(path: &str, debug: bool, use_vm: bool) -> Result<(), ZError> {
     let data = std::fs::read(path).map_err(|e| {
         ZError::plain(
             codes::FILE_NOT_FOUND,
@@ -206,18 +281,23 @@ fn run_file_or_pkg(path: &str, debug: bool) -> Result<(), ZError> {
     })?;
     if let Some((name, script)) = bundle::parse_script_pkg(&data) {
         // 包内脚本名作为展示名；load/import 相对路径仍以包文件所在目录为基准
-        run_script(&name, &script, debug)
+        run_script(&name, &script, debug, use_vm)
     } else {
         let src = String::from_utf8_lossy(&data).into_owned();
-        run_script(path, &src, debug)
+        run_script(path, &src, debug, use_vm)
     }
 }
 
-/// 对已读取的源码执行完整流程：解析 → 类型检查 → 解释执行。
-fn run_script(path: &str, src: &str, debug: bool) -> Result<(), ZError> {
+/// 对已读取的源码执行完整流程：解析 → 类型检查 → 执行。
+/// `use_vm` 为真时走寄存器式字节码 VM（vm::run），否则走 AST 树遍历解释器（interp::run，默认）。
+fn run_script(path: &str, src: &str, debug: bool, use_vm: bool) -> Result<(), ZError> {
     let program = parser::Parser::parse(path, src)?;
     checker::Checker::check(&program, path, src)?;
-    interp::run(&program, path, src, debug)?;
+    if use_vm {
+        vm::run(&program, path, src, debug)?;
+    } else {
+        interp::run(&program, path, src, debug)?;
+    }
     Ok(())
 }
 
@@ -228,10 +308,12 @@ struct RestartPolicy {
     codes: Vec<String>,
 }
 
-/// `hone run` 的运行选项：重启策略（可选）与是否恢复检查点。
+/// `hone run` 的运行选项：重启策略（可选）、是否恢复检查点、是否走字节码 VM、是否仅反汇编。
 struct RunOptions {
     restart: Option<RestartPolicy>,
     resume: bool,
+    use_vm: bool,
+    disasm: bool,
 }
 
 /// 从 `hone run` 的参数中提取运行选项。
@@ -244,6 +326,8 @@ fn parse_run_args(args: &[String]) -> (RunOptions, Vec<String>) {
     let mut codes: Vec<String> = Vec::new();
     let mut has_restart = false;
     let mut resume = false;
+    let mut use_vm = false;
+    let mut disasm = false;
     let mut rest = Vec::new();
     let mut parsing_opts = true;
 
@@ -252,6 +336,14 @@ fn parse_run_args(args: &[String]) -> (RunOptions, Vec<String>) {
             match a.as_str() {
                 "--restart" => {
                     has_restart = true;
+                    continue;
+                }
+                "--vm" => {
+                    use_vm = true;
+                    continue;
+                }
+                "--disasm" => {
+                    disasm = true;
                     continue;
                 }
                 "--resume" => {
@@ -293,15 +385,15 @@ fn parse_run_args(args: &[String]) -> (RunOptions, Vec<String>) {
     } else {
         None
     };
-    (RunOptions { restart, resume }, rest)
+    (RunOptions { restart, resume, use_vm, disasm }, rest)
 }
 
 /// 按策略循环运行脚本：正常结束（Ok）立即返回；错误按白名单与次数上限重试，
 /// 等待间隔取 backoff 序列（第 n 次失败后等待 backoff[n]，超出取最后一项）。
-fn run_with_restart(path: &str, policy: &RestartPolicy) -> Result<(), ZError> {
+fn run_with_restart(path: &str, policy: &RestartPolicy, use_vm: bool) -> Result<(), ZError> {
     let mut count = 0usize;
     loop {
-        match run_file(path, false) {
+        match run_file(path, false, use_vm) {
             Ok(()) => return Ok(()),
             Err(e) => {
                 let retryable = policy.codes.is_empty() || policy.codes.iter().any(|c| c == e.code);
@@ -376,6 +468,8 @@ fn print_help() {
     println!("用法:");
     println!("  hone <script.hn>         执行 Hone 脚本（默认命令）");
     println!("  hone run <script.hn>     执行 Hone 脚本");
+    println!("       --vm                使用寄存器式字节码虚拟机执行（默认走 AST 解释器）");
+    println!("       --disasm            仅编译为字节码文本 IR 并打印（不执行）");
     println!("       --restart[=N]       失败自动重启（N 为最大次数，默认 3；仅对可恢复错误）");
     println!("       --backoff=a,b,c     重启间隔递增序列（秒，默认 1,3,10）");
     println!("       --restart-on=Hxxx   只对指定错误码重启（逗号分隔；省略则全部可重启）");
@@ -394,6 +488,8 @@ fn print_help() {
     println!("  hone get <script.hn>     预下载脚本中所有 import 声明的模块");
     println!("  hone watch <script.hn>   监控脚本文件变更自动重跑（[--interval=N] 毫秒，默认 500，Ctrl+C 退出）");
     println!("  hone prof <script.hn>    以剖析模式运行脚本，输出函数级热点报告（总耗时/调用次数/平均耗时）");
+    println!("  hone test [script.hn]    运行 `*.test.hn` 测试文件与 assert 断言");
+    println!("  hone poop <file.hn>      屎山检测：扫描代码异味与可疑写法");
     println!("  hone self-update [url]   从 URL 下载最新 hone 二进制并替换当前程序（需管理员/写权限）");
     println!("  hone lsp                 启动语言服务器（补全/诊断，LSP over stdio）");
     println!("  hone repl                交互式解释器（Python 式：表达式回显/多行输入/.vars）");
@@ -1441,7 +1537,7 @@ fn cmd_test(args: &[String]) -> Result<(), ZError> {
     let mut total_asserts = 0usize;
     for f in &files {
         let (ok0, fail0) = builtins::assertion_stats();
-        match run_file(f, false) {
+        match run_file(f, false, false) {
             Ok(()) => {
                 let (ok, fail) = builtins::assertion_stats();
                 println!("PASS  {} (断言 {}/{})", f, ok - ok0, ok - ok0 + fail - fail0);
@@ -1494,7 +1590,7 @@ fn cmd_watch(args: &[String]) -> Result<(), ZError> {
     };
     let run_once = |path: &str| {
         println!("[{}] 运行 {}", now_str(), path);
-        match run_file_or_pkg(path, false) {
+        match run_file_or_pkg(path, false, false) {
             Ok(()) => println!("[{}] 运行成功", now_str()),
             Err(e) => println!("[{}] {}", now_str(), e),
         }

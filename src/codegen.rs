@@ -9,6 +9,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
+use crate::cgen_util::c_str_lit;
 use crate::error::codes;
 use crate::error::ZError;
 use crate::lexer::Span;
@@ -1262,24 +1263,6 @@ impl Codegen {
     }
 }
 
-/// Hone 字符串 → C 字符串字面量（转义）。
-fn c_str_lit(s: &str) -> String {
-    let mut o = String::from("\"");
-    for c in s.chars() {
-        match c {
-            '"' => o.push_str("\\\""),
-            '\\' => o.push_str("\\\\"),
-            '\n' => o.push_str("\\n"),
-            '\t' => o.push_str("\\t"),
-            '\r' => o.push_str("\\r"),
-            c if (c as u32) < 0x20 => o.push_str(&format!("\\x{:02x}", c as u32)),
-            c => o.push(c),
-        }
-    }
-    o.push('"');
-    o
-}
-
 /// 判断语句序列中是否存在 return 语句（递归扫描分支与嵌套块）。
 fn has_return(stmts: &[Stmt]) -> bool {
     for s in stmts {
@@ -1348,8 +1331,8 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Go { span, .. }
         | Stmt::Try { span, .. }
         | Stmt::Throw { span, .. }
-        | Stmt::StructDef { span, .. }
-        | Stmt::ClassDef { span, .. }
-        | Stmt::DebugPrint { span, .. } => *span,
+        | Stmt::Label { span, .. }
+        | Stmt::Goto { span, .. }
+        | Stmt::MacroDef { span, .. } => *span,
     }
 }

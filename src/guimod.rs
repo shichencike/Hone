@@ -1617,7 +1617,7 @@ mod platform {
             let text = pet.text.as_str();
             if !text.is_empty() {
                 let brush = CreateSolidBrush(0x00FFFFFF);
-                let mut br: RECT = RECT { left: 2, top: 2, right: cw - 2, bottom: bubble_h - 2 };
+                let br: RECT = RECT { left: 2, top: 2, right: cw - 2, bottom: bubble_h - 2 };
                 if br.right > br.left && br.bottom > br.top {
                     FillRect(hdc, &br, brush);
                 }

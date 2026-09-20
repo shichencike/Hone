@@ -51,6 +51,10 @@ pub enum Tok {
     // 异步：async fn（后台线程执行，返回 future）与 await（等待 future 结果）
     Async,
     Await,
+    // 标签与跳转：`label NAME;` / `NAME:` 定义标签，`goto NAME;` 跳转
+    Goto,
+    // 宏定义：`macro NAME(参数) => 表达式;` / `macro NAME(参数) { 语句 }`
+    Macro,
     // 类型关键字
     TInt,
     TFloat,
@@ -147,6 +151,8 @@ impl Tok {
             Tok::Enum => "`enum`".into(),
             Tok::Async => "`async`".into(),
             Tok::Await => "`await`".into(),
+            Tok::Goto => "`goto`".into(),
+            Tok::Macro => "`macro`".into(),
             Tok::TInt => "type `int`".into(),
             Tok::TFloat => "type `float`".into(),
             Tok::TBool => "type `bool`".into(),
@@ -387,6 +393,8 @@ impl Lexer {
                 "enum" => Tok::Enum,
                 "async" => Tok::Async,
                 "await" => Tok::Await,
+                "goto" => Tok::Goto,
+                "macro" => Tok::Macro,
                 "int" => Tok::TInt,
                 "float" => Tok::TFloat,
                 "bool" => Tok::TBool,

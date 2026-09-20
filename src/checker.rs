@@ -1002,6 +1002,10 @@ impl Checker {
                 }
                 Ok(())
             }
+            // 标签与跳转：唯一性、可见性、是否跳过声明已由预处理阶段统一校验（preproc）
+            Stmt::Label { .. } | Stmt::Goto { .. } => Ok(()),
+            // 宏定义：已由预处理阶段展开并从 AST 移除（此处不可达，仅为穷尽匹配）
+            Stmt::MacroDef { .. } => Ok(()),
             Stmt::Breakpoint { cond, span } => {
                 if let Some(c) = cond {
                     let t = self.check_expr(c)?;
@@ -1328,6 +1332,10 @@ impl Checker {
                 }
                 Ok(())
             }
+            // 标签与跳转：唯一性、可见性、是否跳过声明已由预处理阶段统一校验（preproc）
+            Stmt::Label { .. } | Stmt::Goto { .. } => Ok(()),
+            // 宏定义：已由预处理阶段展开并从 AST 移除（此处不可达，仅为穷尽匹配）
+            Stmt::MacroDef { .. } => Ok(()),
             Stmt::Breakpoint { cond, span } => {
                 if let Some(c) = cond {
                     let t = self.check_expr(c)?;
@@ -3886,9 +3894,9 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Go { span, .. }
         | Stmt::Try { span, .. }
         | Stmt::Throw { span, .. }
-        | Stmt::StructDef { span, .. }
-        | Stmt::ClassDef { span, .. }
-        | Stmt::DebugPrint { span, .. } => *span,
+        | Stmt::Label { span, .. }
+        | Stmt::Goto { span, .. }
+        | Stmt::MacroDef { span, .. } => *span,
     }
 }
 

@@ -1,13 +1,13 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<html lang="zh-CN" data-page-node-id="0ahXpZHib1aEJTwhqO57KW">
+<head data-page-node-id="wyHW16aSSlOYIR1U8faz5D">
+<meta charset="UTF-8" data-page-node-id="QOOBUMAxKWQfmxtMl5HHSg">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="X3MIse4pqhoOpCwgulUAWX">
 <title>Hone 更新日志</title>
-<meta name="description" content="Hone 编程语言更新日志：v0.6.4 标准输入函数（input/read_int/read_float）、v0.6.3 新语法（continue/C 风格 for/do-while/复合赋值/lambda/默认参数/原始字符串）、v0.6.2 process 进程检测与 sched 定时任务标准库、v0.6.1 解释器深度优化与 alias 别名增强、v0.6.0 class 类与泛型、标准库大规模扩展（csv/yaml/sqlite/smtp/ws 等）、v0.4.0 typed FFI 与头文件绑定等版本记录。">
-<meta name="theme-color" content="#0d1117">
-<link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css">
+<meta name="description" content="Hone 编程语言更新日志：v0.6.4 标准输入函数（input/read_int/read_float）、v0.6.3 新语法（continue/C 风格 for/do-while/复合赋值/lambda/默认参数/原始字符串）、v0.6.2 process 进程检测与 sched 定时任务标准库、v0.6.1 解释器深度优化与 alias 别名增强、v0.6.0 class 类与泛型、标准库大规模扩展（csv/yaml/sqlite/smtp/ws 等）、v0.4.0 typed FFI 与头文件绑定等版本记录。" data-page-node-id="oBSRQjlgCgBm8HtxTCQzFi">
+<meta name="theme-color" content="#0d1117" data-page-node-id="u4hW8BE1U8CxqOB3zgSZJa">
+<link rel="icon" href="favicon.png" type="image/png" data-page-node-id="wXji0dPnGYF6FZ7RRTDj5K">
+<link rel="stylesheet" href="style.css" data-page-node-id="gAKJa9H88tKG0LzSiKQ659">
 <script>
 /* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
 function toggleTheme(){
@@ -23,533 +23,570 @@ function toggleTheme(){
 })();
 </script>
 </head>
-<body>
-<header>
-  <span class="logo"><span class="mark">⚡</span> Hone</span>
-  <nav>
-    <a href="index.html">首页</a>
-    <a href="docs.html">文档</a>
-    <a href="tutorial.html">教程</a>
-    <a href="examples.html">示例</a>
-    <a href="stdlib.html">标准库</a>
-    <a href="install.html">安装</a>
-    <a href="download.html">下载</a>
-    <a href="perf.html">性能</a>
+<body data-page-node-id="BDkZf3qvfiW5pMDLxRs31N">
+<header data-page-node-id="CHBOMdYLWSBm6U75C9DrpG">
+  <span class="logo" data-page-node-id="1JAgp6AU5IbBIS1yG6N53D"><span class="mark" data-page-node-id="DIKf2XZDVjQexX0Z9A4PdH">⚡</span> Hone</span>
+  <nav data-page-node-id="zop6OU5nImfWTHCS9G5B3W">
+    <a href="index.html" data-page-node-id="weJHE1HiUrvC5APRmTBcmf">首页</a>
+    <a href="docs.html" data-page-node-id="fJo4enC8Xyp8XJxSEuGdPh">文档</a>
+    <a href="language.html">语言</a>
+    <a href="tutorial.html" data-page-node-id="WzM70ZIqtkxwCzJSOLMNDX">教程</a>
+    <a href="examples.html" data-page-node-id="dFyYzGuKlDo4erZakvkno9">示例</a>
+    <a href="stdlib.html" data-page-node-id="d537GYSnoaBF9b5LNtYYJz">标准库</a>
+    <a href="install.html" data-page-node-id="TPQvWykim88xZr4enyZGPU">安装</a>
+    <a href="download.html" data-page-node-id="GGejq1kH1dLsQclPGD7QnV">下载</a>
+    <a href="perf.html" data-page-node-id="UKdgsmsYKMKg43JtTK2O6E">性能</a>
   </nav>
-  <span class="ver">v0.7.10</span>
-  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
+  <span class="ver" data-page-node-id="LikLmPQ9RSurJAcYWZuTEN">v0.7.11</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题" data-page-node-id="WEx94CCw03PidBHzNHbFGx"><span class="ti-light" data-page-node-id="IP4wnB3QN9CCKbzSKc52fP">☀️</span><span class="ti-dark" data-page-node-id="81CEyz5g22CwaoiLa8ktNO">🌙</span></button>
 </header>
 
-<main>
-  <h2><span class="hash">#</span>更新日志</h2>
-  <p>各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md">GitHub</a>。</p>
+<main data-page-node-id="S5n0baL82z8XcBIB7QMbLi">
+  <h2 data-page-node-id="dqfn6Mtk3SwzERFGpCYrEL"><span class="hash" data-page-node-id="8QvTG0jkBOeOvYLOlyBl7Z">#</span>更新日志</h2>
+  <p data-page-node-id="GZzQ7Eq0mroA1hUsKZqlsi">各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md" data-page-node-id="tn2LZztCXhsACyFmGFobev">GitHub</a>。</p>
 
-  <div class="release">
-    <span class="ver-tag">v0.7.10</span><span class="date">2026-08-30</span>
-    <h4>新增</h4>
-    <ul>
-      <li><strong>char 字符类型</strong>：单个 Unicode 字符，全链路支持（词法/AST/解析/静态检查/解释器）
-        <ul>
-          <li>字面量：单引号 <code>'a'</code> / <code>'\n'</code> / <code>'\''</code> / <code>'中'</code>
-            （转义同字符串 + <code>\'</code>；必须恰好一个字符，空/多字符报 H005）；
-            类型注解 <code>char c = 'x';</code>（C 风格与 <code>c : char;</code> 风格均支持），
-            <code>x : char;</code> 无初值时默认 <code>'\0'</code></li>
-          <li>比较：<code>==</code> / <code>!=</code> / <code>&lt;</code> / <code>&lt;=</code> / <code>&gt;</code> / <code>&gt;=</code>
-            按 Unicode 码点比较（<code>'中' &gt; 'a'</code>）；不参与算术运算（<code>'a' + 1</code> 报 H001）；
+  <div class="release" data-page-node-id="qDUhs5x0SnRFBPb50OOpa3">
+    <span class="ver-tag" data-page-node-id="FudSZxREKPnMSaSxoG8by8">v0.7.11</span><span class="date" data-page-node-id="nN2TUiAkgz2j8bPaPN9pqH">2026-09-13</span>
+    <h4 data-page-node-id="wapUxX3DxwEcDBVBQSn1sg">新增</h4>
+    <ul data-page-node-id="56l5KiHScR2n5qo28QRIqe">
+      <li data-page-node-id="zKJ9f8XqkdjX27k5qsOpiX"><strong data-page-node-id="xot90eWDzdeiEYTyEh108a">标签与 goto（H105）</strong>：<code data-page-node-id="FO7C7uqDZKdt2vth0xgBpf">名字:</code> 定义标签，<code data-page-node-id="UJcs9YsBO8wCWzUBsHCpw3">goto 名字;</code> 跳转（手工搭循环、一次性跳出多层嵌套、跳过一段代码）。编译期安全校验，运行期绝不跳到未定义位置：
+        <ul data-page-node-id="89p2iBpOPRXv43rLb0z5iL">
+          <li data-page-node-id="SuIq3Kn5rb1E4hCSVkzMB9">标签必须与 <code data-page-node-id="UwCIsvGV3DqvI9AcAgGOjf">goto</code> 同函数、同名唯一；只能跳到从跳转点向外层可见的标签，<strong data-page-node-id="YCxmQxaS7V8B38PK2f3cVf">无法跳进 if / 循环等内层语句块</strong></li>
+          <li data-page-node-id="4tH3Zo4KjxFh065l0W1net"><strong data-page-node-id="CJWtHYu8tpvC5QY5fVM5g0">禁止向前跳过变量绑定</strong>（<code data-page-node-id="GMGbCB9z0RtKOrOHLyCRAR">x = ...</code> / <code data-page-node-id="JYAW8Zy6D0QyNsvPg0qCle">int x = ...</code> / 解构赋值），避免读到未初始化变量</li>
+          <li data-page-node-id="ZZpwUaE1ZbkqToRGnIDNxy">标签写法 <code data-page-node-id="WTnOfsUDm9HrLyGEarwc0U">loop_top:</code> 与类型注解 <code data-page-node-id="QIORQqWAi68SHlb7atRoBS">x : int = 10;</code> 无歧义：冒号后同行还有内容即按类型注解解析</li>
+          <li data-page-node-id="VGqBx4DPojga0JmvHgY6nj">解释器与字节码 VM 均完整支持；AOT 原生编译（<code data-page-node-id="zHqbPXX1fBlK8E4lFdNtRs">build --exe -c</code>）<strong data-page-node-id="M3Gk0eKwgCzvGGvxOy1ddS">暂不支持 goto</strong>，报 <code data-page-node-id="EOGj745f68PpPIw5suRKCp">error[H999]</code>（尚未实现）并提示改用 <code data-page-node-id="gUgDfVtO7bWXHiyKv7kj7y">hone run</code> / <code data-page-node-id="rfm6OCNLrFLDizo3mPkew5">hone run --vm</code></li>
+          <li data-page-node-id="eCXIBv8pOTG4kG2harce6G">示例 <code data-page-node-id="7FT589Qr89E6NpxERfHNPQ">examples/goto_demo.hn</code>；回归 <code data-page-node-id="NA2mir3NCdwndH91B8W7PK">regress3.py</code> / <code data-page-node-id="UPmUrgRrdURvdqgLA3xAdS">regress_ir.py</code> 均纳入比对</li>
+        </ul>
+      </li>
+      <li data-page-node-id="tyuZylcXkHAEfbyn9bBsKS"><strong data-page-node-id="IagJjpFr8qH6XdXRyJTuNB">宏 macro（H106）</strong>：表达式宏 <code data-page-node-id="LCdsyRBicRdy1LSpyrktZ0">macro NAME(形参) =&gt; 表达式;</code> 与语句宏 <code data-page-node-id="FkAppyHY1ZC01J4E41xKsW">macro NAME(形参) { 语句... }</code>，调用写法与函数一致（<code data-page-node-id="ezhH14tY8yDatQO5yAocSl">NAME(...)</code>）
+        <ul data-page-node-id="U7m4E6C98RzYqjt7HRKfKG">
+          <li data-page-node-id="To13I2g0BZrGcJZkW6tV9q">解析后、类型检查前由新增的预处理阶段（<code data-page-node-id="ycCecNUPVc7ihfHo9qv0lC">src/preproc.rs</code>）做<strong data-page-node-id="FMdDSRghyxSu2zLHTB46Vg">纯 AST 替换</strong>，因此解释器 / 字节码 VM / AOT 三个后端行为完全一致，运行期不存在宏</li>
+          <li data-page-node-id="LYLOxf6kWeyEjFYgCiLhdt">安全约定：宏只能在<strong data-page-node-id="9FBmgua2frqPn7wjR9PJWk">顶层</strong>定义、<strong data-page-node-id="xMqFkWQUTBAekVuW8ceGrK">先定义后使用</strong>（若调用的名字对应更靠后的宏定义，直接报 H106 并指出定义行号，提示把定义上移）；<strong data-page-node-id="hID3QKIBqhGs3gy2GvCdq6">宏体在定义点展开</strong>（只能引用更早的宏 ⇒ 引用无环，不可能无限展开，无需深度上限）；宏名不得与函数 / async fn / 结构体 / 类 / 枚举或其他宏重名；实参个数必须匹配</li>
+          <li data-page-node-id="JGZZdByvRlSLOn7k14u2Lu">表达式宏体内禁用 <code data-page-node-id="Ogmcvy0fNNu8HOMns8eW1F">++</code> / <code data-page-node-id="PfgzTL7gnz9oH7DaLKdj2t">--</code> 与 lambda，形参不得用作被调用函数名；语句宏展开为<strong data-page-node-id="vHMUeENdsdDguoX97gLuX0">独立作用域块</strong>（变量不外泄），体内禁用 <code data-page-node-id="ZsmYbNAE1RaLwwFDFZEoGS">return</code> / <code data-page-node-id="gRnV0pg2XpdnWXMKCxRLx3">goto</code> / 标签 / 嵌套 macro，<code data-page-node-id="ba4oc8twW4bBqlAzaY05pK">break</code> / <code data-page-node-id="Sua8nV8aesv3xCJpjQkuI3">continue</code> 仅限宏体自身的循环</li>
+          <li data-page-node-id="m1LZeHjYplSXIJQx3twPw0">形参可作简单赋值目标（<code data-page-node-id="RoxqZw6d3ci0fbUXBoSCFz">INC(i)</code> → <code data-page-node-id="1CL0XCGVtGAXRBvhoJyf8q">i = i + 1;</code>），实参须为裸变量名</li>
+          <li data-page-node-id="HxyllCgH0dxyv5FhHxTFdi">示例 <code data-page-node-id="Ho17wuF1llRoKFJ42Qg0mD">examples/macro_demo.hn</code></li>
+        </ul>
+      </li>
+      <li data-page-node-id="EO0vR15E6BJdbHApHYeDrq">新增错误码 <code data-page-node-id="ihXt3ntODKKF9Y2CnHdrT2">H105</code>（标签/跳转）、<code data-page-node-id="tk5IVcShpCQ0dRhuAGEiqk">H106</code>（宏），<code data-page-node-id="bMa9n60y4HooxKhVLdmGVF">hone explain H105/H106</code> 提供修复建议</li>
+    </ul>
+    <h4 data-page-node-id="V7N8tJ8vDWbVxE6gdBfeuO">变更</h4>
+    <ul data-page-node-id="FlFfbKf1Cx7VlB01WwEyOb">
+      <li data-page-node-id="MLAGNYmAteMyQRvCYEUIkd"><code data-page-node-id="DfCGAKEWUnodazGADFMW27">src/preproc.rs</code>（新增）：所有解析入口（<code data-page-node-id="mWitbldix30263hCcHcFBE">Parser::parse</code>）统一挂载「宏展开 + 跳转校验」，保证 <code data-page-node-id="OCQovML9SU45tlYKyIqfRH">hone run</code> / <code data-page-node-id="cXPwXSMPw9bCwCp59z5lPs">--vm</code> / <code data-page-node-id="4v5OgfQTJkG2iNla9vJzlD">--disasm</code> / AOT / LSP / REPL 走同一份语义</li>
+      <li data-page-node-id="eqFyVLbpKaP0GRTTKKqrB2">文档与官网同步更新（语言手册、更新日志、进阶用法新增 goto / 宏章节与 H105 / H106 错误码说明）</li>
+      <li data-page-node-id="cgu001aotx0001">新增 <code data-page-node-id="cgu001aotx0002">src/cgen_util.rs</code>：两个 C 后端（<code data-page-node-id="cgu001aotx0003">aot.rs</code> 与 <code data-page-node-id="cgu001aotx0004">codegen.rs</code>）共用的机械转义层，并<strong data-page-node-id="cgu001aotx0005">修复 <code data-page-node-id="cgu001aotx0006">--dll</code> 的真实缺陷</strong>：原先控制字符用十六进制 <code data-page-node-id="cgu001aotx0007">\x</code> 转义，而 <strong data-page-node-id="cgu001aotx0008">C 的 <code data-page-node-id="cgu001aotx0009">\x</code> 转义是贪婪的</strong>（<code data-page-node-id="cgu001aotx0010">"\x01a"</code> 会被解析成单字节 <code data-page-node-id="cgu001aotx0011">\x1a</code>），导致含控制字符的字符串被静默截短；现统一为三位八进制并加 4 个单元测试锁死该回归。两者值模型不同（<code data-page-node-id="cgu001aotx0012">--dll</code> 用 C 原生类型对接 C ABI、AOT 统一装箱），<strong data-page-node-id="cgu001aotx0013">代码生成主体不共用</strong></li>
+      <li data-page-node-id="cgu001aotx0014"><strong data-page-node-id="cgu001aotx0015">AOT 后端评估完成：保留并投入，不移除</strong>。实测推翻「AOT 性价比不高」的初始假设，AOT 相对解释器有接近一个数量级的稳定加速：fib(26) <strong data-page-node-id="cgu001aotx0016">9.5x</strong>（267 ms vs 2530 ms）、循环 200 万次 <strong data-page-node-id="cgu001aotx0017">12.1x</strong>（514 ms vs 6203 ms）；产物体积约 58.6 KB。同时<strong data-page-node-id="cgu001aotx0018">如实记录性能短板</strong>：生成的 C 对每次整数运算都做装箱与深拷贝，等价 <code data-page-node-id="cgu001aotx0019">rustc -O</code> 跑 2000 万次循环约 274 ms、AOT 版约 2962 ms（慢约 10 倍），调高优化级别无效——这是值语义 + 统一装箱的必然代价，故不宜宣称「接近 C 的性能」</li>
+      <li data-page-node-id="cgu001aotx0020">修正文档中与实现不符的描述：<code data-page-node-id="cgu001aotx0021">hone build --dll</code> 原先写作「内置 TinyCC（约 200 KB），无需用户安装外部工具链」，实测 <code data-page-node-id="cgu001aotx0022">Cargo.toml</code> 无任何 C 编译器依赖，<code data-page-node-id="cgu001aotx0023">find_cc()</code> 走 <code data-page-node-id="cgu001aotx0024">CC</code> 环境变量 &gt; gcc &gt; clang &gt; cc，<strong data-page-node-id="cgu001aotx0025">与 AOT 一样依赖系统 C 编译器</strong></li>
+      <li data-page-node-id="ZAMjWhnEVy9EKBrJZobO1e">回归基线：示例逻辑比对（regress3）、错误码（regress_err）、字节码反汇编（regress_ir）三套全部达标，真实逻辑差异为 0；少量不一致均为随机数 / 端口 / 时间等非逻辑差异</li>
+    </ul>
+  </div>
+
+  <div class="release" data-page-node-id="IifbMFIBbWcN7ynQL9fGnJ">
+    <span class="ver-tag" data-page-node-id="0yHaJRecZLU43p24ogE4Js">v0.7.10</span><span class="date" data-page-node-id="KaBwk6mEGdRFJgX1lGPa85">2026-08-30</span>
+    <h4 data-page-node-id="DaYTfRDDACqrxQmhLEnfSv">新增</h4>
+    <ul data-page-node-id="dnNzMWBCvznrzAsUUqc0AP">
+      <li data-page-node-id="L4br1BoZyHpkdDg2LBxAzq"><strong data-page-node-id="A9qJcBj8sBrB9VlSwXyAmW">char 字符类型</strong>：单个 Unicode 字符，全链路支持（词法/AST/解析/静态检查/解释器）
+        <ul data-page-node-id="EJumLsjOdWVKdwQDIIPwC6">
+          <li data-page-node-id="tNAmffVxK1AWn68Scl7TzQ">字面量：单引号 <code data-page-node-id="mScVwvAmM6UGs0P9yEbgrZ">'a'</code> / <code data-page-node-id="4Nk0w2y8c4sWDkrP7igNhn">'\n'</code> / <code data-page-node-id="lTCifM6DiCQmmeXFz0SQ48">'\''</code> / <code data-page-node-id="Acg1QwknUU98ogfRODNgs5">'中'</code>
+            （转义同字符串 + <code data-page-node-id="LDCH2mADd4LpMFGsAtMQUj">\'</code>；必须恰好一个字符，空/多字符报 H005）；
+            类型注解 <code data-page-node-id="QGq0boeKxJ9RzOwwISm0JB">char c = 'x';</code>（C 风格与 <code data-page-node-id="kZ25fqVfKm5L0qLBe6hdw0">c : char;</code> 风格均支持），
+            <code data-page-node-id="CglCKgYQBu87s5cR7OhLKG">x : char;</code> 无初值时默认 <code data-page-node-id="0gocyVIaOh3dGLIFLnseqh">'\0'</code></li>
+          <li data-page-node-id="fsRhkDNZDTkTSpR1pwm7Pu">比较：<code data-page-node-id="R4qrkQY9lOaz1E5zSuudZS">==</code> / <code data-page-node-id="CFGCSJwg2X8sHlw6TD49Z1">!=</code> / <code data-page-node-id="KXm9hAf2nWgkO1yTwQICru">&lt;</code> / <code data-page-node-id="nBW7vZhUn7YefdHWHry7PZ">&lt;=</code> / <code data-page-node-id="X6cpoAe3S89rekoJLd9xsG">&gt;</code> / <code data-page-node-id="nZ8gThL0wkCNsyNBUwzDFy">&gt;=</code>
+            按 Unicode 码点比较（<code data-page-node-id="8k8QCRO29S9Tu49wvwIibN">'中' &gt; 'a'</code>）；不参与算术运算（<code data-page-node-id="4nfuzzcTbKneCRMqNrk1Hs">'a' + 1</code> 报 H001）；
             与 int/str 等禁止隐式转换（H001 类型锁定）</li>
-          <li>内置函数：<code>ord(c)</code>（字符 → 码点）、<code>char(i)</code>（码点 → 字符，越界/代理区报错）、
-            <code>char_at(s, i)</code>（按 Unicode 字符取串中第 i 个字符 → char，区别于 <code>s[i]</code> 返回单字符 str）、
-            <code>char_upper(c)</code> / <code>char_lower(c)</code>（大小写）、
-            <code>char_is_digit(c)</code> / <code>char_is_alpha(c)</code> / <code>char_is_space(c)</code>（字符分类）</li>
-          <li>集成：<code>to_str(c)</code> → 单字符字符串；<code>type_of('a')</code> → <code>"char"</code>；
-            JSON 序列化为字符串；match 模式支持字符字面量；fmt 兼容；<code>--dll</code> 导出按码点 int 映射；
-            AOT 原生编译暂不支持；示例 <code>examples/char_demo.hn</code></li>
+          <li data-page-node-id="U7Sq8MWkPNYhPHkX5H8AVd">内置函数：<code data-page-node-id="d4woCnFLbPEL5ELUZU8KCq">ord(c)</code>（字符 → 码点）、<code data-page-node-id="jI8iDZSTKMACymq09AS8zi">char(i)</code>（码点 → 字符，越界/代理区报错）、
+            <code data-page-node-id="UBMorFCNT8UcNxE6op9SlU">char_at(s, i)</code>（按 Unicode 字符取串中第 i 个字符 → char，区别于 <code data-page-node-id="L72Fw2Lop8Wqc2UIRPSrdm">s[i]</code> 返回单字符 str）、
+            <code data-page-node-id="8fQXGDT5gDmbD2XfyKcBqZ">char_upper(c)</code> / <code data-page-node-id="aOl4tN3ZDrlM8SEUFCqEKg">char_lower(c)</code>（大小写）、
+            <code data-page-node-id="BZuzM5GDwrgYCU77HFl3IP">char_is_digit(c)</code> / <code data-page-node-id="cPQd3nJxLKU0oOXFW5fEgl">char_is_alpha(c)</code> / <code data-page-node-id="TplRi0TgvgmryZH8XmNE7X">char_is_space(c)</code>（字符分类）</li>
+          <li data-page-node-id="DIZCWuNlRLMrXbap7B8s54">集成：<code data-page-node-id="Gh3FiexfROsytSd1p2aIc7">to_str(c)</code> → 单字符字符串；<code data-page-node-id="y0so59P1cvc7VvMCWDPDeY">type_of('a')</code> → <code data-page-node-id="h2uolFUNfRaJVch1eveJ06">"char"</code>；
+            JSON 序列化为字符串；match 模式支持字符字面量；fmt 兼容；<code data-page-node-id="Eaf4ldFlkFoU4RgbgHE1py">--dll</code> 导出按码点 int 映射；
+            AOT 原生编译暂不支持；示例 <code data-page-node-id="DUS7QKM7tKBHzXJux3Qvpj">examples/char_demo.hn</code></li>
         </ul>
       </li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.7.9</span><span class="date">2026-08-30</span>
-    <h4>新增</h4>
-    <ul>
-      <li><strong>枚举类型 enum + match 变体模式</strong>：<code>enum Name { A, B(int), C(float, float) };</code>
-        简单变体无载荷、带载荷变体携带多个类型化字段；<code>Color.Red</code> 访问、
-        <code>Shape.Circle(1.5)</code> 构造（检查阶段校验个数与类型）；<code>==</code>/<code>!=</code>
-        比较类型 + 变体 + 载荷；match 变体模式 <code>Shape.Circle(r)</code> 载荷绑定到分支体变量
-        （<code>_</code> 忽略项），与字面量/通配符模式共存；全链路支持解析/静态检查/解释器/
-        AOT 原生编译（C 运行时 HnEnum 判别式 + 载荷）/fmt/LSP；示例 <code>examples/enum_demo.hn</code></li>
-      <li><strong>运算符重载（__op 特殊函数）</strong>：顶层定义 <code>fn __add(a, b)</code> 等，
+  <div class="release" data-page-node-id="UJ7DJOLDmxVtgvBRljr6Bo">
+    <span class="ver-tag" data-page-node-id="4AwqbsdCxu4zsbCt0Bdd6w">v0.7.9</span><span class="date" data-page-node-id="1osjYzSIfOEielJAGjAsxu">2026-08-30</span>
+    <h4 data-page-node-id="TjGbHRGs6njmI4qfVdapRx">新增</h4>
+    <ul data-page-node-id="PohkcxXpUbu7HmaHLeaCAO">
+      <li data-page-node-id="8MYkuRy2rhzDFPP9h4ZjqD"><strong data-page-node-id="DflCPgoBkXMQPJ0IY2XBB8">枚举类型 enum + match 变体模式</strong>：<code data-page-node-id="IqkSbKGWijvtGl6mchnAHS">enum Name { A, B(int), C(float, float) };</code>
+        简单变体无载荷、带载荷变体携带多个类型化字段；<code data-page-node-id="SsaAjml4CvhRFzAMLDfld8">Color.Red</code> 访问、
+        <code data-page-node-id="N8F0ZIAFKAmY4sCLh1KEf8">Shape.Circle(1.5)</code> 构造（检查阶段校验个数与类型）；<code data-page-node-id="uusQOvi3WBRBmMwojNEd7M">==</code>/<code data-page-node-id="mzk9ur298hUk3gw4DjAQSu">!=</code>
+        比较类型 + 变体 + 载荷；match 变体模式 <code data-page-node-id="We16kHhqpCHRGeLE88K5Lu">Shape.Circle(r)</code> 载荷绑定到分支体变量
+        （<code data-page-node-id="grDVCAi9fthDcm8bWfDIif">_</code> 忽略项），与字面量/通配符模式共存；全链路支持解析/静态检查/解释器/
+        AOT 原生编译（C 运行时 HnEnum 判别式 + 载荷）/fmt/LSP；示例 <code data-page-node-id="0iQEGLfcFSEYmjsEqY1M7M">examples/enum_demo.hn</code></li>
+      <li data-page-node-id="iADg95O5mHQ4VlLRO2zqTd"><strong data-page-node-id="eFBvYLbHHdVqnUTJtYoKWs">运算符重载（__op 特殊函数）</strong>：顶层定义 <code data-page-node-id="w0MsDEtvmkR1Zqqgz4NIce">fn __add(a, b)</code> 等，
         仅在内建运算不支持的操作数组合时被调用，内置类型固有行为完全不受影响；覆盖二元
-        <code>+ - * / % == != &lt; &lt;= &gt; &gt;=</code>（<code>__add/__sub/__mul/__div/__mod/
-        __eq/__ne/__lt/__le/__gt/__ge</code>）、一元 <code>-x</code>/<code>!x</code>
-        （<code>__neg/__not</code>）、内置 <code>len(x)</code>/<code>x[i]</code>
-        （<code>__len/__index</code>）；AOT 生成「内建组合 → 内建运算，否则 → __op 调用」分派链；
-        示例 <code>examples/overload_demo.hn</code></li>
-      <li><strong>hone watch 热重载</strong>：<code>hone watch &lt;script.hn&gt; [--interval=N]</code>
+        <code data-page-node-id="Ga3dOcaIuLWQcrCVyTK3V4">+ - * / % == != &lt; &lt;= &gt; &gt;=</code>（<code data-page-node-id="cmxTSZqb9A2Pl0aPsyGh6i">__add/__sub/__mul/__div/__mod/
+        __eq/__ne/__lt/__le/__gt/__ge</code>）、一元 <code data-page-node-id="aVhC9Arz57amzA51dkp7Io">-x</code>/<code data-page-node-id="YZLZFd7prt6whULcR0IJhw">!x</code>
+        （<code data-page-node-id="6rFSi9POdsX4gCw3ZigW9s">__neg/__not</code>）、内置 <code data-page-node-id="WhFJ2iC2vkzNwH4Bd1SmNc">len(x)</code>/<code data-page-node-id="Blsf0Qr2GqDFTZBZ1VkqFL">x[i]</code>
+        （<code data-page-node-id="tPR7N3e9DaoOHmwsNhkiTg">__len/__index</code>）；AOT 生成「内建组合 → 内建运算，否则 → __op 调用」分派链；
+        示例 <code data-page-node-id="B0zcZP0ygS9i9g5lrt7C6Q">examples/overload_demo.hn</code></li>
+      <li data-page-node-id="tMizb9iwBxCNlFWHerS7vp"><strong data-page-node-id="xn7CD7BhNPn4StDFHDvg8i">hone watch 热重载</strong>：<code data-page-node-id="v1DkE8HxvNSeCnhd18D1Qp">hone watch &lt;script.hn&gt; [--interval=N]</code>
         监控脚本文件变更自动重跑（跨平台轮询 mtime + 大小，std 实现零新增依赖，带时间戳，Ctrl+C 退出）</li>
-      <li><strong>测试框架增强</strong>：新增断言函数 <code>assert_eq(实际, 期望[, 消息])</code>；
-        <code>hone test</code> 输出按文件断言统计（PASS/FAIL 后附 通过/总数），汇总行含总断言通过数</li>
-      <li><strong>异步函数 async fn + await</strong>：<code>async fn name(...)</code> 定义异步函数，
-        调用时后台线程执行并立即返回 future（不阻塞）；<code>await expr</code> 阻塞等待结果；
+      <li data-page-node-id="crFcWX0YGmHs13gO3vrkzo"><strong data-page-node-id="J8OlcKzqwZUzIHGnPNp6sX">测试框架增强</strong>：新增断言函数 <code data-page-node-id="mrjbH1IqtEjUpkFCWDU2MI">assert_eq(实际, 期望[, 消息])</code>；
+        <code data-page-node-id="F6Xh1rTzGG8VCgfTihuLo7">hone test</code> 输出按文件断言统计（PASS/FAIL 后附 通过/总数），汇总行含总断言通过数</li>
+      <li data-page-node-id="p4uiN7JKD9K4wKCicpwrMv"><strong data-page-node-id="CXAxGyGIK5dgc9tap4Fk02">异步函数 async fn + await</strong>：<code data-page-node-id="A60q90YIh6nUnzBTf8IS5R">async fn name(...)</code> 定义异步函数，
+        调用时后台线程执行并立即返回 future（不阻塞）；<code data-page-node-id="IHWt1lQIGv0ljqJAkEpTiO">await expr</code> 阻塞等待结果；
         错误经 future 原样传播（可 try/catch 捕获）；与 go 互补（go 发后不理、async/await 等待结果）；
-        AOT 与 --dll 对 async/await 报「暂不支持」；示例 <code>examples/async_demo.hn</code></li>
+        AOT 与 --dll 对 async/await 报「暂不支持」；示例 <code data-page-node-id="Dg2ipTXXygWA1e8uDdBunt">examples/async_demo.hn</code></li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.7.8</span><span class="date">2026-08-29</span>
-    <h4>重构</h4>
-    <ul>
-      <li><strong>桌宠 <code>hone_lib/pet.hn</code> 改原生窗口</strong>：不再依赖
+  <div class="release" data-page-node-id="9KxTz8lFMNP72BJlzLn8Dp">
+    <span class="ver-tag" data-page-node-id="tudYdwoOLzI0mHvneP0Pyj">v0.7.8</span><span class="date" data-page-node-id="HQ4TDC86DsD0Lb5sBpHARN">2026-08-29</span>
+    <h4 data-page-node-id="xEGNIY9C6ZwK7Je3ytgTEO">重构</h4>
+    <ul data-page-node-id="gz2cGNzBoAHNY64TDsPCIY">
+      <li data-page-node-id="KI94D2htWuk3Gmu30mMExs"><strong data-page-node-id="MzGSsZm6FHLXXjw44fiTSr">桌宠 <code data-page-node-id="CK9TBirtGRYWm5TiGkfZk1">hone_lib/pet.hn</code> 改原生窗口</strong>：不再依赖
         PowerShell/WinForms 与 state.json/events.json 文件轮询，改为运行时 guipro 模块新增的
-        <code>guipro.pet_*</code> 原生 Win32 窗口内置函数——<code>pet_window</code>
-        （无边框 + 品红键透明 + 置顶 + 不抢焦点）/ <code>pet_frame</code>（RGB 文本推帧，
-        Rust 端最近邻放大 + 水平翻转）/ <code>pet_text</code>（气泡）/
-        <code>pet_move</code> / <code>pet_pos</code> / <code>pet_cursor</code> /
-        <code>pet_menu</code>（右键原生弹出菜单，返回选中项）/ <code>pet_close</code></li>
-      <li>交互改走 <code>guipro.poll</code> 事件队列：click / dblclick / drag（Rust 端
-        SetCapture 拖拽窗口）/ rclick；跟随鼠标改用 <code>pet_cursor</code> 直接读光标；
-        帧由磁盘 PPM 缓存改为内存 RGB 文本（<code>pet_frame_rgb</code> /
-        <code>pet_frames_rgb</code>），换装即时重建；外部 PPM 帧目录替换仍支持</li>
-      <li>窗口随 Hone 进程生命周期，Ctrl+C 不再残留 PowerShell 孤儿窗口；示例
-        <code>examples/pet_demo.hn</code>，详见
-        <a href="stdlib.html#pet">标准库 · pet 桌宠模块</a></li>
+        <code data-page-node-id="IrsAjeD3V6LlHtpCML8CZI">guipro.pet_*</code> 原生 Win32 窗口内置函数——<code data-page-node-id="i4OtAaJhgx0GVY5jMA4wsm">pet_window</code>
+        （无边框 + 品红键透明 + 置顶 + 不抢焦点）/ <code data-page-node-id="WjC81JihldTOyMp9pFEqao">pet_frame</code>（RGB 文本推帧，
+        Rust 端最近邻放大 + 水平翻转）/ <code data-page-node-id="iDN4Znol42MNIRdHyXVAPJ">pet_text</code>（气泡）/
+        <code data-page-node-id="uSQeeG802XZwHbZAA8Vcga">pet_move</code> / <code data-page-node-id="Qsy9RPPw61nVxrUvr62RpS">pet_pos</code> / <code data-page-node-id="xPuQWYIJeewiHOT2Xsa8nJ">pet_cursor</code> /
+        <code data-page-node-id="ySTuiTBkEqEeP6T09uSVBx">pet_menu</code>（右键原生弹出菜单，返回选中项）/ <code data-page-node-id="YIMN8bS9zHZwGhAWqFtclf">pet_close</code></li>
+      <li data-page-node-id="x40qUhxQ3gzz84XpWmeHPL">交互改走 <code data-page-node-id="C17pgvoIEnVe2g5ybq14gO">guipro.poll</code> 事件队列：click / dblclick / drag（Rust 端
+        SetCapture 拖拽窗口）/ rclick；跟随鼠标改用 <code data-page-node-id="K99GHJPbFRCG9KCpPnCNEW">pet_cursor</code> 直接读光标；
+        帧由磁盘 PPM 缓存改为内存 RGB 文本（<code data-page-node-id="WQ35HdiyD5UkqBtXA681F6">pet_frame_rgb</code> /
+        <code data-page-node-id="3BEsNCA9JIz4zc1eS9eYys">pet_frames_rgb</code>），换装即时重建；外部 PPM 帧目录替换仍支持</li>
+      <li data-page-node-id="RbBDACN6mYHANQBlbLUsv0">窗口随 Hone 进程生命周期，Ctrl+C 不再残留 PowerShell 孤儿窗口；示例
+        <code data-page-node-id="Nvrx4xtGRFvQEpI9LfI8Mo">examples/pet_demo.hn</code>，详见
+        <a href="stdlib.html#pet" data-page-node-id="dAwBi4Rkq7fU8IxGFz3UQr">标准库 · pet 桌宠模块</a></li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.7.7</span><span class="date">2026-08-28</span>
-    <h4>新增</h4>
-    <ul>
-      <li><strong>进度条标准库 <code>hone_lib/pbar.hn</code></strong>（纯 Hone 编写，零依赖）：
-        终端字符进度条 <code>[####----] 45% 12/24</code>，支持单行原地刷新（ANSI 重绘）、
+  <div class="release" data-page-node-id="c0rQgpepIZnAfoyKG8V53V">
+    <span class="ver-tag" data-page-node-id="CppCiU4zs2VldvA8lD7INY">v0.7.7</span><span class="date" data-page-node-id="NABqlRNAz7udqbG4fWHpfm">2026-08-28</span>
+    <h4 data-page-node-id="6dYX6qFnG9qnlf1Iuwe1Zn">新增</h4>
+    <ul data-page-node-id="7hGPSOzvsf34zrx7AQtL1W">
+      <li data-page-node-id="bw8vuEfU43jBRjZJpTjIlP"><strong data-page-node-id="tiV4m2PjntB22eEP0YOZW0">进度条标准库 <code data-page-node-id="HKBWm4nA8C0nsWLeS7AnnZ">hone_lib/pbar.hn</code></strong>（纯 Hone 编写，零依赖）：
+        终端字符进度条 <code data-page-node-id="Vs02ZddJLDEVAyCouUF5PM">[####----] 45% 12/24</code>，支持单行原地刷新（ANSI 重绘）、
         每帧新行模式（老终端兼容）、剩余时间估算；
-        单行刷新通过 <code>crypto.base64_decode("Gw==")</code> 构造 ESC 字符拼出
-        <code>ESC[1A</code>（上移一行）+ <code>ESC[K</code>（清行）实现（Hone 的 <code>print</code>
+        单行刷新通过 <code data-page-node-id="AtsKsbmxqSBOJObqqiTEp6">crypto.base64_decode("Gw==")</code> 构造 ESC 字符拼出
+        <code data-page-node-id="tl7byahIbbxZhQomhsdVkq">ESC[1A</code>（上移一行）+ <code data-page-node-id="3AxUdRE6ZlDeW4m64lBpKO">ESC[K</code>（清行）实现（Hone 的 <code data-page-node-id="wYSaBHqREcXz8dPiFxSW8k">print</code>
         自带换行且字符串转义不支持 \r/\x）；Hone 值语义，更新函数返回新对象需重新赋值
-        <code>pb = pbar_show(pb)</code>；示例 <code>examples/pbar_demo.hn</code>，详见
-        <a href="stdlib.html#pbar">标准库 · pbar 进度条模块</a></li>
+        <code data-page-node-id="MwBoHD1OX44llSlHSM6Xf8">pb = pbar_show(pb)</code>；示例 <code data-page-node-id="eGYeD9VH0GC413Psna81On">examples/pbar_demo.hn</code>，详见
+        <a href="stdlib.html#pbar" data-page-node-id="wltMFOLiuzTlrjMMRbQPnn">标准库 · pbar 进度条模块</a></li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.7.6</span><span class="date">2026-08-26</span>
-    <h4>新增</h4>
-    <ul>
-      <li><strong>AOT 原生编译</strong>：<code>hone build --exe -c &lt;script.hn&gt;</code> 将 .hn 脚本编译为
-        C 中间文件，再用系统 C 编译器（gcc/clang/cc，可用 <code>CC</code> 环境变量指定）生成原生可执行文件；
+  <div class="release" data-page-node-id="N3b9fEi0Zib3sDn6rGASKk">
+    <span class="ver-tag" data-page-node-id="aDSlKxVdeJKhEyt1U1WYUo">v0.7.6</span><span class="date" data-page-node-id="7J1uWAsv4F5IE5NNVJ59NH">2026-08-26</span>
+    <h4 data-page-node-id="g1b0QEeYhxCfQOthm0eZfR">新增</h4>
+    <ul data-page-node-id="T02zWL9AeHVzYfPxbxKLoF">
+      <li data-page-node-id="APOpmdJbd9LbmyNROyDHBs"><strong data-page-node-id="U4kYZ4IPQTPyyspQolpL9f">AOT 原生编译</strong>：<code data-page-node-id="WWcHU3Pp9XEY8ouxhTouE7">hone build --exe -c &lt;script.hn&gt;</code> 将 .hn 脚本编译为
+        C 中间文件，再用系统 C 编译器（gcc/clang/cc，可用 <code data-page-node-id="ono6rc6XRppChPf3Ncpd4V">CC</code> 环境变量指定）生成原生可执行文件；
         生成前先做语法与类型检查</li>
-      <li>编译参数 <code>-Os -ffunction-sections -fdata-sections</code> + 链接期死代码消除，未用到的内置函数
-        不占体积，常见脚本约 50~70 KB；默认删除中间 .c 文件，<code>--keep-c</code> 保留便于检查，
-        输出名用 <code>[-o &lt;out&gt;]</code></li>
-      <li>值语义与解释器一致（列表/字典深拷贝、lambda 按值捕获、索引赋值克隆写回），支持函数/递归/类方法/
+      <li data-page-node-id="AnceN4i544luB9oBibZc0f">编译参数 <code data-page-node-id="0LN8dV2DHRSwuBKpLeTQXn">-Os -ffunction-sections -fdata-sections</code> + 链接期死代码消除，未用到的内置函数
+        不占体积，常见脚本约 50~70 KB；默认删除中间 .c 文件，<code data-page-node-id="lTi2lTJT4Lh8op8kLKzEha">--keep-c</code> 保留便于检查，
+        输出名用 <code data-page-node-id="CQhdyxEJ9FY57OOH9sxvS6">[-o &lt;out&gt;]</code></li>
+      <li data-page-node-id="2CQn4AolifrzDiSuqftjGr">值语义与解释器一致（列表/字典深拷贝、lambda 按值捕获、索引赋值克隆写回），支持函数/递归/类方法/
         结构体/lambda/异常/推导式/解构/多返回值/match/可选链/复合赋值等全语言特性</li>
-      <li>内置函数支持核心集（print/len/to_str/集合/字符串/文件/时间/随机等）；
+      <li data-page-node-id="BxRhaJPWVGaRwiwf4p4FHD">内置函数支持核心集（print/len/to_str/集合/字符串/文件/时间/随机等）；
         http/crypto/sqlite/guipro 等重内置与 import/load/go 在编译期报「暂不支持」（附定位与建议）</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.7.5</span><span class="date">2026-08-26</span>
-    <h4>工具链增强</h4>
-    <ul>
-      <li><strong>LSP 语义高亮</strong>：新增 <code>textDocument/semanticTokens/full</code>（semantic tokens），
-        复用词法分析器精准 token 流，智能分类高亮——关键字 / 类型（<code>int/float/bool/str</code>）/
-        函数（定义名带 declaration 修饰符、调用、内置函数）/ 变量 / 字符串（含 <code>f"..."</code> 插值串与
-        <code>"""</code> 多行串）/ 数字 / 注释（<code>//</code> 与跨行 <code>/* */</code>）/ 命名空间（<code>time.</code> 等模块名）/
+  <div class="release" data-page-node-id="qinCawsNeUAfHZHqtiCGOB">
+    <span class="ver-tag" data-page-node-id="AAUj92tYat8Pj2MBOfCAxV">v0.7.5</span><span class="date" data-page-node-id="IMGZGXH2GmOosVNLCSEFPC">2026-08-26</span>
+    <h4 data-page-node-id="aNVJ0NheQ4IdmXnm0O7hOa">工具链增强</h4>
+    <ul data-page-node-id="FoFRYm50569wmLk7zzOPe0">
+      <li data-page-node-id="BKsEbsSEjnuRuV8hWxGjXz"><strong data-page-node-id="KFFfsgAIPWD0dXBVJM3eVG">LSP 语义高亮</strong>：新增 <code data-page-node-id="tFZPMJRkgx1rTQ7AXiOltT">textDocument/semanticTokens/full</code>（semantic tokens），
+        复用词法分析器精准 token 流，智能分类高亮——关键字 / 类型（<code data-page-node-id="zCWVCi2PkvV2jd7pNhYS6k">int/float/bool/str</code>）/
+        函数（定义名带 declaration 修饰符、调用、内置函数）/ 变量 / 字符串（含 <code data-page-node-id="9ZmlbzyWWOae8U0RApz7Lr">f"..."</code> 插值串与
+        <code data-page-node-id="401VXk4WLYKL7MpySaURgL">"""</code> 多行串）/ 数字 / 注释（<code data-page-node-id="gAJN8wBKgZUS7zj9EktnXJ">//</code> 与跨行 <code data-page-node-id="8Za5BQmuCOsZj3akvhxax6">/* */</code>）/ 命名空间（<code data-page-node-id="qoUXBrg0gaeOlL4g4kgPWp">time.</code> 等模块名）/
         类 / 结构体，输出标准 LSP delta 编码</li>
-      <li>词法失败（如未闭合字符串）时自动退化为仅注释高亮，不影响编辑；无新增依赖</li>
+      <li data-page-node-id="9wWQD1MmI0pPIgHhMhVxTR">词法失败（如未闭合字符串）时自动退化为仅注释高亮，不影响编辑；无新增依赖</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.7.4</span><span class="date">2026-08-26</span>
-    <h4>新增</h4>
-    <ul>
-      <li><strong>guipro 进阶控件</strong>：滑块 <code>slider</code> / 表格 <code>table</code> / 树 <code>tree</code> / 画布 <code>canvas</code>，
-        支持读写（<code>guipro_table_*</code> / <code>guipro_tree_*</code> / <code>guipro_canvas_*</code>）与事件；
-        示例 <code>examples/guipro_adv_demo.hn</code>（滑块/表格/树/画布/托盘/菜单）</li>
-      <li><strong>托盘图标与菜单栏</strong>：<code>guipro_tray_add/tray_tip/tray_remove</code>（Windows 用
-        Shell_NotifyIcon，Linux X11 用 XEmbed 系统托盘协议）、<code>guipro_menu</code> 菜单栏
+  <div class="release" data-page-node-id="JHtqBsp5s5wDR9r8MEyiQv">
+    <span class="ver-tag" data-page-node-id="PtDdtEKjBcl41Lbs0fHANF">v0.7.4</span><span class="date" data-page-node-id="iQen0kfSPn4cByYnCozNRi">2026-08-26</span>
+    <h4 data-page-node-id="Sd9xuVsAOPJl1LfGFuHvhv">新增</h4>
+    <ul data-page-node-id="1YpS2hgPeVIM6N4ujs7qt3">
+      <li data-page-node-id="6dP9EsUhseWI8wtFRUMYGp"><strong data-page-node-id="S16ifoEw2BEMJAzEoRoqtA">guipro 进阶控件</strong>：滑块 <code data-page-node-id="7I3uPkmNqIRESngtt5t98M">slider</code> / 表格 <code data-page-node-id="IQ7QKfhr1H9V3YxeqAoEET">table</code> / 树 <code data-page-node-id="HVd8yNvwgAhvTGEK8yC77A">tree</code> / 画布 <code data-page-node-id="9kE0cxgi6ueGVUQNRvw6jI">canvas</code>，
+        支持读写（<code data-page-node-id="3nqbfQgxECGNpm9UAQXaY3">guipro_table_*</code> / <code data-page-node-id="A3XPfCe9cXCZlE15fYdzb2">guipro_tree_*</code> / <code data-page-node-id="SbFKCZXUvKwV6pH9Re19bo">guipro_canvas_*</code>）与事件；
+        示例 <code data-page-node-id="NzSDnR2GWRqOr7oYw9ozYY">examples/guipro_adv_demo.hn</code>（滑块/表格/树/画布/托盘/菜单）</li>
+      <li data-page-node-id="K7FuI12VEGP4pp0ZwxEWki"><strong data-page-node-id="rthhCv9JiWRAduBn2bjAMI">托盘图标与菜单栏</strong>：<code data-page-node-id="Vb3iKE9IfWB8J1ECMTTI0W">guipro_tray_add/tray_tip/tray_remove</code>（Windows 用
+        Shell_NotifyIcon，Linux X11 用 XEmbed 系统托盘协议）、<code data-page-node-id="btjwYRvq4ZCkTmaeha3T3x">guipro_menu</code> 菜单栏
         （menu 事件 value=菜单路径）</li>
-      <li><strong>Linux X11 自绘后端</strong>：GTK3 缺失时自动回退 libX11.so.6 动态加载的单窗口自绘后端，
+      <li data-page-node-id="x25psUeZ2ZFrfcdClnLKeo"><strong data-page-node-id="v4jehTNW9zSSgUDRiI1Ai8">Linux X11 自绘后端</strong>：GTK3 缺失时自动回退 libX11.so.6 动态加载的单窗口自绘后端，
         覆盖全部控件与事件（含托盘 XEmbed）；本机 Windows 亦可 cargo check 编译验证</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.7.3</span><span class="date">2026-08-25</span>
-    <h4>新增</h4>
-    <ul>
-      <li><strong>原生图形界面标准库 <code>hone_lib/guipro.hn</code></strong>（gui.hn 的升级版）：
+  <div class="release" data-page-node-id="YidfD5exFRKJDa4hp8BoZx">
+    <span class="ver-tag" data-page-node-id="JbV1hDempBApjkAMJ5Mcgb">v0.7.3</span><span class="date" data-page-node-id="0thbpxTcBa3ReqcfQG5Ns9">2026-08-25</span>
+    <h4 data-page-node-id="D2lysA4FG7rkqc9R1lePw8">新增</h4>
+    <ul data-page-node-id="kVjQXTljvQKfz3K3TqOeyg">
+      <li data-page-node-id="8DylZBWVqLOkIRy6m2IFPC"><strong data-page-node-id="ZYRDrzupdHP5GHHKkGcJ9h">原生图形界面标准库 <code data-page-node-id="PIc8MgFO5REBHnllXtcmwP">hone_lib/guipro.hn</code></strong>（gui.hn 的升级版）：
         原生窗口 + 原生控件，不再依赖浏览器。Windows 用 Win32 标准控件（user32/gdi32，零新增依赖、不增体积），
         Linux 运行时动态加载 GTK3（缺失时 msgbox 降级 zenity/xmessage）；
         控件：button / label / input / select / checkbox / radio + VBox 布局；
-        事件：click / change / close / resize，闭包分发 + <code>guipro_timer</code> 定时器 + 原生消息框；
-        示例 <code>examples/guipro_demo.hn</code>（20 秒后自动关闭演示），详见
-        <a href="stdlib.html#guipro">标准库 · guipro 原生图形界面模块</a></li>
-      <li>架构：内置 <code>guipro.*</code> 原语（checker 签名表 + builtins 分发）只推送事件队列，
-        闭包分发在 Hone 层 <code>guipro_run</code> 主循环完成（builtins::call 无解释器上下文）；
+        事件：click / change / close / resize，闭包分发 + <code data-page-node-id="0gzqdrnHSE5piePHkJCQ66">guipro_timer</code> 定时器 + 原生消息框；
+        示例 <code data-page-node-id="dQScEGo0v5LZDdcuddSeen">examples/guipro_demo.hn</code>（20 秒后自动关闭演示），详见
+        <a href="stdlib.html#guipro" data-page-node-id="4AFwLGaJ63qs9t5GZQ8mke">标准库 · guipro 原生图形界面模块</a></li>
+      <li data-page-node-id="rrMRqweXa1pTiLgARblZVV">架构：内置 <code data-page-node-id="ZICP5qzuMw7VNiTgXVVkGg">guipro.*</code> 原语（checker 签名表 + builtins 分发）只推送事件队列，
+        闭包分发在 Hone 层 <code data-page-node-id="PZl14yrUq6EJHZkMRhRhGB">guipro_run</code> 主循环完成（builtins::call 无解释器上下文）；
         事件注册表函数式传递（Hone 函数内不能改全局变量）</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.7.2</span><span class="date">2026-08-25</span>
-    <h4>新增</h4>
-    <ul>
-      <li><strong>桌宠标准库 <code>hone_lib/pet.hn</code></strong>（Windows）：Hone 驱动状态机 +
-        PowerShell 透明置顶窗渲染，内置像素猫 8 帧动画（<code>idle</code> 眨眼 / <code>walk</code> 走路镜像 /
-        <code>sleep</code> 睡觉 / <code>happy</code> 开心 / <code>surprise</code> 惊讶），
+  <div class="release" data-page-node-id="iAOyaq2Ipw8ePBFmpgdrZo">
+    <span class="ver-tag" data-page-node-id="WCfohHo2HdglujOR4OsNlL">v0.7.2</span><span class="date" data-page-node-id="fhpcUAsXyGPCNrbpYMAxQC">2026-08-25</span>
+    <h4 data-page-node-id="HXHrwDUmRLeeejsGoA8j8z">新增</h4>
+    <ul data-page-node-id="vQZckVDZG73CyYx3A020Dy">
+      <li data-page-node-id="ct8KgZOkqFrlu4nrYf4Jcx"><strong data-page-node-id="RV3HCVD82FUzlInEPC1xyW">桌宠标准库 <code data-page-node-id="20FUCCeIItOSIh5zbbmpG5">hone_lib/pet.hn</code></strong>（Windows）：Hone 驱动状态机 +
+        PowerShell 透明置顶窗渲染，内置像素猫 8 帧动画（<code data-page-node-id="21Ytap6QPhy76bAruN1HeI">idle</code> 眨眼 / <code data-page-node-id="uiZWFBPSTKO6Nc6BUitvWa">walk</code> 走路镜像 /
+        <code data-page-node-id="9uYZWxmW5UUdNyvVIBpBjU">sleep</code> 睡觉 / <code data-page-node-id="cvRXVse6PVzlqgpGiIjbEO">happy</code> 开心 / <code data-page-node-id="78l9VZ8gI7pxfOWr6JjFSs">surprise</code> 惊讶），
         说话气泡、点击/拖拽交互、右键菜单（换装/静音/跟随鼠标/隐藏显示台词/退出）、全屏游荡、
         自动入睡、整点报时、CPU/内存播报（wmic）；支持自定义台词 JSON 与外部 PPM 帧目录替换；
-        提供阻塞 <code>pet_run(cfg)</code> 与非阻塞 <code>pet_tick(st)</code> 两种形态；
-        示例 <code>examples/pet_demo.hn</code>，详见 <a href="stdlib.html#pet">标准库 · pet 桌宠模块</a></li>
-      <li>性能：帧构建用 <code>ptr.alloc</code> 缓冲 + 24×24 内联整数判定 + 2× 最近邻放大到 48×48，
+        提供阻塞 <code data-page-node-id="Bmtyjst1AS86JSBR5aY1yN">pet_run(cfg)</code> 与非阻塞 <code data-page-node-id="RUk11KZ8Dg2yDvOpLD48Fw">pet_tick(st)</code> 两种形态；
+        示例 <code data-page-node-id="GjSibZWNPNJIvFFE5E2mYN">examples/pet_demo.hn</code>，详见 <a href="stdlib.html#pet" data-page-node-id="D01Y1fNOXP9RFCuMnKZ67M">标准库 · pet 桌宠模块</a></li>
+      <li data-page-node-id="eGClptjsL3zl5uw543IsmP">性能：帧构建用 <code data-page-node-id="xBoGpcdVwaGb976ovfyX2P">ptr.alloc</code> 缓冲 + 24×24 内联整数判定 + 2× 最近邻放大到 48×48，
         8 帧约 2s（对比推导式 rows 约 10s）；规避 Hone 列表值类型 O(w*h) 逐像素拷贝</li>
-      <li>说明：Hone 无原生窗口 API，窗口渲染/鼠标事件由运行时生成的 <code>pet_window.ps1</code>
-        （WinForms 透明置顶窗）承担，Hone 与窗口以文件轮询通信（<code>state.json</code> / <code>events.json</code>）；
+      <li data-page-node-id="vswSLoWEIYXxrDPOzT6TXB">说明：Hone 无原生窗口 API，窗口渲染/鼠标事件由运行时生成的 <code data-page-node-id="CDFCjpQeqLZfQAoLTC2pUT">pet_window.ps1</code>
+        （WinForms 透明置顶窗）承担，Hone 与窗口以文件轮询通信（<code data-page-node-id="x2Lmp8Wa59x5a7VQb9oUuk">state.json</code> / <code data-page-node-id="YrEpKdXRBKuXT0Z1n4gAu5">events.json</code>）；
         仅支持 Windows（PowerShell 5.1+），与 gui.hn 同类、非纯 Hone 实现</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.7.1</span><span class="date">2026-08-19</span>
-    <h4>新增</h4>
-    <ul>
-      <li><strong>图片标准库 <code>hone_lib/img.hn</code></strong>（纯 Hone 编写）：像素网格
-        <code>{"w","h","rows"}</code> 表示 + 创建/绘图（<code>img_new</code>、<code>img_fill</code>、
-        <code>img_rect</code>、<code>img_line</code>、<code>img_circle</code>、
-        <code>img_gradient_h/v</code>、<code>img_checker</code>、<code>img_noise</code>）+
-        滤镜（<code>img_grayscale</code>、<code>img_invert</code>、<code>img_brightness</code>、
-        <code>img_contrast</code>、<code>img_threshold</code>）+ 变换（<code>img_flip_h/v</code>、
-        <code>img_rotate90</code>、<code>img_crop</code>、<code>img_scale</code>）+
-        PPM P3 读写（<code>img_to_ppm</code>、<code>img_save_ppm</code>、<code>img_from_ppm</code>、
-        <code>img_load_ppm</code>）与 SVG 输出（<code>img_to_svg</code>、<code>img_save_svg</code>）；
-        示例 <code>examples/test_img_lib.hn</code>（35 项断言），详见 <a href="stdlib.html#img">标准库 · img 图片模块</a></li>
-      <li>说明：Hone 的 str 无法承载二进制，故采用文本格式 PPM P3 与 SVG，不支持 PNG/BMP；
+  <div class="release" data-page-node-id="T6ZiHOiTMfXat2CMPtW8nK">
+    <span class="ver-tag" data-page-node-id="VWR4I6SvECCLTrCiDuCFTI">v0.7.1</span><span class="date" data-page-node-id="dh0Hu6r1p4qhSvezvcuLMG">2026-08-19</span>
+    <h4 data-page-node-id="sKauyppIOPiBwM0FPmhvBq">新增</h4>
+    <ul data-page-node-id="FWPNXaich8wOEZSPTFBsye">
+      <li data-page-node-id="xvVUsvWzaeBxbIQOQ2FymN"><strong data-page-node-id="Oa2c4LmN4AeEjpKkyzvOvk">图片标准库 <code data-page-node-id="HmH0DqfmIQIwONhgFs0P3d">hone_lib/img.hn</code></strong>（纯 Hone 编写）：像素网格
+        <code data-page-node-id="5BA3pScm5umjasGicai43q">{"w","h","rows"}</code> 表示 + 创建/绘图（<code data-page-node-id="6odNE18zmJaHElg1fVhX6D">img_new</code>、<code data-page-node-id="ARRbqAxucGZQCDg9eKU3iI">img_fill</code>、
+        <code data-page-node-id="uHBary6Zpb7CkwmQyqkmUN">img_rect</code>、<code data-page-node-id="z2tecnWfYEM8JHkaNwAFU1">img_line</code>、<code data-page-node-id="07VC66O5ruFSAoLiw6In0j">img_circle</code>、
+        <code data-page-node-id="uMm7c8czi6H57JyIvbVg1w">img_gradient_h/v</code>、<code data-page-node-id="3qFdXWY8FayEzAbPzxMP0g">img_checker</code>、<code data-page-node-id="NRH72hPPDitbibjDa7hjZU">img_noise</code>）+
+        滤镜（<code data-page-node-id="C6EBLUmlZfa0ZDw8ep9pvC">img_grayscale</code>、<code data-page-node-id="p7qEFklm8Btv3gMCqq2V6v">img_invert</code>、<code data-page-node-id="3FjYB8XnkMneCYntozTwKH">img_brightness</code>、
+        <code data-page-node-id="RmRiibJouz0sYheK8NCzIb">img_contrast</code>、<code data-page-node-id="sQLDtHJ4yyCeGpEi1la4KG">img_threshold</code>）+ 变换（<code data-page-node-id="6z0BsdPpHODtwbhqH8DJUb">img_flip_h/v</code>、
+        <code data-page-node-id="uTipvfTeO3XkLExalQBJvE">img_rotate90</code>、<code data-page-node-id="pV0CSIA6krrEl0IRwevxeE">img_crop</code>、<code data-page-node-id="ekiFqeMKjnqpIMk1bE972o">img_scale</code>）+
+        PPM P3 读写（<code data-page-node-id="SfhgKvqgJNSV7Cv49BCR01">img_to_ppm</code>、<code data-page-node-id="gT2WvnsD7LImW9xcHAeDqm">img_save_ppm</code>、<code data-page-node-id="RKVT0gBQ36XPHZ2zkRsd3w">img_from_ppm</code>、
+        <code data-page-node-id="PxSI5DjnXmdhuICtQebYxV">img_load_ppm</code>）与 SVG 输出（<code data-page-node-id="WX96LAa03ILq6FrFAv1jva">img_to_svg</code>、<code data-page-node-id="qv3ezFufp0utH9arawozTL">img_save_svg</code>）；
+        示例 <code data-page-node-id="LDVgxE3vRtwSLfRoDlTwY5">examples/test_img_lib.hn</code>（35 项断言），详见 <a href="stdlib.html#img" data-page-node-id="GFIHS2qlDTJMP71oHWU7ja">标准库 · img 图片模块</a></li>
+      <li data-page-node-id="bRKXOPC3BFSkGCLBGD6lIA">说明：Hone 的 str 无法承载二进制，故采用文本格式 PPM P3 与 SVG，不支持 PNG/BMP；
         列表为值类型，绘图/滤镜适合 ≤128×128 的小图</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.7.0</span><span class="date">2026-08-19</span>
-    <h4>工具链增强</h4>
-    <ul>
-      <li><strong>LSP 增强</strong>：上下文感知补全（<code>time.</code> 等模块成员 / 文档变量 / 用户函数）、
+  <div class="release" data-page-node-id="zv0i1J16Wa6qnm66E0LG85">
+    <span class="ver-tag" data-page-node-id="7I42RzEYUdB8rmvwP15pXC">v0.7.0</span><span class="date" data-page-node-id="PhfPZTImrsSZ8qhP9uk9c2">2026-08-19</span>
+    <h4 data-page-node-id="p4VktnXlwZ6SA7V6yx7C72">工具链增强</h4>
+    <ul data-page-node-id="HeZsoDfbrxtucLK7xEXMMq">
+      <li data-page-node-id="WFQqTlrxS2DbjvCqOT4gGI"><strong data-page-node-id="OXY87viWgSty9twfHtFVH3">LSP 增强</strong>：上下文感知补全（<code data-page-node-id="Be0rwsuyB81tckx9pYnxhX">time.</code> 等模块成员 / 文档变量 / 用户函数）、
         悬停文档（内置函数签名+说明）、跳转定义、文档大纲，serverInfo 升至 0.2.0</li>
-      <li><strong>调试器增强</strong>：条件断点 <code>breakpoint if (expr);</code>（条件为 bool 才暂停）；
-        断点提示支持交互命令 <code>c</code> 继续 / <code>q</code> 退出 / <code>p &lt;expr&gt;</code> 即时求值 /
-        <code>w &lt;name&gt;</code> 监视变量 / <code>u &lt;name&gt;</code> 取消监视</li>
-      <li><strong>prof 剖析增强</strong>：新增自耗时（排除子调用）与占比列、调用图输出、总览行</li>
-      <li><strong>fmt 格式化增强</strong>：新增 <code>-c/--check</code> 检查模式（逐文件报告差异，CI 友好），与 <code>-w</code> 互斥</li>
-      <li><strong>新增 <code>hone doc</code> 工具</strong>：扫描 fn/class 定义及其上方 <code>//</code> 注释，生成 Markdown API 文档</li>
-      <li><strong>修复</strong>：debug 构建主线程栈溢出——改为 64MB 栈专用线程执行命令逻辑，
-        递归脚本（如 <code>fib(26)</code>）在 debug 构建下恢复正常</li>
+      <li data-page-node-id="IV8wXA39vQHG3KnjGDJNxo"><strong data-page-node-id="nqP4uQChFUvO3097g4RSgF">调试器增强</strong>：条件断点 <code data-page-node-id="rEufboPYetYaUxdEJFgeIV">breakpoint if (expr);</code>（条件为 bool 才暂停）；
+        断点提示支持交互命令 <code data-page-node-id="r7o3t8KxKXsMAaCLtZrLUD">c</code> 继续 / <code data-page-node-id="NXXewIA4dusDKu0CvtmAQu">q</code> 退出 / <code data-page-node-id="UdJHqBbtnrrIbmdiK5HBDP">p &lt;expr&gt;</code> 即时求值 /
+        <code data-page-node-id="ynr1bMZ7rp1QchnVEca0Vo">w &lt;name&gt;</code> 监视变量 / <code data-page-node-id="G6cPl3f3ih7bzP5V8sIF60">u &lt;name&gt;</code> 取消监视</li>
+      <li data-page-node-id="JrRxzcqY04uBn4mWEr5SUo"><strong data-page-node-id="moaD0eLdwAbv4cHkHaPhFY">prof 剖析增强</strong>：新增自耗时（排除子调用）与占比列、调用图输出、总览行</li>
+      <li data-page-node-id="oyhCXC2UpGbsfuuHCdDMy5"><strong data-page-node-id="QRdLssJ8mBG3q5UmxvEQFO">fmt 格式化增强</strong>：新增 <code data-page-node-id="O2qbLBE6SKXepGjH7M9rlD">-c/--check</code> 检查模式（逐文件报告差异，CI 友好），与 <code data-page-node-id="fsG1MdGestbn3bYJgUmGS4">-w</code> 互斥</li>
+      <li data-page-node-id="pPOs3a5L448LLaMqGs7scm"><strong data-page-node-id="cRuBG2CTBhOTY5yIvHALOw">新增 <code data-page-node-id="6zYsxdaWhwsuqc44DLo34Y">hone doc</code> 工具</strong>：扫描 fn/class 定义及其上方 <code data-page-node-id="krCsVviw8thQD81GAY3s05">//</code> 注释，生成 Markdown API 文档</li>
+      <li data-page-node-id="Wmja2ufVijOLPzymPlXCXu"><strong data-page-node-id="zFReH1MwiyeB0vyGaLUu3h">修复</strong>：debug 构建主线程栈溢出——改为 64MB 栈专用线程执行命令逻辑，
+        递归脚本（如 <code data-page-node-id="rXSUbZ9nq8yuimMz1c7ZXE">fib(26)</code>）在 debug 构建下恢复正常</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.6.8</span><span class="date">2026-08-18</span>
-    <h4>新增（新语法）</h4>
-    <ul>
-      <li><strong>多返回值</strong>：<code>return a, b, ...;</code> 一次返回多个值，运行时打包为列表，
-        由解构赋值 <code>a, b = f()</code> 接收</li>
-      <li><strong>解构赋值</strong>：列表 <code>a, b = [1, 2]</code> 按位置绑定；
-        字典 <code>{a, b} = dict</code> / 改名 <code>{a: x, b: y} = dict</code> 按键取出</li>
-      <li><strong>列表/字典推导式</strong>：<code>[expr for x in iter (if cond)]</code> 与
-        <code>{key: value for ...}</code> 一行生成集合（字典键必须为 str）</li>
-      <li><strong>可选链 <code>?.</code></strong>：<code>a?.b</code> 在 a 为 null 时短路返回 null，
-        可链式 <code>a?.b?.c</code>；混合链 <code>a?.b.c</code> 与 JS 语义一致</li>
+  <div class="release" data-page-node-id="16Y0ZmSErKss1dXT9r0iYA">
+    <span class="ver-tag" data-page-node-id="OSEe8RRpNbSw1eHfFcED2T">v0.6.8</span><span class="date" data-page-node-id="YpgQCUwQzvg36VqNa2otet">2026-08-18</span>
+    <h4 data-page-node-id="YgEpED6LhkVMIm0TjgyjHq">新增（新语法）</h4>
+    <ul data-page-node-id="HDhdLDEgKekaEk9FSfHrCx">
+      <li data-page-node-id="O8H9EFOmSLtFh6qijLtTbg"><strong data-page-node-id="p3JmrqJn13o8G9dGIieXAR">多返回值</strong>：<code data-page-node-id="HAeFNoSEuJaGa5FjNpNGry">return a, b, ...;</code> 一次返回多个值，运行时打包为列表，
+        由解构赋值 <code data-page-node-id="ICLJO0yEa6sB1eQ6R25aGg">a, b = f()</code> 接收</li>
+      <li data-page-node-id="ozPTNIo3dJIbGiu7ES5sry"><strong data-page-node-id="vCPcDuURI38rqmsHcUrSrg">解构赋值</strong>：列表 <code data-page-node-id="DIarWhB0CNfkXtIF87e15L">a, b = [1, 2]</code> 按位置绑定；
+        字典 <code data-page-node-id="673cnMSc87AeznclO8JihL">{a, b} = dict</code> / 改名 <code data-page-node-id="8Oi4xMjl5WWPRYZjdSxaAL">{a: x, b: y} = dict</code> 按键取出</li>
+      <li data-page-node-id="vwouUfZzvS542oXlQtXH7A"><strong data-page-node-id="Wb7Y4aTpY6PkzOhdQszQBU">列表/字典推导式</strong>：<code data-page-node-id="NN5KVD2at2Ztt8bqarV0lN">[expr for x in iter (if cond)]</code> 与
+        <code data-page-node-id="n96st46mgGETMe1GH2IHIt">{key: value for ...}</code> 一行生成集合（字典键必须为 str）</li>
+      <li data-page-node-id="XjLNpwA5GUye0C2AomJhDH"><strong data-page-node-id="OUCGgqOhiHlJBxcVgpp01v">可选链 <code data-page-node-id="eJXV5ic1zxjflYilOOCcZx">?.</code></strong>：<code data-page-node-id="gAuQ8uvolMAOTMKHwEIops">a?.b</code> 在 a 为 null 时短路返回 null，
+        可链式 <code data-page-node-id="n8Lg1R75fRBvdMoKXSjYRW">a?.b?.c</code>；混合链 <code data-page-node-id="D5wse4SKb7VwEijeOD4UUZ">a?.b.c</code> 与 JS 语义一致</li>
     </ul>
-    <h4>新增（TLS 根证书回退）</h4>
-    <ul>
-      <li>内置根证书校验失败自动回退<strong>系统根证书</strong>（Windows ROOT 证书库 / LinuxTermux 系统 CA bundle），
+    <h4 data-page-node-id="3DvOXkdXOpB8rEQpCSE3V9">新增（TLS 根证书回退）</h4>
+    <ul data-page-node-id="O6TFTGNB89kc3jLEjyGcfo">
+      <li data-page-node-id="XEnJWD5IqAWOY7ZFdazsDV">内置根证书校验失败自动回退<strong data-page-node-id="7OGwFnBfZHue9UzJ7Ri7Fx">系统根证书</strong>（Windows ROOT 证书库 / LinuxTermux 系统 CA bundle），
         防内置根证书过期导致 https/wss 无法连接</li>
-      <li>用户信任根：<code>HONE_CA_BUNDLE</code> / <code>~/.hn/ca.pem</code>，可信任私有 CA 的
-        <strong>根证书与中间证书</strong>；中间证书注入链构建，服务器不随链发送也能验证</li>
-      <li>覆盖 <code>http_get</code> / <code>http_post</code> / <code>http.request</code>、
-        <code>smtp.send</code>（隐式 TLS / STARTTLS）、<code>ws.request</code>（wss://）</li>
+      <li data-page-node-id="XFSlx8NxTMqL3ezvRrmiU3">用户信任根：<code data-page-node-id="LFubGxDTcP8jnwpX4BXNGv">HONE_CA_BUNDLE</code> / <code data-page-node-id="3v4rHs90CYVoT9baaw0suI">~/.hn/ca.pem</code>，可信任私有 CA 的
+        <strong data-page-node-id="VCgC61SrWEWI6pYEM59Zjq">根证书与中间证书</strong>；中间证书注入链构建，服务器不随链发送也能验证</li>
+      <li data-page-node-id="qPS2A6ONXndN8ACXz4vcML">覆盖 <code data-page-node-id="M2CIfAxySKmAXT5qwDRjES">http_get</code> / <code data-page-node-id="B2hq39TBd08bIZVX9ArHnq">http_post</code> / <code data-page-node-id="3SjqBHB3A4ljeOk28dfOZc">http.request</code>、
+        <code data-page-node-id="9GuXHlM9aLzQuGRntpK90n">smtp.send</code>（隐式 TLS / STARTTLS）、<code data-page-node-id="FbRTk5nFJGxWPv9RIZEPLc">ws.request</code>（wss://）</li>
     </ul>
-    <h4>文档</h4>
-    <ul>
-      <li>hone.md（1.16-1.19 新语法、3.22 TLS 回退）、官网 docs.html（§7.7 新语法、§8 TLS 说明）/
+    <h4 data-page-node-id="BX2mlh8eieu79Bmm0cMgGJ">文档</h4>
+    <ul data-page-node-id="m6Y04PlAU36AioEd59OVKW">
+      <li data-page-node-id="JJMqOLxHDsX8MjIY4T0iEA">hone.md（1.16-1.19 新语法、3.22 TLS 回退）、官网 docs.html（§7.7 新语法、§8 TLS 说明）/
         tutorial.html（可选链交叉引用）/ changelog.html（v0.6.8 条目）同步更新</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.6.7</span><span class="date">2026-08-18</span>
-    <h4>新增（交互式解释器）</h4>
-    <ul>
-      <li><strong><code>hone repl</code></strong>：进入 Python 式交互环境——表达式自动回显、
-        未闭合大括号自动续行（<code>...</code> 提示）、语句省略结尾 <code>;</code> 自动补全、
+  <div class="release" data-page-node-id="h5gpRsbWOPmHaQlqb4NH8J">
+    <span class="ver-tag" data-page-node-id="M14Qq2fUCpxAkNcN252DDE">v0.6.7</span><span class="date" data-page-node-id="a0biaAPdaVM1bqfjYmgyYd">2026-08-18</span>
+    <h4 data-page-node-id="LtPyW6BRtugbGApOGX53oW">新增（交互式解释器）</h4>
+    <ul data-page-node-id="YoQTI4cwTBvwM8Db9lhZ4V">
+      <li data-page-node-id="jZGAbkqh225XnRq8OtwPrO"><strong data-page-node-id="vtSjnuAjJ1gPwLCPjDKqGc"><code data-page-node-id="p7Dm4eLiVNhXBxEK5iBrVF">hone repl</code></strong>：进入 Python 式交互环境——表达式自动回显、
+        未闭合大括号自动续行（<code data-page-node-id="kkJYFpPGdx39AHnwdoimpt">...</code> 提示）、语句省略结尾 <code data-page-node-id="69LhGk2TPrBSxrhr6FnObT">;</code> 自动补全、
         跨输入共享变量与函数定义</li>
-      <li>特殊命令：<code>exit()</code> / <code>quit()</code> / <code>.exit</code> / <code>.quit</code> 退出，
-        <code>.vars</code> 查看已定义变量与函数，<code>.help</code> 内置帮助，Ctrl+D / Ctrl+Z 结束输入</li>
-      <li>REPL 不做静态类型检查（跨行变量无法增量检查），类型错误在运行期报出；
-        裸字面量（如 <code>1+1</code>）按单表达式解析回显</li>
+      <li data-page-node-id="7pSEN5bfyMkL5DbKzexk0g">特殊命令：<code data-page-node-id="b8kNwEHFunHeHZ59Nbc0ib">exit()</code> / <code data-page-node-id="wF4oQeg4BR1OQpRRY3fgFm">quit()</code> / <code data-page-node-id="yamufNsUWSs3NY8eLHjlMz">.exit</code> / <code data-page-node-id="uqEYGYWJqsFMJAuJtnu4aF">.quit</code> 退出，
+        <code data-page-node-id="wKGAoshLIiCeBYsz6FozXR">.vars</code> 查看已定义变量与函数，<code data-page-node-id="QIutUVHAtuyaACjvHwIFRF">.help</code> 内置帮助，Ctrl+D / Ctrl+Z 结束输入</li>
+      <li data-page-node-id="wkyGFIroMFQVGb3UoxEWFf">REPL 不做静态类型检查（跨行变量无法增量检查），类型错误在运行期报出；
+        裸字面量（如 <code data-page-node-id="mwoX8FzbDJymBiPGYJjDak">1+1</code>）按单表达式解析回显</li>
     </ul>
-    <h4>文档</h4>
-    <ul>
-      <li>官网 docs.html（§10 工具链：命令表 + hone repl 使用指南）、index.html（快速开始命令表）、
+    <h4 data-page-node-id="ugbtAcemAm5IfnJmVuONw6">文档</h4>
+    <ul data-page-node-id="vQGEcmgr4K85TQZammD8xl">
+      <li data-page-node-id="cyRLhQjBqgAj6SpNQdK3ZI">官网 docs.html（§10 工具链：命令表 + hone repl 使用指南）、index.html（快速开始命令表）、
         changelog.html（v0.6.7 条目）同步更新</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.6.6</span><span class="date">2026-08-17</span>
-    <h4>新增（性能分析）</h4>
-    <ul>
-      <li><strong><code>hone prof &lt;script.hn&gt;</code></strong>：以剖析模式运行脚本，统计每个用户函数的
+  <div class="release" data-page-node-id="XYc54ZuJkZwwLzb6Z0ni1K">
+    <span class="ver-tag" data-page-node-id="e4BAhoV1ZMXifQWSD7dL2D">v0.6.6</span><span class="date" data-page-node-id="2bU3Uau493qEdxKoLfh5DX">2026-08-17</span>
+    <h4 data-page-node-id="wK9AqiXZbb0Xi7FIsCLjlq">新增（性能分析）</h4>
+    <ul data-page-node-id="UPOqMAjyfKnNGEnMDQKPGs">
+      <li data-page-node-id="nFwD9hZUtuIzcqTCWZ3Yht"><strong data-page-node-id="Z3Buc44qmBHliMDiLqczru"><code data-page-node-id="08kAWLWj5jAF0A7M4CzwmG">hone prof &lt;script.hn&gt;</code></strong>：以剖析模式运行脚本，统计每个用户函数的
         总耗时 / 调用次数 / 平均耗时（纳秒级计时），按总耗时降序输出控制台表格</li>
-      <li>lambda 调用统一归入 <code>(lambda)</code> 条目；未调用任何用户函数时提示
-        <code>(未调用任何用户函数)</code>；剖析仅在 prof 模式下启用，普通运行零开销</li>
-      <li>用法：<code>hone prof examples/fib.hn</code> 找出热点函数，配合 <code>hone poop</code> 评估复杂度优先优化</li>
+      <li data-page-node-id="0ncl8l0Ot3eu6KEouZrbLk">lambda 调用统一归入 <code data-page-node-id="275AFQp9oBEWizWP7qARWs">(lambda)</code> 条目；未调用任何用户函数时提示
+        <code data-page-node-id="vZCr998YhSFsds8htzUla9">(未调用任何用户函数)</code>；剖析仅在 prof 模式下启用，普通运行零开销</li>
+      <li data-page-node-id="0l550tYxhQnCoD9AKB4nNQ">用法：<code data-page-node-id="g1iQA7pPdF198BXwNLZ8pF">hone prof examples/fib.hn</code> 找出热点函数，配合 <code data-page-node-id="myv1HOQgXpyKl2GJy1DAAZ">hone poop</code> 评估复杂度优先优化</li>
     </ul>
-    <h4>文档</h4>
-    <ul>
-      <li>hone.md（工具链命令）、README（命令清单）、
+    <h4 data-page-node-id="S85seI5jXyYtoR4x5fq4xF">文档</h4>
+    <ul data-page-node-id="DRdsLza9Uk6B9R3p7gjzay">
+      <li data-page-node-id="4cPrgX4h5iY9z8Ciw4J1Go">hone.md（工具链命令）、README（命令清单）、
         官网 docs.html（§15 工具链）/ index.html（快速开始命令表）/ changelog.html（v0.6.6 条目）同步更新</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.6.5</span><span class="date">2026-08-17</span>
-    <h4>新增（模块清单 hone.json）</h4>
-    <ul>
-      <li><strong>模块清单 <code>hone.json</code></strong>（类似 package.json / Cargo.toml）：项目根目录集中声明
-        <code>name</code> / <code>version</code> / <code>modules</code> 依赖（模块名 → 源码 URL 或本地路径）</li>
-      <li><code>hone get</code>（不带参数）：读取当前目录 <code>hone.json</code> 清单，批量下载全部模块到 ~/.hone/cache/</li>
-      <li><code>hone get &lt;module&gt; &lt;url&gt;</code>：下载单个模块并自动写入 / 更新 <code>hone.json</code> 清单
+  <div class="release" data-page-node-id="LAdi4msGh5OJJbrSCMSvra">
+    <span class="ver-tag" data-page-node-id="SnZUCSeHwERn8CtnGn587F">v0.6.5</span><span class="date" data-page-node-id="aCWTvEdIGTGOaYPndMgkiz">2026-08-17</span>
+    <h4 data-page-node-id="Zfvr9qMzopjI1oI0kGIvGX">新增（模块清单 hone.json）</h4>
+    <ul data-page-node-id="KxqM8gWHsCZlFeU2y2iP3s">
+      <li data-page-node-id="Iv0S5n6PcX9YFP6UxBhsVa"><strong data-page-node-id="0HfzRvDjMBdgsWKnjWIA3e">模块清单 <code data-page-node-id="GbtxJK444uI0ovXMk8Q5dM">hone.json</code></strong>（类似 package.json / Cargo.toml）：项目根目录集中声明
+        <code data-page-node-id="Jnv98I0Ck8KZ53v2Cwkzmk">name</code> / <code data-page-node-id="LsoV77bhNgys5odhNAtSMF">version</code> / <code data-page-node-id="yNBTdWufwdt7dEEFmwQOTv">modules</code> 依赖（模块名 → 源码 URL 或本地路径）</li>
+      <li data-page-node-id="O8TqXsx4ZWQNOfXHdtBeIz"><code data-page-node-id="Q14lC67U7uyw5r9UDElDXc">hone get</code>（不带参数）：读取当前目录 <code data-page-node-id="FRsPiXdmLVkKHEYbGk02mS">hone.json</code> 清单，批量下载全部模块到 ~/.hone/cache/</li>
+      <li data-page-node-id="eiJa4pf6sC2lJDUIw7xUOd"><code data-page-node-id="8xwzTsefC1VzpVEkW0I0U2">hone get &lt;module&gt; &lt;url&gt;</code>：下载单个模块并自动写入 / 更新 <code data-page-node-id="vHFAzjCNPXjdxYxNrMTVHL">hone.json</code> 清单
         （新建时 name 取目录名、version 默认 0.1.0）</li>
-      <li>模块 URL 非 http/https 开头按本地路径处理，直接读取源码（不联网），便于同仓库共享 hone_lib 等模块；
-        清单缺失报 <code>error[H404]</code>、JSON 语法错误报 <code>error[H005]</code></li>
+      <li data-page-node-id="MgKJ6GGGlP0mLxrmEz6sHS">模块 URL 非 http/https 开头按本地路径处理，直接读取源码（不联网），便于同仓库共享 hone_lib 等模块；
+        清单缺失报 <code data-page-node-id="FgFvOniDRUBXewC5vJeHvt">error[H404]</code>、JSON 语法错误报 <code data-page-node-id="UnEqIOOBgTwlZgd9Rc1wjv">error[H005]</code></li>
     </ul>
-    <h4>文档</h4>
-    <ul>
-      <li>hone.md（4.3.1 模块清单教程、工具链命令）、README（命令与导入章节）、
+    <h4 data-page-node-id="atr3cIrFQAjxj4djEKXeEZ">文档</h4>
+    <ul data-page-node-id="2HGEoFvw7VMXqbUkvs8jlf">
+      <li data-page-node-id="UU1664yQZD1CgFdCdSCXWu">hone.md（4.3.1 模块清单教程、工具链命令）、README（命令与导入章节）、
         官网 docs.html（§15 工具链）/ index.html（快速开始命令表）同步更新</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.6.4</span><span class="date">2026-08-17</span>
-    <h4>新增（标准输入函数）</h4>
-    <ul>
-      <li><strong>input(prompt?)</strong>：从标准输入读取一行返回 <code>str</code>（去除行尾换行），
-        可选提示文本（须为 <code>str</code>，如 <code>input("请输入名字: ")</code>）；EOF（管道关闭 / Ctrl+Z / Ctrl+D）抛
-        <code>error[H306]</code>，可用 try-catch 捕获降级</li>
-      <li><strong>read_int(prompt?)</strong> / <strong>read_float(prompt?)</strong>：读取一行并解析为
-        <code>int</code> / <code>float</code>，格式非法分别抛 <code>error[H006]</code> / <code>error[H007]</code></li>
-      <li>新增错误码 <strong>H306</strong>（标准输入读取失败 / EOF）及 <code>hone explain H306</code> 说明</li>
-      <li>新增示例 <code>examples/input_demo.hn</code>（input / read_int / read_float / EOF try-catch 演示）、
-        <code>examples/input_default_demo.hn</code>（输入默认值 / EOF 降级演示）</li>
+  <div class="release" data-page-node-id="5EQFvfRmAzzn9eLUeLkLoY">
+    <span class="ver-tag" data-page-node-id="etDYNjBTP7u5R7Mf7zmnRo">v0.6.4</span><span class="date" data-page-node-id="XJQBQd3koTsL0aKIc9W2KR">2026-08-17</span>
+    <h4 data-page-node-id="LqH4Xvpm9pJfFuRQXUlJyX">新增（标准输入函数）</h4>
+    <ul data-page-node-id="JHwFAhcYVtzICludyMSanC">
+      <li data-page-node-id="ZqjIrdoDvVAEE8C07wck3g"><strong data-page-node-id="WXPxAEC9vF6KCblOZvQhzt">input(prompt?)</strong>：从标准输入读取一行返回 <code data-page-node-id="bIBFCcFRfm9Qeiy5qUQBQk">str</code>（去除行尾换行），
+        可选提示文本（须为 <code data-page-node-id="DpwPCb9zN6NQ5mKWcfBesX">str</code>，如 <code data-page-node-id="PpgCnH9B31S19GYGLNAiOT">input("请输入名字: ")</code>）；EOF（管道关闭 / Ctrl+Z / Ctrl+D）抛
+        <code data-page-node-id="JxDSSKIqU7QQRxCchsBmxF">error[H306]</code>，可用 try-catch 捕获降级</li>
+      <li data-page-node-id="BEsXUWKr6zlF8BFDa9S9bX"><strong data-page-node-id="RqBAlkd3FvjoRUVdxxRxeI">read_int(prompt?)</strong> / <strong data-page-node-id="GWBQRZGqP6OLR4w9pD5Oda">read_float(prompt?)</strong>：读取一行并解析为
+        <code data-page-node-id="STDEZbTHbwUCEOrQ8wG64B">int</code> / <code data-page-node-id="6gWeRrNHaBNVpH6cSOpnmG">float</code>，格式非法分别抛 <code data-page-node-id="f27LR6V3LTv23m6q27BBI2">error[H006]</code> / <code data-page-node-id="KQCr39x6zVxpjjhGC4EO0D">error[H007]</code></li>
+      <li data-page-node-id="We0v0VUSbRLV8ZmD5pQqoK">新增错误码 <strong data-page-node-id="4JtH75sSnviaxCOQzkUhV5">H306</strong>（标准输入读取失败 / EOF）及 <code data-page-node-id="0f4WEhUeuLhEb6vbD1EHaR">hone explain H306</code> 说明</li>
+      <li data-page-node-id="eEjvkaKn2v1jC97PYwaHys">新增示例 <code data-page-node-id="oBeP8UUOEG4PUqKItDzGxQ">examples/input_demo.hn</code>（input / read_int / read_float / EOF try-catch 演示）、
+        <code data-page-node-id="YBXYmmhksiVUhAStxlRo1h">examples/input_default_demo.hn</code>（输入默认值 / EOF 降级演示）</li>
     </ul>
-    <h4>文档</h4>
-    <ul>
-      <li>README（内置功能 + 错误码表）、hone.md（3.1 基础内置函数、3.1.1 输入默认值教程、5.2 错误码）、
+    <h4 data-page-node-id="RX4MiuVdVsxF4bDaqzt9XI">文档</h4>
+    <ul data-page-node-id="FVHNwikwxSWeJs2yMtUG3m">
+      <li data-page-node-id="KMDfeArYqPyalEWOf8EGVO">README（内置功能 + 错误码表）、hone.md（3.1 基础内置函数、3.1.1 输入默认值教程、5.2 错误码）、
         官网 docs.html（§8 内置函数参考 + 输入默认值教程）/ stdlib.html / changelog.html /
         examples.html（5.15 输入默认值示例）/ index.html 同步更新</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.6.3</span><span class="date">2026-08-16</span>
-    <h4>新增（新语法）</h4>
-    <ul>
-      <li><strong>continue 关键字</strong>：跳过本次循环剩余语句进入下一次迭代（与 <code>break</code> 相对，仅循环体内合法）</li>
-      <li><strong>C 风格 for</strong>：<code>for (init; cond; step) { ... }</code> 三段式循环，各段可省略（<code>for (;;)</code> 无限循环配合 <code>break</code>）</li>
-      <li><strong>do-while 循环</strong>：<code>do { ... } while (cond);</code> 先执行循环体再判断条件（至少执行一次）</li>
-      <li><strong>复合赋值</strong>：<code>+=</code> <code>-=</code> <code>*=</code> <code>/=</code> <code>%=</code>（str 仅支持 <code>+=</code> 拼接）；<strong>自增/自减</strong>：<code>i++</code> <code>i--</code>（后缀返回旧值）、<code>++i</code> <code>--i</code>（前缀返回新值）</li>
-      <li><strong>三元表达式</strong>：<code>cond ? a : b</code>（右结合可嵌套）；<strong>空值合并</strong>：<code>a ?? b</code>（a 为 null 取 b，短路求值）</li>
-      <li><strong>匿名函数 lambda</strong>：<code>fn(x) { ... }</code> 一等值（可赋值/传参/返回），创建时按值捕获环境（闭包），经变量名动态调用</li>
-      <li><strong>函数默认参数</strong>：<code>fn f(a, b = 10)</code> 调用可省略尾部实参；默认表达式调用时求值、可引用前面参数；必选参数位于默认参数之前；lambda 同样支持；<code>hone build --dll</code> 暂不支持（明确报错）</li>
-      <li><strong>三引号原始字符串</strong>：<code>"""..."""</code> 多行字符串，不做转义处理、原样保留换行与缩进</li>
-      <li>新增综合示例 <code>examples/new_syntax_demo.hn</code>（覆盖全部新语法，含 fmt 往返验证）</li>
+  <div class="release" data-page-node-id="o4EZdDMgQDq611wGvQ340f">
+    <span class="ver-tag" data-page-node-id="s3HfINbnnYeJ3uffO6jG8l">v0.6.3</span><span class="date" data-page-node-id="PJ7shZBeZvHFtmRxbxwHUO">2026-08-16</span>
+    <h4 data-page-node-id="K62bK5FdIeKwvgQH4lo3OK">新增（新语法）</h4>
+    <ul data-page-node-id="WHAkzBC1irCu4GDe7FEPBT">
+      <li data-page-node-id="SGBaGAefgsR9UfOAzUngeG"><strong data-page-node-id="sb4FgIXxSJVs9gyfX45Jk4">continue 关键字</strong>：跳过本次循环剩余语句进入下一次迭代（与 <code data-page-node-id="7tK0RgEaNSJdAnWTzASPcS">break</code> 相对，仅循环体内合法）</li>
+      <li data-page-node-id="pNycKjxAnBWu1SjHihf0kx"><strong data-page-node-id="MvaNpCVHvA9Fr1LsTZQG2v">C 风格 for</strong>：<code data-page-node-id="qBO6pt1qxhD7a9TwCoSqUi">for (init; cond; step) { ... }</code> 三段式循环，各段可省略（<code data-page-node-id="OoAplc1KaX9u1XdkCE2uq5">for (;;)</code> 无限循环配合 <code data-page-node-id="1C45vZ1vLo1HeqHKLsWFJD">break</code>）</li>
+      <li data-page-node-id="1x1JKj50JstGWyga4L6XDY"><strong data-page-node-id="7OjfkDyYbeiOI1QVjsT7df">do-while 循环</strong>：<code data-page-node-id="PSdxNrqUU7Y64NhWIFDDaA">do { ... } while (cond);</code> 先执行循环体再判断条件（至少执行一次）</li>
+      <li data-page-node-id="yDqeulcY8611ZCyY6fk8KS"><strong data-page-node-id="gATkSHnD1f7s8Ga68FzQgp">复合赋值</strong>：<code data-page-node-id="VY8LGTGAQlSjVbdrsnA0wK">+=</code> <code data-page-node-id="p0rejEwYE84BdzGNxMWqEl">-=</code> <code data-page-node-id="2c8ox13uBwViLLxuKLXnXe">*=</code> <code data-page-node-id="uNmI7zZMlnQndnHjW1Y7p1">/=</code> <code data-page-node-id="a6OZpyt7P0qeAOCHesIDxg">%=</code>（str 仅支持 <code data-page-node-id="XLP4QGSzFiQBbzDFOevLQY">+=</code> 拼接）；<strong data-page-node-id="cx3Rjq4ewxDDIH6F3YTdvP">自增/自减</strong>：<code data-page-node-id="ZuucrOAnAz78QCpNzVLmAp">i++</code> <code data-page-node-id="EhumHQjn4tuckZWQp5MrxV">i--</code>（后缀返回旧值）、<code data-page-node-id="JTVmOoHVkGyqMoDkQr3JWu">++i</code> <code data-page-node-id="9x2TE72BfDOfAJ3pjDea1V">--i</code>（前缀返回新值）</li>
+      <li data-page-node-id="nN17OXicAzMtHEecyLDroO"><strong data-page-node-id="Duo6cyxvBN5SOwvb7EXF5s">三元表达式</strong>：<code data-page-node-id="jwLNRtgOEkZeLiwooddBOu">cond ? a : b</code>（右结合可嵌套）；<strong data-page-node-id="GZH01p7ZBm2H7zIEqMPCZg">空值合并</strong>：<code data-page-node-id="pPzVulKWM4zIescLxqcpwp">a ?? b</code>（a 为 null 取 b，短路求值）</li>
+      <li data-page-node-id="XRdeSPGmPycK8kpOAheQBC"><strong data-page-node-id="36M9NmKhnytKt0ms7disRj">匿名函数 lambda</strong>：<code data-page-node-id="vr7JaH5UJETKOECRzo3c11">fn(x) { ... }</code> 一等值（可赋值/传参/返回），创建时按值捕获环境（闭包），经变量名动态调用</li>
+      <li data-page-node-id="Bl2zQz0tZgsUxgERGIa5FO"><strong data-page-node-id="GTd3kDIc9AdXTvBIJYv6if">函数默认参数</strong>：<code data-page-node-id="rjKXSqKPhXzKI2BEoHRjbe">fn f(a, b = 10)</code> 调用可省略尾部实参；默认表达式调用时求值、可引用前面参数；必选参数位于默认参数之前；lambda 同样支持；<code data-page-node-id="SiGGeAgDaEn7kXTtud4hGa">hone build --dll</code> 暂不支持（明确报错）</li>
+      <li data-page-node-id="agBxV3VQHWSKg3DrcGWzla"><strong data-page-node-id="7g5J71r7x3opsCeQVMuUWT">三引号原始字符串</strong>：<code data-page-node-id="nAkdq1Z1HZzuNwsjquFx6U">"""..."""</code> 多行字符串，不做转义处理、原样保留换行与缩进</li>
+      <li data-page-node-id="3PBEgng2fqUQ6KmWERDPQw">新增综合示例 <code data-page-node-id="NQcjlPQFZCw85JuT3YoxHI">examples/new_syntax_demo.hn</code>（覆盖全部新语法，含 fmt 往返验证）</li>
     </ul>
-    <h4>文档</h4>
-    <ul>
-      <li>hone.md（1.4 控制流、1.11–1.15 新语法章节）、CHANGELOG.md 同步更新</li>
-    </ul>
-  </div>
-
-  <div class="release">
-    <span class="ver-tag">v0.6.2</span><span class="date">2026-08-16</span>
-    <h4>新增</h4>
-    <ul>
-      <li><strong>process 进程检测标准库</strong>（<code>hone_lib/process.hn</code>，纯 Hone 编写）：
-        枚举进程、按名称/PID 查找、结束进程；Windows 用 <code>tasklist</code> / <code>taskkill</code>，
-        Unix 用 <code>ps</code> / <code>kill -9</code>，跨平台一致。函数：<code>proc_os</code> /
-        <code>proc_list</code> / <code>proc_find</code> / <code>proc_exists</code> / <code>proc_by_pid</code> /
-        <code>proc_count</code> / <code>proc_pids</code> / <code>proc_names</code> / <code>proc_kill</code> /
-        <code>proc_kill_by_name</code>；详见 <a href="stdlib.html#process">标准库文档</a></li>
-      <li><strong>sched 定时任务标准库</strong>（<code>hone_lib/sched.hn</code>，纯 Hone 编写）：
-        按间隔秒 / 每天指定时刻 / cron 表达式调度命令执行（命令字符串 + <code>sys.run</code>，跨平台）。
-        函数：<code>sch_every</code> / <code>sch_at</code> / <code>sch_cron</code> / <code>sch_run</code> /
-        <code>sch_tick</code> / <code>sch_next_hhmm</code> / <code>sch_cron_match</code> / <code>sch_cron_next</code>；
-        cron 5 段表达式支持 <code>*</code> / <code>a-b</code> / <code>*/n</code> / <code>a-b/n</code> / 逗号列表；
-        详见 <a href="stdlib.html#sched">标准库文档</a></li>
-      <li>新增示例 <code>examples/test_process_lib.hn</code>、<code>examples/test_sched_lib.hn</code></li>
-    </ul>
-    <h4>文档</h4>
-    <ul>
-      <li>官网 stdlib.html（#8 process、#9 sched 章节）、docs.html（#14 进程检测库、#15 定时任务库章节）同步更新</li>
+    <h4 data-page-node-id="y5OtEYHUR6tBmNgEA0Ch2U">文档</h4>
+    <ul data-page-node-id="Edr5W36VhNmQPDtIcEqLue">
+      <li data-page-node-id="cuOW9zXRStwu9uf0xa8jhi">hone.md（1.4 控制流、1.11–1.15 新语法章节）、CHANGELOG.md 同步更新</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.6.1</span><span class="date">2026-08-14</span>
-    <h4>性能（解释器深度优化）</h4>
-    <ul>
-      <li><strong>函数定义 <code>Arc</code> 共享</strong>：消除每次调用的 AST 深拷贝（递归 fib(26) 约 3.4s → 1.6s）</li>
-      <li><strong>循环作用域复用 + 原地赋值更新</strong>：消除每轮迭代的堆分配与 String 分配
+  <div class="release" data-page-node-id="VOIsQOSzAmJVUg36YRDk6D">
+    <span class="ver-tag" data-page-node-id="gtfCE9EPkYSTz9wn8IHuSt">v0.6.2</span><span class="date" data-page-node-id="5cDjuCL11aKrmrDdUfTB47">2026-08-16</span>
+    <h4 data-page-node-id="H5JkyysNrh8c4Fs5YemZpE">新增</h4>
+    <ul data-page-node-id="YS0zQwDGbhArzMFC7yogpc">
+      <li data-page-node-id="lj1QUVZpPb1R33TgES8uTn"><strong data-page-node-id="YsVaOEETshzh2Wwyg3DzIR">process 进程检测标准库</strong>（<code data-page-node-id="K3nUzOR5J6FVeKprdAaiyu">hone_lib/process.hn</code>，纯 Hone 编写）：
+        枚举进程、按名称/PID 查找、结束进程；Windows 用 <code data-page-node-id="arXt5nTuPcGW4UAtMrcbfJ">tasklist</code> / <code data-page-node-id="rQEoiDFRORdnc17FoqqGr3">taskkill</code>，
+        Unix 用 <code data-page-node-id="iV2YpzwviO9FAs74Jvm73y">ps</code> / <code data-page-node-id="MqzApX8d60dv6v2mbG53tT">kill -9</code>，跨平台一致。函数：<code data-page-node-id="EuBEcTyb3lpQRUGVvWn9CJ">proc_os</code> /
+        <code data-page-node-id="Dc0CRoBa1VIqfCnmRLbdgo">proc_list</code> / <code data-page-node-id="Ln7GKL8VcChybDyMpcBs2l">proc_find</code> / <code data-page-node-id="8wdXuQeEnTsq9aBlFh9Ga4">proc_exists</code> / <code data-page-node-id="s3D9Cr4rkLh8BVHCuoqETx">proc_by_pid</code> /
+        <code data-page-node-id="FZgkHzpTS1gdlHWGxdaR95">proc_count</code> / <code data-page-node-id="INwnmT3q4PEegn3vUAavuP">proc_pids</code> / <code data-page-node-id="BCpcHWxu63dJwEmHjCAhc8">proc_names</code> / <code data-page-node-id="mficWtbDNJMf8aO0wF8zJf">proc_kill</code> /
+        <code data-page-node-id="ISRzu1aLOZFGTsX7KiBX4T">proc_kill_by_name</code>；详见 <a href="stdlib.html#process" data-page-node-id="sYkAT2h31pMW3EFei8dl9d">标准库文档</a></li>
+      <li data-page-node-id="VUDZ4YDxBpjMx2pyGoNuJb"><strong data-page-node-id="40X0QIikjWICslgIq6rAjj">sched 定时任务标准库</strong>（<code data-page-node-id="BUiLfjk6yTSV0WXkGjgti4">hone_lib/sched.hn</code>，纯 Hone 编写）：
+        按间隔秒 / 每天指定时刻 / cron 表达式调度命令执行（命令字符串 + <code data-page-node-id="QcNUBNV3wYQqqjWTD5ybdO">sys.run</code>，跨平台）。
+        函数：<code data-page-node-id="LjV9YH0doDHhDPVg8D1TPV">sch_every</code> / <code data-page-node-id="7Btrh61Kjt0xzFjYJ9Xwta">sch_at</code> / <code data-page-node-id="TEqc0fqZTYB9eHvSXjQUre">sch_cron</code> / <code data-page-node-id="PxG6o1GQg6UIbhC3uy7R0g">sch_run</code> /
+        <code data-page-node-id="0UG1qLnP9wqZkbGlvsPRBP">sch_tick</code> / <code data-page-node-id="9Hi5lMed2nCMzAD7J0SG8E">sch_next_hhmm</code> / <code data-page-node-id="pVHwJz6yTVgBjp4ATBJEkG">sch_cron_match</code> / <code data-page-node-id="EAoOQzjfk9fIg0oZYOb2h8">sch_cron_next</code>；
+        cron 5 段表达式支持 <code data-page-node-id="Hy0Z3UcSPmbZlKYa17KIb2">*</code> / <code data-page-node-id="AUMF5Y7a5lLDDnsSERQkOE">a-b</code> / <code data-page-node-id="Sj8HgyNlyKFAwdAeq70ZKm">*/n</code> / <code data-page-node-id="fig8zTvmtLK5icgnbWnc4A">a-b/n</code> / 逗号列表；
+        详见 <a href="stdlib.html#sched" data-page-node-id="NJ5wG9wHD3roBggMYlu0Gs">标准库文档</a></li>
+      <li data-page-node-id="WQ5zdWEdIs4RvvCr5LjVUb">新增示例 <code data-page-node-id="soUaueabVv1ZzCfdGP7QhT">examples/test_process_lib.hn</code>、<code data-page-node-id="Fgl60QTvLR2WKol9uzdWYu">examples/test_sched_lib.hn</code></li>
+    </ul>
+    <h4 data-page-node-id="kXg67OmljLFJ2klZkns1IA">文档</h4>
+    <ul data-page-node-id="KgIGmovG2D3WDGd1aw3uiT">
+      <li data-page-node-id="MpyCkDhQssGVXCe5Et6OVb">官网 stdlib.html（#8 process、#9 sched 章节）、docs.html（#14 进程检测库、#15 定时任务库章节）同步更新</li>
+    </ul>
+  </div>
+
+  <div class="release" data-page-node-id="C3vM6qG1elxDE4AnmdC9kR">
+    <span class="ver-tag" data-page-node-id="cGxjqMOtyEcnqIJAFXzDBn">v0.6.1</span><span class="date" data-page-node-id="0Z2rld2OuQvKIItBlbbLMp">2026-08-14</span>
+    <h4 data-page-node-id="WoP2rl8bO6XTaIYzaKd6CY">性能（解释器深度优化）</h4>
+    <ul data-page-node-id="i83l6QA6qY0Z1JSwDMomea">
+      <li data-page-node-id="dkfv87lkWBx79wK7ooBVqe"><strong data-page-node-id="Oq2tI2xMDEEAnA1xcFZUMV">函数定义 <code data-page-node-id="wOrttj2RsEq4ETlg8rS0h0">Arc</code> 共享</strong>：消除每次调用的 AST 深拷贝（递归 fib(26) 约 3.4s → 1.6s）</li>
+      <li data-page-node-id="tA5zM7ENv5GMWs1MR86pB7"><strong data-page-node-id="CHTHzO0sEM905U0G8ZHaCw">循环作用域复用 + 原地赋值更新</strong>：消除每轮迭代的堆分配与 String 分配
         （2000 万次纯循环 71s → 42s；字符串拼接 20 万次 90s → 20s，预分配容量免 O(n²) 整串复制）</li>
-      <li>解释器整体基准提升约 40%–78%，语义完全不变；移除 <code>once_cell</code> 依赖（改用标准库
-        <code>LazyLock</code>）、清理死字段，编译警告清零</li>
-      <li>官网兼容 Android 8.1（Chrome 61 级 WebView）：flex <code>gap</code> 改为 margin 间距</li>
+      <li data-page-node-id="H8F0uouluC6VQXeuTA9dGz">解释器整体基准提升约 40%–78%，语义完全不变；移除 <code data-page-node-id="YByvMRnKowTNfhMNX1Lfgn">once_cell</code> 依赖（改用标准库
+        <code data-page-node-id="H6GeoxhikZ1wgz1WwRrCwN">LazyLock</code>）、清理死字段，编译警告清零</li>
+      <li data-page-node-id="qKvxdEkVGitHWBN0z2OhBZ">官网兼容 Android 8.1（Chrome 61 级 WebView）：flex <code data-page-node-id="bE1zpTzLtYUSyDfAs4wiFD">gap</code> 改为 margin 间距</li>
     </ul>
-    <h4>新增</h4>
-    <ul>
-      <li><strong>alias 别名增强</strong>：原名支持点号路径（<code>alias time.now as tnow;</code> 之后可
-        <code>tnow(...)</code> 调用），别名可叠加（别名再起别名）、可指向内置函数（<code>alias print as p;</code>）；
-        新增示例 <code>examples/alias_demo.hn</code></li>
-      <li><strong>music 乐理标准库</strong>（<code>hone_lib/music.hn</code>，纯 Hone 编写）：
+    <h4 data-page-node-id="Kb9EdK3nVp2GvI1kWVK4bg">新增</h4>
+    <ul data-page-node-id="UFdfDwDv13FzO05A8ybVeC">
+      <li data-page-node-id="hFcdD7MZevrJLyWHbWSCBK"><strong data-page-node-id="29nZ2GMwyz5JWntfK2xTIO">alias 别名增强</strong>：原名支持点号路径（<code data-page-node-id="ZoEQswLV758DYLhkJKTkkf">alias time.now as tnow;</code> 之后可
+        <code data-page-node-id="YMRbMIxwXNTB70MFfHd4hG">tnow(...)</code> 调用），别名可叠加（别名再起别名）、可指向内置函数（<code data-page-node-id="xlHxBT0l2D1uT57AUeK3eD">alias print as p;</code>）；
+        新增示例 <code data-page-node-id="g6iT9cWvTUBAfCSDlQS3iJ">examples/alias_demo.hn</code></li>
+      <li data-page-node-id="ZQ0QbsbH5hzWrb29WT7ZxZ"><strong data-page-node-id="akoyZktTkCmUtJYUhlzUzZ">music 乐理标准库</strong>（<code data-page-node-id="Dg9yDcWGcn0BG8XlMxlqTu">hone_lib/music.hn</code>，纯 Hone 编写）：
         音名 ↔ MIDI 编号 ↔ 频率换算、音阶与和弦生成（16 种音阶 / 20 种和弦）、时值与 BPM、
-        音程与移调、调号与调性、顺阶和声、音分与纯律比率；详见 <a href="stdlib.html#music">标准库文档</a></li>
+        音程与移调、调号与调性、顺阶和声、音分与纯律比率；详见 <a href="stdlib.html#music" data-page-node-id="KVwUHXcNQylwlVOqaAjBhD">标准库文档</a></li>
     </ul>
-    <h4>文档</h4>
-    <ul>
-      <li>hone.md（4.4 别名、6.2 编译优化实测说明）、README（性能基准表 + alias 用法 + 版本号同步）、
+    <h4 data-page-node-id="bhWaKBXScJmUooRraYzwe9">文档</h4>
+    <ul data-page-node-id="9qfMy96RGoWLKaPx4ESeTe">
+      <li data-page-node-id="5n4aU8trKXn3epHVuso1iu">hone.md（4.4 别名、6.2 编译优化实测说明）、README（性能基准表 + alias 用法 + 版本号同步）、
         官网 docs.html / examples.html / changelog.html / index.html 同步更新</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.6.0</span><span class="date">2026-08-09</span>
-    <h4>新增</h4>
-    <ul>
-      <li><strong>class 类</strong>：<code>class 名称 { fn 方法(...) { ... } }</code> 将相关函数组织成命名空间，
-        经 <code>类.方法(...)</code> 调用；<strong>成员函数不进全局符号表</strong>（裸名调用报 H002，同名全局函数可与类方法共存）；
-        类内互调用限定名；类名与 struct 名不重复；支持参数/返回值/递归/<code>-&gt; type</code> 注解</li>
-      <li><strong>泛型</strong>：<code>fn name[T, U](参数) -&gt; T</code> 声明类型参数，注解可引用（<code>x: T</code>）；
+  <div class="release" data-page-node-id="DoWfIeMRlVzsHE7FFBdRzB">
+    <span class="ver-tag" data-page-node-id="7Bs2BkPH8xpyXKTdle8PiA">v0.6.0</span><span class="date" data-page-node-id="pZjAx3vxk5KXfHChzWyAyq">2026-08-09</span>
+    <h4 data-page-node-id="CSACCsUiI0dKIknqqhMKIp">新增</h4>
+    <ul data-page-node-id="oKOsv8r18CJIVXoBviwamh">
+      <li data-page-node-id="DjgVLi7aO4tYrr8dzz1Nky"><strong data-page-node-id="8klHZRfJiSFbvNolLPeKSm">class 类</strong>：<code data-page-node-id="a1A0SUh3SYt7uNM9AteNjj">class 名称 { fn 方法(...) { ... } }</code> 将相关函数组织成命名空间，
+        经 <code data-page-node-id="STopA3ErbczBga7t3nv0UC">类.方法(...)</code> 调用；<strong data-page-node-id="lgapBJikktgH2mXvb9kibX">成员函数不进全局符号表</strong>（裸名调用报 H002，同名全局函数可与类方法共存）；
+        类内互调用限定名；类名与 struct 名不重复；支持参数/返回值/递归/<code data-page-node-id="tRCh5hv5HaTE02miBqu560">-&gt; type</code> 注解</li>
+      <li data-page-node-id="skeqv7SeHCOpqVtm0Ghx5A"><strong data-page-node-id="1DBZcPf5gZRcEuBpWM5mxP">泛型</strong>：<code data-page-node-id="4Jihqu1epwLDqFjFv5sfsR">fn name[T, U](参数) -&gt; T</code> 声明类型参数，注解可引用（<code data-page-node-id="VftyHzHjAnhjkJaDo2kZTx">x: T</code>）；
         调用时按实参自动推导，同一泛型函数可不同类型多次调用、互不锁定；
-        <strong>编译期擦除</strong>——运行期零成本、不产生重复代码；类方法同样支持泛型</li>
-      <li><strong>标准库大规模扩展</strong>（内置函数，开箱即用）：
-        <code>csv.*</code>（解析/序列化）、<code>yaml.*</code>、<code>glob.*</code> 与 <code>temp.*</code>、
-        <code>zlib.*</code> / <code>gzip</code> 压缩、<code>stat.*</code> 统计与 <code>matrix.*</code> 矩阵、
-        <code>diff.*</code> 文本对比与 <code>regex.find/groups/split</code>、
-        <code>time.add/diff/weekday</code>（<code>WW</code> 星期占位符）、
-        <code>http.request</code>（method/headers/body/timeout，可自定义 User-Agent）、
-        <code>smtp.send</code>（发邮件）、<code>ws.request</code>（WebSocket，支持 wss://）、
-        <code>plot.bar/line</code>（SVG 图表）、<code>sqlite.*</code>（运行时加载系统 libsqlite3，零 C 构建依赖）</li>
-      <li><strong>语言特性</strong>：点号后允许关键字作为模块成员名（如 <code>glob.match</code>、<code>random.int</code>、<code>plugin.load</code>）</li>
-      <li>新增示例 <code>examples/stdlib_test.hn</code>、<code>examples/class_test.hn</code>、<code>examples/generic_test.hn</code></li>
+        <strong data-page-node-id="bWNCsCW85XFEljQHK01Esm">编译期擦除</strong>——运行期零成本、不产生重复代码；类方法同样支持泛型</li>
+      <li data-page-node-id="FpAqV69qVnzOzaE5JJeVRM"><strong data-page-node-id="w99zb3thYCVlBmASDpLGf0">标准库大规模扩展</strong>（内置函数，开箱即用）：
+        <code data-page-node-id="UeHKmxoWx1KzDn7CvdvlJF">csv.*</code>（解析/序列化）、<code data-page-node-id="1YwQgCgAaukBklZpcnSLpw">yaml.*</code>、<code data-page-node-id="EVbaiaMKhhDVu4LfqVAImF">glob.*</code> 与 <code data-page-node-id="QSBEpzCDO3F3244GyciqDf">temp.*</code>、
+        <code data-page-node-id="AjhHpyXYTGCrbMxhH9hbt4">zlib.*</code> / <code data-page-node-id="axforfV0PWo1TZ4qyI4AYH">gzip</code> 压缩、<code data-page-node-id="OIHZee2noaCPAGblDxyEHb">stat.*</code> 统计与 <code data-page-node-id="6msaCekLy1EK7iJhgSe7zB">matrix.*</code> 矩阵、
+        <code data-page-node-id="iRhhCvEXzD89nQsrjuNMIa">diff.*</code> 文本对比与 <code data-page-node-id="jVFZVDlx9ZTB55YTh546S2">regex.find/groups/split</code>、
+        <code data-page-node-id="lG7U4DvBnUHCXYq3ZpRLc2">time.add/diff/weekday</code>（<code data-page-node-id="rv8hMaRn7ObAPUcLyH6kFu">WW</code> 星期占位符）、
+        <code data-page-node-id="dGgEZb1smxq1df5ObF33Pz">http.request</code>（method/headers/body/timeout，可自定义 User-Agent）、
+        <code data-page-node-id="HKLyAlP5gHTUUXD0TD96G2">smtp.send</code>（发邮件）、<code data-page-node-id="2p5kwDjJFA49iTebToiWPa">ws.request</code>（WebSocket，支持 wss://）、
+        <code data-page-node-id="emjOm6al5fIauLsFEVFkDE">plot.bar/line</code>（SVG 图表）、<code data-page-node-id="gCvrN8fvl2qPPLZCyDaYS7">sqlite.*</code>（运行时加载系统 libsqlite3，零 C 构建依赖）</li>
+      <li data-page-node-id="Tl0I9YsBnmvpcumf1FeCbd"><strong data-page-node-id="98w9YZ67gJEL0oHowk1yQL">语言特性</strong>：点号后允许关键字作为模块成员名（如 <code data-page-node-id="GMfsFCDV6xExWqywi6rrdH">glob.match</code>、<code data-page-node-id="bzyYZbcnoMIFktKyUdhnpV">random.int</code>、<code data-page-node-id="RcMk1ADMrCcDf3HZpnTfyk">plugin.load</code>）</li>
+      <li data-page-node-id="Gd4HACPQ2XKuRFbzdFFsyJ">新增示例 <code data-page-node-id="dhjp8UoHAKwf5tFEkGetpk">examples/stdlib_test.hn</code>、<code data-page-node-id="UCHJCxVu6dG0OaQyzbvXik">examples/class_test.hn</code>、<code data-page-node-id="kTkPcK3WHIG0sQTbJKUmXT">examples/generic_test.hn</code></li>
     </ul>
-    <h4>文档</h4>
-    <ul>
-      <li>README、hone.md、官网 docs.html / stdlib.html：补充 class 类、泛型与全部新标准库模块</li>
+    <h4 data-page-node-id="KKzAZg0reQ8x46N7iZUmDW">文档</h4>
+    <ul data-page-node-id="OOrGHGEPyOioKTFTOizhiD">
+      <li data-page-node-id="rubmWDyf6MFppdZyJxgWlY">README、hone.md、官网 docs.html / stdlib.html：补充 class 类、泛型与全部新标准库模块</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.6.0</span><span class="date">2026-08-08</span>
-    <h4>新增</h4>
-    <ul>
-      <li><strong>语言特性</strong>：<code>struct</code> 结构体（确定数据形态，构造校验字段个数与类型）、
-        <code>match</code> 模式匹配（字面量 + <code>_</code> 通配符，表达式返回值）、
-        <code>|&gt;</code> 管道操作符（<code>x |&gt; f</code> 等价 <code>f(x)</code>，可链式）</li>
-      <li><strong>内置函数扩展</strong>：<code>clone</code> / <code>copy</code> 深度拷贝、<code>assert</code> 断言（H700）、
-        <code>args.get(key, type, default)</code> 类型转换与默认值、<code>server.respond(id, body, status)</code> 自定义 HTTP 状态码</li>
-      <li><strong>指针类 <code>ptr.*</code></strong>：<code>ptr.alloc/free/is_null/is_valid/size/read_*/write_*</code> 内存分配与读写；
+  <div class="release" data-page-node-id="EvZEFIXqxfDp8y8LOrimoH">
+    <span class="ver-tag" data-page-node-id="DwxHEBii5hwJeAPz2Aa5Sy">v0.6.0</span><span class="date" data-page-node-id="5eHvZ59B90RVDKr7eA0gRR">2026-08-08</span>
+    <h4 data-page-node-id="AEYA31VTwiK0c0qQEjGz8t">新增</h4>
+    <ul data-page-node-id="E9sdRdrFmxvr6x2SCeKyCs">
+      <li data-page-node-id="e0UpgsFFy8ziibzFCYew0E"><strong data-page-node-id="vnkHSM8oDFJkFGe8TdGZv6">语言特性</strong>：<code data-page-node-id="rl38EzwoiRFwdHpf8E6TSw">struct</code> 结构体（确定数据形态，构造校验字段个数与类型）、
+        <code data-page-node-id="IXQOeGUwRIAbke1GVEVNC1">match</code> 模式匹配（字面量 + <code data-page-node-id="fWmjjHghDt9bMGZ6jvMJEA">_</code> 通配符，表达式返回值）、
+        <code data-page-node-id="9IHCM3MgYbCTWXFUaBmNEN">|&gt;</code> 管道操作符（<code data-page-node-id="ZJ6bb4i3EYRhzrrWv72OtZ">x |&gt; f</code> 等价 <code data-page-node-id="HGPgHqCcPb2qXIN2eg6Otk">f(x)</code>，可链式）</li>
+      <li data-page-node-id="NnVykYY0ZDYWBKkvrXRLoY"><strong data-page-node-id="G6ZaiHG5ET0VCzPFDLOwH1">内置函数扩展</strong>：<code data-page-node-id="PPGE7WZ8qGZfCkHl5VJrsS">clone</code> / <code data-page-node-id="ydyiFlXJUaqafTjIvV2iSE">copy</code> 深度拷贝、<code data-page-node-id="4ULP7gAgWBCZ2T6pgb468b">assert</code> 断言（H700）、
+        <code data-page-node-id="UECH1ytF2fq2KvR9C3rSoa">args.get(key, type, default)</code> 类型转换与默认值、<code data-page-node-id="tayNXtFLKUtvXvufZ3YBL7">server.respond(id, body, status)</code> 自定义 HTTP 状态码</li>
+      <li data-page-node-id="mjEziCLFAgLAru5bam3Our"><strong data-page-node-id="GIknHkQFdF30rDOlEnljde">指针类 <code data-page-node-id="UqRC2OnVy6IgmjTAOfoOo1">ptr.*</code></strong>：<code data-page-node-id="5EbEhFOLYuv6FSIjF4mRaV">ptr.alloc/free/is_null/is_valid/size/read_*/write_*</code> 内存分配与读写；
         分配表跟踪防野指针（未分配/已释放/重复释放报 H304，越界报 H305）</li>
-      <li><strong>压缩与归档 <code>archive.*</code></strong>：zip / tar.gz 的列表、读取、解压与创建（解压防 zip-slip 穿越）</li>
-      <li><strong>加密与哈希</strong>：<code>crypto.sha1</code> / <code>crypto.hmac_sha256</code> / <code>crypto.base64_encode</code> / <code>crypto.base64_decode</code></li>
-      <li><strong>插件系统 <code>plugin.*</code></strong>：<code>plugin.load/has/list/unload</code> 运行期动态注册，调用走 C ABI 通道</li>
-      <li><strong>测试框架</strong>：<code>hone test [目录]</code> 递归扫描 <code>*.test.hn</code> 运行并汇总 PASS/FAIL</li>
-      <li><strong>打包格式</strong>：<code>hone build --script</code> 生成仅脚本压缩包 <code>.hzp</code>（不内嵌解释器，<code>hone run</code> 执行）</li>
-      <li><strong>自动更新</strong>：<code>hone self-update [url]</code> 下载最新二进制替换当前程序（魔数校验防误下载）</li>
+      <li data-page-node-id="Mm63u0bLABilJacw0LjFa6"><strong data-page-node-id="EhugYYGTCITlxnluE9RJ11">压缩与归档 <code data-page-node-id="kDGVq5p2sR0OQHxyhNCk7g">archive.*</code></strong>：zip / tar.gz 的列表、读取、解压与创建（解压防 zip-slip 穿越）</li>
+      <li data-page-node-id="ECzJbBUvCS0IKUfLfDjDPg"><strong data-page-node-id="WT3uWsDchDEQlJI8fE2BHa">加密与哈希</strong>：<code data-page-node-id="7sdDMsWV6PQoMS8qxxf52u">crypto.sha1</code> / <code data-page-node-id="CIHX3XGQ36Ee3KLOiTpLvL">crypto.hmac_sha256</code> / <code data-page-node-id="10NoXryTanPtENgZOOSRKj">crypto.base64_encode</code> / <code data-page-node-id="tP1WQsquJNYjbJfCChVBaK">crypto.base64_decode</code></li>
+      <li data-page-node-id="ZCi7L2YfOtfBOLn1faILve"><strong data-page-node-id="R5DVH2MiIR3aMHVjoCDzOz">插件系统 <code data-page-node-id="nfEPUQU8z00U13ohJAdcWm">plugin.*</code></strong>：<code data-page-node-id="7uLwn5hnhPlmoLZ50zvuCe">plugin.load/has/list/unload</code> 运行期动态注册，调用走 C ABI 通道</li>
+      <li data-page-node-id="JPCgflglurEwuHrZbIqnSA"><strong data-page-node-id="bfPuYUjTsb7bza4WcO4g3L">测试框架</strong>：<code data-page-node-id="hbNSCMtfZPHJHdaZaoyPIm">hone test [目录]</code> 递归扫描 <code data-page-node-id="kTMb7ZKbAIz5aGMnJhGDrl">*.test.hn</code> 运行并汇总 PASS/FAIL</li>
+      <li data-page-node-id="BGmRP0mQdg8JvnEKrTOJx4"><strong data-page-node-id="RerPdOOjOvaDDqLuO4qF3o">打包格式</strong>：<code data-page-node-id="UKsCLecv0pR7IGNtKjWQGD">hone build --script</code> 生成仅脚本压缩包 <code data-page-node-id="bljhaC1hDntnj2HkSMHXOo">.hzp</code>（不内嵌解释器，<code data-page-node-id="mp2FTNGTAhHP6qr3DBxlOp">hone run</code> 执行）</li>
+      <li data-page-node-id="eSGvtJHEgU2H4yAA5YAQwb"><strong data-page-node-id="52KE1g4TgrdcuSIWWbo19O">自动更新</strong>：<code data-page-node-id="Zsgx02C8FtyYdxbbCB3hf9">hone self-update [url]</code> 下载最新二进制替换当前程序（魔数校验防误下载）</li>
     </ul>
-    <h4>变更</h4>
-    <ul>
-      <li>移除 <code>hone upgrade</code> 命令（旧语法迁移工具不再提供）</li>
+    <h4 data-page-node-id="BmrshwUZx0GBRQjRL7AF7V">变更</h4>
+    <ul data-page-node-id="QMofJj4yQJiXm1OSjME2kg">
+      <li data-page-node-id="DMaoAN1zr5ZkDnRjRrLxgn">移除 <code data-page-node-id="L1AWWFzEe8pZMSI893AbUM">hone upgrade</code> 命令（旧语法迁移工具不再提供）</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.4.0</span><span class="date">2026-08-08</span>
-    <h4>新增</h4>
-    <ul>
-      <li>typed FFI：<code>load "lib" as m { fn f(p: ty, ...) -> ret; ... }</code> 签名块显式声明 C ABI 参数与返回类型，
-        支持 <code>int</code>（int64_t）/ <code>float</code>（double）/ <code>bool</code> / <code>str</code>（const char*）/ <code>ptr</code>（void*）/ <code>void</code>（返回），
+  <div class="release" data-page-node-id="cwZDxK3mcAcnYt5UcLDm72">
+    <span class="ver-tag" data-page-node-id="dSSoDVChE5QdfgHmjjDvpB">v0.4.0</span><span class="date" data-page-node-id="gZQszcY8cdSIpAa9EG1BHF">2026-08-08</span>
+    <h4 data-page-node-id="U1YnDdD0Vk4gU8FL8V8IX7">新增</h4>
+    <ul data-page-node-id="4j0N55gctKC7ewcuRZU8s0">
+      <li data-page-node-id="BkscBkWXNzcRcQjytAUUdZ">typed FFI：<code data-page-node-id="HId4Ade5HtSQ2JuVOh3uMw">load "lib" as m { fn f(p: ty, ...) -> ret; ... }</code> 签名块显式声明 C ABI 参数与返回类型，
+        支持 <code data-page-node-id="730ZmodlHHZNkmFE4XWbuH">int</code>（int64_t）/ <code data-page-node-id="VMT41TOElDLMDefs1wexj8">float</code>（double）/ <code data-page-node-id="QHDLHtjyZwtqXJYmuxZ4gV">bool</code> / <code data-page-node-id="9ZsCW30QcCzj9nv9bXlX0E">str</code>（const char*）/ <code data-page-node-id="YoeElgTnsmtFmzHpmNsDKA">ptr</code>（void*）/ <code data-page-node-id="2t5EVNxObJ6FKCwEJcZuZj">void</code>（返回），
         调用时按声明精确转换，替代此前全 int64 单通道；参数最多 8 个，Windows / Linux / Termux ABI 一致</li>
-      <li>静态检查：签名块声明的函数调用在检查阶段校验参数个数与类型（H001/H005），返回类型参与类型推导；
+      <li data-page-node-id="p4CGW7cHCVt7JFe4bFbKEA">静态检查：签名块声明的函数调用在检查阶段校验参数个数与类型（H001/H005），返回类型参与类型推导；
         未声明签名的库函数保持旧 int64 通道调用（完全向后兼容）</li>
-      <li>新类型 <code>ptr</code>：FFI 返回值/参数可传递不透明句柄，<code>p == 0</code> 判断 NULL；to_str(p) 输出 0x 十六进制</li>
-      <li>头文件自动绑定：<code>load "lib" as m from "header.h";</code> 从 C 头文件提取函数原型自动生成签名
+      <li data-page-node-id="I9yMBY1jcJqUEZHFVBK9Td">新类型 <code data-page-node-id="XZCx2mw6NNI2Hvm5e980zW">ptr</code>：FFI 返回值/参数可传递不透明句柄，<code data-page-node-id="wgbPuq4gZrOam3l8nzhqXK">p == 0</code> 判断 NULL；to_str(p) 输出 0x 十六进制</li>
+      <li data-page-node-id="HsxmBDrXAZ0rV8gIGIRgvG">头文件自动绑定：<code data-page-node-id="DATrQBzhGklABmeBylJeJe">load "lib" as m from "header.h";</code> 从 C 头文件提取函数原型自动生成签名
         （受限解析器：跳过注释/预处理/struct 定义/extern "C" 块，typedef 简单展开，属性宏跳过；
         回调/变参/数组/结构体按值/long double 标记 unsupported，调用时直接报错而非 ABI 崩溃）</li>
-      <li>新命令 <code>hone bind &lt;header.h&gt;</code>：离线生成 typed load 签名块（可直接粘贴进脚本）</li>
-      <li>新增示例 <code>examples/ffi_demo.hn</code>（typed FFI 全类型演示）、<code>examples/ffi_header.hn</code>（from 头文件自动绑定演示）</li>
+      <li data-page-node-id="6oV0UIYDwFLrHeXQjGZbAJ">新命令 <code data-page-node-id="jweYOfrjWZACSuaPndFOaV">hone bind &lt;header.h&gt;</code>：离线生成 typed load 签名块（可直接粘贴进脚本）</li>
+      <li data-page-node-id="eWryxeF5BJcvZbBOSyKxJH">新增示例 <code data-page-node-id="bi2AnJbzGsgX7ToIFUXYzz">examples/ffi_demo.hn</code>（typed FFI 全类型演示）、<code data-page-node-id="B3tJQKbEg80ZDEjpwlKLBY">examples/ffi_header.hn</code>（from 头文件自动绑定演示）</li>
     </ul>
-    <h4>变更</h4>
-    <ul>
-      <li>语言更名：Zap → Hone（二进制 <code>hone</code>、扩展名 <code>.hn</code>、错误码 <code>Hxxx</code>、缓存目录 <code>~/.hone</code>）</li>
-      <li>新增 GitHub Actions CI（Windows/Linux 构建测试 + Termux aarch64 交叉编译）与 tag 触发自动发布
+    <h4 data-page-node-id="yzG7jo9pDf82G2hxWHW93v">变更</h4>
+    <ul data-page-node-id="OBztoeWwmEipAP7TOuYH8n">
+      <li data-page-node-id="evUw2pHczm8ZUIPpbudbPv">语言更名：Zap → Hone（二进制 <code data-page-node-id="nM4InJE1N2fc5FjugDXHQL">hone</code>、扩展名 <code data-page-node-id="kxG1FjnmcLbT8OckL3Xtgt">.hn</code>、错误码 <code data-page-node-id="XRtrzzghvqMI5PvcCWaTK5">Hxxx</code>、缓存目录 <code data-page-node-id="SOCaSLFlZYXDxJ5b81RXh9">~/.hone</code>）</li>
+      <li data-page-node-id="LC2Gj2h4E512SBd7zWO148">新增 GitHub Actions CI（Windows/Linux 构建测试 + Termux aarch64 交叉编译）与 tag 触发自动发布
         （三平台二进制 + 校验和 + 一键安装脚本 → GitHub Releases 附件）</li>
-      <li>新增一键安装脚本 install.sh / install.ps1（sha256 校验）</li>
-      <li>官网部署至 <a href="https://hone.xo.je">hone.xo.je</a></li>
+      <li data-page-node-id="84wrmUYCjK6pahn3yT8OhB">新增一键安装脚本 install.sh / install.ps1（sha256 校验）</li>
+      <li data-page-node-id="YpIyUcHlRVxEpcLefofdm8">官网部署至 <a href="https://hone.xo.je" data-page-node-id="Ve11Yj3pm5AWYDwssF8pqo">hone.xo.je</a></li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.3.0</span><span class="date">2026-08-07</span>
-    <h4>新增</h4>
-    <ul>
-      <li><code>server.listen(port)</code> / <code>server.poll()</code> / <code>server.respond(id, body)</code> 本地 HTTP 服务器内置函数：
+  <div class="release" data-page-node-id="TiIIvRm3czKW2E8eKBnXEQ">
+    <span class="ver-tag" data-page-node-id="rDv31C1W1s7cSHqydUrd9h">v0.3.0</span><span class="date" data-page-node-id="TCevjkabYqGcz5TPYhzmb1">2026-08-07</span>
+    <h4 data-page-node-id="tpwBeLw5hJLYIMxMEouLbl">新增</h4>
+    <ul data-page-node-id="FgpWDWNMmiYKrLSCLR8s5Z">
+      <li data-page-node-id="5qHGDwCH5GC31ZghydA5yn"><code data-page-node-id="rSUTTHsokfvEAc7lvTAiuq">server.listen(port)</code> / <code data-page-node-id="fiWnrevre9mbOB3AnCH4Kw">server.poll()</code> / <code data-page-node-id="A6UXwGHCZnAQUz7tVhdj9N">server.respond(id, body)</code> 本地 HTTP 服务器内置函数：
         纯 std::net 实现，Windows / Linux / Termux 跨平台一致，无 C 依赖；后台线程只做 TCP 收发与请求排队，
         Hone 脚本在主线程轮询响应，与解释器单线程模型完全兼容</li>
-      <li>图形界面库 <code>hone_lib/gui.hn</code>（纯 Hone 编写）：浏览器渲染 + 本地服务器双向交互，
-        控件 <code>gui_button</code> / <code>gui_label</code> / <code>gui_input</code> / <code>gui_select</code> / <code>gui_html</code>，
-        事件回调约定 <code>on_event(id, value)</code>，返回值按 JSON 协议更新页面元素</li>
-      <li>新增示例 <code>examples/gui_demo.hn</code>（GUI 演示）、<code>examples/server_demo.hn</code>（server API 演示）、
-        <code>examples/server_selftest.hn</code>（进程内自测）</li>
+      <li data-page-node-id="dyrk0v6ub0nwI5EFJ580Tw">图形界面库 <code data-page-node-id="3iSNTr8ADyRpggewPrb1f3">hone_lib/gui.hn</code>（纯 Hone 编写）：浏览器渲染 + 本地服务器双向交互，
+        控件 <code data-page-node-id="UAi9egRHMAlrZSczmNy6gh">gui_button</code> / <code data-page-node-id="KjBOzO1qJ9wiXRHfcjCh1e">gui_label</code> / <code data-page-node-id="Qu7Rf0aZHqdxt6oAy33IHY">gui_input</code> / <code data-page-node-id="OrRs8jweXsv0lex5I9DrzM">gui_select</code> / <code data-page-node-id="cjDvJxzWgG19qELErDIun4">gui_html</code>，
+        事件回调约定 <code data-page-node-id="0DClVuuP8skMOtD8azjMLX">on_event(id, value)</code>，返回值按 JSON 协议更新页面元素</li>
+      <li data-page-node-id="EaficcfyIV0JUx92kWGp3i">新增示例 <code data-page-node-id="VPUfhdF4SutPqnQ2kJ6hGh">examples/gui_demo.hn</code>（GUI 演示）、<code data-page-node-id="12w0rQoibsVqCjSt6fAvNv">examples/server_demo.hn</code>（server API 演示）、
+        <code data-page-node-id="MovUV6h47ZDojDLnzsFa91">examples/server_selftest.hn</code>（进程内自测）</li>
     </ul>
   </div>
 
-  <div class="release">
-    <span class="ver-tag">v0.2.0</span><span class="date">2026-08-07</span>
-    <h4>新增</h4>
-    <ul>
-      <li><code>http_get</code> / <code>http_post</code> 支持 <code>https://</code>：TLS 采用 rustls + rustls-rustcrypto
+  <div class="release" data-page-node-id="jYpfJgrG4H1Ni5ET8b1gxo">
+    <span class="ver-tag" data-page-node-id="3cYe6kEsB2aBLI2AHFIz3i">v0.2.0</span><span class="date" data-page-node-id="dCtkYDa98eFVIob9r5AKsH">2026-08-07</span>
+    <h4 data-page-node-id="boctu3jRgBebeofdXo3nFX">新增</h4>
+    <ul data-page-node-id="MXI9FhIxriBGjRKLEHbIw5">
+      <li data-page-node-id="nQXgDpbwLTuFuUYILRwvXB"><code data-page-node-id="A9kxAHb8u8GQhRkimLHdfG">http_get</code> / <code data-page-node-id="nPY2njk2jLqGeHwCspsaqB">http_post</code> 支持 <code data-page-node-id="cOYmAo8JOFjIfZsj5OtGdX">https://</code>：TLS 采用 rustls + rustls-rustcrypto
         （纯 Rust 实现，无 C 依赖），内置 Mozilla 根证书，Windows / Linux / Termux 跨平台行为一致</li>
-      <li>新增示例 <code>examples/https_demo.hn</code>：https GET、http POST、JSON 解析与错误捕获</li>
+      <li data-page-node-id="yvDFVf4vao4aR4vFhFjaoJ">新增示例 <code data-page-node-id="RCWE7kNcAAPqMI1BUDcEuq">examples/https_demo.hn</code>：https GET、http POST、JSON 解析与错误捕获</li>
     </ul>
-    <h4>修复</h4>
-    <ul>
-      <li>类型检查：<code>http_post</code> 的返回类型标注由 <code>void</code> 修正为 <code>str</code>（与运行时返回响应体一致），
+    <h4 data-page-node-id="FHb3grBF1P9BY6qoK8XU9T">修复</h4>
+    <ul data-page-node-id="lRPCvsy1lGln0QgUyzuBvn">
+      <li data-page-node-id="SpyCq7k3joioo6YLwYnCac">类型检查：<code data-page-node-id="uyTIECJmGlIqJewskTUnoD">http_post</code> 的返回类型标注由 <code data-page-node-id="K7RGiRt0bstYmxA6Buz5jQ">void</code> 修正为 <code data-page-node-id="TezGX4mQHd35EgyNVMllDu">str</code>（与运行时返回响应体一致），
         此前将返回值传给其他函数会被静态检查误报</li>
     </ul>
   </div>
 </main>
 
-<footer>
-  <div class="links">
-    <a href="index.html">首页</a>
-    <a href="docs.html">文档</a>
-    <a href="tutorial.html">教程</a>
-    <a href="examples.html">示例</a>
-    <a href="stdlib.html">标准库</a>
-    <a href="install.html">安装</a>
-    <a href="download.html">下载</a>
-    <a href="perf.html">性能</a>
-    <a href="changelog.html">更新日志</a>
-    <a href="faq.html">FAQ</a>
-    <a href="about.html">关于</a>
-    <a href="https://github.com/shichencike/Hone">GitHub</a>
+<footer data-page-node-id="016MU8XwcFCkGc4qnTAEMO">
+  <div class="links" data-page-node-id="7b8BFtZ06z8SiMJyFKEXGi">
+    <a href="index.html" data-page-node-id="QuJgyhqUtvcTDC0jyfVPNO">首页</a>
+    <a href="docs.html" data-page-node-id="NigEL8spU7EECkTQMtPl2A">文档</a>
+    <a href="language.html">语言</a>
+    <a href="tutorial.html" data-page-node-id="PXNh90stBDb8JO659y2eU8">教程</a>
+    <a href="examples.html" data-page-node-id="swK2WNYOWvrJmPvRjurkwQ">示例</a>
+    <a href="stdlib.html" data-page-node-id="GbfCQTurqOMsZmatiLitCm">标准库</a>
+    <a href="install.html" data-page-node-id="j8VtfzqIGEfyECpp7VwjUb">安装</a>
+    <a href="download.html" data-page-node-id="sxByBqdvZOYBYJ90M7xY1k">下载</a>
+    <a href="perf.html" data-page-node-id="OH3fLG4WhGO5BtnpG8rOdX">性能</a>
+    <a href="changelog.html" data-page-node-id="x6cu9sGnoibtfYgDbCMy2p">更新日志</a>
+    <a href="faq.html" data-page-node-id="YegBh89rAfZlo3O8ig24SA">FAQ</a>
+    <a href="about.html" data-page-node-id="kDGEa298K0tIO2ySc3V8h6">关于</a>
+    <a href="https://github.com/shichencike/Hone" data-page-node-id="6AMOmHnRFK3Hd9zAPu8oUS">GitHub</a>
   </div>
-  Hone v0.7.9 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.7.11 · MIT License · <span class="sword" data-page-node-id="z7Z0UzfmJGc7vovXnwzypN">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

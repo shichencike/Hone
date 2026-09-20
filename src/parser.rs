@@ -62,7 +62,10 @@ impl Parser {
             pos: 0,
         };
         let stmts = p.parse_program()?;
-        Ok(Program { stmts })
+        let mut prog = Program { stmts };
+        // 解析后统一预处理：宏展开 + 跳转安全校验（所有后端共享同一份语义）
+        crate::preproc::preprocess(&crate::preproc::Ctx::new(file, src), &mut prog)?;
+        Ok(prog)
     }
 
     /// REPL 用：把整段源码当作"单个表达式语句"解析（如 `1+1`、`[1,2]`），
@@ -190,7 +193,13 @@ impl Parser {
                 if self.peek2() == &Tok::LParen && self.peek() == &Tok::Ident("debug_print".to_string()) {
                     self.parse_debug_print()
                 } else if self.peek2() == &Tok::Colon {
-                    self.parse_decl_ts()
+                    // `x : int = 10;`（类型注解声明）与 `L:`（标签）都以 `标识符 :` 开头：
+                    // 仅当本行在 `:` 之后不再有其他 token 时按标签解析，否则按类型注解声明解析。
+                    if self.is_label_here() {
+                        self.parse_label()
+                    } else {
+                        self.parse_decl_ts()
+                    }
                 } else if self.peek2() == &Tok::Assign {
                     self.parse_assign()
                 } else if self.peek2() == &Tok::Comma {
@@ -275,10 +284,12 @@ impl Parser {
             Tok::Async => self.parse_async_fn(),
             // 语句级 await：await expr;（如 try 块内的 await 调用）
             Tok::Await => self.parse_expr_stmt(),
+            Tok::Goto => self.parse_goto(),
+            Tok::Macro => self.parse_macro_def(),
             other => Err(self.err_here(
                 codes::SYNTAX,
                 format!("expected a statement, found {}", other.describe()),
-                Some("statements start with an identifier, `fn`, `if`, `while`, `do`, `for`, `return`, `go`, `break`, `continue`, `breakpoint`, `try` or `{`"),
+                Some("statements start with an identifier, `fn`, `if`, `while`, `do`, `for`, `return`, `go`, `break`, `continue`, `breakpoint`, `try`, `goto`, `macro` or `{`"),
             )),
         }
     }
@@ -351,9 +362,130 @@ impl Parser {
         })
     }
 
-    /// x = expr;
-    fn parse_assign(&mut self) -> Result<Stmt, ZError> {
+    /// 判定当前 `标识符 :` 是**标签**（`L:`，本行除标签外无其他内容）还是
+    /// **类型注解声明**（`x : int = 10;`，冒号后同一行仍有 token）。
+    /// 标签行要求 `:` 之后的下一个 token 出现在后续行（或文件结束）。
+    fn is_label_here(&self) -> bool {
+        let last = self.toks.len() - 1;
+        let colon_idx = (self.pos + 1).min(last);
+        let after_idx = (self.pos + 2).min(last);
+        if matches!(self.toks[after_idx].0, Tok::Eof) {
+            return true;
+        }
+        self.toks[after_idx].1.line > self.toks[colon_idx].1.line
+    }
+
+    /// 标签：`名称:`（不跟分号；本行只有标签）。
+    fn parse_label(&mut self) -> Result<Stmt, ZError> {
         let (name_tok, span) = self.next();
+        let name = match name_tok {
+            Tok::Ident(s) => s,
+            _ => unreachable!(),
+        };
+        self.expect(&Tok::Colon, "`:`")?;
+        Ok(Stmt::Label { name, span })
+    }
+
+    /// 跳转：goto 名称;
+    fn parse_goto(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // goto
+        let (name_tok, nspan) = self.next();
+        let name = match name_tok {
+            Tok::Ident(s) => s,
+            other => {
+                return Err(self.err_at(
+                    &nspan,
+                    codes::SYNTAX,
+                    format!("expected a label name after `goto`, found {}", other.describe()),
+                    Some("`goto` 用法：`goto 标签名;`（标签用 `标签名:` 定义）"),
+                ))
+            }
+        };
+        self.expect_semi()?;
+        Ok(Stmt::Goto { name, span })
+    }
+
+    /// 宏定义：
+    ///   macro NAME(参数...) => 表达式;
+    ///   macro NAME(参数...) { 语句... }
+    /// 参数为纯名字（无类型、无默认值），宏展开是 AST 级替换。
+    fn parse_macro_def(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // macro
+        let (name_tok, nspan) = self.next();
+        let name = match name_tok {
+            Tok::Ident(s) => s,
+            other => {
+                return Err(self.err_at(
+                    &nspan,
+                    codes::MACRO,
+                    format!("expected a macro name after `macro`, found {}", other.describe()),
+                    Some("`macro` 用法：`macro 名称(参数) => 表达式;` 或 `macro 名称(参数) { 语句 }`"),
+                ))
+            }
+        };
+        self.expect(&Tok::LParen, "`(`")?;
+        let mut params: Vec<Param> = Vec::new();
+        if !self.at(&Tok::RParen) {
+            loop {
+                let (p_tok, p_span) = self.next();
+                let pname = match p_tok {
+                    Tok::Ident(s) => s,
+                    other => {
+                        return Err(self.err_at(
+                            &p_span,
+                            codes::MACRO,
+                            format!("expected a parameter name in macro `{}`, found {}", name, other.describe()),
+                            Some("宏参数只能是不带类型与默认值的名字"),
+                        ))
+                    }
+                };
+                if params.iter().any(|p| p.name == pname) {
+                    return Err(self.err_at(
+                        &p_span,
+                        codes::MACRO,
+                        format!("duplicate parameter `{}` in macro `{}`", pname, name),
+                        Some("宏参数名必须互不相同"),
+                    ));
+                }
+                params.push(Param {
+                    name: pname,
+                    ty: None,
+                    span: p_span,
+                    default: None,
+                });
+                if self.at(&Tok::Comma) {
+                    self.next();
+                    continue;
+                }
+                break;
+            }
+        }
+        self.expect(&Tok::RParen, "`)`")?;
+        let body = if self.at(&Tok::FatArrow) {
+            self.next();
+            let e = self.parse_expr()?;
+            self.expect_semi()?;
+            MacroBody::Expr(e)
+        } else if self.at(&Tok::LBrace) {
+            self.next();
+            MacroBody::Stmts(self.parse_block_body()?)
+        } else {
+            return Err(self.err_here(
+                codes::MACRO,
+                format!("expected `=>` or `{{` in macro `{}` body, found {}", name, self.peek().describe()),
+                Some("表达式宏写 `macro 名称(参数) => 表达式;`；语句宏写 `macro 名称(参数) { 语句 }`"),
+            ));
+        };
+        Ok(Stmt::MacroDef {
+            name,
+            params,
+            body,
+            span,
+        })
+    }
+
+    /// x = expr;
+    fn parse_assign(&mut self) -> Result<Stmt, ZError> {        let (name_tok, span) = self.next();
         let name = match name_tok {
             Tok::Ident(s) => s,
             _ => unreachable!(),
@@ -1421,7 +1553,7 @@ impl Parser {
     /// async fn 名称(参数) { ... }  异步函数定义。
     /// 已消费 `async` 关键字；复用 fn 解析并把 FnDef 转为 AsyncFnDef（后台线程执行 + await 等待）。
     fn parse_async_fn(&mut self) -> Result<Stmt, ZError> {
-        let (_, span) = self.next(); // async
+        let (_, _span) = self.next(); // async
         self.expect(&Tok::Fn, "`fn`")?;
         let stmt = self.parse_fn_body(false)?;
         match stmt {
@@ -1964,6 +2096,13 @@ impl Parser {
             }
             Tok::LBrace => {
                 // 字典字面量 {"key": value, ...} 或字典推导式 {key: value for k, v in iter [if cond]}
+                // 空字典字面量 `{}`：与空列表 `[]` 对称，直接产出无条目的 DictLit。
+                // 各后端对空 entries 均安全（interp → Value::Dict(vec![])、vm → NewDict(r, base, 0)、
+                // aot → hn_dict_new() 后不加 set、checker → 空循环返回 Ty::Unknown）。
+                if self.at(&Tok::RBrace) {
+                    self.next();
+                    return Ok(Expr::DictLit(Vec::new(), span));
+                }
                 let key_expr = self.parse_expr()?;
                 self.expect(&Tok::Colon, "`:`")?;
                 let v = self.parse_expr()?;

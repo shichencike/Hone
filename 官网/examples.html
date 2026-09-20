@@ -1,13 +1,13 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<html lang="zh-CN" data-page-node-id="plU2qfyR6tELcnffYCmqqQ">
+<head data-page-node-id="O8lq9scO9FzJZ9hK5GJgno">
+<meta charset="UTF-8" data-page-node-id="yA3PRI56YV2CQCZj5Xy2KA">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="wUsBDzRAxzrKPDRiWqSNjG">
 <title>Hone 示例 - 期望运行效果</title>
-<meta name="description" content="Hone 语言示例：按知识点分组的基础、控制流、函数、集合、内置函数、并发、导入与外部集成、工具链、错误处理、图形界面示例。">
-<meta name="theme-color" content="#0d1117">
-<link rel="icon" href="favicon.png" type="image/png">
-<link rel="stylesheet" href="style.css">
+<meta name="description" content="Hone 语言示例：按知识点分组的基础、控制流、函数、集合、内置函数、并发、导入与外部集成、工具链、错误处理、图形界面示例。" data-page-node-id="TF7HOsrrGOCxdBpuqCCue6">
+<meta name="theme-color" content="#0d1117" data-page-node-id="6PCjamx8g2gFNguaVLc9Y4">
+<link rel="icon" href="favicon.png" type="image/png" data-page-node-id="S9LxgMfHysPp4CrCWryn2C">
+<link rel="stylesheet" href="style.css" data-page-node-id="AozCkBmnp6QqAxKTvle9YR">
 <script>
 /* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
 function toggleTheme(){
@@ -23,794 +23,828 @@ function toggleTheme(){
 })();
 </script>
 </head>
-<body>
-<header>
-  <span class="logo"><span class="mark">⚡</span> Hone</span>
-  <nav>
-    <a href="index.html">首页</a>
-    <a href="docs.html">文档</a>
-    <a href="tutorial.html">教程</a>
-    <a href="examples.html" class="active">示例</a>
-    <a href="stdlib.html">标准库</a>
-    <a href="install.html">安装</a>
-    <a href="download.html">下载</a>
-    <a href="perf.html">性能</a>
+<body data-page-node-id="J0NyyFcqbcJOzDhULRPtwI">
+<header data-page-node-id="vHHQkPcllezzqviGj8EGrD">
+  <span class="logo" data-page-node-id="xjJ7NIjeM5Z8Fa9uB42WOo"><span class="mark" data-page-node-id="j1N5MGWEmtLJIm01oY2Oip">⚡</span> Hone</span>
+  <nav data-page-node-id="rKfUfazFbNbmMwzlRJeFKc">
+    <a href="index.html" data-page-node-id="dobIAp8VMrGGxtxu1kEVe1">首页</a>
+    <a href="docs.html" data-page-node-id="8yQYRBCVsZgTkExr2qjHeE">文档</a>
+    <a href="language.html">语言</a>
+    <a href="tutorial.html" data-page-node-id="TuPa2lsppHMqHhxDIeaBEa">教程</a>
+    <a href="examples.html" class="active" data-page-node-id="fMVBRjFPiE0RB8XlITcHbC">示例</a>
+    <a href="stdlib.html" data-page-node-id="gYUzeHwnnljqMpMoaYJaSk">标准库</a>
+    <a href="install.html" data-page-node-id="Sx0vC6h1bK7BKDV9PAHmK9">安装</a>
+    <a href="download.html" data-page-node-id="eEb9ctwmfWEM2zlbbHNOD6">下载</a>
+    <a href="perf.html" data-page-node-id="WQxcN6UGTD6KeARGF6JZuF">性能</a>
   </nav>
-  <span class="ver">v0.7.9</span>
-  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
+  <span class="ver" data-page-node-id="Mp8gQCnHL2vaMHUePlmod8">v0.7.11</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题" data-page-node-id="zj6PY80PuEMTkboK4qwk0r"><span class="ti-light" data-page-node-id="LktrffL4F6CKI848e0Mifu">☀️</span><span class="ti-dark" data-page-node-id="rqv8PGOlliZr7MyuFuxpjH">🌙</span></button>
 </header>
 
-<main>
-  <h2><span class="hash">#</span>示例代码</h2>
-  <p>按知识点分组，与<a href="docs.html">语言手册</a>章节对应。以下示例均可在 <code class="inline">examples/</code> 目录中找到，用 <code class="inline">hone run &lt;file.hn&gt;</code> 运行。</p>
+<main data-page-node-id="hZRs86qXbE004XIVSMQ2IK">
+  <h2 data-page-node-id="7jwmnCcAA65C0xfnbwcWD8"><span class="hash" data-page-node-id="Zw2QZYHtAJDKXG0xULODlx">#</span>示例代码</h2>
+  <p data-page-node-id="ukXBZlcSL22Dg0g0RkF89J">按知识点分组，与<a href="docs.html" data-page-node-id="QU7bpH14u1fNEPsxWJ6f2i">语言手册</a>章节对应。以下示例均可在 <code class="inline" data-page-node-id="QaLZ6gDDmXeFSWsIyOGOwZ">examples/</code> 目录中找到，用 <code class="inline" data-page-node-id="R8lUFNSaUROw0UKhj5A3Ju">hone run &lt;file.hn&gt;</code> 运行。</p>
 
-  <input type="text" id="search" class="search-box" placeholder="搜索示例…（如 http、list、f-string）" oninput="searchExamples(this.value)">
-  <div id="search-count" class="search-count"></div>
+  <input type="text" id="search" class="search-box" placeholder="搜索示例…（如 http、list、f-string）" oninput="searchExamples(this.value)" data-page-node-id="TtjsUh92vpCms6wk0nlMXg">
+  <div id="search-count" class="search-count" data-page-node-id="3k9snkiO4IGzknymJjdAz2"></div>
 
-  <h3><span class="hash">#</span>1. 基础</h3>
+  <h3 data-page-node-id="2MHkcGBnR6fc62KZSjmXyx"><span class="hash" data-page-node-id="st4o1DN6OaZn0QG7uO4sCl">#</span>1. 基础</h3>
 
-  <div class="example">
-    <div class="title">1.1 Hello World</div>
-    <div class="note">第一个 Hone 程序</div>
-<pre><code><span class="c">// 这是 Hone 的第一个示例</span>
-<span class="f">print</span>(<span class="s">"Hello Hone!"</span>);</code></pre>
+  <div class="example" data-page-node-id="JAK7E1H8Lv0o4jk28PJRUs">
+    <div class="title" data-page-node-id="CzloXNwzBFGPqEw8MPeBpF">1.1 Hello World</div>
+    <div class="note" data-page-node-id="aZ5HPrMG5UiaNFHBuHKDLp">第一个 Hone 程序</div>
+<pre data-page-node-id="WDSuCAHj6p0fcn3M8Tu6Lx"><code data-page-node-id="pDuz0xm8CZWbkhSEEGKBHl"><span class="c" data-page-node-id="EX1CwGHLhLrmT9e1h3xoUX">// 这是 Hone 的第一个示例</span>
+<span class="f" data-page-node-id="M3DD4HRdFzbnNyKixCTB4b">print</span>(<span class="s" data-page-node-id="F4GKC1V3KfHzYisZtKU07Y">"Hello Hone!"</span>);</code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">1.2 变量与类型</div>
-    <div class="note">自动推导、显式类型、类型锁定（期望输出：60 / 3.14 / int / 3）</div>
-<pre><code>x = <span class="n">10</span>;            <span class="c">// 自动推导为 int</span>
-y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">// 显式类型（Rust/TS 风格）</span>
-<span class="k">int</span> z = <span class="n">30</span>;      <span class="c">// 显式类型（C 风格）</span>
-<span class="f">print</span>(x + y + z);   <span class="c">// 60</span>
+  <div class="example" data-page-node-id="PmPC1IF12lYwW6SBOmjrpA">
+    <div class="title" data-page-node-id="xyNAmu5DktVa5Cgp5fPJ06">1.2 变量与类型</div>
+    <div class="note" data-page-node-id="tPV0CBCiB3lWRGQq3aZDPH">自动推导、显式类型、类型锁定（期望输出：60 / 3.14 / int / 3）</div>
+<pre data-page-node-id="EBpkgns2DMuMoXbl5TNDCD"><code data-page-node-id="XVKzlYCq0usl0GGAG6DCXG">x = <span class="n" data-page-node-id="UiYfbIGkP7DsqqYd1h0i8i">10</span>;            <span class="c" data-page-node-id="sgXlyUvuRwfBhiZPdiHRnS">// 自动推导为 int</span>
+y : <span class="k" data-page-node-id="hw5pADDqdEXSTuizeapfhV">int</span> = <span class="n" data-page-node-id="3cToF0dgqBDgvf3oj6Di3D">20</span>;    <span class="c" data-page-node-id="71frvLdVYga0FIDoKt8h0G">// 显式类型（Rust/TS 风格）</span>
+<span class="k" data-page-node-id="jFOcmlH4BGaPZL5yq2GVCV">int</span> z = <span class="n" data-page-node-id="vCtECtOSzMTAFszrT8VKkz">30</span>;      <span class="c" data-page-node-id="uYUMe6NEJwCcB4H8h4WQnr">// 显式类型（C 风格）</span>
+<span class="f" data-page-node-id="73lidVyJIkjpyhxC7qc8uX">print</span>(x + y + z);   <span class="c" data-page-node-id="comrowns6obrRyex3TpJ2V">// 60</span>
 
-f = <span class="n">3.14</span>;
-<span class="f">print</span>(<span class="f">to_str</span>(f));  <span class="c">// 3.14</span>
-<span class="f">print</span>(<span class="f">type_of</span>(x)); <span class="c">// int</span>
+f = <span class="n" data-page-node-id="LsF9sH4cAHQqnzlFZmXz9d">3.14</span>;
+<span class="f" data-page-node-id="iZEgpUqwEx7Eof5miK6e15">print</span>(<span class="f" data-page-node-id="FX0GoIVxOmCAT8c6XUif9M">to_str</span>(f));  <span class="c" data-page-node-id="xIn2KKFiVXPfUTAoib2P8T">// 3.14</span>
+<span class="f" data-page-node-id="iJMO1Ja9xGrmx1w4ia4mRT">print</span>(<span class="f" data-page-node-id="MiCfHNUElB3M5vQnXxsz4G">type_of</span>(x)); <span class="c" data-page-node-id="fr9SWN7Gp6AO09Ab7A93Rm">// int</span>
 
-a = <span class="n">7</span> / <span class="n">2</span>;
-<span class="f">print</span>(a);           <span class="c">// 3（整数除法）</span>
-<span class="c">// x = "Hone";  // error[H001]：类型锁定</span></code></pre>
+a = <span class="n" data-page-node-id="QRVQDY1hIcl113zkIqKu7v">7</span> / <span class="n" data-page-node-id="LAWC8fqSRwCjVdvOvS8VCb">2</span>;
+<span class="f" data-page-node-id="rZ3rvEwBPaxZdZJU5mYg0m">print</span>(a);           <span class="c" data-page-node-id="jOqkZo254sCEyvURhLI3v6">// 3（整数除法）</span>
+<span class="c" data-page-node-id="PJBtoXgsFWrAAfF9MGj8Ss">// x = "Hone";  // error[H001]：类型锁定</span></code></pre>
   </div>
 
-  <h3><span class="hash">#</span>2. 控制流</h3>
+  <h3 data-page-node-id="vtzDCQOcCWverKsUmGmwQn"><span class="hash" data-page-node-id="oHQS6SewdV4hUhMGaKPPvJ">#</span>2. 控制流</h3>
 
-  <div class="example">
-    <div class="title">2.1 if / while</div>
-    <div class="note">条件必须是 bool；支持 else if 链（期望输出：45 / B）</div>
-<pre><code>i = <span class="n">0</span>; sum = <span class="n">0</span>;
-<span class="k">while</span> (i &lt; <span class="n">10</span>) {
+  <div class="example" data-page-node-id="ziXjE5s0PR7xqLcQgkk44b">
+    <div class="title" data-page-node-id="hDVgoNyFz8G6D1C78lcxwz">2.1 if / while</div>
+    <div class="note" data-page-node-id="1ihJ5zsC3CIpqyA4J2bNkb">条件必须是 bool；支持 else if 链（期望输出：45 / B）</div>
+<pre data-page-node-id="tFaOWZ62SSFl4I1C7ocY5o"><code data-page-node-id="OUSdp6yvCZy4fFmOpSEUtR">i = <span class="n" data-page-node-id="cowhDv2yk4N6ehZayosPL6">0</span>; sum = <span class="n" data-page-node-id="008qSI01KrhLmyx02deht2">0</span>;
+<span class="k" data-page-node-id="1lHxv6FSySqiJf78OoP0x9">while</span> (i &lt; <span class="n" data-page-node-id="8qpi5jvTpo3TiDbWOLd5Nx">10</span>) {
     sum = sum + i;
-    i = i + <span class="n">1</span>;
+    i = i + <span class="n" data-page-node-id="TlcNSFojHRPUhRsN08jVEc">1</span>;
 }
-<span class="f">print</span>(sum);  <span class="c">// 45</span>
+<span class="f" data-page-node-id="NEP6AOCMr1FbvX6UJjAq9f">print</span>(sum);  <span class="c" data-page-node-id="4d7RHunXl6TfORBfzflKk5">// 45</span>
 
-score = <span class="n">85</span>;
-<span class="k">if</span> (score &gt;= <span class="n">90</span>) {
-    <span class="f">print</span>(<span class="s">"A"</span>);
-} <span class="k">else if</span> (score &gt;= <span class="n">80</span>) {
-    <span class="f">print</span>(<span class="s">"B"</span>);   <span class="c">// 输出 B</span>
-} <span class="k">else</span> {
-    <span class="f">print</span>(<span class="s">"C"</span>);
+score = <span class="n" data-page-node-id="67YuMcDGA0wCuOZEmLOCBK">85</span>;
+<span class="k" data-page-node-id="HxC9tR5pg4ALKW0szdOQrS">if</span> (score &gt;= <span class="n" data-page-node-id="496GvDqaaDwy4uHT0RTw4I">90</span>) {
+    <span class="f" data-page-node-id="Br9rycaOdtefPNOnsBcRIZ">print</span>(<span class="s" data-page-node-id="WrPw3memtYwPl33I0ug9wO">"A"</span>);
+} <span class="k" data-page-node-id="Cbgbthzj05VPpy6udwauEJ">else if</span> (score &gt;= <span class="n" data-page-node-id="AFajDIeTldfRcfSEcgjuIP">80</span>) {
+    <span class="f" data-page-node-id="CMbOdMGeempiNjY1hY3Cqk">print</span>(<span class="s" data-page-node-id="dpRw0WbhArh0z8MeFWWh6J">"B"</span>);   <span class="c" data-page-node-id="yAp6Y7QJe2UfW7423Q1m9k">// 输出 B</span>
+} <span class="k" data-page-node-id="LLMFj6qtHwg253wgZPIU4t">else</span> {
+    <span class="f" data-page-node-id="b1vimEgcdsP2BXOxqbkGfP">print</span>(<span class="s" data-page-node-id="NSHnPQvXUkaOU84LXjmklL">"C"</span>);
 }</code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">2.2 for-in 循环</div>
-    <div class="note">遍历列表（单变量）与字典（键、值双变量）</div>
-<pre><code>sum = <span class="n">0</span>;
-<span class="k">for</span> x <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>] {
-    <span class="f">print</span>(x * x);          <span class="c">// 1 4 9</span>
+  <div class="example" data-page-node-id="fTSsHzXOCyGcviu8S8B7Lb">
+    <div class="title" data-page-node-id="LQCjX0WBGxAxlooRlGohL5">2.2 for-in 循环</div>
+    <div class="note" data-page-node-id="8HBfo8qx2EgeCUV5oOX3E2">遍历列表（单变量）与字典（键、值双变量）</div>
+<pre data-page-node-id="rvXInMjj1Dr8CNtRNMujNf"><code data-page-node-id="EWV9WbScJgbw9ezvsJpTwj">sum = <span class="n" data-page-node-id="GK8OQavd9AVpUbnuPdcCqV">0</span>;
+<span class="k" data-page-node-id="e4nAj4FGhvXUXxEXS9K4aa">for</span> x <span class="k" data-page-node-id="WmmRkPpvoGn7qtXJXeabdb">in</span> [<span class="n" data-page-node-id="WqnINh5kbEy9Hd5hGAEIuq">1</span>, <span class="n" data-page-node-id="SYdWtjNenpTtSAwoueXkOC">2</span>, <span class="n" data-page-node-id="3CzT96dkz9q8BoJGl0gKi6">3</span>] {
+    <span class="f" data-page-node-id="Fex5Ee8wZ4d4emQzrV6dEK">print</span>(x * x);          <span class="c" data-page-node-id="mHOuT3ltw8Ze6hjQPvDAGt">// 1 4 9</span>
     sum = sum + x;
 }
 
-d = {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
-<span class="k">for</span> k, v <span class="k">in</span> d {
-    <span class="f">print</span>(k + <span class="s">": "</span> + <span class="f">to_str</span>(v));
+d = {<span class="s" data-page-node-id="HAgT4HBtvAHEFv9MoOUVxC">"name"</span>: <span class="s" data-page-node-id="kpgpRZRCG8Zj4B7jz9PEuZ">"hone"</span>, <span class="s" data-page-node-id="g9ZoMne0v90CrpYInqR963">"ver"</span>: <span class="n" data-page-node-id="RMPuc6NHKGZAkVrKRXzYV5">1</span>};
+<span class="k" data-page-node-id="dFPtEUJPH5xh46h15E0Sjt">for</span> k, v <span class="k" data-page-node-id="pxUatHaK3UKvTvf5sjJbs0">in</span> d {
+    <span class="f" data-page-node-id="9J3EfOEyqVfvGUAqsVzILH">print</span>(k + <span class="s" data-page-node-id="Y8bmThEhdnMNm0JoUHptKe">": "</span> + <span class="f" data-page-node-id="IGtznpW9wqeaOde7a6bSCN">to_str</span>(v));
 }
-<span class="f">print</span>(sum);              <span class="c">// 6</span></code></pre>
+<span class="f" data-page-node-id="eQWd8jFeofZ0mIt6vDcT7M">print</span>(sum);              <span class="c" data-page-node-id="PMuH07YP6fIZHAy5GbT05U">// 6</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">2.3 C 风格 for / do-while / continue</div>
-    <div class="note">for (init; cond; step) 三段可省略；do-while 至少执行一次；continue 跳过本次循环（期望输出：0 1 2 3 4 / 3 / 1 3 5）</div>
-<pre><code><span class="c">// C 风格 for：init; cond; step 三段均可省略（for (;;) 无限循环，配合 break 退出）</span>
-<span class="k">for</span> (i = <span class="n">0</span>; i &lt; <span class="n">5</span>; i = i + <span class="n">1</span>) {
-    <span class="f">print</span>(i);            <span class="c">// 0 1 2 3 4</span>
+  <div class="example" data-page-node-id="aVFt4AXRBWlKkASUcF9sXh">
+    <div class="title" data-page-node-id="1wWy9VuDK55doQf8IyWzQA">2.3 C 风格 for / do-while / continue</div>
+    <div class="note" data-page-node-id="c68iMslV1KiVropkd1f3nB">for (init; cond; step) 三段可省略；do-while 至少执行一次；continue 跳过本次循环（期望输出：0 1 2 3 4 / 3 / 1 3 5）</div>
+<pre data-page-node-id="wNl7D7oopGWbR6AsVUEy8z"><code data-page-node-id="Je7DQB04H4F9CiJ944bCHe"><span class="c" data-page-node-id="ORlYHHIbcX0FSxjNJYlHNb">// C 风格 for：init; cond; step 三段均可省略（for (;;) 无限循环，配合 break 退出）</span>
+<span class="k" data-page-node-id="RUC69xNKO9VnmGyY15qlCE">for</span> (i = <span class="n" data-page-node-id="jV0P8pfIDs4utJObdhjSgp">0</span>; i &lt; <span class="n" data-page-node-id="aLTQAp1AulKWz8eA2Rizm2">5</span>; i = i + <span class="n" data-page-node-id="aUgKb1ZeoC5FvoPa50FG77">1</span>) {
+    <span class="f" data-page-node-id="3AHzrKiquEXynw7kdDvkAk">print</span>(i);            <span class="c" data-page-node-id="yrIBSDA4eupbJVoLeKxXYG">// 0 1 2 3 4</span>
 }
 
-<span class="c">// do-while：先执行循环体再判断条件（至少执行一次）</span>
-j = <span class="n">0</span>;
-<span class="k">do</span> { j = j + <span class="n">1</span>; } <span class="k">while</span> (j &lt; <span class="n">3</span>);
-<span class="f">print</span>(j);              <span class="c">// 3</span>
+<span class="c" data-page-node-id="W187HlIWE5iXlTOwB0RqIG">// do-while：先执行循环体再判断条件（至少执行一次）</span>
+j = <span class="n" data-page-node-id="uZPGzPvZLn2EJUCXuM5aDX">0</span>;
+<span class="k" data-page-node-id="PzTPnfw3aXxkXGBAvhEYIw">do</span> { j = j + <span class="n" data-page-node-id="9o2mm9omfAo1F7qrZSNLPL">1</span>; } <span class="k" data-page-node-id="WZdjszYWx2r4lMnE7YWYyr">while</span> (j &lt; <span class="n" data-page-node-id="qGd4DJXmwSxlUNrOrPLQX0">3</span>);
+<span class="f" data-page-node-id="b19h2IhXa4osq4YC1oYvB3">print</span>(j);              <span class="c" data-page-node-id="6HRCD6xhIqaG41IXPTRCcW">// 3</span>
 
-<span class="c">// continue：跳过本次循环剩余语句，只打印奇数</span>
-<span class="k">for</span> (i = <span class="n">1</span>; i &lt;= <span class="n">5</span>; i = i + <span class="n">1</span>) {
-    <span class="k">if</span> (i % <span class="n">2</span> == <span class="n">0</span>) { <span class="k">continue</span>; }
-    <span class="f">print</span>(i);            <span class="c">// 1 3 5</span>
+<span class="c" data-page-node-id="nwA0rJmWBz8jYQHeFxSgdA">// continue：跳过本次循环剩余语句，只打印奇数</span>
+<span class="k" data-page-node-id="5lgCt6Si1JnEbC7D9lFbCm">for</span> (i = <span class="n" data-page-node-id="QApL3vO9LOOsthgDCrslzk">1</span>; i &lt;= <span class="n" data-page-node-id="D6Fmzw6QGx8ELkVyjqdliD">5</span>; i = i + <span class="n" data-page-node-id="zh4yn5Hyl7nM2D2qRZvBFL">1</span>) {
+    <span class="k" data-page-node-id="Je5eyLTaXVh4fQu5LE1rlc">if</span> (i % <span class="n" data-page-node-id="QIMYA4nm5ZKG6hnlqcVfFu">2</span> == <span class="n" data-page-node-id="QLyKupAXlHEzq0w024tcht">0</span>) { <span class="k" data-page-node-id="um2gCdXt2EjA0z7vbS91oR">continue</span>; }
+    <span class="f" data-page-node-id="poCZ6EY9ACXhBPUkStOSSg">print</span>(i);            <span class="c" data-page-node-id="A6HB290X74x4BzcPxUC0XM">// 1 3 5</span>
 }</code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">2.4 复合赋值与自增/自减</div>
-    <div class="note">+= -= *= /= %=（str 仅支持 += 拼接）；i++ 后缀返回旧值，++i 前缀返回新值（期望输出：2 / Hone! / 1 / 1 / 3）</div>
-<pre><code>x = <span class="n">10</span>;
-x += <span class="n">5</span>; x -= <span class="n">3</span>; x *= <span class="n">2</span>; x /= <span class="n">4</span>; x %= <span class="n">4</span>;
-<span class="f">print</span>(x);              <span class="c">// 2</span>
+  <div class="example" data-page-node-id="R7YPHxb73UAnYK1abcJ7LQ">
+    <div class="title" data-page-node-id="Rw6HFYzyYnxreORHYJq08n">2.4 复合赋值与自增/自减</div>
+    <div class="note" data-page-node-id="uz69p9wte2qBnC95wXqwFP">+= -= *= /= %=（str 仅支持 += 拼接）；i++ 后缀返回旧值，++i 前缀返回新值（期望输出：2 / Hone! / 1 / 1 / 3）</div>
+<pre data-page-node-id="AQueoKMwLJ04yRiwF4TXkb"><code data-page-node-id="mZIfGQr1u2byG1ljXT44EY">x = <span class="n" data-page-node-id="XEUGORK1F1zT0O5JBFoO0o">10</span>;
+x += <span class="n" data-page-node-id="zxAoE1tuQwb9MQfk57h2vI">5</span>; x -= <span class="n" data-page-node-id="unueP5kWDnlS4wSxHuBE9F">3</span>; x *= <span class="n" data-page-node-id="pv2ShBM69URKUDHx9jN7FX">2</span>; x /= <span class="n" data-page-node-id="xamzXGqezBP7RD7dER5wwl">4</span>; x %= <span class="n" data-page-node-id="MJ4Yrx7ZLLDXUiSKAPt2Fi">4</span>;
+<span class="f" data-page-node-id="TDDE8IINGgowEOwSNpYI30">print</span>(x);              <span class="c" data-page-node-id="mqq3CNNlHflQRO8fd0jFIl">// 2</span>
 
-s = <span class="s">"Hone"</span>;
-s += <span class="s">"!"</span>;
-<span class="f">print</span>(s);              <span class="c">// Hone!</span>
+s = <span class="s" data-page-node-id="Vis1bnwUiVsTBBXfdDcgD5">"Hone"</span>;
+s += <span class="s" data-page-node-id="zwwaxHwQkQkozQ7qHlJLCb">"!"</span>;
+<span class="f" data-page-node-id="7W0jnmPJJOob2f1uuT2FBW">print</span>(s);              <span class="c" data-page-node-id="1WSp0Wm4GpsWajzjS8xztT">// Hone!</span>
 
-i = <span class="n">0</span>;
+i = <span class="n" data-page-node-id="j4MbCvMmvzj6DE9U30OS6n">0</span>;
 i++;
-<span class="f">print</span>(i);              <span class="c">// 1（后缀返回旧值）</span>
-<span class="f">print</span>(i++);            <span class="c">// 1（i 变为 2）</span>
-<span class="f">print</span>(++i);            <span class="c">// 3（前缀返回新值）</span></code></pre>
+<span class="f" data-page-node-id="vvuvm1j7BHOGwU931Cekns">print</span>(i);              <span class="c" data-page-node-id="DB9QIOMbYOYdLxI9lw9h6z">// 1（后缀返回旧值）</span>
+<span class="f" data-page-node-id="lyHcSHBCK8Lp74Dxy2UGFn">print</span>(i++);            <span class="c" data-page-node-id="gYqBG3bWU0fHlZukq6veOo">// 1（i 变为 2）</span>
+<span class="f" data-page-node-id="4tN5UqG9Ef6QCIanLXMWb8">print</span>(++i);            <span class="c" data-page-node-id="Tr8G81ORnA0WoLNkow65no">// 3（前缀返回新值）</span></code></pre>
   </div>
 
-  <h3><span class="hash">#</span>3. 函数</h3>
+  <h3 data-page-node-id="KX7EBqHj114TDsDflVTFDq"><span class="hash" data-page-node-id="Iwl2VHpYJrDcaJdz0XVUn2">#</span>2.5 标签与 goto（H105）</h3>
 
-  <div class="example">
-    <div class="title">3.1 递归函数：斐波那契</div>
-    <div class="note">参数类型可由调用上下文推导（期望输出：55 / 42）</div>
-<pre><code><span class="k">fn</span> <span class="f">fib</span>(n) {
-    <span class="k">if</span> (n &lt;= <span class="n">1</span>) {
-        <span class="k">return</span> n;
+  <div class="example" data-page-node-id="DNibcRTosn7HbK3AT7zpaD">
+    <div class="title" data-page-node-id="UDAJK037lH9w29BFTy9UcX">2.5 标签与 goto</div>
+    <div class="note" data-page-node-id="XigH4o4qNylXHBsiRfHCLD">编译期校验，运行期绝不跳到未定义位置；标签只能跳到外层可见标签，无法跳进内层块（期望输出：0 1 2 / flag = 1）</div>
+<pre data-page-node-id="vzGZl8L9YVsUamy9GwVIUt"><code data-page-node-id="FnWcZvWADFbwEByiJ2jEPI">i = <span class="n" data-page-node-id="WNGTAKgBI6XgazZpldHR7H">0</span>;
+again:
+<span class="f" data-page-node-id="FOta6ns6XeZzABSSIn371G">print</span>(i);
+i = i + <span class="n" data-page-node-id="L0M4HR6F33G8e4EHHRrln1">1</span>;
+<span class="k" data-page-node-id="jMlB7DwD3CGKlGbCapnWY2">if</span> (i &lt; <span class="n" data-page-node-id="zEenzMZiSVSsAQMAB9m3S7">3</span>) { <span class="k" data-page-node-id="iOmNh7ZrgRfr4An8s9JKAN">goto</span> again; }   <span class="c" data-page-node-id="hv1ExSf9Z1HxFqmjd5YYtE">// 回跳：依次打印 0 1 2</span>
+
+<span class="k" data-page-node-id="zQujPghmcvqVhzMTlEZkKT">goto</span> skip;
+<span class="f" data-page-node-id="IfFirqYwSgDpjrRXWEnbUq">print</span>(<span class="s" data-page-node-id="BwU8ixVFbj12l53AcPG22N">"这行不会执行"</span>);
+skip:
+flag = <span class="n" data-page-node-id="l0CbSvcULgyRjhNjMTvCvT">1</span>;
+<span class="f" data-page-node-id="qcCj1CFkBybza2xMvoRgnP">print</span>(<span class="s" data-page-node-id="sDxChveYJdfDbYqb0IpG8F">"flag = "</span> + <span class="f" data-page-node-id="LwInB46oBi6Fw2vp2LqWCN">to_str</span>(flag));  <span class="c" data-page-node-id="aWVaLUh2HyZGlJRIVQM0WK">// flag = 1</span></code></pre>
+  </div>
+
+  <h3 data-page-node-id="zGHJVWc0Vju9cNz5dhwOSr"><span class="hash" data-page-node-id="IE0HBTeE5ddNEHpoOwTTGV">#</span>2.6 宏 macro（H106）</h3>
+
+  <div class="example" data-page-node-id="GDvQhD28IKmZbiYVg0inT9">
+    <div class="title" data-page-node-id="CZtsADwUwRux2XMSjgemPt">2.6 宏</div>
+    <div class="note" data-page-node-id="6Bk18N7CURP8CecxypjmI5">解析期纯 AST 替换，运行期无实体，解释器 / 字节码 VM / AOT 三后端行为一致（期望输出：9 / hello macro / 12）</div>
+<pre data-page-node-id="ILB1GFbAyXBRkkQMsgETAB"><code data-page-node-id="gmUJ0as8B5IoELfokvBDXJ"><span class="k" data-page-node-id="ScBR20zpMFHxFMzFwnO2WO">macro</span> <span class="f" data-page-node-id="OK4Bmb45XDcie2ZHQEyS67">SQ</span>(x) =&gt; x * x;
+<span class="k" data-page-node-id="e2BN09EBuzTtf4hSFSJJzu">macro</span> <span class="f" data-page-node-id="zTci1MmSh2YO4dhTXQAp7F">SAY</span>(msg) { <span class="f" data-page-node-id="0TG6VJvefdD2LcBSvOB5lr">print</span>(msg); }
+<span class="k" data-page-node-id="ZBXCINjJCEmHHCr3V7s07M">macro</span> <span class="f" data-page-node-id="Vc5OqWU5xiELVsNAowuSER">INC</span>(x) { x = x + <span class="n" data-page-node-id="EQKKGCSWRKUF0TFoP1eCc8">1</span>; }   <span class="c" data-page-node-id="gzJJocHooa0FwMVJxFCqxi">// 形参作赋值目标：实参须为裸变量名</span>
+
+<span class="f" data-page-node-id="fZYA1tegx2DQHedx5OAwAy">print</span>(<span class="f" data-page-node-id="vSFfHMUs6sCb96ZJvcxPUA">SQ</span>(<span class="n" data-page-node-id="CrqszSMeIIdEE4uXg4yCwr">3</span>));          <span class="c" data-page-node-id="R7NH5FgkEG5GJZKYtxx8Cz">// 9</span>
+<span class="f" data-page-node-id="EVcPEt32AFQKnDwkMPfgxk">SAY</span>(<span class="s" data-page-node-id="rvGEQpQwvFfUBEld8SnDm2">"hello macro"</span>);
+n = <span class="n" data-page-node-id="h81vd0kdrAzOGgnZEugmBd">10</span>; <span class="f" data-page-node-id="hNCk82OhYGnWnc9HJktnBW">INC</span>(n); <span class="f" data-page-node-id="XfjSev2oXc2nZAGCBfmF5d">INC</span>(n);
+<span class="f" data-page-node-id="NapNR4Dg4M95c8qe1EB2Wy">print</span>(n);              <span class="c" data-page-node-id="XXAVcQjeb1EkZ3l7SNvPrE">// 12</span></code></pre>
+  </div>
+
+  <h3 data-page-node-id="9CscmGOYAcwnqBnyiKCwvC"><span class="hash" data-page-node-id="6OgVqFmBy1AlYQNVrSiAgo">#</span>3. 函数</h3>
+
+  <div class="example" data-page-node-id="CnjDRu2Y12XZYQdRKn4wUs">
+    <div class="title" data-page-node-id="ZNHfIuOemW7SG6EUDwI872">3.1 递归函数：斐波那契</div>
+    <div class="note" data-page-node-id="nsG3ssRyXt8L6oDN6DGzPH">参数类型可由调用上下文推导（期望输出：55 / 42）</div>
+<pre data-page-node-id="4FT5BqDe2ly0vlzh9aB3P2"><code data-page-node-id="l1t3guXQHnnveP9Q7V2EH8"><span class="k" data-page-node-id="bqlqCM6RSKOpPrYlRrCHIb">fn</span> <span class="f" data-page-node-id="e0BKrOfeCEnzbCBVcG7WYd">fib</span>(n) {
+    <span class="k" data-page-node-id="zpYvVXIoevert3wfCIp37o">if</span> (n &lt;= <span class="n" data-page-node-id="dw3OzIBCzc0PtSjzBval5N">1</span>) {
+        <span class="k" data-page-node-id="77rDYzBsCZZvQA7FMU9dSA">return</span> n;
     }
-    <span class="k">return</span> <span class="f">fib</span>(n - <span class="n">1</span>) + <span class="f">fib</span>(n - <span class="n">2</span>);
+    <span class="k" data-page-node-id="H8YmO8ysrbvtUAICo9Br5R">return</span> <span class="f" data-page-node-id="UsMGraVD0PtM1QzqCBA9Lu">fib</span>(n - <span class="n" data-page-node-id="Z6gbtx7RsI88LKh80xhXB9">1</span>) + <span class="f" data-page-node-id="Wrx7LXXjOaipKCic4WikPz">fib</span>(n - <span class="n" data-page-node-id="ZTQYJYMjQcD49JSp17fplw">2</span>);
 }
 
-<span class="f">print</span>(<span class="f">fib</span>(<span class="n">10</span>));  <span class="c">// 55</span>
+<span class="f" data-page-node-id="368flsZtaBLdmiKXy0tf01">print</span>(<span class="f" data-page-node-id="dwH0Cjh1CAzPYFUBL78zB9">fib</span>(<span class="n" data-page-node-id="X7cQqjFpT1a9HVkAQ3SLx2">10</span>));  <span class="c" data-page-node-id="plHylAs9xpHZpoKPBSQhsA">// 55</span>
 
-<span class="k">fn</span> <span class="f">add</span>(a : <span class="k">int</span>, b : <span class="k">int</span>) -&gt; <span class="k">int</span> {
-    <span class="k">return</span> a + b;
+<span class="k" data-page-node-id="1z0IFi1tUaiFROQcOinERk">fn</span> <span class="f" data-page-node-id="S86AmC050D27mqpjIPUrTb">add</span>(a : <span class="k" data-page-node-id="iLdF678ve0M2KP4u7FH55A">int</span>, b : <span class="k" data-page-node-id="ioIyUuzAOnuu3QKfN0YyQI">int</span>) -&gt; <span class="k" data-page-node-id="SHRfJ2KQHVes1TVdrdM6Oh">int</span> {
+    <span class="k" data-page-node-id="4XAVeatz984Y8zH9Ho8TcE">return</span> a + b;
 }
-<span class="f">print</span>(<span class="f">add</span>(<span class="n">20</span>, <span class="n">22</span>));  <span class="c">// 42</span></code></pre>
+<span class="f" data-page-node-id="lNMKf1US9ROzSfIf1ee3Ln">print</span>(<span class="f" data-page-node-id="vTZ5JbcsK4P4XmLWrwv7Cz">add</span>(<span class="n" data-page-node-id="Hm2mFI8UsxcRQcSNq7QkIc">20</span>, <span class="n" data-page-node-id="7nm3TM5NR2Zx04f7zxJoJ9">22</span>));  <span class="c" data-page-node-id="t3SQvE7KW8MXu9LxhQGG6s">// 42</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">3.2 函数默认参数</div>
-    <div class="note">省略尾部实参取默认值；默认表达式调用时求值、可引用前面参数；必选参数必须在前（期望输出：Hello, Hone! / Hi, Hone! / *-*-* / *-* / *+*+*+*）</div>
-<pre><code><span class="k">fn</span> <span class="f">greet</span>(name, greeting = <span class="s">"Hello"</span>) {
-    <span class="k">return</span> greeting + <span class="s">", "</span> + name + <span class="s">"!"</span>;
+  <div class="example" data-page-node-id="M9x7AGYRYGZhY5acp7RPMO">
+    <div class="title" data-page-node-id="KMatEsWmXwqIKdXK1Si9TJ">3.2 函数默认参数</div>
+    <div class="note" data-page-node-id="ws6Nq6C3BA0GLyqaPUQmuz">省略尾部实参取默认值；默认表达式调用时求值、可引用前面参数；必选参数必须在前（期望输出：Hello, Hone! / Hi, Hone! / *-*-* / *-* / *+*+*+*）</div>
+<pre data-page-node-id="52VlV6VrHXtbhXKTl37GRX"><code data-page-node-id="IIOxplKaQ6WMEpSUBcaJHa"><span class="k" data-page-node-id="VN9ipRS5a1R3x6T20Bw3mD">fn</span> <span class="f" data-page-node-id="zUh7KWs96WRgtnQWHyHFBg">greet</span>(name, greeting = <span class="s" data-page-node-id="FKiJRYdVyR5iqKxT9DDBGA">"Hello"</span>) {
+    <span class="k" data-page-node-id="2ABAGQsELGCL9LDMSxwnB7">return</span> greeting + <span class="s" data-page-node-id="llmdb9ZSQppJwdUAblFwIY">", "</span> + name + <span class="s" data-page-node-id="Ew0RZFOntcjf59y4vCPnAE">"!"</span>;
 }
-<span class="f">print</span>(<span class="f">greet</span>(<span class="s">"Hone"</span>));           <span class="c">// Hello, Hone!</span>
-<span class="f">print</span>(<span class="f">greet</span>(<span class="s">"Hone"</span>, <span class="s">"Hi"</span>));     <span class="c">// Hi, Hone!</span>
+<span class="f" data-page-node-id="lLUaH1CQr9yGBHefp13oou">print</span>(<span class="f" data-page-node-id="4mQm90fygU6wYqcAKLbsy5">greet</span>(<span class="s" data-page-node-id="HrUlc5gpuMSk2vRvtpH65R">"Hone"</span>));           <span class="c" data-page-node-id="KGVEZV10DYS5FMABnGaxNy">// Hello, Hone!</span>
+<span class="f" data-page-node-id="gaWy7L1oJRhHe8gLNy678E">print</span>(<span class="f" data-page-node-id="FaJpoWV2yQ1SdQEMzEU01c">greet</span>(<span class="s" data-page-node-id="K5Mz6hpQpXgeLZiNmicWk4">"Hone"</span>, <span class="s" data-page-node-id="ZLhT031xN8UAAFUtHOfSlI">"Hi"</span>));     <span class="c" data-page-node-id="3p6wdxOx63cMm5kS9F4FSt">// Hi, Hone!</span>
 
-<span class="k">fn</span> <span class="f">repeat_char</span>(ch, times = <span class="n">3</span>, sep = <span class="s">"-"</span>) {
-    s = <span class="s">""</span>;
-    <span class="k">for</span> (i = <span class="n">0</span>; i &lt; times; i = i + <span class="n">1</span>) {
+<span class="k" data-page-node-id="Fd3UjfGgD85FNVitvFZ1dd">fn</span> <span class="f" data-page-node-id="44XH5Cnq2KJhdAj2Fmwbpu">repeat_char</span>(ch, times = <span class="n" data-page-node-id="Ife2Qn9zCwgObRHYhbV8Ra">3</span>, sep = <span class="s" data-page-node-id="3CNG9XD5eUDDuwjLacWRUL">"-"</span>) {
+    s = <span class="s" data-page-node-id="V2VQE8i7t7MskHf8Kt696a">""</span>;
+    <span class="k" data-page-node-id="7uZ5Rj1Bb9iXdbsbRGWKue">for</span> (i = <span class="n" data-page-node-id="yHiKxJ96s1Fy6YBqE8rXlV">0</span>; i &lt; times; i = i + <span class="n" data-page-node-id="ksMIDrLLEnsW3eBK6DopHj">1</span>) {
         s = s + ch;
-        <span class="k">if</span> (i &lt; times - <span class="n">1</span>) { s = s + sep; }
+        <span class="k" data-page-node-id="cwA9OWrzsrVI5lt3ClG1ix">if</span> (i &lt; times - <span class="n" data-page-node-id="fig6hZy0zn2FpggXMniXjO">1</span>) { s = s + sep; }
     }
-    <span class="k">return</span> s;
+    <span class="k" data-page-node-id="nUplBnA3hjl9amjagJK4x5">return</span> s;
 }
-<span class="f">print</span>(<span class="f">repeat_char</span>(<span class="s">"*"</span>));          <span class="c">// *-*-*</span>
-<span class="f">print</span>(<span class="f">repeat_char</span>(<span class="s">"*"</span>, <span class="n">2</span>));       <span class="c">// *-*</span>
-<span class="f">print</span>(<span class="f">repeat_char</span>(<span class="s">"*"</span>, <span class="n">4</span>, <span class="s">"+"</span>));  <span class="c">// *+*+*+*</span></code></pre>
+<span class="f" data-page-node-id="6ddJ2fxFnuVlCx3XJGfKwq">print</span>(<span class="f" data-page-node-id="CnRAYdVacK2jK09HFvCwU0">repeat_char</span>(<span class="s" data-page-node-id="M00DDHYg2UNLvJFA4KLMG9">"*"</span>));          <span class="c" data-page-node-id="ZsKn1f3ZBcmlRLTOTx8IQW">// *-*-*</span>
+<span class="f" data-page-node-id="nigKNtuK3oSVZZQFNJhQDK">print</span>(<span class="f" data-page-node-id="zF6mI4YRtRMeDp2igqQdTW">repeat_char</span>(<span class="s" data-page-node-id="2EHkHO4kfxC0NhIw2cxR7p">"*"</span>, <span class="n" data-page-node-id="omW0k6h7KlyNqF5qeXehK1">2</span>));       <span class="c" data-page-node-id="qBLGyYmBRjd9EbsbpRyFUz">// *-*</span>
+<span class="f" data-page-node-id="EsENqwVnvO52BLaqdgmTS5">print</span>(<span class="f" data-page-node-id="3frysAE5PFrYif87U9SIJg">repeat_char</span>(<span class="s" data-page-node-id="0LhNFH155kjQAFhGQEKSrh">"*"</span>, <span class="n" data-page-node-id="JHYH2EbasiAVqhtxfM8dDO">4</span>, <span class="s" data-page-node-id="8GZ9bIhG2XkPj2AedJIWW2">"+"</span>));  <span class="c" data-page-node-id="Sm2RudaNWqak1xEik9DjmN">// *+*+*+*</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">3.3 匿名函数（lambda 闭包）</div>
-    <div class="note">一等值：赋值/传参/返回；创建时按值捕获外围变量（期望输出：42 / 15 / 36 / 15）</div>
-<pre><code>double = <span class="k">fn</span>(x) { <span class="k">return</span> x * <span class="n">2</span>; };
-<span class="f">print</span>(double(<span class="n">21</span>));     <span class="c">// 42</span>
+  <div class="example" data-page-node-id="pm9H28cHGJH5FDIBV9ZxYo">
+    <div class="title" data-page-node-id="jW43aQCoTmb7IMT6Dw3nhh">3.3 匿名函数（lambda 闭包）</div>
+    <div class="note" data-page-node-id="nO4Bghckxg0bSIbjeABUGj">一等值：赋值/传参/返回；创建时按值捕获外围变量（期望输出：42 / 15 / 36 / 15）</div>
+<pre data-page-node-id="82UtTglKL4CgyHQegFybOA"><code data-page-node-id="dadtaqf8ln9QyzF6FCTVRt">double = <span class="k" data-page-node-id="FKdLaxTitHSmivOCTwkEIm">fn</span>(x) { <span class="k" data-page-node-id="em19LgF00ZYXFeaLtbbXJP">return</span> x * <span class="n" data-page-node-id="gNDVv7aqUpSxFagdeuwsH0">2</span>; };
+<span class="f" data-page-node-id="5zfFsy5y2fYZzzRYyeArQx">print</span>(double(<span class="n" data-page-node-id="MKKjCZWhU3HjMvWpy5OOce">21</span>));     <span class="c" data-page-node-id="WHxLnlb3y8jcwbBtHmTMTF">// 42</span>
 
-base = <span class="n">10</span>;
-adder = <span class="k">fn</span>(y) { <span class="k">return</span> base + y; };  <span class="c">// 捕获 base（按值）</span>
-<span class="f">print</span>(adder(<span class="n">5</span>));       <span class="c">// 15</span>
+base = <span class="n" data-page-node-id="U6leE3YjTU82va8cEqOTZn">10</span>;
+adder = <span class="k" data-page-node-id="o2ROPDefGk2lAbdBC7Fe6f">fn</span>(y) { <span class="k" data-page-node-id="qszPsEcdCbjFCkSvsHECBC">return</span> base + y; };  <span class="c" data-page-node-id="KorlAc5pBtVM47unJ2OJKP">// 捕获 base（按值）</span>
+<span class="f" data-page-node-id="4PnzXwU18HLTDHofMfKqQD">print</span>(adder(<span class="n" data-page-node-id="JPdDqQyCeE4IEJDoC7wmdw">5</span>));       <span class="c" data-page-node-id="iBxDAqt85CPZTo2jDHNB5A">// 15</span>
 
-<span class="k">fn</span> <span class="f">apply</span>(f, v) { <span class="k">return</span> f(v); }
-<span class="f">print</span>(<span class="f">apply</span>(<span class="k">fn</span>(n: <span class="k">int</span>) { <span class="k">return</span> n * n; }, <span class="n">6</span>));  <span class="c">// 36</span>
+<span class="k" data-page-node-id="QwrymI59bS7MWgrTSdHSVF">fn</span> <span class="f" data-page-node-id="FMAUq8ljsIzl1dFb89dBHB">apply</span>(f, v) { <span class="k" data-page-node-id="PH5AvDGeHN9AUlD8jt2hDa">return</span> f(v); }
+<span class="f" data-page-node-id="yVFZ2wNdblo0mDBCG5oX0V">print</span>(<span class="f" data-page-node-id="CkyeafQ1FHt92ke0MBEsYt">apply</span>(<span class="k" data-page-node-id="viwjMJNypPP8ME4knqKEya">fn</span>(n: <span class="k" data-page-node-id="YcAVC1SURTcloUCkRHZylx">int</span>) { <span class="k" data-page-node-id="hLGka0eoUpmynKjVAwwnyc">return</span> n * n; }, <span class="n" data-page-node-id="S5YjTny55tVI8pprxFzpS6">6</span>));  <span class="c" data-page-node-id="Ezyj3rRUphWGoAssoQ6yF3">// 36</span>
 
-<span class="k">fn</span> <span class="f">make_adder</span>(offset) { <span class="k">return</span> <span class="k">fn</span>(z) { <span class="k">return</span> z + offset; }; }
-add5 = <span class="f">make_adder</span>(<span class="n">5</span>);
-<span class="f">print</span>(add5(<span class="n">10</span>));       <span class="c">// 15</span></code></pre>
+<span class="k" data-page-node-id="7GUAAIN9oqTS3O12lJG9Q6">fn</span> <span class="f" data-page-node-id="rRB0DrYwSMtY9ifjoWmDUP">make_adder</span>(offset) { <span class="k" data-page-node-id="iE3QuxsVneneDjwtMA5Kry">return</span> <span class="k" data-page-node-id="DlxRlSmHHF3xg78zyrALoq">fn</span>(z) { <span class="k" data-page-node-id="7gCpPGRsPfvk2AiOaXkHY0">return</span> z + offset; }; }
+add5 = <span class="f" data-page-node-id="paJpDpD4YETkxfFz6Y9VEB">make_adder</span>(<span class="n" data-page-node-id="mym0BxBroEFk2jZdRMDDZd">5</span>);
+<span class="f" data-page-node-id="A0EIfTOZTTKSVt4R4u6moc">print</span>(add5(<span class="n" data-page-node-id="Ufvi8NEFmfv8TDFK0VAcic">10</span>));       <span class="c" data-page-node-id="EExBzL0RXTY2MGbEPycHVJ">// 15</span></code></pre>
   </div>
 
-  <p>新语法综合示例（continue / C 风格 for / do-while / 复合赋值 / 自增自减 / 三元表达式 / 空值合并 /
-    lambda 闭包 / 函数默认参数 / 三引号原始字符串）见 <code class="inline">examples/new_syntax_demo.hn</code>。</p>
+  <p data-page-node-id="EOHXTW7BmC0oV1JLANhQF1">新语法综合示例（continue / C 风格 for / do-while / 复合赋值 / 自增自减 / 三元表达式 / 空值合并 /
+    lambda 闭包 / 函数默认参数 / 三引号原始字符串）见 <code class="inline" data-page-node-id="tzbl4khLi38z34JkuL2f2f">examples/new_syntax_demo.hn</code>。</p>
 
-  <h3><span class="hash">#</span>4. 集合与字符串</h3>
+  <h3 data-page-node-id="sYmxQLPnhGDZNGYYDmTJiZ"><span class="hash" data-page-node-id="zemAn6DGOB21iAvgWcY2H4">#</span>4. 集合与字符串</h3>
 
-  <div class="example">
-    <div class="title">4.1 列表操作</div>
-    <div class="note">列表字面量、len/append/contains/index_of（期望输出：3 / [1, 2, 3, 4] / true / false / 3 / -1）</div>
-<pre><code>l = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>];
-<span class="f">print</span>(<span class="f">len</span>(l));           <span class="c">// 3</span>
-l = <span class="f">append</span>(l, <span class="n">4</span>);        <span class="c">// [1, 2, 3, 4]</span>
-<span class="f">print</span>(<span class="f">to_str</span>(l));
-<span class="f">print</span>(<span class="f">contains</span>(l, <span class="n">3</span>));   <span class="c">// true</span>
-<span class="f">print</span>(<span class="f">contains</span>(l, <span class="n">9</span>));   <span class="c">// false</span>
-<span class="f">print</span>(<span class="f">index_of</span>(l, <span class="n">4</span>));   <span class="c">// 3</span>
-<span class="f">print</span>(<span class="f">index_of</span>(l, <span class="n">99</span>));  <span class="c">// -1</span></code></pre>
+  <div class="example" data-page-node-id="N2r1GgulOW1Y2O0cuwZiUj">
+    <div class="title" data-page-node-id="dKPsYLFuyzu9ysc4mASH9K">4.1 列表操作</div>
+    <div class="note" data-page-node-id="OwOPNN2zxBHDW4QMNEwNl8">列表字面量、len/append/contains/index_of（期望输出：3 / [1, 2, 3, 4] / true / false / 3 / -1）</div>
+<pre data-page-node-id="WcvhZl8LPLLWs5zKqeaxXU"><code data-page-node-id="G1906AhKrAHiQHQo8GfJdi">l = [<span class="n" data-page-node-id="lxmKVjVvjUzGUyBregKYAF">1</span>, <span class="n" data-page-node-id="uWmhAcc9A8ctQFo6PDcKij">2</span>, <span class="n" data-page-node-id="Gtity3RbJHoT1k39szL8B5">3</span>];
+<span class="f" data-page-node-id="oLXHegeJgsX5dD1I0BmPtH">print</span>(<span class="f" data-page-node-id="rxIi2MjSzf2gvNFTph36is">len</span>(l));           <span class="c" data-page-node-id="P0r5nayCSf46sEUVTAqipm">// 3</span>
+l = <span class="f" data-page-node-id="h3acRAQrUueJGlIi0GJP0f">append</span>(l, <span class="n" data-page-node-id="9l6j4dH6jRWXCDG6HpueXb">4</span>);        <span class="c" data-page-node-id="ABH3o5dmKJK5aF17ur4EVT">// [1, 2, 3, 4]</span>
+<span class="f" data-page-node-id="8LCaFNZTB9yuxHtjDyZqzJ">print</span>(<span class="f" data-page-node-id="5uNdSn6RBcht6rARnKszmK">to_str</span>(l));
+<span class="f" data-page-node-id="al3uEfTQxXrBu46Xd2yTT2">print</span>(<span class="f" data-page-node-id="7mwIA6JmSOlhpKhf7uPzJy">contains</span>(l, <span class="n" data-page-node-id="w5sk2LZyl9F4YCiADHAIMK">3</span>));   <span class="c" data-page-node-id="OWosCvlk789m4pnArSzis5">// true</span>
+<span class="f" data-page-node-id="SdjCu9CitTly28B8nS0J2y">print</span>(<span class="f" data-page-node-id="6Co0d5bQWjsbPNCmKJJdck">contains</span>(l, <span class="n" data-page-node-id="FcmWtQzzS9007YGV9m2Cuv">9</span>));   <span class="c" data-page-node-id="4SBNgN3zC9oVtPbButNVzj">// false</span>
+<span class="f" data-page-node-id="dhAW7FwVaGAO5Z4b4D94Sc">print</span>(<span class="f" data-page-node-id="AqsR1ixVfeAaGyAlmb8Dhb">index_of</span>(l, <span class="n" data-page-node-id="TXQ52DIBX4NnOIAewhzKOp">4</span>));   <span class="c" data-page-node-id="pkL9b6asIKp9YVrcjEAzT5">// 3</span>
+<span class="f" data-page-node-id="AQpMVFKj0LLTXBnIjQaLbV">print</span>(<span class="f" data-page-node-id="L15Fm9E6xDr6s0K1c8cho8">index_of</span>(l, <span class="n" data-page-node-id="Q857pBjaYkeoTLkombAMN9">99</span>));  <span class="c" data-page-node-id="B1oBy6VZgbm86mLFcYP1qE">// -1</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">4.2 字典操作</div>
-    <div class="note">字典字面量、has_key/keys/values/len（期望输出：{name: hone, ver: 1} / true / false / [name, ver] / [hone, 1] / 2）</div>
-<pre><code>d = {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
-<span class="f">print</span>(<span class="f">to_str</span>(d));          <span class="c">// {name: hone, ver: 1}</span>
-<span class="f">print</span>(<span class="f">has_key</span>(d, <span class="s">"name"</span>)); <span class="c">// true</span>
-<span class="f">print</span>(<span class="f">has_key</span>(d, <span class="s">"nope"</span>)); <span class="c">// false</span>
-<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">keys</span>(d)));    <span class="c">// [name, ver]</span>
-<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">values</span>(d)));  <span class="c">// [hone, 1]</span>
-<span class="f">print</span>(<span class="f">len</span>(d));           <span class="c">// 2（键个数）</span></code></pre>
+  <div class="example" data-page-node-id="OACm3VNuptmiNQzTHNyvG7">
+    <div class="title" data-page-node-id="H7jERZoHcLDUVTcNPZjLW9">4.2 字典操作</div>
+    <div class="note" data-page-node-id="DXPF1sXfmjRdQYGwA9FYU0">字典字面量、has_key/keys/values/len（期望输出：{name: hone, ver: 1} / true / false / [name, ver] / [hone, 1] / 2）</div>
+<pre data-page-node-id="vI4yLQm4CujCLfeUHf0fx1"><code data-page-node-id="3pe3DFmkpXeBT80D2TO3sb">d = {<span class="s" data-page-node-id="28Q2DXppugNv7vDy9ob4pM">"name"</span>: <span class="s" data-page-node-id="ML9L1jgrywa3wAKOjtthek">"hone"</span>, <span class="s" data-page-node-id="6DTrGNw3kYPYbRdMYu3HC7">"ver"</span>: <span class="n" data-page-node-id="uQ6FuKC37v8x0xfvtLBIlK">1</span>};
+<span class="f" data-page-node-id="KEEF5PebrHFKlNkpre5ic2">print</span>(<span class="f" data-page-node-id="QOpF4HruTPdn5QTcsb3w3V">to_str</span>(d));          <span class="c" data-page-node-id="eXrrMonhGdPv0UsyATKUgp">// {name: hone, ver: 1}</span>
+<span class="f" data-page-node-id="4FTI2w0siuyC63kzilCSv1">print</span>(<span class="f" data-page-node-id="7OlV2gmC4cPtNMnUfnF0KC">has_key</span>(d, <span class="s" data-page-node-id="Gt3MJqznnq0kLspFKcyyGu">"name"</span>)); <span class="c" data-page-node-id="tlclEs1neU7hKmu9nSY5oY">// true</span>
+<span class="f" data-page-node-id="rJ2bifOnxZGSQ8w30weBk1">print</span>(<span class="f" data-page-node-id="9p65DgBASNatYJyFueU0xH">has_key</span>(d, <span class="s" data-page-node-id="yYqDDOpy2omzJ90iFFDjKw">"nope"</span>)); <span class="c" data-page-node-id="Wc7L5AwsNRrpwPgdi8mH85">// false</span>
+<span class="f" data-page-node-id="ytFHFUwUQP0gGDu7kjrClI">print</span>(<span class="f" data-page-node-id="tMSkNEHFA4NVqqhmbWDBIG">to_str</span>(<span class="f" data-page-node-id="E3YwfVwwHcTsIt7L7bsdGC">keys</span>(d)));    <span class="c" data-page-node-id="GPvG6wfmfSXtzy9XsN0zLs">// [name, ver]</span>
+<span class="f" data-page-node-id="t8wDsZ7atJhzeVa0MKBQqv">print</span>(<span class="f" data-page-node-id="lWEYz1yqeIenzY8IqAgepu">to_str</span>(<span class="f" data-page-node-id="vELX4IeoIJmCg4BWcoROgG">values</span>(d)));  <span class="c" data-page-node-id="kwQ6Os3EQgpHr0S1CRprbt">// [hone, 1]</span>
+<span class="f" data-page-node-id="5NtyS7wd4fWpHqxquIpdo7">print</span>(<span class="f" data-page-node-id="A4Poia50folWoqNK9lQABa">len</span>(d));           <span class="c" data-page-node-id="rKMuFC8Ca5B7PQaHloVrEv">// 2（键个数）</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">4.3 f-string 字符串插值</div>
-    <div class="note">f"..." 内 {expr} 嵌入表达式，{{ / }} 转义字面大括号</div>
-<pre><code>name = <span class="s">"hone"</span>;
-<span class="f">print</span>(<span class="s">f"你好, {name}!"</span>);        <span class="c">// 你好, hone!</span>
+  <div class="example" data-page-node-id="9RI9cncEylgoG1AHTymbNd">
+    <div class="title" data-page-node-id="LGVNNkaHPqdnir1U1MaE6W">4.3 f-string 字符串插值</div>
+    <div class="note" data-page-node-id="E0DEkUlaPNmPQmdJY4wPfD">f"..." 内 {expr} 嵌入表达式，{{ / }} 转义字面大括号</div>
+<pre data-page-node-id="zUyb5jkv8KWMc6vk14pjnd"><code data-page-node-id="boobmSftjc5gzgUGGRCeMG">name = <span class="s" data-page-node-id="a03ypw277DqRsru4fwNRHp">"hone"</span>;
+<span class="f" data-page-node-id="IkqZW9uZEPLOkprvkSIxWt">print</span>(<span class="s" data-page-node-id="EjYkBooi0nQcrW5SrDBpgW">f"你好, {name}!"</span>);        <span class="c" data-page-node-id="h4BRk4qa0PWpNT7GTZb8LL">// 你好, hone!</span>
 
-a = <span class="n">3</span>; b = <span class="n">2</span>;
-<span class="f">print</span>(<span class="s">f"sum = {a + b}, pi = {3.14}"</span>);  <span class="c">// sum = 5, pi = 3.14</span>
+a = <span class="n" data-page-node-id="kEooS1VYk3BIFrCmjPTbo8">3</span>; b = <span class="n" data-page-node-id="frGE5BegQka2nsbSXN8D4H">2</span>;
+<span class="f" data-page-node-id="hKLAtFMhmzBr4dJwDU0xKP">print</span>(<span class="s" data-page-node-id="z1izjJiPTwerZO02nmIowb">f"sum = {a + b}, pi = {3.14}"</span>);  <span class="c" data-page-node-id="Cgy85JgzhlYzAgtKLYQz5G">// sum = 5, pi = 3.14</span>
 
-l = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>];
-d = {<span class="s">"a"</span>: <span class="n">1</span>};
-<span class="f">print</span>(<span class="s">f"list = {l}, dict = {d}"</span>);   <span class="c">// list = [1, 2, 3], dict = {a: 1}</span></code></pre>
+l = [<span class="n" data-page-node-id="TeKBvHZQAjmRlKBqxWJWgl">1</span>, <span class="n" data-page-node-id="Q1PyfcpO5PaqXPpQRWqlTJ">2</span>, <span class="n" data-page-node-id="ue3S8bSFIbtr3lMugwmFze">3</span>];
+d = {<span class="s" data-page-node-id="uo0AHHiq77CPLiqsgpoXkI">"a"</span>: <span class="n" data-page-node-id="PprHI4PFskMvb3CrY6AOCE">1</span>};
+<span class="f" data-page-node-id="a3uc80O1GXCiSbVYJ96AJv">print</span>(<span class="s" data-page-node-id="1Vpzk4GKhKCzSEotxd8HrB">f"list = {l}, dict = {d}"</span>);   <span class="c" data-page-node-id="U25dMCDalAPLZvUYFEI2kz">// list = [1, 2, 3], dict = {a: 1}</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">4.4 类型判断</div>
-    <div class="note">is_int / is_float / is_str / is_bool / is_list / is_dict / is_null</div>
-<pre><code>a = <span class="n">42</span>; b = <span class="n">3.14</span>; s = <span class="s">"hello"</span>; l = [<span class="n">1</span>, <span class="n">2</span>];
-<span class="f">print</span>(<span class="f">is_int</span>(a));       <span class="c">// true</span>
-<span class="f">print</span>(<span class="f">is_float</span>(a));     <span class="c">// false</span>
-<span class="f">print</span>(<span class="f">is_float</span>(b));     <span class="c">// true</span>
-<span class="f">print</span>(<span class="f">is_str</span>(s));       <span class="c">// true</span>
-<span class="f">print</span>(<span class="f">is_list</span>(l));      <span class="c">// true</span>
-<span class="f">print</span>(<span class="f">is_bool</span>(<span class="k">true</span>));  <span class="c">// true</span></code></pre>
+  <div class="example" data-page-node-id="jHQ52HmGbotTBGjPREmrAy">
+    <div class="title" data-page-node-id="TlCHXIzZo8QotzjFRrAs2p">4.4 类型判断</div>
+    <div class="note" data-page-node-id="pZkHRrTspCnrWpDma97piN">is_int / is_float / is_str / is_bool / is_list / is_dict / is_null</div>
+<pre data-page-node-id="X00VSFqegQDsK2kuSkYBPo"><code data-page-node-id="vueG4uJMrDfvGjoj06cxVz">a = <span class="n" data-page-node-id="b6lbnHRI59Kd8PPUZh1rd3">42</span>; b = <span class="n" data-page-node-id="j3fcivXhVetdQJG8FxPVme">3.14</span>; s = <span class="s" data-page-node-id="o2b9ZIegXbhX9QMp1cZgo3">"hello"</span>; l = [<span class="n" data-page-node-id="7wPHcoaF27tMBH3W1FiOFK">1</span>, <span class="n" data-page-node-id="PEQgSCbLQmNvHppGpEmVBu">2</span>];
+<span class="f" data-page-node-id="W2EyMIjbNIvH1hO8wxPraM">print</span>(<span class="f" data-page-node-id="5uonsMDHHPsKIECbgYayOr">is_int</span>(a));       <span class="c" data-page-node-id="2JpYPHID1cTqIWwmcAK2Kp">// true</span>
+<span class="f" data-page-node-id="oH6iVmaCEVFHwir2wiOt0b">print</span>(<span class="f" data-page-node-id="UQsxNl2SD1X1gCbkaqL5sP">is_float</span>(a));     <span class="c" data-page-node-id="5hYASgfuYc8vYEn1lu8kze">// false</span>
+<span class="f" data-page-node-id="0OVhbKjsDTAEKqhh4gn2o3">print</span>(<span class="f" data-page-node-id="jTpbQYZVG9X1SgZROSo3c9">is_float</span>(b));     <span class="c" data-page-node-id="qnxCukJUFN8OYwhhAZqbCZ">// true</span>
+<span class="f" data-page-node-id="ixokFNOhJXHCXBd8irL35Z">print</span>(<span class="f" data-page-node-id="RJmSMZ5Ek7ADBnkGC2MHl7">is_str</span>(s));       <span class="c" data-page-node-id="kKiyFQ2ALOGgUI4TSZ8E17">// true</span>
+<span class="f" data-page-node-id="EpK9r3EnoIrOlCiNyzyTHQ">print</span>(<span class="f" data-page-node-id="GNIy2hYBW5mBcMDT79y8zp">is_list</span>(l));      <span class="c" data-page-node-id="5O5cxOuanIGLGznpPgZlub">// true</span>
+<span class="f" data-page-node-id="5vQGmSPjAuNHT5iE25WX3F">print</span>(<span class="f" data-page-node-id="XqxAgnekhFtEzkdAF7WBDp">is_bool</span>(<span class="k" data-page-node-id="m3JKNZhwNN8DYVbt2OOOjo">true</span>));  <span class="c" data-page-node-id="NsKeakJqQScI2xowH78rxk">// true</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">4.5 结构体（struct）与深度拷贝</div>
-    <div class="note">struct 声明确定的数据形态（字段名与类型固定），构造时按字段顺序传参并校验类型；clone/copy 深度拷贝防别名</div>
-<pre><code><span class="k">struct</span> <span class="f">Point</span> { x: <span class="k">int</span>, y: <span class="k">float</span> };
-<span class="k">struct</span> <span class="f">Rect</span> { w: <span class="k">int</span>, h: <span class="k">int</span>, label: <span class="k">str</span> };
+  <div class="example" data-page-node-id="DT1V29HDwCkStqndWme1TY">
+    <div class="title" data-page-node-id="rqT9wkRACuKJmrS87672Ee">4.5 结构体（struct）与深度拷贝</div>
+    <div class="note" data-page-node-id="s0LSGJ39f8oEuIMFx3CNaB">struct 声明确定的数据形态（字段名与类型固定），构造时按字段顺序传参并校验类型；clone/copy 深度拷贝防别名</div>
+<pre data-page-node-id="HBcMhC19mWcfQWdEltvBHA"><code data-page-node-id="jYUrAM28EErnGIquzbRqyC"><span class="k" data-page-node-id="zJ8hu64QG6s74Uky1rjJtb">struct</span> <span class="f" data-page-node-id="TAS12YLsgg5HQyBBaXkBNm">Point</span> { x: <span class="k" data-page-node-id="pSP75BAMKVCLuDh5Xbgy6I">int</span>, y: <span class="k" data-page-node-id="VUcToESV8Nt0lEBvDBR6oH">float</span> };
+<span class="k" data-page-node-id="NV6yFq8MsFQpbYvWBIcoAz">struct</span> <span class="f" data-page-node-id="A04fgCO6wo4toB20mltheO">Rect</span> { w: <span class="k" data-page-node-id="zVhhRxJSDarvnHqo5B2prw">int</span>, h: <span class="k" data-page-node-id="ZV6PRWzgD1Jsik3zIVo4Qz">int</span>, label: <span class="k" data-page-node-id="q65wmvTLhCyVNRT8SWUem0">str</span> };
 
-p = <span class="f">Point</span>(<span class="n">3</span>, <span class="n">2.5</span>);
-<span class="f">print</span>(p.x);            <span class="c">// 3</span>
-r = <span class="f">Rect</span>(<span class="n">10</span>, <span class="n">20</span>, <span class="s">"box"</span>);
-<span class="f">print</span>(r.label);        <span class="c">// box</span>
+p = <span class="f" data-page-node-id="aemsUdbsJfWupSpypigBRZ">Point</span>(<span class="n" data-page-node-id="w1y8LI1yIMM1K5aDqy0eCa">3</span>, <span class="n" data-page-node-id="8nDf2B1aNGdTqXGnQZCXyY">2.5</span>);
+<span class="f" data-page-node-id="RyZPtXEsYxva1EX05My8iZ">print</span>(p.x);            <span class="c" data-page-node-id="edOAzeVu5QhXxWlsnJv0z1">// 3</span>
+r = <span class="f" data-page-node-id="ly1Iz5axxyClaJOQe7tJ5P">Rect</span>(<span class="n" data-page-node-id="2gw3og6PLyyQZv6ItoVW9n">10</span>, <span class="n" data-page-node-id="KdLCwftrdsMBclAXDhoABI">20</span>, <span class="s" data-page-node-id="37zlVIkrmDu7ugq67QJk7A">"box"</span>);
+<span class="f" data-page-node-id="UbfiuUWNcTzKGGAOxVgSA2">print</span>(r.label);        <span class="c" data-page-node-id="7R0q98hEdWKcLOMmKHETH3">// box</span>
 
-<span class="c">// 深度拷贝：修改副本不影响原值</span>
-l1 = [<span class="n">1</span>, <span class="n">2</span>, [<span class="n">3</span>, <span class="n">4</span>]];
-l2 = <span class="f">clone</span>(l1);
-l2 = <span class="f">append</span>(l2, <span class="n">99</span>);
-<span class="f">print</span>(<span class="f">to_str</span>(l1));     <span class="c">// [1, 2, [3, 4]]（不变）</span></code></pre>
+<span class="c" data-page-node-id="ndo8xyUSf5H3VCDMv6Kdv3">// 深度拷贝：修改副本不影响原值</span>
+l1 = [<span class="n" data-page-node-id="pMOTKeO1uVOXdPbJYAjG7k">1</span>, <span class="n" data-page-node-id="5jWRcJSoXjPLw24mGhGZZD">2</span>, [<span class="n" data-page-node-id="1cfyZR64xMm7J2btqFElmn">3</span>, <span class="n" data-page-node-id="IESqmdEbZeFx7bIzICa5hO">4</span>]];
+l2 = <span class="f" data-page-node-id="AndbVk5UgN2dRC5QeBkBmm">clone</span>(l1);
+l2 = <span class="f" data-page-node-id="W9WD2LzUoni0j54rs5TgEl">append</span>(l2, <span class="n" data-page-node-id="Gown95ueEbVDA1pSSJB3Hs">99</span>);
+<span class="f" data-page-node-id="hdIuLJfCXqcRzNyTgAoGIh">print</span>(<span class="f" data-page-node-id="WWrgrm0HJWhh5Oyri30DWY">to_str</span>(l1));     <span class="c" data-page-node-id="QHMysGtKMiA2vCgGfdFGmY">// [1, 2, [3, 4]]（不变）</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">4.6 模式匹配（match）</div>
-    <div class="note">match 是表达式，返回匹配分支的值；模式支持字面量与 _ 通配符（放最后）；全部不匹配运行时报错</div>
-<pre><code>s = <span class="k">match</span> <span class="n">2</span> {
-    <span class="n">1</span> =&gt; <span class="s">"one"</span>,
-    <span class="n">2</span> =&gt; <span class="s">"two"</span>,
-    _ =&gt; <span class="s">"other"</span>,
+  <div class="example" data-page-node-id="o4HM3LS79GjDGKwtCEPDl8">
+    <div class="title" data-page-node-id="jKVcIEmivVtGfTKyw5EIoE">4.6 模式匹配（match）</div>
+    <div class="note" data-page-node-id="fA9fdFVz4gHl9Vy6HJx1Ls">match 是表达式，返回匹配分支的值；模式支持字面量与 _ 通配符（放最后）；全部不匹配运行时报错</div>
+<pre data-page-node-id="tJD3QXV2vGiYBP9Px2LxAr"><code data-page-node-id="oW0URD7nSj4Q562yFPwEHB">s = <span class="k" data-page-node-id="a06DR1PRU0Q0dt5GlAZEza">match</span> <span class="n" data-page-node-id="axHT1TNDWbE4z70H5INbAo">2</span> {
+    <span class="n" data-page-node-id="gJGoCHqTdefxVagzTBd0uC">1</span> =&gt; <span class="s" data-page-node-id="KfQGKygH9B0H9vRmePLqam">"one"</span>,
+    <span class="n" data-page-node-id="rfpnwLgkLXsqN5hlDDHIdy">2</span> =&gt; <span class="s" data-page-node-id="kGHdzup4W9mtY1FbQ5QMpy">"two"</span>,
+    _ =&gt; <span class="s" data-page-node-id="hLVGGE8P6xswCtVxW9TOVe">"other"</span>,
 };
-<span class="f">print</span>(s);                 <span class="c">// two</span>
+<span class="f" data-page-node-id="ZrMq7DxMmBVCnrKPLo3qAU">print</span>(s);                 <span class="c" data-page-node-id="seNMIZ1vyezBUFJEtsxVUz">// two</span>
 
-status = <span class="n">404</span>;
-msg = <span class="k">match</span> status {
-    <span class="n">200</span> =&gt; <span class="s">"OK"</span>,
-    <span class="n">404</span> =&gt; <span class="s">"Not Found"</span>,
-    <span class="n">500</span> =&gt; <span class="s">"Server Error"</span>,
-    _ =&gt; <span class="s">"Unknown"</span>,
+status = <span class="n" data-page-node-id="zixHxbDxcWwmWxBpMyce48">404</span>;
+msg = <span class="k" data-page-node-id="QGmeoC7sDNRje2aIq71jIy">match</span> status {
+    <span class="n" data-page-node-id="NGRlVAl7HwW9fwPngm8Cd2">200</span> =&gt; <span class="s" data-page-node-id="gRWNYToWUY7lzCc5fHBWaL">"OK"</span>,
+    <span class="n" data-page-node-id="KOqzolZTJuAzhpVSlA8hap">404</span> =&gt; <span class="s" data-page-node-id="MheJVoxXUDPw2gXl8FEJzX">"Not Found"</span>,
+    <span class="n" data-page-node-id="HrDoCl7N1t0CBgR4JE8Ecm">500</span> =&gt; <span class="s" data-page-node-id="dP1shWVI2EdnIGqvBZeJJ6">"Server Error"</span>,
+    _ =&gt; <span class="s" data-page-node-id="g5ygOu5jaaVddN5bXG8F0Q">"Unknown"</span>,
 };
-<span class="f">print</span>(msg);               <span class="c">// Not Found</span></code></pre>
+<span class="f" data-page-node-id="qvlCsOtxZo5kp40sGQyPK2">print</span>(msg);               <span class="c" data-page-node-id="UUFpS45XmlLdCpixBcq0sw">// Not Found</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">4.7 管道操作符（|&gt;）</div>
-    <div class="note">x |&gt; f 等价 f(x)；x |&gt; f(a, b) 等价 f(x, a, b)；可链式，解析期转换为普通调用</div>
-<pre><code><span class="c">// 嵌套调用写法 vs 管道写法</span>
-<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">len</span>(<span class="s">"hello"</span>)));      <span class="c">// "5"</span>
-<span class="f">print</span>(<span class="s">"hello"</span> |&gt; <span class="f">len</span> |&gt; <span class="f">to_str</span>);  <span class="c">// "5"</span>
+  <div class="example" data-page-node-id="c1sAdYQAbRFIhWpVgXZnbf">
+    <div class="title" data-page-node-id="I5KfFVeXl2znCaqCM8VeEE">4.7 管道操作符（|&gt;）</div>
+    <div class="note" data-page-node-id="y44LdHd6ph4OTBaSmnm0pt">x |&gt; f 等价 f(x)；x |&gt; f(a, b) 等价 f(x, a, b)；可链式，解析期转换为普通调用</div>
+<pre data-page-node-id="tdrCx0nHRAnJdmZvkHm2cJ"><code data-page-node-id="ExQ2k10PqohYmXTyDwNzFL"><span class="c" data-page-node-id="U3quPY898DhQJoVE781UyB">// 嵌套调用写法 vs 管道写法</span>
+<span class="f" data-page-node-id="M7WU9YjX25JHGcVSIityMF">print</span>(<span class="f" data-page-node-id="X0VwQOJGC4AFHa2fQeieK4">to_str</span>(<span class="f" data-page-node-id="JZBds8yfAHiAc0oF5I9ZAf">len</span>(<span class="s" data-page-node-id="HI9berKeLlaWdpBu7r1OlE">"hello"</span>)));      <span class="c" data-page-node-id="b4ovAGzaR40kR8F7n0Dh7J">// "5"</span>
+<span class="f" data-page-node-id="BBchDHWFpklLZDHgwELf3q">print</span>(<span class="s" data-page-node-id="13G74hcKiUxBC5L6K2e5xd">"hello"</span> |&gt; <span class="f" data-page-node-id="AiY43W940TabTJcgOfUD0s">len</span> |&gt; <span class="f" data-page-node-id="Q9L5mR49YTHTXRlPyrBo93">to_str</span>);  <span class="c" data-page-node-id="D7E3URP5GLaiSbP3dkKyc2">// "5"</span>
 
-<span class="f">print</span>([<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>] |&gt; <span class="f">len</span>);          <span class="c">// 3</span>
-<span class="f">print</span>(<span class="n">3</span> |&gt; <span class="f">max</span>(<span class="n">7</span>) |&gt; <span class="f">to_str</span>);     <span class="c">// "7"</span></code></pre>
+<span class="f" data-page-node-id="Kdf7Zgo7rzdlzjFrIn3Svu">print</span>([<span class="n" data-page-node-id="HyZKTZ7SkK14ehc993qQOV">1</span>, <span class="n" data-page-node-id="M3XTcw6LfntKhUbBUc9FJR">2</span>, <span class="n" data-page-node-id="ikzBkt3TwBai5biUfhjTzX">3</span>] |&gt; <span class="f" data-page-node-id="C0wKUBU6nXLvHyBjsyFW0q">len</span>);          <span class="c" data-page-node-id="aSHF9TSTsWeLU8BPzP6gbE">// 3</span>
+<span class="f" data-page-node-id="uT752zcFQkFGHr5jdZcBPm">print</span>(<span class="n" data-page-node-id="D566LYqYDblYA5mjSUtVWA">3</span> |&gt; <span class="f" data-page-node-id="IHPoullbCfyXd8wGvQjq4z">max</span>(<span class="n" data-page-node-id="MoEweE7V7WDCPBdEhfcPJU">7</span>) |&gt; <span class="f" data-page-node-id="kEvO1yHT3aSGD75sgueYeG">to_str</span>);     <span class="c" data-page-node-id="nuVkeSeK0EwWTkZxIbT1ZV">// "7"</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">4.8 char 字符类型</div>
-    <div class="note">单引号字面量（须恰好一个字符）、按码点比较、ord/char/char_at/char_upper/char_lower/char_is_* 函数；无算术运算（完整示例：examples/char_demo.hn）</div>
-<pre><code>c = <span class="s">'中'</span>;                  <span class="c">// char：单个 Unicode 字符</span>
-<span class="k">char</span> w = <span class="s">'x'</span>;           <span class="c">// 显式类型声明</span>
-<span class="f">print</span>(<span class="f">type_of</span>(c));          <span class="c">// char</span>
-<span class="f">print</span>(<span class="s">'a'</span> &lt; <span class="s">'b'</span>);         <span class="c">// true（按码点比较）</span>
-<span class="f">print</span>(<span class="f">ord</span>(c));               <span class="c">// 20013（Unicode 码点）</span>
-<span class="f">print</span>(<span class="f">char</span>(<span class="n">97</span>));           <span class="c">// a（码点 → 字符）</span>
-<span class="f">print</span>(<span class="f">char_at</span>(<span class="s">"hone"</span>, <span class="n">1</span>)); <span class="c">// o（按字符取，返回 char）</span>
-<span class="f">print</span>(<span class="f">char_upper</span>(<span class="s">'a'</span>));    <span class="c">// A</span>
-<span class="f">print</span>(<span class="f">char_is_digit</span>(<span class="s">'5'</span>));  <span class="c">// true</span>
-<span class="f">print</span>(<span class="f">char_is_alpha</span>(<span class="s">'中'</span>)); <span class="c">// true</span></code></pre>
+  <div class="example" data-page-node-id="Jjp8ii0AZ2eKqf3wP2LUOR">
+    <div class="title" data-page-node-id="G19LiAQonF0DdnUGUymDxG">4.8 char 字符类型</div>
+    <div class="note" data-page-node-id="asvBuZpszDfvcRzzPELx6D">单引号字面量（须恰好一个字符）、按码点比较、ord/char/char_at/char_upper/char_lower/char_is_* 函数；无算术运算（完整示例：examples/char_demo.hn）</div>
+<pre data-page-node-id="LYhPbK5VlW6kB6LTdCoIQ8"><code data-page-node-id="XyHon6lHg5th5d0eELUXlx">c = <span class="s" data-page-node-id="LA6XXen3X9Pn1ZzB9MWIwA">'中'</span>;                  <span class="c" data-page-node-id="zcDDLCDVDMgfyCMyRZWA1D">// char：单个 Unicode 字符</span>
+<span class="k" data-page-node-id="WiBgLHjabq0W6y28xBpYrY">char</span> w = <span class="s" data-page-node-id="1bHxhIhWwvxolcFm7qO8vx">'x'</span>;           <span class="c" data-page-node-id="4Qf87Lw8Zv3HUMlL5eVRiI">// 显式类型声明</span>
+<span class="f" data-page-node-id="riZIs7aHj6sI52XkyAolGH">print</span>(<span class="f" data-page-node-id="S6ZsvckQGBFvh2bt7E0Yjp">type_of</span>(c));          <span class="c" data-page-node-id="nfhQWb8i5q6YsekLQmeTOR">// char</span>
+<span class="f" data-page-node-id="Ko8tSXaEdtbEXbOIRqcXME">print</span>(<span class="s" data-page-node-id="D9mxZi0WnNWx9JYeSfCOC6">'a'</span> &lt; <span class="s" data-page-node-id="Zgs2FRbIiEIcp6y3mPt1f1">'b'</span>);         <span class="c" data-page-node-id="1msXAXKdDJTsxNQsHnEJnM">// true（按码点比较）</span>
+<span class="f" data-page-node-id="GxxgrhBavEG3fKCMkSOqfB">print</span>(<span class="f" data-page-node-id="CRydJsl2MtwPRRJGiffbbG">ord</span>(c));               <span class="c" data-page-node-id="9lwyfmBsiwyBZzgjBEiC0v">// 20013（Unicode 码点）</span>
+<span class="f" data-page-node-id="CYgai7BEwTpoUlYEmAqXbK">print</span>(<span class="f" data-page-node-id="6U1YXuhGyM6ubKEK63Z5cC">char</span>(<span class="n" data-page-node-id="w6Tufo4uO7qaEe6HeHVE6Q">97</span>));           <span class="c" data-page-node-id="s26V2564ZZR7nBTXJMNUCd">// a（码点 → 字符）</span>
+<span class="f" data-page-node-id="umLgXYPgKizXB6jUL7b33Q">print</span>(<span class="f" data-page-node-id="SYH6smKy4z7PjT1jlOmPBn">char_at</span>(<span class="s" data-page-node-id="nmCBXyJEaTblHFeaA4ELkI">"hone"</span>, <span class="n" data-page-node-id="6arGH4kVgiAiu7FJV3A0sw">1</span>)); <span class="c" data-page-node-id="xY7rlmiGJHtsd03FwjImx6">// o（按字符取，返回 char）</span>
+<span class="f" data-page-node-id="ErkCvB6urhYlHq0dFj57RL">print</span>(<span class="f" data-page-node-id="XWemYAvUpKy5oC8akO5YOI">char_upper</span>(<span class="s" data-page-node-id="B8IzwZpMWHPozqRB1yveIF">'a'</span>));    <span class="c" data-page-node-id="4ExnfZy4W146MxzHjEV5Il">// A</span>
+<span class="f" data-page-node-id="inhuRdycDEsvbAPhk4z61Z">print</span>(<span class="f" data-page-node-id="ovVIQ88umNd9UWdTw6vKf1">char_is_digit</span>(<span class="s" data-page-node-id="uwo0DSTfaAa8j0CoD73j94">'5'</span>));  <span class="c" data-page-node-id="VXNxFtpfaA84tNGnkeRkPv">// true</span>
+<span class="f" data-page-node-id="Z0H8IfBPviUCW9nHBEoMxX">print</span>(<span class="f" data-page-node-id="BituIppmlusWXW4E3VzsfU">char_is_alpha</span>(<span class="s" data-page-node-id="0ACT3lPJZN1KtMPtOp6N5J">'中'</span>)); <span class="c" data-page-node-id="DDPWI8E43fvy1psoolGAyc">// true</span></code></pre>
   </div>
 
-  <h3><span class="hash">#</span>5. 内置函数</h3>
+  <h3 data-page-node-id="uUm5WmsGaEuytF3CgBLnqA"><span class="hash" data-page-node-id="N1D8mz6nHuUXrpm5UsRbl5">#</span>5. 内置函数</h3>
 
-  <div class="example">
-    <div class="title">5.1 时间与随机</div>
-    <div class="note">时间格式化（UTC）与闭区间随机数</div>
-<pre><code>t = <span class="f">time.now</span>();
-<span class="f">print</span>(<span class="f">time.format</span>(t, <span class="s">"YYYY-MM-DD HH:mm:SS"</span>));
+  <div class="example" data-page-node-id="gWuFVWA5ZhbuEjX2vz9jAi">
+    <div class="title" data-page-node-id="IcvroHXAJG50vdItkPbPGC">5.1 时间与随机</div>
+    <div class="note" data-page-node-id="D0OrHiKg1U3zXWEIDHj4g8">时间格式化（UTC）与闭区间随机数</div>
+<pre data-page-node-id="MpfMpmPcfG9nSX4S3pWmDY"><code data-page-node-id="YxYh0uBm5hDp3zKE8fXG6I">t = <span class="f" data-page-node-id="ASlTLMkTb9rpbPUxR1OJbI">time.now</span>();
+<span class="f" data-page-node-id="Vy7jLCduPNhFzO1MPLrVhY">print</span>(<span class="f" data-page-node-id="vQ4Jot1JUaySBooQTzIF2G">time.format</span>(t, <span class="s" data-page-node-id="reDNNemA8SK4jBhBfI4wGf">"YYYY-MM-DD HH:mm:SS"</span>));
 
-r = <span class="f">random.int</span>(<span class="n">1</span>, <span class="n">100</span>);   <span class="c">// 闭区间 [1, 100]</span>
-<span class="f">print</span>(<span class="s">"随机数: "</span> + <span class="f">to_str</span>(r));
-<span class="f">print</span>(<span class="s">"随机小数: "</span> + <span class="f">to_str</span>(<span class="f">random.float</span>()));
+r = <span class="f" data-page-node-id="rAxGADDuiPdOEJ0itcjJms">random.int</span>(<span class="n" data-page-node-id="6oxTxn4SxwgKevToPDBosp">1</span>, <span class="n" data-page-node-id="QANor3mrQKwMpwn2F4U0xf">100</span>);   <span class="c" data-page-node-id="CVU7Cp9PFnKuatMHQOFuan">// 闭区间 [1, 100]</span>
+<span class="f" data-page-node-id="Atjmxnyt5ZeqTg4nNgAPZA">print</span>(<span class="s" data-page-node-id="wVWA9gLclIpyIOZfVLzJYd">"随机数: "</span> + <span class="f" data-page-node-id="k5f6u3UDFF05XKlfnyZZ0H">to_str</span>(r));
+<span class="f" data-page-node-id="pd2tHZuhqXDH3lcK9GEJro">print</span>(<span class="s" data-page-node-id="2IZQKPLgtzPeaKmBlSh8Iv">"随机小数: "</span> + <span class="f" data-page-node-id="QcVquVz1Bab2SlNNKxqUcA">to_str</span>(<span class="f" data-page-node-id="r4zdWLi2AYTaQ4lcdq2wpm">random.float</span>()));
 
-<span class="f">time.sleep</span>(<span class="n">0.5</span>);  <span class="c">// 暂停 0.5 秒</span></code></pre>
+<span class="f" data-page-node-id="ZpGZSqIBxaA9WJFAqupEVS">time.sleep</span>(<span class="n" data-page-node-id="W7wyo0ydHiWiiTTES14tP2">0.5</span>);  <span class="c" data-page-node-id="BZZQTYysyGF0tuKuV9AfaK">// 暂停 0.5 秒</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.2 时间戳解析</div>
-    <div class="note">time.parse 解析 YYYY-MM-DD[THH:MM:SS] → Unix 秒（UTC），配合 time.format 回显</div>
-<pre><code>t = <span class="f">time.parse</span>(<span class="s">"2025-01-01T00:00:00Z"</span>);
-<span class="f">print</span>(t);                                  <span class="c">// 1735689600</span>
-<span class="f">print</span>(<span class="f">time.format</span>(t, <span class="s">"YYYY-MM-DD HH:mm:SS"</span>));  <span class="c">// 2025-01-01 00:00:00</span>
+  <div class="example" data-page-node-id="eT0JF6yECZKowrHhtMSWJX">
+    <div class="title" data-page-node-id="Op0qOhMxhuKgmMvqCc8rzm">5.2 时间戳解析</div>
+    <div class="note" data-page-node-id="GUgOKLoFJ4wxNFZRefE0fc">time.parse 解析 YYYY-MM-DD[THH:MM:SS] → Unix 秒（UTC），配合 time.format 回显</div>
+<pre data-page-node-id="Fgj3xOLshHlF7ZtY4f4ecb"><code data-page-node-id="pWGK4xJbmvFFzoRaWqr9UK">t = <span class="f" data-page-node-id="H7Hb0ezUQpgLlS6FEcKVS6">time.parse</span>(<span class="s" data-page-node-id="EDHZzCVjEHFCioJrbWDB08">"2025-01-01T00:00:00Z"</span>);
+<span class="f" data-page-node-id="ArgAokCjsd5Ny2GjB5TA12">print</span>(t);                                  <span class="c" data-page-node-id="6KRFVCb31UAUnrCJP8u6ZB">// 1735689600</span>
+<span class="f" data-page-node-id="p3ON8LntoG6NDlFC2I4jkg">print</span>(<span class="f" data-page-node-id="bUttwtLzNZ92DXAR0HzI70">time.format</span>(t, <span class="s" data-page-node-id="AqpxkqEEJ6GJdF5omQzKZo">"YYYY-MM-DD HH:mm:SS"</span>));  <span class="c" data-page-node-id="1W1cZmu12srymL2uOE8XDP">// 2025-01-01 00:00:00</span>
 
-t2 = <span class="f">time.parse</span>(<span class="s">"2025-01-01 08:30:00"</span>);   <span class="c">// 空格分隔也可</span>
-<span class="f">print</span>(<span class="f">time.format</span>(t2, <span class="s">"YYYY-MM-DD HH:mm:SS"</span>));  <span class="c">// 2025-01-01 08:30:00</span></code></pre>
+t2 = <span class="f" data-page-node-id="tQBhjh28Gcf4rrQw3Uk63l">time.parse</span>(<span class="s" data-page-node-id="mLPVT7SQlq1WIoY5DLsWi4">"2025-01-01 08:30:00"</span>);   <span class="c" data-page-node-id="AAHSnVxGIuWZTRGREjKyVY">// 空格分隔也可</span>
+<span class="f" data-page-node-id="M9YEzAABcdnDLclpWjPwAk">print</span>(<span class="f" data-page-node-id="mfBH0jTwWHfkwLIoSAw1cU">time.format</span>(t2, <span class="s" data-page-node-id="Ahh7Ed6zsIv2b1rmNvH1aM">"YYYY-MM-DD HH:mm:SS"</span>));  <span class="c" data-page-node-id="SXqHhqPMpudGrhNHE5almH">// 2025-01-01 08:30:00</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.3 JSON 解析与序列化</div>
-    <div class="note">标量值自动映射为 int / float / bool / str</div>
-<pre><code>n = <span class="f">json_parse</span>(<span class="s">"42"</span>);
-<span class="f">print</span>(<span class="f">type_of</span>(n));          <span class="c">// int</span>
+  <div class="example" data-page-node-id="NziCnr63UJr8B2MDfcWH8t">
+    <div class="title" data-page-node-id="oozW4FmCgAu2v6a4Aqngi5">5.3 JSON 解析与序列化</div>
+    <div class="note" data-page-node-id="v1FfeQGa6MI9Hf9ZloqqTf">标量值自动映射为 int / float / bool / str</div>
+<pre data-page-node-id="QfIRE3vSTHjeGOn2Nl6Goc"><code data-page-node-id="xhPcsVvSPHnKw72b2hg4ms">n = <span class="f" data-page-node-id="OlYNFhQexANmR6HhOxd1SQ">json_parse</span>(<span class="s" data-page-node-id="m5rxGz973R7VPHDCjnbex5">"42"</span>);
+<span class="f" data-page-node-id="bURtPKKkfNIHyIPVrFz7jF">print</span>(<span class="f" data-page-node-id="wqjhWBYN4x8JRhPzRbDmeO">type_of</span>(n));          <span class="c" data-page-node-id="ocNxI9WCu3qb6o8tu8cGsM">// int</span>
 
-f = <span class="f">json_parse</span>(<span class="s">"3.14"</span>);
-<span class="f">print</span>(f);                     <span class="c">// 3.14</span>
+f = <span class="f" data-page-node-id="tSRmkcDxSNhQz8BndGRscV">json_parse</span>(<span class="s" data-page-node-id="IeS1t5uJ0sIPTvDvCD4ElG">"3.14"</span>);
+<span class="f" data-page-node-id="tRKBseGSG5KxDJwszAHdCE">print</span>(f);                     <span class="c" data-page-node-id="YBC5TQnNo5Y66GewJrbsxT">// 3.14</span>
 
-b = <span class="f">json_parse</span>(<span class="s">"true"</span>);
-<span class="f">print</span>(b);                     <span class="c">// true</span>
+b = <span class="f" data-page-node-id="BRWVIKxHJPEiSVAKSA7GDW">json_parse</span>(<span class="s" data-page-node-id="BXTCyfDjCatrfpBVWaD8zE">"true"</span>);
+<span class="f" data-page-node-id="JRHiHn1KmdMYMqKrS1XZJp">print</span>(b);                     <span class="c" data-page-node-id="HcC6Wx64wi3LHzyV8A5uXB">// true</span>
 
-<span class="f">print</span>(<span class="f">json_stringify</span>(<span class="n">100</span>));  <span class="c">// 100</span></code></pre>
+<span class="f" data-page-node-id="HkoUJKODeWbYl2bm6W1fHA">print</span>(<span class="f" data-page-node-id="UIe8Qap692lFk5ny9WV2r9">json_stringify</span>(<span class="n" data-page-node-id="EwItnBEOC8wggjOj73pMVV">100</span>));  <span class="c" data-page-node-id="0lVT24WVom9KYtnYLLmxqd">// 100</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.4 正则匹配与替换</div>
-    <div class="note">regex.match / regex.replace 使用标准正则表达式</div>
-<pre><code>ok = <span class="f">regex.match</span>(<span class="s">"^\\d+$"</span>, <span class="s">"12345"</span>);
-<span class="f">print</span>(ok);  <span class="c">// true</span>
+  <div class="example" data-page-node-id="tBJbrSrDyj4FCEXJD0X38P">
+    <div class="title" data-page-node-id="XSUUMUc6MirgFY7UpbKpkI">5.4 正则匹配与替换</div>
+    <div class="note" data-page-node-id="TLzkzdmB6f2eaxFUeH3cPN">regex.match / regex.replace 使用标准正则表达式</div>
+<pre data-page-node-id="lYJJgOympFgTRiWJOLesF2"><code data-page-node-id="ulPyF78HuXxlQDpEArbouQ">ok = <span class="f" data-page-node-id="FoH1kb7VWQI0ha3tSJOb6u">regex.match</span>(<span class="s" data-page-node-id="JehD7qGbVUKwAekbx55MxH">"^\\d+$"</span>, <span class="s" data-page-node-id="V8OUZ0bbdfeQcdnjhcfA2j">"12345"</span>);
+<span class="f" data-page-node-id="9HBDkioNd7CD3VQKkcZsPV">print</span>(ok);  <span class="c" data-page-node-id="pBQhW8npSzT2proHBvt1CB">// true</span>
 
-result = <span class="f">regex.replace</span>(<span class="s">"world"</span>, <span class="s">"hello world"</span>, <span class="s">"Hone"</span>);
-<span class="f">print</span>(result);  <span class="c">// hello Hone</span></code></pre>
+result = <span class="f" data-page-node-id="dYKwWO5Wfc3Bcf7TztMUNt">regex.replace</span>(<span class="s" data-page-node-id="JpIRYP4QFfLzn4YBzSjen5">"world"</span>, <span class="s" data-page-node-id="MTzGYjH57E53jHS4PDJvGV">"hello world"</span>, <span class="s" data-page-node-id="3W6XRkBjbduSRHUUoGUktR">"Hone"</span>);
+<span class="f" data-page-node-id="K17kMkdRULFrghcZ0sLJ33">print</span>(result);  <span class="c" data-page-node-id="yyPdwBxMGp3l8qy6KMvr9p">// hello Hone</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.5 加密与哈希（crypto.*）</div>
-    <div class="note">crypto.md5 / sha1 / sha256 / hmac_sha256 / base64_encode / base64_decode</div>
-<pre><code><span class="f">print</span>(<span class="f">crypto.md5</span>(<span class="s">"abc"</span>));      <span class="c">// 900150983cd24fb0d6963f7d28e17f72</span>
-<span class="f">print</span>(<span class="f">crypto.sha1</span>(<span class="s">"abc"</span>));     <span class="c">// a9993e364706816aba3e25717850c26c9cd0d89d</span>
-<span class="f">print</span>(<span class="f">crypto.sha256</span>(<span class="s">"abc"</span>));   <span class="c">// ba7816bf8f01cfea414140de5dae2223...</span>
-<span class="f">print</span>(<span class="f">crypto.hmac_sha256</span>(<span class="s">"key"</span>, <span class="s">"msg"</span>));
-<span class="f">print</span>(<span class="f">crypto.base64_encode</span>(<span class="s">"hello"</span>));  <span class="c">// aGVsbG8=</span>
-<span class="f">print</span>(<span class="f">crypto.base64_decode</span>(<span class="s">"aGVsbG8="</span>)); <span class="c">// hello</span></code></pre>
+  <div class="example" data-page-node-id="Oov2FfP6roPnmbD26lR1Sb">
+    <div class="title" data-page-node-id="T8sYNdVnUniIPqXzyC8HQT">5.5 加密与哈希（crypto.*）</div>
+    <div class="note" data-page-node-id="xJI8KevYiabGU0aiJpHZOj">crypto.md5 / sha1 / sha256 / hmac_sha256 / base64_encode / base64_decode</div>
+<pre data-page-node-id="fNyPXCUdBNuPAFKUR4yoHd"><code data-page-node-id="W6EBI770JC2tzLcNq2Neyy"><span class="f" data-page-node-id="MyBRlCLwt3wwFy9wRDucQ0">print</span>(<span class="f" data-page-node-id="h8JTyHlGpnCIYGzMGHFADB">crypto.md5</span>(<span class="s" data-page-node-id="IES8ouAevcP0SuzUPf3Q08">"abc"</span>));      <span class="c" data-page-node-id="DuFXU5Q9rSO4fib5oI4q4g">// 900150983cd24fb0d6963f7d28e17f72</span>
+<span class="f" data-page-node-id="FefoXe2fBsG05YEIgXYoj6">print</span>(<span class="f" data-page-node-id="ZlXNsDrFkOGaLGVK4lpPHv">crypto.sha1</span>(<span class="s" data-page-node-id="19muvZ8aVUEFwqZ2Cj6WoF">"abc"</span>));     <span class="c" data-page-node-id="DJO3Ag6BUoRJXMcArRGsEA">// a9993e364706816aba3e25717850c26c9cd0d89d</span>
+<span class="f" data-page-node-id="0CuURun2NaPogtje08zFq1">print</span>(<span class="f" data-page-node-id="XCEEOxSKmgrRH1watdissN">crypto.sha256</span>(<span class="s" data-page-node-id="6oRCyjGiVy7GDqH91EZLOo">"abc"</span>));   <span class="c" data-page-node-id="SQLUp1XAtd7fXX2tieQPCZ">// ba7816bf8f01cfea414140de5dae2223...</span>
+<span class="f" data-page-node-id="pDX14pkXM676YQINbAgumQ">print</span>(<span class="f" data-page-node-id="BhMwqoMp4BZ0FkhQp8u9km">crypto.hmac_sha256</span>(<span class="s" data-page-node-id="y9SOxDs1obl5wjEe99TsMP">"key"</span>, <span class="s" data-page-node-id="ZotOZPor4a5PAVQTkPf2A0">"msg"</span>));
+<span class="f" data-page-node-id="WHqvn7jD3cIyTj6jlyXDn7">print</span>(<span class="f" data-page-node-id="UGgxvzfkf7FB65JMJm6nBQ">crypto.base64_encode</span>(<span class="s" data-page-node-id="80Sg4Z75jnDdWy0dTKWxfw">"hello"</span>));  <span class="c" data-page-node-id="TuIMoPpoaIUEvRRItIboum">// aGVsbG8=</span>
+<span class="f" data-page-node-id="kQ6Re7FRXqfotiJrAUjGL1">print</span>(<span class="f" data-page-node-id="BrqpwFcXMbl53lP25CCvcE">crypto.base64_decode</span>(<span class="s" data-page-node-id="9rR3KaHkD7qiq2OPuPUgWq">"aGVsbG8="</span>)); <span class="c" data-page-node-id="44bcQcQHm71JF9oxeKSPDA">// hello</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.6 UUID v4 生成</div>
-    <div class="note">uuid.new 每次生成不同的 UUID v4（形如 xxxxxxxx-xxxx-4xxx-xxxx-xxxxxxxxxxxx）</div>
-<pre><code>a = <span class="f">uuid.new</span>();
-b = <span class="f">uuid.new</span>();
-<span class="f">print</span>(a);               <span class="c">// 每次运行不同</span>
-<span class="f">print</span>(b);
-<span class="f">print</span>(a != b);          <span class="c">// true</span></code></pre>
+  <div class="example" data-page-node-id="5OTThJPXsKERyOkxytEoF3">
+    <div class="title" data-page-node-id="wGFZFng41bDciY8IIIF33F">5.6 UUID v4 生成</div>
+    <div class="note" data-page-node-id="VcGpHg4rgseOWegSU88Xgk">uuid.new 每次生成不同的 UUID v4（形如 xxxxxxxx-xxxx-4xxx-xxxx-xxxxxxxxxxxx）</div>
+<pre data-page-node-id="6KSSI6mBx2ofMNcz4anzs0"><code data-page-node-id="gs9jVYH0gIuvjWSXMmx4iW">a = <span class="f" data-page-node-id="SR6ZFcyNHIfwEi8b6w9Npn">uuid.new</span>();
+b = <span class="f" data-page-node-id="52xFNZ2Z7gI2g6pHMZyc4n">uuid.new</span>();
+<span class="f" data-page-node-id="TRaXSg4AYJ4HIgucan8waw">print</span>(a);               <span class="c" data-page-node-id="pyfLS4ytRKswd4NGhxEOxF">// 每次运行不同</span>
+<span class="f" data-page-node-id="nanZfojeHt2ZIQSAVhZ9Ke">print</span>(b);
+<span class="f" data-page-node-id="2REo0XOANIhqdyTtS7YdOm">print</span>(a != b);          <span class="c" data-page-node-id="Qk6UokD0cn1NxlwpEHGMSj">// true</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.7 路径操作</div>
-    <div class="note">path.join / path.dirname / path.basename 跨平台路径操作</div>
-<pre><code><span class="f">print</span>(<span class="f">path.join</span>(<span class="s">"data"</span>, <span class="s">"users"</span>, <span class="s">"1.json"</span>));
-<span class="f">print</span>(<span class="f">path.dirname</span>(<span class="s">"/home/user/file.txt"</span>));
-<span class="f">print</span>(<span class="f">path.basename</span>(<span class="s">"/home/user/file.txt"</span>));</code></pre>
+  <div class="example" data-page-node-id="y7JRhnYF1BKK5g7ZJS5beP">
+    <div class="title" data-page-node-id="6hAjSgcjHBxPyOJabhj1TU">5.7 路径操作</div>
+    <div class="note" data-page-node-id="vW5xc2NN1p5TDIBGIXUZbz">path.join / path.dirname / path.basename 跨平台路径操作</div>
+<pre data-page-node-id="zeenayKjIVnUt0jktfuhVy"><code data-page-node-id="ic3IyIjCZObQ61rwLRfk3w"><span class="f" data-page-node-id="cxkZz29hAsNInFWnWCNT8d">print</span>(<span class="f" data-page-node-id="HelbTEBtx8zgVyiQkzPlBE">path.join</span>(<span class="s" data-page-node-id="Zay9rZpfvlRaFCXzgxpOBL">"data"</span>, <span class="s" data-page-node-id="fCgcN9CqwX7M2EzQC5Qfbl">"users"</span>, <span class="s" data-page-node-id="TN1IL5XFcrBExnnaJDS5ev">"1.json"</span>));
+<span class="f" data-page-node-id="qcxcHe4bAECatBPuOwWtQS">print</span>(<span class="f" data-page-node-id="UyBTnjWAo832dqfPrRIPJF">path.dirname</span>(<span class="s" data-page-node-id="B0HQ3rtsngXkBWYS5fUF1T">"/home/user/file.txt"</span>));
+<span class="f" data-page-node-id="BnwcdkyqDSUgpSB1J9qxp9">print</span>(<span class="f" data-page-node-id="1Bugkh1prioDwpE4EpwGT9">path.basename</span>(<span class="s" data-page-node-id="eDH4v4UixBk2dpvf3h9aH9">"/home/user/file.txt"</span>));</code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.8 环境变量与键值存储</div>
-    <div class="note">env.get/set 读写环境变量，db.set/get 内存键值存储</div>
-<pre><code>path = <span class="f">env.get</span>(<span class="s">"PATH"</span>);
-<span class="k">env.set</span>(<span class="s">"MY_VAR"</span>, <span class="s">"hello"</span>);
-<span class="k">db.set</span>(<span class="s">"token"</span>, <span class="s">"abc123"</span>);
-<span class="f">print</span>(<span class="f">db.get</span>(<span class="s">"token"</span>));</code></pre>
+  <div class="example" data-page-node-id="PHC5ECfGMmyedzLAhrUxZX">
+    <div class="title" data-page-node-id="EPzFEoEKpFA8HaVt6oa5eh">5.8 环境变量与键值存储</div>
+    <div class="note" data-page-node-id="y6oHzqSQdgouqoceZ603FE">env.get/set 读写环境变量，db.set/get 内存键值存储</div>
+<pre data-page-node-id="PBRZFZGSWuFc9uL0n8fIxF"><code data-page-node-id="FBF2LihnHXgsdARZAY7CZk">path = <span class="f" data-page-node-id="cqgLBDaWCfY4xERBAhGo5b">env.get</span>(<span class="s" data-page-node-id="RxYshTSIc6EgD3Im1pwpcW">"PATH"</span>);
+<span class="k" data-page-node-id="o6ArYqmgZ7iBmz9JuMIt3m">env.set</span>(<span class="s" data-page-node-id="Feednhd02HWm0ONrrg1AKc">"MY_VAR"</span>, <span class="s" data-page-node-id="HG8liaPxmcHjakO3pnBtcw">"hello"</span>);
+<span class="k" data-page-node-id="9KYOvFJG1yEBzh74GJvBhg">db.set</span>(<span class="s" data-page-node-id="ajvC3bmgCsGvWVCR5A8Dn6">"token"</span>, <span class="s" data-page-node-id="s1PaVkqmHgtbp9JKVvJAbA">"abc123"</span>);
+<span class="f" data-page-node-id="GvflgyBtAPVQ2m5oc1bHo6">print</span>(<span class="f" data-page-node-id="tbIfxBwTyj6BHAjOm7KGbA">db.get</span>(<span class="s" data-page-node-id="aUjkoGnVMA85VksQEvTFuw">"token"</span>));</code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.9 命令行参数解析</div>
-    <div class="note">args.get 支持类型转换与默认值：args.get(key, type[, default])，type 可为 int/float/bool/str</div>
-<pre><code>port = <span class="f">args.get</span>(<span class="s">"port"</span>, <span class="k">int</span>, <span class="n">8080</span>);  <span class="c">// --port 9090 → 9090(int)；缺省 → 8080</span>
-ratio = <span class="f">args.get</span>(<span class="s">"ratio"</span>, <span class="k">float</span>, <span class="n">1.5</span>); <span class="c">// --ratio 2.5 → 2.5(float)</span>
-verbose = <span class="f">args.get</span>(<span class="s">"v"</span>, <span class="k">bool</span>, <span class="k">false</span>); <span class="c">// --v → true</span>
-<span class="k">if</span> (verbose) {
-    <span class="f">print</span>(<span class="s">"port="</span> + <span class="f">to_str</span>(port) + <span class="s">" ratio="</span> + <span class="f">to_str</span>(ratio));
+  <div class="example" data-page-node-id="bAImJtHMPV11C9CATjcbMz">
+    <div class="title" data-page-node-id="CkCCxrfxmyuGx8jTPrFgyU">5.9 命令行参数解析</div>
+    <div class="note" data-page-node-id="0GArZdKkcd0A7gwJGqpY5A">args.get 支持类型转换与默认值：args.get(key, type[, default])，type 可为 int/float/bool/str</div>
+<pre data-page-node-id="0IyfMHYdIV65JqNOVPY5AO"><code data-page-node-id="kEPsGpbXwpfSAkaEfIADkq">port = <span class="f" data-page-node-id="1fqtZQXEOhArVaxEVzf2UA">args.get</span>(<span class="s" data-page-node-id="BQBSBVGPATUhVYmk4Ab9DZ">"port"</span>, <span class="k" data-page-node-id="mszL55esleR8E8lHFHr87j">int</span>, <span class="n" data-page-node-id="MPbpsCHb6RAKiHHZ8A7Ivx">8080</span>);  <span class="c" data-page-node-id="W0lVSGomGsW9AEXDXKw91u">// --port 9090 → 9090(int)；缺省 → 8080</span>
+ratio = <span class="f" data-page-node-id="AkqwvE4F3sJxEZoGRWorPd">args.get</span>(<span class="s" data-page-node-id="LCzfagYJZzeYnzYPVHSxKt">"ratio"</span>, <span class="k" data-page-node-id="BFNaaGcXX5kiY48tuOHhAo">float</span>, <span class="n" data-page-node-id="cCEXDmaQqLM8uYHAlzOXgz">1.5</span>); <span class="c" data-page-node-id="ntD3Hx90Mw6UMTFzJpsy6C">// --ratio 2.5 → 2.5(float)</span>
+verbose = <span class="f" data-page-node-id="e4sCzSCi5itYamyr8JY4Sp">args.get</span>(<span class="s" data-page-node-id="8M3Yg2xYeU8LBofMmrX8OG">"v"</span>, <span class="k" data-page-node-id="O0FrcANZyy7okVIG8GwFjW">bool</span>, <span class="k" data-page-node-id="WdB1DGr1PomlwatyCnfBzo">false</span>); <span class="c" data-page-node-id="B9p368RsF4FAGFAFAlK0Rf">// --v → true</span>
+<span class="k" data-page-node-id="1XPNe9a7iH4HuMa1jGvZth">if</span> (verbose) {
+    <span class="f" data-page-node-id="0smQ6NoCxTDTUsi0RAcNSY">print</span>(<span class="s" data-page-node-id="tt7V382L1h5xNQMq3a6wpC">"port="</span> + <span class="f" data-page-node-id="CwoMgWZUND0aVAc00zwMjF">to_str</span>(port) + <span class="s" data-page-node-id="pIthWORdF9tVFPNwno5zO2">" ratio="</span> + <span class="f" data-page-node-id="Ix3B6n4CEdHrhKCSAVTpWd">to_str</span>(ratio));
 }</code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.10 HTTP 网络请求（http / https）</div>
-    <div class="note">http_get / http_post 支持 http:// 与 https://（TLS 为纯 Rust 实现、内置 Mozilla 根证书）</div>
-<pre><code>html = <span class="f">http_get</span>(<span class="s">"https://example.com/"</span>);
-<span class="f">print</span>(<span class="f">len</span>(html));              <span class="c">// 页面字节数</span>
-resp = <span class="f">http_post</span>(<span class="s">"http://httpbin.org/post"</span>, <span class="s">"hello"</span>);
-<span class="f">print</span>(<span class="f">str_contains</span>(resp, <span class="s">"hello"</span>));  <span class="c">// true</span></code></pre>
+  <div class="example" data-page-node-id="OLoCsglAH3mc2Z7nl5dt8S">
+    <div class="title" data-page-node-id="cKDpYDxrWpK8KrJWm3kv8i">5.10 HTTP 网络请求（http / https）</div>
+    <div class="note" data-page-node-id="oOxrCwTR4xNC3NcYLZPngg">http_get / http_post 支持 http:// 与 https://（TLS 为纯 Rust 实现、内置 Mozilla 根证书）</div>
+<pre data-page-node-id="XwI1ekupbcoprVXVHtUvdu"><code data-page-node-id="r3Y7jgV6QRBA55i8cSEHt2">html = <span class="f" data-page-node-id="ClVyNDm1EmFGl6JGJipGnv">http_get</span>(<span class="s" data-page-node-id="x5WGp1iyfk3RrtrQEtIwfo">"https://example.com/"</span>);
+<span class="f" data-page-node-id="49gYMRoPDT0cNQaFaAIBLm">print</span>(<span class="f" data-page-node-id="XVEJpDrBzoQkQOZocvfiUG">len</span>(html));              <span class="c" data-page-node-id="M8A4fp3difA8VDLyO7MMmd">// 页面字节数</span>
+resp = <span class="f" data-page-node-id="kQMUnhlm9NH6Oq2ojG5lyA">http_post</span>(<span class="s" data-page-node-id="dt3iBCq4SCfBA0UDl649bq">"http://httpbin.org/post"</span>, <span class="s" data-page-node-id="zZPsrnzzdd3vAtfaaOY15x">"hello"</span>);
+<span class="f" data-page-node-id="D2BANq0vVeyaUjed1wzDz6">print</span>(<span class="f" data-page-node-id="IYuAILMnGFrW7A9bN6jQ1b">str_contains</span>(resp, <span class="s" data-page-node-id="AsQBfBYrplBtn83UFlWF7e">"hello"</span>));  <span class="c" data-page-node-id="Cf6FAHvFqWFBntdX1x8p7Q">// true</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.11 彩色日志</div>
-    <div class="note">log.info / log.warn / log.error / log.debug 彩色输出到 stderr</div>
-<pre><code><span class="k">log.info</span>(<span class="s">"程序启动完成"</span>);
-<span class="k">log.warn</span>(<span class="s">"磁盘空间不足"</span>);
-<span class="k">log.error</span>(<span class="s">"连接失败"</span>);
-<span class="k">log.debug</span>(<span class="s">"x = 42"</span>);</code></pre>
+  <div class="example" data-page-node-id="UhBj8oDRYSE8uDL0bp3AuM">
+    <div class="title" data-page-node-id="qGeCpc23aMWsIPvMCsGUSr">5.11 彩色日志</div>
+    <div class="note" data-page-node-id="k2RgndiodKl6tdd5CGbg33">log.info / log.warn / log.error / log.debug 彩色输出到 stderr</div>
+<pre data-page-node-id="lQCU5gZPN3sS9HLAZOCuny"><code data-page-node-id="u65jKlf7Z4ZvDAcjp9kL6z"><span class="k" data-page-node-id="u6pqA7tTvjKwjlgBB5Kp8m">log.info</span>(<span class="s" data-page-node-id="Wy0pOVMbeBklnyejyrgOSr">"程序启动完成"</span>);
+<span class="k" data-page-node-id="ElkgzIvBSP1pPKnYeDEYS8">log.warn</span>(<span class="s" data-page-node-id="vIVdw9XtyQUeTUhOwsM4k1">"磁盘空间不足"</span>);
+<span class="k" data-page-node-id="2mKJaJw6Gppy1bwmI5XoeS">log.error</span>(<span class="s" data-page-node-id="Fy8itx29hG5UPEUMEoPGQH">"连接失败"</span>);
+<span class="k" data-page-node-id="EqHxusYAvLbbhlSADH7W6S">log.debug</span>(<span class="s" data-page-node-id="xhvURp6A5aJKza3kCvvfXw">"x = 42"</span>);</code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.12 压缩与归档（archive.*）</div>
-    <div class="note">zip / tar.gz 的列表、读取、解压与创建；解压自动拒绝 `..` 穿越条目（防 zip-slip）</div>
-<pre><code><span class="f">archive.zip_create</span>(<span class="s">"pkg.zip"</span>, {<span class="s">"a.txt"</span>: <span class="s">"hello"</span>, <span class="s">"sub/b.txt"</span>: <span class="s">"nested"</span>});
-<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">archive.zip_list</span>(<span class="s">"pkg.zip"</span>)));    <span class="c">// [a.txt, sub/b.txt]</span>
-<span class="f">print</span>(<span class="f">archive.zip_read</span>(<span class="s">"pkg.zip"</span>, <span class="s">"a.txt"</span>));   <span class="c">// hello</span>
-<span class="f">archive.zip_extract</span>(<span class="s">"pkg.zip"</span>, <span class="s">"out"</span>);           <span class="c">// 解压到 out/</span>
+  <div class="example" data-page-node-id="eNW8tcAWmqAN5AS1W5hHgL">
+    <div class="title" data-page-node-id="RQE0Rd7EoVBSCCgOhSLivF">5.12 压缩与归档（archive.*）</div>
+    <div class="note" data-page-node-id="tE2YAMoBmmB90ACVW3x25w">zip / tar.gz 的列表、读取、解压与创建；解压自动拒绝 `..` 穿越条目（防 zip-slip）</div>
+<pre data-page-node-id="WCkFLjLXdE52g9m9VPbolw"><code data-page-node-id="32JoZNyotMZKfe13oemekn"><span class="f" data-page-node-id="KqKMrqGsxIBFGUajIXugDC">archive.zip_create</span>(<span class="s" data-page-node-id="r9QMPHvRIsJTlAMoGKHopY">"pkg.zip"</span>, {<span class="s" data-page-node-id="w3kZNRPnHggGwgU7pBta5S">"a.txt"</span>: <span class="s" data-page-node-id="DPAUXkBVGkopA8OS6Fmw4k">"hello"</span>, <span class="s" data-page-node-id="4gNUPAgNA0gtToTk4opQJ3">"sub/b.txt"</span>: <span class="s" data-page-node-id="JgaNC12f4glCprWhC9EOYU">"nested"</span>});
+<span class="f" data-page-node-id="M2tNFVp2zwOHJvr4SdebVd">print</span>(<span class="f" data-page-node-id="j7rhTn6rYvDMgMjUyqQ3GB">to_str</span>(<span class="f" data-page-node-id="PwZal8PRlqCAzwGJtCapXY">archive.zip_list</span>(<span class="s" data-page-node-id="kGpERNDKOT9Ufz9OQdwI8D">"pkg.zip"</span>)));    <span class="c" data-page-node-id="kNuYebi3Ion8XAizq2L725">// [a.txt, sub/b.txt]</span>
+<span class="f" data-page-node-id="cMsHiCfiX56aWZRzYqadOB">print</span>(<span class="f" data-page-node-id="Ys391Kn9qGYtrgV9dJVjN8">archive.zip_read</span>(<span class="s" data-page-node-id="1gQFVSXjtxgEP6xVaF9Qou">"pkg.zip"</span>, <span class="s" data-page-node-id="rOib0zp5FsGFvaD2PnrHhk">"a.txt"</span>));   <span class="c" data-page-node-id="StoFUuBja2oCwIyOPfyBQ8">// hello</span>
+<span class="f" data-page-node-id="Elbqrz3jWmEEOmqdnCcsC0">archive.zip_extract</span>(<span class="s" data-page-node-id="8Nwyn9AQBh3xTiPfn6WmkW">"pkg.zip"</span>, <span class="s" data-page-node-id="E1YmRLeQz6ftCp99gNhOHj">"out"</span>);           <span class="c" data-page-node-id="GKMD4WA7LPKjUaUrJQZgr5">// 解压到 out/</span>
 
-<span class="c">// tar.gz 同款：archive.tgz_list / tgz_read / tgz_extract / tgz_create</span></code></pre>
+<span class="c" data-page-node-id="jTQNyZGYOic02Y7rJwQYcu">// tar.gz 同款：archive.tgz_list / tgz_read / tgz_extract / tgz_create</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.13 指针类（ptr.*）</div>
-    <div class="note">分配 / 释放 / 读写内存；分配表跟踪防野指针（未分配/已释放/重复释放报 H304，越界报 H305）</div>
-<pre><code>p = <span class="f">ptr.alloc</span>(<span class="n">32</span>);                  <span class="c">// 分配 32 字节</span>
-<span class="f">ptr.write_int</span>(p, <span class="n">0</span>, <span class="n">12345</span>);       <span class="c">// 偏移 0 写 8 字节整数</span>
-<span class="f">print</span>(<span class="f">ptr.read_int</span>(p, <span class="n">0</span>));        <span class="c">// 12345</span>
-<span class="f">print</span>(<span class="f">ptr.size</span>(p));                 <span class="c">// 32</span>
-<span class="f">ptr.free</span>(p);                          <span class="c">// 释放；此后访问报 H304</span></code></pre>
+  <div class="example" data-page-node-id="YeFMMIWaQ8HEmnCiHnkJkx">
+    <div class="title" data-page-node-id="VtmXHBVN9sFATj7OCj4W4F">5.13 指针类（ptr.*）</div>
+    <div class="note" data-page-node-id="mmLUHslvJddTiMO0NiYZMu">分配 / 释放 / 读写内存；分配表跟踪防野指针（未分配/已释放/重复释放报 H304，越界报 H305）</div>
+<pre data-page-node-id="gsTfSCJno3LZHDsGCD0miH"><code data-page-node-id="CSRuLfQern8kKpt6YYceFW">p = <span class="f" data-page-node-id="xxmPanxUBQkhCtaRXsnzeV">ptr.alloc</span>(<span class="n" data-page-node-id="cE0cjxy9ezt9bDB1Z1lFZ0">32</span>);                  <span class="c" data-page-node-id="Py9Y3ejsoUdytWjgDo2xBd">// 分配 32 字节</span>
+<span class="f" data-page-node-id="e4ulYFkHtsJjCiHoZBeveG">ptr.write_int</span>(p, <span class="n" data-page-node-id="PuYfOXsrUN6Kr6SqKnC1tz">0</span>, <span class="n" data-page-node-id="dF1ibuGuSkr0x3vBn5ZYVG">12345</span>);       <span class="c" data-page-node-id="7eXmMfSdsrlH7q5vkKZ3SF">// 偏移 0 写 8 字节整数</span>
+<span class="f" data-page-node-id="1ato1LEl7HOi6zjfkJ1XYL">print</span>(<span class="f" data-page-node-id="Pms3leXfKmcmH2enUwUA89">ptr.read_int</span>(p, <span class="n" data-page-node-id="ZbmxqaQJzT2OvHGQWusihy">0</span>));        <span class="c" data-page-node-id="RhNVFEXvzpaQQ48kgDZHNX">// 12345</span>
+<span class="f" data-page-node-id="E0jeiRbc3ErGTI515K0qIj">print</span>(<span class="f" data-page-node-id="sCU6sPmdKMHBL897DsA9WE">ptr.size</span>(p));                 <span class="c" data-page-node-id="dHWCMB5SWo6VHVVD6lVOGf">// 32</span>
+<span class="f" data-page-node-id="cPYLcwUfiRuiiIZ0FWsTPk">ptr.free</span>(p);                          <span class="c" data-page-node-id="ZlByeGK9zEd8pjbifOXhNB">// 释放；此后访问报 H304</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.14 插件系统（plugin.*）</div>
-    <div class="note">运行期加载动态库并注册，之后可用别名直接调用（走 C ABI 通道）；plugin.list 列出已注册插件</div>
-<pre><code>ok = <span class="f">plugin.load</span>(<span class="s">"path/to/lib.dll"</span>, <span class="s">"pl"</span>);  <span class="c">// 加载并注册别名 pl</span>
-<span class="f">print</span>(<span class="f">plugin.has</span>(<span class="s">"pl"</span>));                  <span class="c">// true</span>
-<span class="f">print</span>(<span class="f">pl.lib_add</span>(<span class="n">3</span>, <span class="n">4</span>));                  <span class="c">// 7（调用库函数）</span>
-<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">plugin.list</span>()));              <span class="c">// [{name: pl, path: ...}]</span>
-<span class="f">plugin.unload</span>(<span class="s">"pl"</span>);                       <span class="c">// 注销</span></code></pre>
+  <div class="example" data-page-node-id="66hYhLHeK6EU35qqPoESxS">
+    <div class="title" data-page-node-id="TCkAe3eCO9AepFupb4Ycws">5.14 插件系统（plugin.*）</div>
+    <div class="note" data-page-node-id="tvMIlBEn9x7cb2fnMLURpk">运行期加载动态库并注册，之后可用别名直接调用（走 C ABI 通道）；plugin.list 列出已注册插件</div>
+<pre data-page-node-id="TP2X8EBrUIhz16q7jTbChO"><code data-page-node-id="wTpNtkhoOlCAR3DRxjBfH2">ok = <span class="f" data-page-node-id="mL4zGtnwuDc8TBPgvoqBHs">plugin.load</span>(<span class="s" data-page-node-id="6Vw82Eq6HDx0CaN9p2GvMR">"path/to/lib.dll"</span>, <span class="s" data-page-node-id="VLXjs7tJ3w6ApIpDUMlWCo">"pl"</span>);  <span class="c" data-page-node-id="zAweZ2UpNHeVu2k5FZkbro">// 加载并注册别名 pl</span>
+<span class="f" data-page-node-id="7V9CkCDnoYY5NOa9y1tpjL">print</span>(<span class="f" data-page-node-id="Y0G1DdHro4Wenect6nGKAr">plugin.has</span>(<span class="s" data-page-node-id="hLRSSrMA8tdMWVonGLX3vk">"pl"</span>));                  <span class="c" data-page-node-id="FBUmvx9Z4C4vWj9wFTurnB">// true</span>
+<span class="f" data-page-node-id="X1wVJeMzkmLf2U3tgEixyR">print</span>(<span class="f" data-page-node-id="OkEzAJBwRDES6R3ccjhcvw">pl.lib_add</span>(<span class="n" data-page-node-id="BWIiOIniRfVUt3LVHxhIoD">3</span>, <span class="n" data-page-node-id="MCGrqc8ZvsWYCkVP9vRExC">4</span>));                  <span class="c" data-page-node-id="CW89pYs4PrCJXFahmgIn1q">// 7（调用库函数）</span>
+<span class="f" data-page-node-id="YWgzo9XZJX8XDXyCmsOkLh">print</span>(<span class="f" data-page-node-id="sIdwEaxH9KfYaT06SNYdTM">to_str</span>(<span class="f" data-page-node-id="SEEUb13eBkHU74NaGoqUKg">plugin.list</span>()));              <span class="c" data-page-node-id="reAy8pwGgu4iBfvxmA2f6L">// [{name: pl, path: ...}]</span>
+<span class="f" data-page-node-id="59h5cF96S1UzArRQCer6Ti">plugin.unload</span>(<span class="s" data-page-node-id="64z8bqHYWbTmRgvkIIAzYn">"pl"</span>);                       <span class="c" data-page-node-id="yzo7165yBD6B7crHNOwU2h">// 注销</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">5.15 标准输入与默认值（EOF 降级）</div>
-    <div class="note">input / read_int / read_float 从 stdin 读取；EOF 抛 H306、数字格式错抛 H006/H007，用 try-catch 包装实现默认值（期望输出：管道喂入 "Bob\n25\n" → 你好, Bob! / 明年你 26 岁）</div>
-<pre><code><span class="k">fn</span> <span class="f">ask</span>(prompt, fallback) {
-    <span class="k">try</span> {
-        <span class="k">return</span> <span class="f">input</span>(prompt);
-    } <span class="k">catch</span> e {
-        <span class="k">return</span> fallback;   <span class="c">// H306 EOF → 默认值</span>
+  <div class="example" data-page-node-id="481wZ0ZKZa0kK4WDzRicBX">
+    <div class="title" data-page-node-id="flYblIXjC2JBfOtLrpOi5Z">5.15 标准输入与默认值（EOF 降级）</div>
+    <div class="note" data-page-node-id="1LsUiiPe5jtMwA9k0bwe3i">input / read_int / read_float 从 stdin 读取；EOF 抛 H306、数字格式错抛 H006/H007，用 try-catch 包装实现默认值（期望输出：管道喂入 "Bob\n25\n" → 你好, Bob! / 明年你 26 岁）</div>
+<pre data-page-node-id="uxcqpYagKN35jJqOYBynLA"><code data-page-node-id="A3wkFHELYeEiKtobzYgJX6"><span class="k" data-page-node-id="RNELV3ti6MDtaXehwJ8yLO">fn</span> <span class="f" data-page-node-id="zhrWG4sxwipqcUVipNMzIy">ask</span>(prompt, fallback) {
+    <span class="k" data-page-node-id="sFQ2VTco6kcIrWTJ9dcUDi">try</span> {
+        <span class="k" data-page-node-id="LBrdtFJzARM6uVhULJYH1A">return</span> <span class="f" data-page-node-id="3ehY6qE0Dg8l8HUPEyvuHB">input</span>(prompt);
+    } <span class="k" data-page-node-id="5kFELgOfxZx9fUe5XibwMC">catch</span> e {
+        <span class="k" data-page-node-id="aJLdvF0s99WNAdjNWq34qz">return</span> fallback;   <span class="c" data-page-node-id="HbDYusaVXjYEGeYP0GlJ1m">// H306 EOF → 默认值</span>
     }
 }
-name = <span class="f">ask</span>(<span class="s">"姓名: "</span>, <span class="s">"匿名"</span>);
-<span class="f">print</span>(<span class="s">"你好, "</span> + name + <span class="s">"!"</span>);
+name = <span class="f" data-page-node-id="KS8CmVMEtkIyKT6rlCN7SN">ask</span>(<span class="s" data-page-node-id="ADvd8dkYDrfbtdE0SdhOzj">"姓名: "</span>, <span class="s" data-page-node-id="0mpJnxHKvk5isDPLeha6jK">"匿名"</span>);
+<span class="f" data-page-node-id="aa67OPYiRHMptbZjcxEElc">print</span>(<span class="s" data-page-node-id="pkSNzn4cT33C0dMvTSKDyE">"你好, "</span> + name + <span class="s" data-page-node-id="2674gHrDXtFjInZDdMiWcQ">"!"</span>);
 
-<span class="k">fn</span> <span class="f">ask_int</span>(prompt, fallback) {
-    <span class="k">try</span> {
-        <span class="k">return</span> <span class="f">read_int</span>(prompt);
-    } <span class="k">catch</span> e {
-        <span class="k">return</span> fallback;   <span class="c">// H006 格式错 / H306 EOF → 默认值</span>
+<span class="k" data-page-node-id="rEH7iOmVdbDE6tCb3OhtwO">fn</span> <span class="f" data-page-node-id="sdimS8AeVJQoeluMJaGiFU">ask_int</span>(prompt, fallback) {
+    <span class="k" data-page-node-id="hk6TfUc4AuPMfEQwEvcBVm">try</span> {
+        <span class="k" data-page-node-id="pTQa4TGJvJIpY8BcCH2bp3">return</span> <span class="f" data-page-node-id="lCPeAmt05sMvyJj2b6l0Pi">read_int</span>(prompt);
+    } <span class="k" data-page-node-id="HC14gZQFTqRavBEzrXIlV5">catch</span> e {
+        <span class="k" data-page-node-id="B7zNAB8mmt0eVN1o67P7Nd">return</span> fallback;   <span class="c" data-page-node-id="FnSDXFaEXe8vN1O3OrzQ6D">// H006 格式错 / H306 EOF → 默认值</span>
     }
 }
-age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span class="n">0</span>);
-<span class="f">print</span>(<span class="s">"明年你 "</span> + <span class="f">to_str</span>(age + <span class="n">1</span>) + <span class="s">" 岁"</span>);
+age = <span class="f" data-page-node-id="yojBBAocguyWhadx7hbOTD">ask_int</span>(<span class="s" data-page-node-id="sk7OBDqQSDQjgda1M0yfPv">"年龄: "</span>, <span class="n" data-page-node-id="4q0o4pG3boTi4mDS9GkWlV">0</span>);
+<span class="f" data-page-node-id="wy5GJ0vRPLCoH8NgmCLB2l">print</span>(<span class="s" data-page-node-id="9bNw77C2H7bncTy2i9VhPC">"明年你 "</span> + <span class="f" data-page-node-id="6hO3wKHvDhKOsUBGIbPpg6">to_str</span>(age + <span class="n" data-page-node-id="K6XMwmVCBSot3z0XSMDClC">1</span>) + <span class="s" data-page-node-id="RkVgLeiUBET2BM7meSlLEd">" 岁"</span>);
 
-<span class="c">// 完整示例：examples/input_demo.hn；EOF 也可用 ?? 空值合并？——不行，</span>
-<span class="c">// input 在 EOF 抛错误而非返回 null，?? 只对 null 值生效，必须 try-catch</span></code></pre>
+<span class="c" data-page-node-id="5iGDf4qBH2KbBh5priFxkM">// 完整示例：examples/input_demo.hn；EOF 也可用 ?? 空值合并？——不行，</span>
+<span class="c" data-page-node-id="RCXHjOBBRoGpeWoXKuQKEd">// input 在 EOF 抛错误而非返回 null，?? 只对 null 值生效，必须 try-catch</span></code></pre>
   </div>
 
-  <h3><span class="hash">#</span>6. 并发</h3>
+  <h3 data-page-node-id="2WMiSZLrWpoZe40TRKl6Mu"><span class="hash" data-page-node-id="OJGfflORzp9UwKh5SLoAzG">#</span>6. 并发</h3>
 
-  <div class="example">
-    <div class="title">6.1 go 多线程</div>
-    <div class="note">每次 go 启动独立线程，不共享变量；子线程崩溃不影响主线程</div>
-<pre><code><span class="k">fn</span> <span class="f">task</span>(id) {
-    i = <span class="n">0</span>;
-    <span class="k">while</span> (i &lt; <span class="n">100000</span>) { i = i + <span class="n">1</span>; }
-    <span class="f">print</span>(<span class="s">"任务 "</span> + <span class="f">to_str</span>(id) + <span class="s">" 完成"</span>);
+  <div class="example" data-page-node-id="oDVsScvKZ9PBHyRsBDHWsI">
+    <div class="title" data-page-node-id="gQIpiFJEasanN1q11np6QE">6.1 go 多线程</div>
+    <div class="note" data-page-node-id="gIuaKZwsd3wya5YLDsOpyX">每次 go 启动独立线程，不共享变量；子线程崩溃不影响主线程</div>
+<pre data-page-node-id="GcbgnWuG44yesTrJ55CoNN"><code data-page-node-id="FLvul7AxcQ6sxBPiuLEaL3"><span class="k" data-page-node-id="ybNzrDuOLrEJ7zqUQvw3lD">fn</span> <span class="f" data-page-node-id="WAFPw9vcDbppcGIVqwJ6RO">task</span>(id) {
+    i = <span class="n" data-page-node-id="iFPgCr9PgimWP9dngBLlUk">0</span>;
+    <span class="k" data-page-node-id="Arewxzf2TIUUMDF6PTLgJo">while</span> (i &lt; <span class="n" data-page-node-id="isYjW2QktJnChrlFECvWJG">100000</span>) { i = i + <span class="n" data-page-node-id="JamJuSFegJ6cBy2K6x6HQe">1</span>; }
+    <span class="f" data-page-node-id="vQkwpN0nuZKnIusb6zPgrj">print</span>(<span class="s" data-page-node-id="XwgMk7q38NLGeNgh1Boq7Q">"任务 "</span> + <span class="f" data-page-node-id="vfrblQc2fR0uPGGlMxMj2Y">to_str</span>(id) + <span class="s" data-page-node-id="0tgvOxXxQ1JRVx8vaYBMBo">" 完成"</span>);
 }
 
-<span class="k">go</span> <span class="f">task</span>(<span class="n">1</span>);
-<span class="k">go</span> <span class="f">task</span>(<span class="n">2</span>);
-<span class="k">go</span> <span class="f">task</span>(<span class="n">3</span>);
-<span class="f">print</span>(<span class="s">"主线程继续执行"</span>);</code></pre>
+<span class="k" data-page-node-id="iyznhXk7FzJlxzR5H6NIlz">go</span> <span class="f" data-page-node-id="ybfv0MxhGrphD0P4hhEVHi">task</span>(<span class="n" data-page-node-id="DsJH9wlzJrhGIvnP09EUHw">1</span>);
+<span class="k" data-page-node-id="fJLh1OaEBLRrjvjqlXNmTK">go</span> <span class="f" data-page-node-id="OZ7p4t1qVfBFlbVMeaSJmx">task</span>(<span class="n" data-page-node-id="kSUGPAFNjP45HA7zApJHmF">2</span>);
+<span class="k" data-page-node-id="bZZCFH8JFREJdX3vneEdLw">go</span> <span class="f" data-page-node-id="PbxmXjhUMDVCm5cRXR8Sje">task</span>(<span class="n" data-page-node-id="Cgikks4aIhiXPyztmOKoWy">3</span>);
+<span class="f" data-page-node-id="mw1hUEEp3EHa8dq9Ua1ixk">print</span>(<span class="s" data-page-node-id="mFf2zGiUgQBjU3NlT9lZxN">"主线程继续执行"</span>);</code></pre>
   </div>
 
-  <h3><span class="hash">#</span>7. 导入与外部集成</h3>
+  <h3 data-page-node-id="6AfJMrkbG13qmLlJLzbXdW"><span class="hash" data-page-node-id="JBCPGNBDsAXzmtZx2SA5uL">#</span>7. 导入与外部集成</h3>
 
-  <div class="example">
-    <div class="title">7.1 import as 别名导入</div>
-    <div class="note">以别名导入远程模块（URL 支持 http/https），函数名前缀自动替换</div>
-<pre><code><span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.hn"</span> <span class="k">as</span> m;
-<span class="f">print</span>(<span class="f">m_add</span>(<span class="n">20</span>, <span class="n">22</span>));  <span class="c">// 42</span></code></pre>
+  <div class="example" data-page-node-id="cTW4fxEwpymrHcygGxEN15">
+    <div class="title" data-page-node-id="KcoI8QNK8BAJOSvMWlV1z2">7.1 import as 别名导入</div>
+    <div class="note" data-page-node-id="z8YeiulfwSPEZhHBZwDUS8">以别名导入远程模块（URL 支持 http/https），函数名前缀自动替换</div>
+<pre data-page-node-id="GBCA00UaV3SiaxEeQgb2oR"><code data-page-node-id="ZQ2I2gjwmCEtkeBINCKDBy"><span class="k" data-page-node-id="rmt9nMC4sfYWTOiLOXjYi0">import</span> <span class="s" data-page-node-id="NMAzXRQsb5iCywDdnnXWUj">"math_mod"</span> <span class="k" data-page-node-id="KVxmwX6CBDp5pavlNaAQ9r">from</span> <span class="s" data-page-node-id="ayvzLtB5G7xvXJ4blHdOPM">"http://example.com/math_mod.hn"</span> <span class="k" data-page-node-id="S4z3wM4jZkRQevI5WgQcCg">as</span> m;
+<span class="f" data-page-node-id="5GZpMZz4cYntAvkqsElrAu">print</span>(<span class="f" data-page-node-id="wklq2zbbACv4rvt2TDEBAR">m_add</span>(<span class="n" data-page-node-id="SFrHzwzVgJdDEQRRIj8ygL">20</span>, <span class="n" data-page-node-id="jjwRBqLMIflYgLYkayzuJa">22</span>));  <span class="c" data-page-node-id="9XM6zBAglZQG0jdXEyRaHN">// 42</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">7.2 DLL 打包</div>
-    <div class="note">@export 标记导出，hone build --dll 生成 C ABI 动态库（可在 C / Python / Rust 中调用）</div>
-<pre><code><span class="c">// math.hn</span>
-<span class="k">fn</span> <span class="f">add</span>(a : <span class="k">int</span>, b : <span class="k">int</span>) -&gt; <span class="k">int</span> { <span class="k">return</span> a + b; }
-<span class="k">fn</span> <span class="f">avg</span>(a : <span class="k">float</span>, b : <span class="k">float</span>) -&gt; <span class="k">float</span> { <span class="k">return</span> (a + b) / <span class="n">2.0</span>; }
-<span class="k">fn</span> <span class="f">greet</span>(name : <span class="k">str</span>) -&gt; <span class="k">str</span> { <span class="k">return</span> <span class="s">"你好, "</span> + name + <span class="s">"!"</span>; }
+  <div class="example" data-page-node-id="gq9dTDZqIctUEw8NbvNsfC">
+    <div class="title" data-page-node-id="QBxoa7HBYDuFfqsio2ZcSU">7.2 DLL 打包</div>
+    <div class="note" data-page-node-id="Wp3QWNHLqOxBMbJqmHikHi">@export 标记导出，hone build --dll 生成 C ABI 动态库（可在 C / Python / Rust 中调用）</div>
+<pre data-page-node-id="JXSq5QmDvwIhuPSdKajPjK"><code data-page-node-id="a0XLhuQmqujRNM1BKO3lge"><span class="c" data-page-node-id="SPU8QsL1Jrz1HCi7l2ZwcW">// math.hn</span>
+<span class="k" data-page-node-id="0RkL4o9wtk0snEv22DWEgQ">fn</span> <span class="f" data-page-node-id="lT6XQmUXzMCAJyazYStxZG">add</span>(a : <span class="k" data-page-node-id="WLPfC7CMZ64N3HEng613jr">int</span>, b : <span class="k" data-page-node-id="UQWfKZkuTZe1UnbkafB8gq">int</span>) -&gt; <span class="k" data-page-node-id="RE0AdNr3MYkMiK4lw0Tet4">int</span> { <span class="k" data-page-node-id="ILLWiBsQafsDWr8DRqtMUp">return</span> a + b; }
+<span class="k" data-page-node-id="Go5QY8paVr8HGCAZHbiqjv">fn</span> <span class="f" data-page-node-id="YG7udgkuWJ9KvpDzeabZE7">avg</span>(a : <span class="k" data-page-node-id="yHWi2DZXRn64pUZb0oLI8b">float</span>, b : <span class="k" data-page-node-id="U2Es7TzsTWSW2FwAE2Zj4M">float</span>) -&gt; <span class="k" data-page-node-id="mGE38cXwJJQ2IgAxy0KqCk">float</span> { <span class="k" data-page-node-id="1bAiWOskKAs1aBDTkOuem6">return</span> (a + b) / <span class="n" data-page-node-id="KeYiNGA6heQTooZiLa9bpZ">2.0</span>; }
+<span class="k" data-page-node-id="dXDb9XBqyvmasEw0UVfGHR">fn</span> <span class="f" data-page-node-id="A76bmNV3Aju3mXyGg680zJ">greet</span>(name : <span class="k" data-page-node-id="ZAAQZYntmHwwiWvpnmx9Mz">str</span>) -&gt; <span class="k" data-page-node-id="HTBhyV4Ia52TXomMAXRUWj">str</span> { <span class="k" data-page-node-id="2Fci7CZoAuuAUEKO1Ex08X">return</span> <span class="s" data-page-node-id="CiucF3cnfS1Z0PWg8SOaGf">"你好, "</span> + name + <span class="s" data-page-node-id="objAJOtEkhndBCJo4spR0k">"!"</span>; }
 
-<span class="k">@export</span> <span class="f">add</span>;
-<span class="k">@export</span> <span class="f">avg</span>;
-<span class="k">@export</span> <span class="f">greet</span>;</code></pre>
-    <p>生成的 C ABI：<code class="inline">int64_t add(int64_t, int64_t)</code>、<code class="inline">double avg(double, double)</code>、<code class="inline">const char* greet(const char*)</code>。</p>
+<span class="k" data-page-node-id="wgCPg4ElxNR1sy9QrsXkK2">@export</span> <span class="f" data-page-node-id="WOtRkNvzlan5j8vTSfdJGE">add</span>;
+<span class="k" data-page-node-id="SD5LCtRkNg0QVGmbrrDcZx">@export</span> <span class="f" data-page-node-id="xMUh5aT5u5GGqw24EF5L22">avg</span>;
+<span class="k" data-page-node-id="J8TMfO5y4LJ8DLLSLxahnD">@export</span> <span class="f" data-page-node-id="nwi5PDpkma5w5gfzq9F8kw">greet</span>;</code></pre>
+    <p data-page-node-id="jSF1jrbGSxw6L6spp08F4j">生成的 C ABI：<code class="inline" data-page-node-id="LPtB85GsH7BgUBePLXn0Da">int64_t add(int64_t, int64_t)</code>、<code class="inline" data-page-node-id="uZ9JgWeNGdouaclEN1mkgS">double avg(double, double)</code>、<code class="inline" data-page-node-id="7EPKys3wEEwFSzRuu0I6Hu">const char* greet(const char*)</code>。</p>
   </div>
 
-  <div class="example">
-    <div class="title">7.3 typed FFI：load 签名块精确调用 C 函数（v0.4+）</div>
-    <div class="note">签名块显式声明参数/返回类型（int/float/bool/str/ptr/void），按声明精确转换；调用在检查阶段校验参数（H001/H005）</div>
-<pre><code><span class="k">load</span> <span class="s">"tests/hone_lib/target/release/hone_lib.dll"</span> <span class="k">as</span> m {
-    <span class="c">// 仅描述 C 函数 ABI，不定义 Hone 函数体；返回类型允许 void</span>
-    <span class="k">fn</span> <span class="f">lib_add_f</span>(a: <span class="k">float</span>, b: <span class="k">float</span>) -&gt; <span class="k">float</span>;
-    <span class="k">fn</span> <span class="f">lib_strlen</span>(s: <span class="k">str</span>) -&gt; <span class="k">int</span>;
-    <span class="k">fn</span> <span class="f">lib_not</span>(b: <span class="k">bool</span>) -&gt; <span class="k">bool</span>;
-    <span class="k">fn</span> <span class="f">lib_echo_ptr</span>(p: <span class="k">ptr</span>) -&gt; <span class="k">ptr</span>;
-    <span class="k">fn</span> <span class="f">lib_bump</span>() -&gt; <span class="k">void</span>;
+  <div class="example" data-page-node-id="SPD7Wgc3BgxxdC3BcHak5H">
+    <div class="title" data-page-node-id="2cPzXDSDC3pK0BfvTQg2E3">7.3 typed FFI：load 签名块精确调用 C 函数（v0.4+）</div>
+    <div class="note" data-page-node-id="wcQy7q7YAOS6fpNQWjoCIV">签名块显式声明参数/返回类型（int/float/bool/str/ptr/void），按声明精确转换；调用在检查阶段校验参数（H001/H005）</div>
+<pre data-page-node-id="skokrJqkbbNfrrvF7rFZUH"><code data-page-node-id="jIRacJz4lDFSg5BLFdCEbf"><span class="k" data-page-node-id="QYwKq1yrtG84zAIWVJtT2M">load</span> <span class="s" data-page-node-id="6wjnl1ZzNyjGLXZCZgjiv4">"tests/hone_lib/target/release/hone_lib.dll"</span> <span class="k" data-page-node-id="U2bMA6i6iJZ7n1jVV5yLbS">as</span> m {
+    <span class="c" data-page-node-id="fFW79d7HCzQgD4LoqKiibE">// 仅描述 C 函数 ABI，不定义 Hone 函数体；返回类型允许 void</span>
+    <span class="k" data-page-node-id="OOHBOVaOQ4nExtFdxGZ3rF">fn</span> <span class="f" data-page-node-id="ppmBKCsvzEI6AuF4vKRAIc">lib_add_f</span>(a: <span class="k" data-page-node-id="S7Gs07SNjvX9fBH2LzXZeB">float</span>, b: <span class="k" data-page-node-id="j9hMJigTCYGxKoRQcYZz2Y">float</span>) -&gt; <span class="k" data-page-node-id="2o1Lc8rqZnostYKbeGzgNq">float</span>;
+    <span class="k" data-page-node-id="HJp9PuxlVuYhOHYvUorQ1r">fn</span> <span class="f" data-page-node-id="5vdxYgdD2xK3FxP7HJH1Ab">lib_strlen</span>(s: <span class="k" data-page-node-id="WzGbYnuWwBGWkC9QJ2FTpW">str</span>) -&gt; <span class="k" data-page-node-id="fmhyQi3JXxUHS3y8sDiV0H">int</span>;
+    <span class="k" data-page-node-id="rVSd8pj4vs9s7OLaq4ylsA">fn</span> <span class="f" data-page-node-id="eUAxj7TsEKfJFkQSfv2LXT">lib_not</span>(b: <span class="k" data-page-node-id="d0EfLz0ZVIpyNItl78bAsM">bool</span>) -&gt; <span class="k" data-page-node-id="ZjSRWdeQpxMVwRC9D7bIOS">bool</span>;
+    <span class="k" data-page-node-id="4KeyiGaTbiRG2OGBn2SjVg">fn</span> <span class="f" data-page-node-id="pAK55pVEubBogYVpdJikJG">lib_echo_ptr</span>(p: <span class="k" data-page-node-id="0cXcpFfnBhRwc0O3UVr4S3">ptr</span>) -&gt; <span class="k" data-page-node-id="N5rW0hokjE1qCyDmjCAFlq">ptr</span>;
+    <span class="k" data-page-node-id="fKMjgya3fWBQPIV8yx6eGY">fn</span> <span class="f" data-page-node-id="a7BCnMQ0m0wJ1OxAQgAp8f">lib_bump</span>() -&gt; <span class="k" data-page-node-id="UAAjOjDsXk7lPqremZ0AsX">void</span>;
 }
 
-<span class="f">print</span>(m.<span class="f">lib_add_f</span>(<span class="n">1.5</span>, <span class="n">2.25</span>));  <span class="c">// 3.75（float 通道）</span>
-<span class="f">print</span>(m.<span class="f">lib_strlen</span>(<span class="s">"hello"</span>));   <span class="c">// 5（str → int）</span>
-<span class="f">print</span>(m.<span class="f">lib_not</span>(<span class="k">true</span>));          <span class="c">// false（bool）</span>
-p = m.<span class="f">lib_echo_ptr</span>(<span class="n">0</span>);            <span class="c">// ptr 句柄往返，0 为 NULL</span>
-<span class="f">print</span>(p == <span class="n">0</span>);                     <span class="c">// true（ptr 支持 == 比较）</span>
+<span class="f" data-page-node-id="oG9vN00OzTfUhquFkze12h">print</span>(m.<span class="f" data-page-node-id="bvyHhbcB1FXMEqy9WT8GFD">lib_add_f</span>(<span class="n" data-page-node-id="6WVrs6DxWC6ZsSHbH4Oxib">1.5</span>, <span class="n" data-page-node-id="hQid5wCuexOawefZ3drMIk">2.25</span>));  <span class="c" data-page-node-id="FGCg64rMrN3DBXB5ZdqTTK">// 3.75（float 通道）</span>
+<span class="f" data-page-node-id="UKHaGC5bSrvq2hsmNF1qnH">print</span>(m.<span class="f" data-page-node-id="LwZY7jd16leHG8VE780k7B">lib_strlen</span>(<span class="s" data-page-node-id="EFD0gdRdzMOIZjBJC4bHZG">"hello"</span>));   <span class="c" data-page-node-id="ZJHbz9isX04O5mZcQakQhL">// 5（str → int）</span>
+<span class="f" data-page-node-id="lM3omy1RzR84O3dqyqpKpa">print</span>(m.<span class="f" data-page-node-id="04l4mTNLobpQhnLKC9J1gB">lib_not</span>(<span class="k" data-page-node-id="yIi15NcRWZ8xMstFPpXeHZ">true</span>));          <span class="c" data-page-node-id="yrZ6kDK5r5WmKdLIdRffwk">// false（bool）</span>
+p = m.<span class="f" data-page-node-id="N7kOkfd6ApXAOeOB6zzZcV">lib_echo_ptr</span>(<span class="n" data-page-node-id="ZVsJfAQEUJGVUeeB5dU4r9">0</span>);            <span class="c" data-page-node-id="jlrS8OTTOnKzntC6R0EGBA">// ptr 句柄往返，0 为 NULL</span>
+<span class="f" data-page-node-id="WfBuNfBxoaIWNFtMV8MMMJ">print</span>(p == <span class="n" data-page-node-id="6vemx4wdz6W8VppldTQ71f">0</span>);                     <span class="c" data-page-node-id="1tghvh938P3BoBH4tswrX3">// true（ptr 支持 == 比较）</span>
 
-<span class="c">// 静态校验：参数类型/个数错误在检查阶段直接报错，而非运行时</span>
-<span class="c">// m.lib_strlen(123);   // H001: 参数期望 str，给了 int</span>
-<span class="c">// m.lib_strlen();      // H005: 参数个数不匹配</span></code></pre>
-    <p>未声明签名的库函数保持旧 int64 通道调用（向后兼容）。完整示例见 <code class="inline">examples/ffi_demo.hn</code>。</p>
+<span class="c" data-page-node-id="O1Uk1Sj7gKAGSGe9o1EavI">// 静态校验：参数类型/个数错误在检查阶段直接报错，而非运行时</span>
+<span class="c" data-page-node-id="BrwR9oYyPDlCJ8VMmqHxzA">// m.lib_strlen(123);   // H001: 参数期望 str，给了 int</span>
+<span class="c" data-page-node-id="j7aj6LqZxZBNa0uIWo69Sm">// m.lib_strlen();      // H005: 参数个数不匹配</span></code></pre>
+    <p data-page-node-id="THmkSW1EZE1bSxIQADDu4k">未声明签名的库函数保持旧 int64 通道调用（向后兼容）。完整示例见 <code class="inline" data-page-node-id="SnDcGxBIM3ACggBRFSIgYj">examples/ffi_demo.hn</code>。</p>
   </div>
 
-  <div class="example">
-    <div class="title">7.4 头文件自动绑定：load ... from "header.h"（v0.4+）</div>
-    <div class="note">从 C 头文件提取函数原型自动生成 FFI 签名；hone bind 可离线生成签名块粘贴进脚本</div>
-<pre><code><span class="c">// 从头文件自动绑定：类型全部来自 hone_lib.h（等价于手写签名块）</span>
-<span class="k">load</span> <span class="s">"tests/hone_lib/target/release/hone_lib.dll"</span> <span class="k">as</span> m <span class="k">from</span> <span class="s">"tests/hone_lib/hone_lib.h"</span>;
+  <div class="example" data-page-node-id="S0owLDPuRch3cruCTp2YSD">
+    <div class="title" data-page-node-id="hnjji1dukc0EMEj0PA173W">7.4 头文件自动绑定：load ... from "header.h"（v0.4+）</div>
+    <div class="note" data-page-node-id="jnGb9Cb7GwXqDhcKgAINRq">从 C 头文件提取函数原型自动生成 FFI 签名；hone bind 可离线生成签名块粘贴进脚本</div>
+<pre data-page-node-id="jiGTq31v2rErq2AKMxYrj5"><code data-page-node-id="qNzrRXQ33zJxEs0lwS7a8U"><span class="c" data-page-node-id="dEfuCKA5QuRi4dU01hRgpo">// 从头文件自动绑定：类型全部来自 hone_lib.h（等价于手写签名块）</span>
+<span class="k" data-page-node-id="EwJYFweC0NgUIJCACcCQWH">load</span> <span class="s" data-page-node-id="BHYaqsscmaatEQgyxAFJtI">"tests/hone_lib/target/release/hone_lib.dll"</span> <span class="k" data-page-node-id="sDtnwUoYnv0n9WvwcPrnKy">as</span> m <span class="k" data-page-node-id="je4eeR2BOfv9LDFFz9P8V2">from</span> <span class="s" data-page-node-id="BBC83pKj7fEBAGGLGeGXBe">"tests/hone_lib/hone_lib.h"</span>;
 
-<span class="f">print</span>(m.<span class="f">lib_add</span>(<span class="n">1</span>, <span class="n">2</span>));         <span class="c">// 3（typedef 展开 ka_int64 → int）</span>
-<span class="f">print</span>(m.<span class="f">lib_add_f</span>(<span class="n">1.5</span>, <span class="n">2.25</span>));  <span class="c">// 3.75（double → float）</span>
-<span class="f">print</span>(m.<span class="f">lib_strlen</span>(<span class="s">"hello"</span>));   <span class="c">// 5（const char* → str）</span>
+<span class="f" data-page-node-id="Pwr5am6arYciWi0SeuFd4T">print</span>(m.<span class="f" data-page-node-id="lMfIjzK6b1Gm3fZB53z9W3">lib_add</span>(<span class="n" data-page-node-id="WKm3vXlG1WlkB4bGjY6uGi">1</span>, <span class="n" data-page-node-id="sFR5FqIVOz2xBoMfxzJOqJ">2</span>));         <span class="c" data-page-node-id="Avzh23QAvaJglrCm7bcT5E">// 3（typedef 展开 ka_int64 → int）</span>
+<span class="f" data-page-node-id="ZBWuNGnkxXLJywDSyD6Fr2">print</span>(m.<span class="f" data-page-node-id="aTGMaeJfKuCcKUFCLZPyS5">lib_add_f</span>(<span class="n" data-page-node-id="CYvI8TCcrCSqj7GrE99q3X">1.5</span>, <span class="n" data-page-node-id="VRZW6sjwQ2FbLzL81wOr8R">2.25</span>));  <span class="c" data-page-node-id="uIM7YzAfsxHkklJBToHFi0">// 3.75（double → float）</span>
+<span class="f" data-page-node-id="O5TTYBb12aerECG8QcCXtG">print</span>(m.<span class="f" data-page-node-id="pljQ5wF3lP68rdeJMHBH2Q">lib_strlen</span>(<span class="s" data-page-node-id="2VAaOalGv0Lj2afAIieZ02">"hello"</span>));   <span class="c" data-page-node-id="9oY2nftLmfZoy4uGVtQHM8">// 5（const char* → str）</span>
 
-<span class="c">// 离线生成签名块（输出到 stdout，unsupported 原型列为注释）</span>
-<span class="c">// hone bind tests/hone_lib/hone_lib.h</span>
+<span class="c" data-page-node-id="bLQESFtlVVIlFk72dlTLdf">// 离线生成签名块（输出到 stdout，unsupported 原型列为注释）</span>
+<span class="c" data-page-node-id="5oiJ83Kb1zWz7ywgxc34Jq">// hone bind tests/hone_lib/hone_lib.h</span>
 
-<span class="c">// 不支持的原型（回调/变参/数组/结构体按值）调用时直接报错，而非 ABI 崩溃</span>
-<span class="c">// print(m.lib_cb(0));   // H006: cannot be called: callback parameter</span>
-<span class="c">// print(m.lib_var("x")); // H006: cannot be called: variadic (`...`)</span></code></pre>
-    <p>解析能力为纯 Rust 受限子集（无 libclang 依赖）：跳过注释/预处理/struct 定义/extern "C" 块，typedef 简单展开，
+<span class="c" data-page-node-id="BAswWjg1fCXQY8OcwPNbpc">// 不支持的原型（回调/变参/数组/结构体按值）调用时直接报错，而非 ABI 崩溃</span>
+<span class="c" data-page-node-id="k29W83sXfKCALI6g3aGOfE">// print(m.lib_cb(0));   // H006: cannot be called: callback parameter</span>
+<span class="c" data-page-node-id="wDL61cqcjIrH9RMrVcnAH9">// print(m.lib_var("x")); // H006: cannot be called: variadic (`...`)</span></code></pre>
+    <p data-page-node-id="5SffS7CQdvsAYfqwFyqmyU">解析能力为纯 Rust 受限子集（无 libclang 依赖）：跳过注释/预处理/struct 定义/extern "C" 块，typedef 简单展开，
       属性宏跳过；类型映射 int/size_t→int、float/double→float、bool→bool、char*→str、其余指针→ptr、void→void。
-      完整示例见 <code class="inline">examples/ffi_header.hn</code>。</p>
+      完整示例见 <code class="inline" data-page-node-id="9AqDkU93U7KkTCAdAehYII">examples/ffi_header.hn</code>。</p>
   </div>
 
-  <div class="example">
-    <div class="title">7.5 函数别名：alias 原名 as 新名（v0.6.1+）</div>
-    <div class="note">给已有函数起新名字再调用；原名支持点号路径（模块/类/内置函数），别名可叠加、可指向内置函数</div>
-<pre><code><span class="k">fn</span> <span class="f">greet</span>(name : <span class="k">str</span>) -&gt; <span class="k">str</span> { <span class="k">return</span> <span class="s">"你好 "</span> + name; }
+  <div class="example" data-page-node-id="xrknDIknrWWxpfsFjOBG1B">
+    <div class="title" data-page-node-id="z3agvjdxmEDK76od7akzYv">7.5 函数别名：alias 原名 as 新名（v0.6.1+）</div>
+    <div class="note" data-page-node-id="YorUjFLrHuXsyYm1JShFEg">给已有函数起新名字再调用；原名支持点号路径（模块/类/内置函数），别名可叠加、可指向内置函数</div>
+<pre data-page-node-id="aS9iHckRaNDH8bCEM08UAR"><code data-page-node-id="mDKUc20cRvChF1GrNSddh3"><span class="k" data-page-node-id="kJM5y1TbJumZR6mXHoB5iB">fn</span> <span class="f" data-page-node-id="3RsmRNEFzodLjzQx555otV">greet</span>(name : <span class="k" data-page-node-id="WSu2kdLvd3xe4EVstXZXpu">str</span>) -&gt; <span class="k" data-page-node-id="jrZ22ahUN7d3ZBdiSTnW1M">str</span> { <span class="k" data-page-node-id="4WV4cZJ71AxS72HSgb65HM">return</span> <span class="s" data-page-node-id="wgcNgJ5YglX5P6eKtM1Ce7">"你好 "</span> + name; }
 
-<span class="k">alias</span> <span class="f">greet</span> <span class="k">as</span> hi;           <span class="c">// 用户函数别名</span>
-<span class="f">print</span>(<span class="f">hi</span>(<span class="s">"Hone"</span>));               <span class="c">// 你好 Hone</span>
+<span class="k" data-page-node-id="v6iaXNdtO3gVeUCHqCo26m">alias</span> <span class="f" data-page-node-id="TYTO2fUszYeFW8CHEeLACx">greet</span> <span class="k" data-page-node-id="qWfLZCEvXvpJeHvb1OE6ID">as</span> hi;           <span class="c" data-page-node-id="fZB51Mv2jQiuVC6yOIvkAz">// 用户函数别名</span>
+<span class="f" data-page-node-id="L3qwlVQhu5dwfj3ecaUEFP">print</span>(<span class="f" data-page-node-id="yJ70I6EyG9Ok2aTFTlpuvD">hi</span>(<span class="s" data-page-node-id="eBig92eBaLKl3o3iNh4SND">"Hone"</span>));               <span class="c" data-page-node-id="bWSVuVFdEjntAm0NrMFzAq">// 你好 Hone</span>
 
-<span class="k">alias</span> <span class="f">random.int</span> <span class="k">as</span> rint;     <span class="c">// 点号路径原名（内置点号函数）</span>
-<span class="f">print</span>(<span class="f">rint</span>(<span class="n">1</span>, <span class="n">100</span>));            <span class="c">// [1, 100] 随机整数</span>
+<span class="k" data-page-node-id="Hlomuy9GYbsS8GGpAeUPU6">alias</span> <span class="f" data-page-node-id="3UYi1hWhzBc9gk91MV1A3o">random.int</span> <span class="k" data-page-node-id="MNn7kSFENrTd26Aw6z4jIM">as</span> rint;     <span class="c" data-page-node-id="RKYFXGSAZCgDd8FTsnzUz1">// 点号路径原名（内置点号函数）</span>
+<span class="f" data-page-node-id="NNEnc1R1DuQRgKMPHXW8Ba">print</span>(<span class="f" data-page-node-id="XlrAJj0OcH4BESQuwnIrar">rint</span>(<span class="n" data-page-node-id="fgAkqAOqkYjSA5t6OlmBCA">1</span>, <span class="n" data-page-node-id="y9RahKjaJI1NXBRiwEdCbB">100</span>));            <span class="c" data-page-node-id="f1gXoFaJfRMJkuLvAk8fs8">// [1, 100] 随机整数</span>
 
-<span class="k">alias</span> <span class="f">greet</span> <span class="k">as</span> hello;          <span class="c">// 别名叠加：hello → greet</span>
-<span class="k">alias</span> <span class="f">hello</span> <span class="k">as</span> hey;           <span class="c">// hey → hello → greet</span>
-<span class="f">print</span>(<span class="f">hey</span>(<span class="s">"World"</span>));             <span class="c">// 你好 World</span>
+<span class="k" data-page-node-id="WJi9t0rJdHf7UN4KhFVcCJ">alias</span> <span class="f" data-page-node-id="bu4MDdj9waEXacB1bKPlMY">greet</span> <span class="k" data-page-node-id="gHYzZIKoB6vpUiE3QgXD0f">as</span> hello;          <span class="c" data-page-node-id="VsTJHRuCguARegmvp865sh">// 别名叠加：hello → greet</span>
+<span class="k" data-page-node-id="GQBexczlKAHIbEum39kLs8">alias</span> <span class="f" data-page-node-id="c8D5wELCj17HgRukREEHBM">hello</span> <span class="k" data-page-node-id="6Ch35si7doWTEmigJjbu3i">as</span> hey;           <span class="c" data-page-node-id="66ClALdTEZDaDSgWOjLwC4">// hey → hello → greet</span>
+<span class="f" data-page-node-id="HfU72PSTFUiU4m6q7Ds5TZ">print</span>(<span class="f" data-page-node-id="6DMajVv2aRgsVO0ol4mKCL">hey</span>(<span class="s" data-page-node-id="18t6uQrLLVd4LaOxOE2wnL">"World"</span>));             <span class="c" data-page-node-id="A9EL8qD80RMtCxhb0gnyLr">// 你好 World</span>
 
-<span class="k">alias</span> <span class="f">abs</span> <span class="k">as</span> mabs;             <span class="c">// 内置函数别名</span>
-<span class="f">print</span>(<span class="f">mabs</span>(<span class="n">-5</span>));                 <span class="c">// 5</span></code></pre>
-    <p>别名作用域为文件级，<code class="inline">alias</code> 语句之后即可用新名调用。完整示例见 <code class="inline">examples/alias_demo.hn</code>。</p>
+<span class="k" data-page-node-id="o1Cn8W0luaBXBPEIlDLIaY">alias</span> <span class="f" data-page-node-id="0Yzc5bRauKMH4l6fmAgSSL">abs</span> <span class="k" data-page-node-id="2VA9h418iWjCTn3ltBfgod">as</span> mabs;             <span class="c" data-page-node-id="9DY7zivBfJDQQcnuDm5yRc">// 内置函数别名</span>
+<span class="f" data-page-node-id="ryUYJk2fB3HYcw6VnPdWVh">print</span>(<span class="f" data-page-node-id="L4nCMvBd8ItawFhirK3Vl1">mabs</span>(<span class="n" data-page-node-id="jHmlq9LAiMqhEnTvyJgkUv">-5</span>));                 <span class="c" data-page-node-id="pNFYR9LbLTUg6N8w8Xh8Lu">// 5</span></code></pre>
+    <p data-page-node-id="Pxoj89keQxqqjKSZqbIeh0">别名作用域为文件级，<code class="inline" data-page-node-id="Xpf2FtiVtY6PXIlAAuHGLA">alias</code> 语句之后即可用新名调用。完整示例见 <code class="inline" data-page-node-id="5eyoKEHPKdxMccLGmhkhw0">examples/alias_demo.hn</code>。</p>
   </div>
 
-  <h3><span class="hash">#</span>8. 工具链</h3>
+  <h3 data-page-node-id="X4CJmcn8KzLW7jcTa9Vavl"><span class="hash" data-page-node-id="erRDaQAy39lHTJkiy1v8bU">#</span>8. 工具链</h3>
 
-  <div class="example">
-    <div class="title">8.0 测试框架（hone test + assert）</div>
-    <div class="note">递归扫描 *.test.hn 并运行；assert 条件为 false 抛 H700；失败退出码非 0</div>
-<pre><code><span class="c">// arith.test.hn（文件名以 .test.hn 结尾）</span>
-<span class="f">assert</span>(<span class="n">1</span> + <span class="n">1</span> == <span class="n">2</span>, <span class="s">"basic math"</span>);
-<span class="f">assert</span>(<span class="f">len</span>([<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>]) == <span class="n">3</span>);
+  <div class="example" data-page-node-id="xYevh5lN1GsQ5fENHMIBGS">
+    <div class="title" data-page-node-id="BaB3QqDIIC1NCZRDjoA2pE">8.0 测试框架（hone test + assert）</div>
+    <div class="note" data-page-node-id="8hkBsxdzGDdoNTep4PUPt9">递归扫描 *.test.hn 并运行；assert 条件为 false 抛 H700；失败退出码非 0</div>
+<pre data-page-node-id="VGgVtFe3WeAg1hxCNrbLyz"><code data-page-node-id="DWCgJ3GunKBlQmnJwHN517"><span class="c" data-page-node-id="zXHxH8N7HQWQcsIeI1kPZw">// arith.test.hn（文件名以 .test.hn 结尾）</span>
+<span class="f" data-page-node-id="SHMFcJukUeiGl50Ryka6GO">assert</span>(<span class="n" data-page-node-id="jGCi7GBIEdQM7xCFCsr9g7">1</span> + <span class="n" data-page-node-id="NKPd9O8AlPzDCXGRgoP9w3">1</span> == <span class="n" data-page-node-id="v0Ge2iHGKzk70uFiMAVq5i">2</span>, <span class="s" data-page-node-id="VyMBt9Jp3j4SSdxQqDFwrB">"basic math"</span>);
+<span class="f" data-page-node-id="ptGf0tbCNlGYxp45ftswx2">assert</span>(<span class="f" data-page-node-id="OlRmNfDiIMkOvZDRcvUPhK">len</span>([<span class="n" data-page-node-id="kLVBwHCx4GJUsmNPOdGPMz">1</span>, <span class="n" data-page-node-id="2ZUkOs2kXz9i8hSNt2lxMC">2</span>, <span class="n" data-page-node-id="039RCHCP9GfONk2cDi427I">3</span>]) == <span class="n" data-page-node-id="etVPwRUkKed5WPP267I4IT">3</span>);
 
-<span class="c">// 运行目录下所有测试</span>
+<span class="c" data-page-node-id="fHCTbiCGMwwzdl6Hewa5qN">// 运行目录下所有测试</span>
 hone test
-<span class="c">// PASS  arith.test.hn</span>
-<span class="c">// 2 passed, 0 failed (2 total)</span></code></pre>
+<span class="c" data-page-node-id="omng6J53ACdJtHIjQojLbc">// PASS  arith.test.hn</span>
+<span class="c" data-page-node-id="mpdYj2YRnCDWb9k7r2gZG0">// 2 passed, 0 failed (2 total)</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">8.1 build --exe 打包独立可执行文件</div>
-    <div class="note">解释器+脚本打包为单文件，双击即用；--version 查看内嵌版本信息</div>
-<pre><code><span class="c">// 打包(默认输出 app.exe,体积≈解释器+脚本)</span>
+  <div class="example" data-page-node-id="w41H7S2Q9yKsHRQo8dUMej">
+    <div class="title" data-page-node-id="DegEROdeGpR6MDtBK1ggXp">8.1 build --exe 打包独立可执行文件</div>
+    <div class="note" data-page-node-id="Sn9QYDaRIQuSr9xAiH1yN1">解释器+脚本打包为单文件，双击即用；--version 查看内嵌版本信息</div>
+<pre data-page-node-id="bCQUuFfthnEHANafvEgRI8"><code data-page-node-id="JPCmsabr3ZA8T4r6weGsKN"><span class="c" data-page-node-id="sOtPojnnCBY0xgQomKvLTr">// 打包(默认输出 app.exe,体积≈解释器+脚本)</span>
 hone build --exe app.hn [-o my_app.exe]
 
-<span class="c">// 运行:自动释放运行时到 .hone_cache,执行完毕后自动清理</span>
+<span class="c" data-page-node-id="EZchXDCxsXgAlMff7pHB4x">// 运行:自动释放运行时到 .hone_cache,执行完毕后自动清理</span>
 ./my_app.exe
 
-<span class="c">// 版本信息(内嵌 Hone 版本/构建时间/脚本名/校验和)</span>
+<span class="c" data-page-node-id="ahBm68dlsG6tSd7ymfkxkr">// 版本信息(内嵌 Hone 版本/构建时间/脚本名/校验和)</span>
 ./my_app.exe --version
-<span class="c">// &gt; my_app.exe (Hone v0.2.0) built at 2026-08-07 09:24:30</span>
-<span class="c">// &gt; script: app.hn</span>
+<span class="c" data-page-node-id="VcbXpZtlGVA7E7zkNLzHIZ">// &gt; my_app.exe (Hone v0.7.11) built at 2026-08-07 09:24:30</span>
+<span class="c" data-page-node-id="DPSbbgNMTgAoRzzxU4tNC7">// &gt; script: app.hn</span>
 
-<span class="c">// 保留缓存以加速下次启动</span>
+<span class="c" data-page-node-id="UyWZBrSgDhySwOAvro5N0N">// 保留缓存以加速下次启动</span>
 ./my_app.exe --keep-cache</code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">8.1b build --script 仅脚本压缩包（.hzp）</div>
-    <div class="note">不内嵌解释器，体积小；生成 .hzp 后用任意 hone 运行时执行（hone run pkg.hzp）</div>
-<pre><code><span class="c">// 打包(默认输出 app.hzp)</span>
+  <div class="example" data-page-node-id="NvrKxEnOG0DimhOWk2oGdi">
+    <div class="title" data-page-node-id="C26pnFckc6fhoPxAjChM6G">8.1b build --script 仅脚本压缩包（.hzp）</div>
+    <div class="note" data-page-node-id="da1I5DDa9Cp7DTTR1Qb8HL">不内嵌解释器，体积小；生成 .hzp 后用任意 hone 运行时执行（hone run pkg.hzp）</div>
+<pre data-page-node-id="hNDLMi5iZafkWZtEBVxnev"><code data-page-node-id="aUKxJYNQBQkvig0paCZtGg"><span class="c" data-page-node-id="dOVc4nWkAGkuqRpH1baN3L">// 打包(默认输出 app.hzp)</span>
 hone build --script app.hn [-o my_app.hzp]
 
-<span class="c">// 执行(自动解包运行,也可直接 hone my_app.hzp)</span>
+<span class="c" data-page-node-id="bEiDPUTx2oTHEMNZHEk67D">// 执行(自动解包运行,也可直接 hone my_app.hzp)</span>
 hone run my_app.hzp</code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">8.1c self-update 自动更新</div>
-    <div class="note">从 URL（或环境变量 HONE_UPDATE_URL）下载最新 hone 二进制替换当前程序；魔数校验防误下载</div>
-<pre><code>hone self-update https://example.com/hone-latest.exe</code></pre>
+  <div class="example" data-page-node-id="t9BuCOOySGsFEb4HkeEyGK">
+    <div class="title" data-page-node-id="O9MeHua2CEV1iNi6MA63Hs">8.1c self-update 自动更新</div>
+    <div class="note" data-page-node-id="8pj7AfkweypqRbEmcEa841">从 URL（或环境变量 HONE_UPDATE_URL）下载最新 hone 二进制替换当前程序；魔数校验防误下载</div>
+<pre data-page-node-id="JFBgEwgeg8i5Zts9WBFB0O"><code data-page-node-id="60T2Tgu6GQHd8VG9kSCeYH">hone self-update https://example.com/hone-latest.exe</code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">8.2 断点调试</div>
-    <div class="note">hone debug 模式下 breakpoint 打印所有变量的类型与值快照</div>
-<pre><code>x = <span class="n">10</span>;
-name = <span class="s">"Hone"</span>;
-flag = <span class="k">true</span>;
-<span class="k">breakpoint</span>;   <span class="c">// [Hone Debug] 断点触发 -&gt; debug.hn:4 + 变量快照</span>
- <span class="f">print</span>(x);</code></pre>
+  <div class="example" data-page-node-id="PXAQ289RQ4BBfEfYirPveo">
+    <div class="title" data-page-node-id="FfP8MNyl26sncq7B8Vjy2s">8.2 断点调试</div>
+    <div class="note" data-page-node-id="Jdx6TJgWPJF5tXACwnLBGA">hone debug 模式下 breakpoint 打印所有变量的类型与值快照</div>
+<pre data-page-node-id="AU4kLSZIZTpgF1N7gOxAnC"><code data-page-node-id="vnVCEYUBEI09pTfp5181lC">x = <span class="n" data-page-node-id="XpbEp493KPw9EJEkAFkMGI">10</span>;
+name = <span class="s" data-page-node-id="XG9R4NQ9vqSXlNXpDGoHa4">"Hone"</span>;
+flag = <span class="k" data-page-node-id="HXXhDSWGI3pFoCqYuwIfJr">true</span>;
+<span class="k" data-page-node-id="jJT4oj0TwH8OGm82z28mAS">breakpoint</span>;   <span class="c" data-page-node-id="gQYVIXrIyyIRletDFs50NI">// [Hone Debug] 断点触发 -&gt; debug.hn:4 + 变量快照</span>
+ <span class="f" data-page-node-id="ToP1a5xb2pME7z2GFrXNN2">print</span>(x);</code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">8.3 临时函数与调试输出</div>
-    <div class="note">tmp fn 编译自动忽略，debug_print 仅 debug 模式生效</div>
-<pre><code><span class="k">tmp</span> <span class="k">fn</span> <span class="f">helper</span>() {
-    <span class="f">print</span>(<span class="s">"只在开发时有用"</span>);
+  <div class="example" data-page-node-id="AhwbP57HWoCiIFJmxcLDxo">
+    <div class="title" data-page-node-id="6mau76ihnbXLJ8wA9eYeb2">8.3 临时函数与调试输出</div>
+    <div class="note" data-page-node-id="8qVIh3hY6dB0YCz7hXPBra">tmp fn 编译自动忽略，debug_print 仅 debug 模式生效</div>
+<pre data-page-node-id="tHnbzsM44UAE6ozJ9xOB9u"><code data-page-node-id="4d922Q5Ey6UHEcluF5Nt04"><span class="k" data-page-node-id="Eta1CAfaR7cQ698atb4yLH">tmp</span> <span class="k" data-page-node-id="iGzWdt607x7yBahTc827ZM">fn</span> <span class="f" data-page-node-id="mOObEb3gn7DBIjNSmKOAKW">helper</span>() {
+    <span class="f" data-page-node-id="dAPEBzUYu9m1q7j5Njso3o">print</span>(<span class="s" data-page-node-id="iRrcbnX5FzA1GuDMQ0Um7h">"只在开发时有用"</span>);
 }
 
-x = <span class="n">42</span>;
-<span class="k">debug_print</span>(<span class="s">"当前 x = "</span> + <span class="f">to_str</span>(x));</code></pre>
+x = <span class="n" data-page-node-id="dv3CrY3L4tfK6EYD0xFFnO">42</span>;
+<span class="k" data-page-node-id="CQiWfTgxgj7LTYjQERANaf">debug_print</span>(<span class="s" data-page-node-id="TEE9M9rviyirXiwAdSl7aE">"当前 x = "</span> + <span class="f" data-page-node-id="3n7eWOrmcMcIQCskXNFptx">to_str</span>(x));</code></pre>
   </div>
 
-  <h3><span class="hash">#</span>9. 错误处理</h3>
+  <h3 data-page-node-id="7oJBniZUG1kgFWBAdVs00Q"><span class="hash" data-page-node-id="wM9ciCx0koT58zYPCbmCj1">#</span>9. 错误处理</h3>
 
-  <div class="example">
-    <div class="title">9.1 try-catch 错误捕获与恢复</div>
-    <div class="note">捕获可恢复错误并降级回退；throw 主动抛出；错误对象字段 e.code / e.message / e.line</div>
-<pre><code>r = <span class="n">0</span>;
-<span class="k">try</span> {
-    r = <span class="n">10</span> / <span class="n">0</span>;              <span class="c">// error[H009] 除零</span>
-} <span class="k">catch</span> e {
-    <span class="f">print</span>(<span class="s">"caught "</span> + e.code + <span class="s">": "</span> + e.message);
-    r = -<span class="n">1</span>;                  <span class="c">// 回退值</span>
+  <div class="example" data-page-node-id="qhhej8NPUAhpk6Bbt1HmvG">
+    <div class="title" data-page-node-id="FK97ap9MbUfae3dH6Yb2iw">9.1 try-catch 错误捕获与恢复</div>
+    <div class="note" data-page-node-id="hZuhWc9oBIo9Oy2oAFzGER">捕获可恢复错误并降级回退；throw 主动抛出；错误对象字段 e.code / e.message / e.line</div>
+<pre data-page-node-id="y6kmVkEdJ636EGiKS3t39E"><code data-page-node-id="gqw2JiIa4cy7dfNz42EdNH">r = <span class="n" data-page-node-id="qRDOHoYruva4aDBZgJj69v">0</span>;
+<span class="k" data-page-node-id="qAdqC1O42Bugz8VEkCspel">try</span> {
+    r = <span class="n" data-page-node-id="7JVL4XQLREDsWaG8sQWGBX">10</span> / <span class="n" data-page-node-id="czQ1Z5V8vltEVFmozd2FdK">0</span>;              <span class="c" data-page-node-id="ShFI4A0uLp6jYIVKNi177J">// error[H009] 除零</span>
+} <span class="k" data-page-node-id="h2WJsm1SGkf2gR6xVhEmnN">catch</span> e {
+    <span class="f" data-page-node-id="Ym7eSFTLORDMbW8WpUjHZB">print</span>(<span class="s" data-page-node-id="uYmAmxdKNjlHIDZZLOO1fy">"caught "</span> + e.code + <span class="s" data-page-node-id="FBCzcBsGcFt7rityW0rZrs">": "</span> + e.message);
+    r = -<span class="n" data-page-node-id="YtDE6z2PRixHSOaqj4uDdj">1</span>;                  <span class="c" data-page-node-id="HPp6xzDye61foiRxG3xNRM">// 回退值</span>
 }
-<span class="f">print</span>(r);                   <span class="c">// -1</span>
+<span class="f" data-page-node-id="9B3Nt4u36FdIcqX3dO56d9">print</span>(r);                   <span class="c" data-page-node-id="2igZ0y96ALmb8pVjvQlqU8">// -1</span>
 
-<span class="k">throw</span> <span class="s">"自定义错误"</span>;        <span class="c">// error[H600]</span></code></pre>
+<span class="k" data-page-node-id="bta78UkEL2zQbCko4EBWIt">throw</span> <span class="s" data-page-node-id="QItWnlNPM3TAH84AQnxLrL">"自定义错误"</span>;        <span class="c" data-page-node-id="U2WkBRGpQHhG1310vR1hh0">// error[H600]</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">9.2 自动重启与检查点恢复</div>
-    <div class="note">--restart 失败自动重拉（名刀机制）；--resume 从 db 检查点继续（崩溃不丢进度）</div>
-<pre><code><span class="c">// 失败自动重启(默认最多3次,间隔1s/3s/10s递增;--restart-on 错误码白名单)</span>
+  <div class="example" data-page-node-id="sK3wdURYCsV2qOJACvMgRs">
+    <div class="title" data-page-node-id="ed9Wv5PNf4H2CQwDLy3Uhy">9.2 自动重启与检查点恢复</div>
+    <div class="note" data-page-node-id="8YA9K9aICIixu0DYNRGuK9">--restart 失败自动重拉（名刀机制）；--resume 从 db 检查点继续（崩溃不丢进度）</div>
+<pre data-page-node-id="zfRgSE0jhWiSsSrZGhwP06"><code data-page-node-id="FYnQziUSDVVIlLSBKGWWBm"><span class="c" data-page-node-id="3hSdnCLCGg9WloE6Ai5bw9">// 失败自动重启(默认最多3次,间隔1s/3s/10s递增;--restart-on 错误码白名单)</span>
 hone run --restart=2 --backoff=1,1 --restart-on=H401 app.hn
 
-<span class="c">// 检查点恢复(db.set 自动落盘 ~/.hone/state/,脚本变更后检查点自动失效)</span>
+<span class="c" data-page-node-id="G53qCx8c3djwYLOUdwqyCN">// 检查点恢复(db.set 自动落盘 ~/.hone/state/,脚本变更后检查点自动失效)</span>
 hone run --resume app.hn
 
-<span class="c">// app.hn 中写入检查点</span>
-<span class="k">db.set</span>(<span class="s">"stage"</span>, <span class="s">"2"</span>);</code></pre>
+<span class="c" data-page-node-id="7LpYyM72mYnY4GRSUFUFlv">// app.hn 中写入检查点</span>
+<span class="k" data-page-node-id="RhqWZbWVzN2aHQv22PYyR5">db.set</span>(<span class="s" data-page-node-id="U2v95yMvl0Ae9419TEz7rA">"stage"</span>, <span class="s" data-page-node-id="3KtvgBuL6v3dr5nBvJuJIS">"2"</span>);</code></pre>
   </div>
 
-  <h3><span class="hash">#</span>10. 图形界面与本地服务器</h3>
+  <h3 data-page-node-id="XyMVTizu8H77pSy1KcLuAD"><span class="hash" data-page-node-id="t51Dlep2oM6VAGccHajvcR">#</span>10. 图形界面与本地服务器</h3>
 
-  <div class="example">
-    <div class="title">10.1 图形界面库（浏览器渲染 + 双向交互）</div>
-    <div class="note">hone_lib/gui.hn：纯 Hone 编写的跨平台 GUI，gui_run 启动本地服务器并自动打开浏览器</div>
-<pre><code><span class="k">import</span> <span class="s">"gui"</span> <span class="k">from</span> <span class="s">"./hone_lib/gui.hn"</span>;
+  <div class="example" data-page-node-id="O1xphHoIXQWHo6vQkeMljf">
+    <div class="title" data-page-node-id="NlvzvYjxyviP0ovR77RwcD">10.1 图形界面库（浏览器渲染 + 双向交互）</div>
+    <div class="note" data-page-node-id="CnRbf508PzG9WcDSMVAUAT">hone_lib/gui.hn：纯 Hone 编写的跨平台 GUI，gui_run 启动本地服务器并自动打开浏览器</div>
+<pre data-page-node-id="HhR1cxZbchRAEruJGGVKWz"><code data-page-node-id="e1weHDQLywBJjozIZKSCsc"><span class="k" data-page-node-id="3ANHI4wkuuxGHHi1VTGLLx">import</span> <span class="s" data-page-node-id="sBJgety2siE5JjYYxiJFO5">"gui"</span> <span class="k" data-page-node-id="BRYtDooTXrDp26AZ8G9otV">from</span> <span class="s" data-page-node-id="kARRSWl15jdfqXaPFilIVb">"./hone_lib/gui.hn"</span>;
 
-<span class="c">// 界面事件处理：id 为控件 id，value 为用户输入值（约定函数名 on_event）</span>
-<span class="k">fn</span> <span class="f">on_event</span>(id : <span class="k">str</span>, value) -&gt; <span class="k">str</span> {
-    <span class="k">if</span> (id == <span class="s">"btn_hi"</span>) {
-        <span class="k">return</span> <span class="f">json_stringify</span>({<span class="s">"update"</span>: [[<span class="s">"lbl_out"</span>, <span class="s">"你好，Hone GUI！"</span>]]});
+<span class="c" data-page-node-id="ChwXxjEX8ZPq2TLZ3rBKcm">// 界面事件处理：id 为控件 id，value 为用户输入值（约定函数名 on_event）</span>
+<span class="k" data-page-node-id="oVgDzScPHYURvV5YIJhORL">fn</span> <span class="f" data-page-node-id="ANLyJHAH3qyFj38LCn3GjA">on_event</span>(id : <span class="k" data-page-node-id="eGbOZ59CDJoHXVf1RzgU7b">str</span>, value) -&gt; <span class="k" data-page-node-id="A0EQ1bMHlTDsEMxBFhthUy">str</span> {
+    <span class="k" data-page-node-id="0M5iArYMKO9NhnH1X585vz">if</span> (id == <span class="s" data-page-node-id="icRiV5I3svt8nkdquKqt93">"btn_hi"</span>) {
+        <span class="k" data-page-node-id="W7DMVEnLpQOznQ9jtXHXOQ">return</span> <span class="f" data-page-node-id="OK1FwhQO4bNs1gZiQmKYjJ">json_stringify</span>({<span class="s" data-page-node-id="Q7PpGQWRBML8FQdW7BypkJ">"update"</span>: [[<span class="s" data-page-node-id="Nq6CeI5HtERGc2a7wYfDCn">"lbl_out"</span>, <span class="s" data-page-node-id="FoVqUynz1QiXyFcbYLdfyk">"你好，Hone GUI！"</span>]]});
     }
-    <span class="k">return</span> <span class="s">""</span>;
+    <span class="k" data-page-node-id="y5wcxRzeNgD7clMBHEzNvt">return</span> <span class="s" data-page-node-id="j1BiFLWT2WpXwbJfHU0z13">""</span>;
 }
 
 widgets = [
-    <span class="f">gui_button</span>(<span class="s">"btn_hi"</span>, <span class="s">"打招呼"</span>),
-    <span class="f">gui_input</span>(<span class="s">"txt_name"</span>, <span class="s">"姓名"</span>, <span class="s">"输入名字"</span>),
-    <span class="f">gui_label</span>(<span class="s">"lbl_out"</span>, <span class="s">"(事件输出)"</span>),
+    <span class="f" data-page-node-id="sJwSTu5xupmuSs1U0s4Mge">gui_button</span>(<span class="s" data-page-node-id="7mheXF3iABYpjqtebkPKvT">"btn_hi"</span>, <span class="s" data-page-node-id="EfpJntuCQbHwaOxb1NOFnu">"打招呼"</span>),
+    <span class="f" data-page-node-id="32v7MoEe7EKdw72RVAeUme">gui_input</span>(<span class="s" data-page-node-id="UgkZlZvVshA9VxtRMGGvig">"txt_name"</span>, <span class="s" data-page-node-id="OtXyjQHSBxIenjogwmahdn">"姓名"</span>, <span class="s" data-page-node-id="yGQbP5CCiueEpQpP6emHYQ">"输入名字"</span>),
+    <span class="f" data-page-node-id="tbtdPlqlYnoiHUXWL0VoJl">gui_label</span>(<span class="s" data-page-node-id="4DAHLsgMvJGWSbH2QZdW24">"lbl_out"</span>, <span class="s" data-page-node-id="ov3lgOFaEmeqcUK7X0188I">"(事件输出)"</span>),
 ];
-<span class="f">gui_run</span>(<span class="s">"Hone GUI 演示"</span>, widgets);  <span class="c">// 浏览器自动打开，Ctrl+C 退出</span></code></pre>
+<span class="f" data-page-node-id="3PQDJNL2PL3J25ZwRFwKgI">gui_run</span>(<span class="s" data-page-node-id="YUIfDNF3cLR8dqCM8b5ySa">"Hone GUI 演示"</span>, widgets);  <span class="c" data-page-node-id="XYmG5aZ7m8rSrABkD0vJYp">// 浏览器自动打开，Ctrl+C 退出</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">10.2 本地 HTTP 服务器（server.* 内置函数）</div>
-    <div class="note">server.listen / server.poll / server.respond：纯 std::net 跨平台，后台线程收发、脚本主线程轮询响应；respond 可指定状态码（如 404/500）</div>
-<pre><code>port = <span class="f">server.listen</span>(<span class="n">0</span>);  <span class="c">// 0 = 自动分配端口，返回实际端口</span>
-<span class="f">print</span>(<span class="s">"http://127.0.0.1:"</span> + <span class="f">to_str</span>(port) + <span class="s">"/"</span>);
+  <div class="example" data-page-node-id="5ka62TNxEHJIewowGLhcI7">
+    <div class="title" data-page-node-id="9KDmUIwuZ8hkaTNbTXoVGF">10.2 本地 HTTP 服务器（server.* 内置函数）</div>
+    <div class="note" data-page-node-id="kfKT2VkjWs8MtLEEPHJAiR">server.listen / server.poll / server.respond：纯 std::net 跨平台，后台线程收发、脚本主线程轮询响应；respond 可指定状态码（如 404/500）</div>
+<pre data-page-node-id="5JFwAD6cIXPmLI3grftQEP"><code data-page-node-id="pzVP4duxFAB6rEEDiRObCq">port = <span class="f" data-page-node-id="GgH8zDf2HGG6k3y8E242eW">server.listen</span>(<span class="n" data-page-node-id="5mVAaQqHGXmQDvDDXYZfQW">0</span>);  <span class="c" data-page-node-id="Rf4Oetf9OpQp94tXNNPeAh">// 0 = 自动分配端口，返回实际端口</span>
+<span class="f" data-page-node-id="VGyvT4r0HIRcRL4Az59VEB">print</span>(<span class="s" data-page-node-id="KJP9neYi1LVA8ug51J9FCl">"http://127.0.0.1:"</span> + <span class="f" data-page-node-id="Gx2wqAfS8cn3fqIGnrzUpq">to_str</span>(port) + <span class="s" data-page-node-id="RvFCLpZErIiuQLsGMeknKI">"/"</span>);
 
-<span class="k">while</span> (<span class="k">true</span>) {
-    reqs = <span class="f">server.poll</span>();   <span class="c">// 取排队请求: JSON 数组 [{id,method,path,body}, ...]</span>
-    <span class="k">if</span> (reqs != <span class="s">"[]"</span>) {
-        list = <span class="f">json_parse</span>(reqs);
-        <span class="k">for</span> req <span class="k">in</span> list {
-            <span class="c">// gui_dict_get(req, "id") 取字段（Hone 无 d["k"] 索引语法）</span>
-            <span class="f">server.respond</span>(<span class="n">1</span>, <span class="s">"ok"</span>, <span class="n">200</span>);     <span class="c">// 指定 HTTP 200</span>
-            <span class="f">server.respond</span>(<span class="n">2</span>, <span class="s">"not found"</span>, <span class="n">404</span>); <span class="c">// 404（默认 200，范围 100..=599）</span>
+<span class="k" data-page-node-id="MKHYHRakImT5NRffSO0Mdi">while</span> (<span class="k" data-page-node-id="whzqeW64tqu3ZCtrcaSPtn">true</span>) {
+    reqs = <span class="f" data-page-node-id="5N597X0gBRFTkin2BZOd3j">server.poll</span>();   <span class="c" data-page-node-id="L1GVlP7B4IqQQXgJ4WgD8c">// 取排队请求: JSON 数组 [{id,method,path,body}, ...]</span>
+    <span class="k" data-page-node-id="tDmxXMjnolgB5Qb2dV1mj2">if</span> (reqs != <span class="s" data-page-node-id="PNpZj8K9HxaP1aaPWOytNg">"[]"</span>) {
+        list = <span class="f" data-page-node-id="YFCEiF9AEscBsnLFNQrFSe">json_parse</span>(reqs);
+        <span class="k" data-page-node-id="sp2AnScCfmeXYSHJYQbekn">for</span> req <span class="k" data-page-node-id="Ib9RY5w38Zurhn03ViTEAd">in</span> list {
+            <span class="c" data-page-node-id="ckA3XbM26qsiwYw7VrUCIu">// gui_dict_get(req, "id") 取字段（Hone 无 d["k"] 索引语法）</span>
+            <span class="f" data-page-node-id="XTXOvUuVLmQ3VjotUeMYKL">server.respond</span>(<span class="n" data-page-node-id="Sl5GHHS8eS2I59UE652h2D">1</span>, <span class="s" data-page-node-id="LZuDVhy9NsiID5tclZvno7">"ok"</span>, <span class="n" data-page-node-id="skGB38074KmY5fSQYeFcoU">200</span>);     <span class="c" data-page-node-id="8AFGGqaBNqxc4AIlkoZFtT">// 指定 HTTP 200</span>
+            <span class="f" data-page-node-id="TM3LXYDY83i2TMUmLnKgEx">server.respond</span>(<span class="n" data-page-node-id="z1oBmfLXwdUdhj7N9EUxrO">2</span>, <span class="s" data-page-node-id="FDdMeCxErAPL0zY5ipdImG">"not found"</span>, <span class="n" data-page-node-id="6rdMBas4vo12vbb9kX5mms">404</span>); <span class="c" data-page-node-id="HdfLC6tem9DtInleMYtzGC">// 404（默认 200，范围 100..=599）</span>
         }
     }
-    <span class="f">time.sleep</span>(<span class="n">0.05</span>);
+    <span class="f" data-page-node-id="DAodZ48n9sdJIGCw5NbV36">time.sleep</span>(<span class="n" data-page-node-id="BtFRjUIrvd1mvahRxlcAEn">0.05</span>);
 }</code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">10.3 桌宠标准库（Windows 透明置顶窗）</div>
-    <div class="note">hone_lib/pet.hn：Hone 驱动状态机 + 原生 Win32 窗口（guipro.pet_*，无 PowerShell 依赖），内置像素猫动画/气泡/交互；仅支持 Windows</div>
-<pre><code><span class="k">import</span> <span class="s">"pet"</span> <span class="k">from</span> <span class="s">"./hone_lib/pet.hn"</span>;
+  <div class="example" data-page-node-id="OMkbSYllCvsI40pBQfEmCL">
+    <div class="title" data-page-node-id="x5qbcX1m1vWYAUUxavSJsq">10.3 桌宠标准库（Windows 透明置顶窗）</div>
+    <div class="note" data-page-node-id="xzj6MjCmArd6Sbb4WzVKJE">hone_lib/pet.hn：Hone 驱动状态机 + 原生 Win32 窗口（guipro.pet_*，无 PowerShell 依赖），内置像素猫动画/气泡/交互；仅支持 Windows</div>
+<pre data-page-node-id="VFM856XXi7zQv2RFv9iiGQ"><code data-page-node-id="6i7hUGqXFYqeBvCmktDTkb"><span class="k" data-page-node-id="wc3TsYOtTCQuztKjDnJQZs">import</span> <span class="s" data-page-node-id="mM5JJv7caZEkta51hI3lxG">"pet"</span> <span class="k" data-page-node-id="89Og4Cg6lji7CvaHvOBqoL">from</span> <span class="s" data-page-node-id="2meYNeGoQTgHVvWi1wFg7u">"./hone_lib/pet.hn"</span>;
 
-cfg = {<span class="s">"pal"</span>: <span class="n">0</span>, <span class="s">"scale"</span>: <span class="n">2</span>, <span class="s">"speed"</span>: <span class="n">3</span>, <span class="s">"sleep_after"</span>: <span class="n">90</span>};
-<span class="f">pet_run</span>(cfg);   <span class="c">// 阻塞运行：右键菜单或 Ctrl+C 退出</span>
+cfg = {<span class="s" data-page-node-id="2BVuINyaRL3BNU3Wn59oeN">"pal"</span>: <span class="n" data-page-node-id="yoFnfEDF55qUkuoZmFqntZ">0</span>, <span class="s" data-page-node-id="6OR7a7DIbJIqh40XEAhQEv">"scale"</span>: <span class="n" data-page-node-id="hwwZ2aO2RK9xphQzS1UlvW">2</span>, <span class="s" data-page-node-id="wDEropPiwyyDt0gh6ccHqi">"speed"</span>: <span class="n" data-page-node-id="W4cE6YOD0T6HI5OR96FN5Y">3</span>, <span class="s" data-page-node-id="OJVi2JQi4YGXZ9LzPAG5sr">"sleep_after"</span>: <span class="n" data-page-node-id="SFSwj6HDODypjf2ivt2Z0k">90</span>};
+<span class="f" data-page-node-id="GgNbbsNfNMCFF7WK4m0pLp">pet_run</span>(cfg);   <span class="c" data-page-node-id="nH0t17kl3DYABmgrxs2E67">// 阻塞运行：右键菜单或 Ctrl+C 退出</span>
 
-<span class="c">// 非阻塞：st = pet_init(cfg); while (st.quit == false) { st = pet_tick(st); time.sleep(st.cfg.tick); }</span>
-<span class="c">// 交互：单击开心、双击惊讶、按住拖拽、右键菜单（换装/静音/跟随鼠标/隐藏台词/退出）</span></code></pre>
+<span class="c" data-page-node-id="PucKiQjIblyIWBiTq8kqHA">// 非阻塞：st = pet_init(cfg); while (st.quit == false) { st = pet_tick(st); time.sleep(st.cfg.tick); }</span>
+<span class="c" data-page-node-id="MjFF3f9z4Jwa9YkmRVNVI6">// 交互：单击开心、双击惊讶、按住拖拽、右键菜单（换装/静音/跟随鼠标/隐藏台词/退出）</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">10.4 原生图形界面库（Windows: Win32 / Linux: GTK3）</div>
-    <div class="note">hone_lib/guipro.hn：原生窗口 + 原生控件（gui.hn 的升级版，不依赖浏览器）；Windows 用 Win32 标准控件，Linux 动态加载 GTK3；闭包事件分发 + 定时器 + 消息框</div>
-<pre><code><span class="k">import</span> <span class="s">"guipro"</span> <span class="k">from</span> <span class="s">"./hone_lib/guipro.hn"</span>;
+  <div class="example" data-page-node-id="GSvEmClxnqKE5f9VF7y8gl">
+    <div class="title" data-page-node-id="BLyFpeyXx0wYRFv7SciRO7">10.4 原生图形界面库（Windows: Win32 / Linux: GTK3）</div>
+    <div class="note" data-page-node-id="LrJh86HF9J1UVTfFDZ8pHi">hone_lib/guipro.hn：原生窗口 + 原生控件（gui.hn 的升级版，不依赖浏览器）；Windows 用 Win32 标准控件，Linux 动态加载 GTK3；闭包事件分发 + 定时器 + 消息框</div>
+<pre data-page-node-id="UQ97BJZVQHZ7ypD1durqJB"><code data-page-node-id="bJZnGAzvKpLdVEaHZVuZyN"><span class="k" data-page-node-id="qY2swXA3xO70YV27JE8K9H">import</span> <span class="s" data-page-node-id="OameVlbdWKiSyvcRYBZAcG">"guipro"</span> <span class="k" data-page-node-id="bUK7Kdih7YnDby1Lc17HeA">from</span> <span class="s" data-page-node-id="A35PjUiGDNlKQ9EisUknHX">"./hone_lib/guipro.hn"</span>;
 
-win = <span class="f">guipro_window</span>(<span class="s">"guipro 演示"</span>, <span class="n">460</span>, <span class="n">420</span>);
+win = <span class="f" data-page-node-id="wLZwRTeLEERDQ2cFaPYRLx">guipro_window</span>(<span class="s" data-page-node-id="lOBf6PV9FVLqQRMwpYqnkQ">"guipro 演示"</span>, <span class="n" data-page-node-id="vX5NSgRuvHKMTmuAYIYgUl">460</span>, <span class="n" data-page-node-id="3BDfdD3C2GyVYALcqocTYQ">420</span>);
 
-<span class="c">// VBox 纵向布局：返回控件 id 列表（与 specs 顺序对应）</span>
+<span class="c" data-page-node-id="G3mbzS55a973grBwnmclZs">// VBox 纵向布局：返回控件 id 列表（与 specs 顺序对应）</span>
 specs = [];
-specs = <span class="f">append</span>(specs, {<span class="s">"type"</span>: <span class="s">"input"</span>, <span class="s">"w"</span>: <span class="n">220</span>, <span class="s">"h"</span>: <span class="n">28</span>});
-specs = <span class="f">append</span>(specs, {<span class="s">"type"</span>: <span class="s">"select"</span>, <span class="s">"options"</span>: [<span class="s">"北京"</span>, <span class="s">"上海"</span>, <span class="s">"广州"</span>], <span class="s">"w"</span>: <span class="n">140</span>, <span class="s">"h"</span>: <span class="n">28</span>});
-specs = <span class="f">append</span>(specs, {<span class="s">"type"</span>: <span class="s">"button"</span>, <span class="s">"text"</span>: <span class="s">"提交"</span>, <span class="s">"w"</span>: <span class="n">120</span>, <span class="s">"h"</span>: <span class="n">32</span>});
-ids = <span class="f">guipro_vbox</span>(win, specs, <span class="n">24</span>, <span class="n">20</span>, <span class="n">6</span>);
+specs = <span class="f" data-page-node-id="uHMDzCLb03wZToCQJ9UHZK">append</span>(specs, {<span class="s" data-page-node-id="qtCIg82srBdffOEQPBpUyo">"type"</span>: <span class="s" data-page-node-id="UkcDSDM8BxTRWnjdzcR8Tg">"input"</span>, <span class="s" data-page-node-id="BUDNHBXPMyCmwz3oO8Ftps">"w"</span>: <span class="n" data-page-node-id="7itMFArpscM4De9vwI6j42">220</span>, <span class="s" data-page-node-id="pR3Y3bj1q5lH6KFlJ0vNHj">"h"</span>: <span class="n" data-page-node-id="KABEr61iAUp1JRJvXsdP0G">28</span>});
+specs = <span class="f" data-page-node-id="GAsmfRU0l4ItxbrniYMWaF">append</span>(specs, {<span class="s" data-page-node-id="AjIzP9fPo0VSPRjjMDGzY2">"type"</span>: <span class="s" data-page-node-id="kA8qRGzrHu5Ig54rzkgB7o">"select"</span>, <span class="s" data-page-node-id="L4kV5Pzsl34EazCoVvZBz9">"options"</span>: [<span class="s" data-page-node-id="7vO5pAtntvTxkA4l5JoMLo">"北京"</span>, <span class="s" data-page-node-id="DTFG1PpdfKW0UClVcf26gC">"上海"</span>, <span class="s" data-page-node-id="j7hTfDAUALsinIxT75mgzr">"广州"</span>], <span class="s" data-page-node-id="WRDEjU15VI6qYRnJNs4t1G">"w"</span>: <span class="n" data-page-node-id="ET2WNWTiKcKkg63xf2cU4a">140</span>, <span class="s" data-page-node-id="0uK9MUiPAQM0h4EmCXjoog">"h"</span>: <span class="n" data-page-node-id="IrGEGDw4vtiJzVIB8sOe58">28</span>});
+specs = <span class="f" data-page-node-id="Fc1SqGyTjW89wlJBTZf0QE">append</span>(specs, {<span class="s" data-page-node-id="kvlyHfkhyVs5fuG7pwISAO">"type"</span>: <span class="s" data-page-node-id="rav06tT9zlS4WLbsx8PEaY">"button"</span>, <span class="s" data-page-node-id="SsXgG4A4fLuGgwCtdP92ks">"text"</span>: <span class="s" data-page-node-id="bUCdDe7i2FGa0Y3hHGxzyU">"提交"</span>, <span class="s" data-page-node-id="VfUHz7QdY7pb2S5zWSWRlq">"w"</span>: <span class="n" data-page-node-id="na59RIAB5qyVdNFcd1XRQI">120</span>, <span class="s" data-page-node-id="9NbgtSBRx17KO0rmuEG1BY">"h"</span>: <span class="n" data-page-node-id="I7oJkZrtfswAheS91IwA9c">32</span>});
+ids = <span class="f" data-page-node-id="O43U0JuFf5ZheqyiYZglOF">guipro_vbox</span>(win, specs, <span class="n" data-page-node-id="GbeN4ZP1a3R9trLZbkGalM">24</span>, <span class="n" data-page-node-id="fa6U1EVZ2pobIDNu8mAzJE">20</span>, <span class="n" data-page-node-id="b5wp33eSnYhNSLTkZmZeyb">6</span>);
 
 handlers = [];
-handlers = <span class="f">guipro_on</span>(handlers, win, ids[<span class="n">2</span>], <span class="s">"click"</span>, <span class="k">fn</span>(id, value) {
-    name = <span class="f">guipro_get_text</span>(win, ids[<span class="n">0</span>]);
-    city = <span class="f">guipro_get_text</span>(win, ids[<span class="n">1</span>]);
-    <span class="f">guipro_msgbox</span>(<span class="s">"提交成功"</span>, <span class="s">"姓名: "</span> + name + <span class="s">"\n城市: "</span> + city);
-    <span class="k">return</span> <span class="s">""</span>;
+handlers = <span class="f" data-page-node-id="DOnj8ZauKjEm8wSimKlE5H">guipro_on</span>(handlers, win, ids[<span class="n" data-page-node-id="OHrsmEGJMQUzKW5CQqeo8w">2</span>], <span class="s" data-page-node-id="xSTyS42PYNcZ4qkPy5oV1f">"click"</span>, <span class="k" data-page-node-id="m6icH2RNWTEkgtfvVjI2hn">fn</span>(id, value) {
+    name = <span class="f" data-page-node-id="BWykRNRkkNcuzt0P4B4STE">guipro_get_text</span>(win, ids[<span class="n" data-page-node-id="cBJUn0jx7kEEjIPhsXDAUd">0</span>]);
+    city = <span class="f" data-page-node-id="NsW7fCkBbeqIdKrtDhJAM6">guipro_get_text</span>(win, ids[<span class="n" data-page-node-id="1RZs8E1TbiudABE6ErzC3O">1</span>]);
+    <span class="f" data-page-node-id="w1as5729aDdOqQPyjfTPqg">guipro_msgbox</span>(<span class="s" data-page-node-id="AIXPiHrHsvLHsQxs3ZcQpG">"提交成功"</span>, <span class="s" data-page-node-id="Ivr14vLJdUdEMR7ss4gP0y">"姓名: "</span> + name + <span class="s" data-page-node-id="0DnGHS2cGRHi3u1KMAGEjx">"\n城市: "</span> + city);
+    <span class="k" data-page-node-id="UtbcfUZSBcjPuPtGkGkP88">return</span> <span class="s" data-page-node-id="fdQBaDyag5LcHVGTPCqadf">""</span>;
 });
-handlers = <span class="f">guipro_on_win</span>(handlers, win, <span class="s">"close"</span>, <span class="k">fn</span>(id, value) {
-    <span class="f">print</span>(<span class="s">"窗口已关闭"</span>);
-    <span class="k">return</span> <span class="s">""</span>;
+handlers = <span class="f" data-page-node-id="zuvCkeDfwuyekIA17dznjl">guipro_on_win</span>(handlers, win, <span class="s" data-page-node-id="0stt86xA0yVnu7MeR3aRcr">"close"</span>, <span class="k" data-page-node-id="3tuE5gfgI3KcGlCrqY0B3S">fn</span>(id, value) {
+    <span class="f" data-page-node-id="LlqpXuU9LaBAiwsbW2BSD6">print</span>(<span class="s" data-page-node-id="Pj4tkRtqRcWARunz6tFIl6">"窗口已关闭"</span>);
+    <span class="k" data-page-node-id="ussx1uw9h8S2W2cz50fKnE">return</span> <span class="s" data-page-node-id="wOaKcHoYSA7BWmuquIfPtC">""</span>;
 });
-<span class="f">guipro_run</span>(handlers);   <span class="c">// 阻塞主循环，窗口关闭后返回</span></code></pre>
+<span class="f" data-page-node-id="VeYlcnHYvMKS8HuxbfUZf4">guipro_run</span>(handlers);   <span class="c" data-page-node-id="4l5L3DSogOoRqFGcESAkrK">// 阻塞主循环，窗口关闭后返回</span></code></pre>
   </div>
 
-  <div class="example">
-    <div class="title">10.5 进度条标准库（pbar）</div>
-    <div class="note">hone_lib/pbar.hn：终端字符进度条 + 单行原地刷新（ANSI）+ 剩余时间估算；Hone 值语义，更新函数返回新对象需重新赋值</div>
-<pre><code><span class="k">import</span> <span class="s">"pbar"</span> <span class="k">from</span> <span class="s">"./hone_lib/pbar.hn"</span>;
+  <div class="example" data-page-node-id="BliYOLVIngsEvdXOnKsPV2">
+    <div class="title" data-page-node-id="WqwVkQon95R8rDqvkSE3OO">10.5 进度条标准库（pbar）</div>
+    <div class="note" data-page-node-id="Kw9mGWgeV3bj9Jip7UWqvL">hone_lib/pbar.hn：终端字符进度条 + 单行原地刷新（ANSI）+ 剩余时间估算；Hone 值语义，更新函数返回新对象需重新赋值</div>
+<pre data-page-node-id="sFfHdtwHsT7mfbOUsLrKwJ"><code data-page-node-id="QGKGTQoJsgbBGB0NaFkctL"><span class="k" data-page-node-id="3yg9BmxWW7njMUaAsTVC0h">import</span> <span class="s" data-page-node-id="kUuTtwRjUDoIJavYNwANIn">"pbar"</span> <span class="k" data-page-node-id="qSA9SFU3kOdg5FF5FErzNH">from</span> <span class="s" data-page-node-id="z3aKeFV7JoxfLernEPaNJm">"./hone_lib/pbar.hn"</span>;
 
-<span class="c">// 单行原地刷新（ANSI：ESC[1A 上移一行 + ESC[K 清行；print 自带换行，用 base64 解码构造 ESC）</span>
-pb = <span class="f">pbar_new</span>(<span class="n">100</span>, <span class="n">30</span>, <span class="s">"下载"</span>);
-i = <span class="n">0</span>;
-<span class="k">while</span> (i &lt;= <span class="n">100</span>) {
-    pb = <span class="f">pbar_update</span>(pb, i);
-    pb = <span class="f">pbar_show</span>(pb);        <span class="c">// 原地刷新，返回新对象</span>
-    <span class="f">time.sleep</span>(<span class="n">0.05</span>);
-    i = i + <span class="n">1</span>;
+<span class="c" data-page-node-id="uhTXgKgIzg0IUU5dF9T2A9">// 单行原地刷新（ANSI：ESC[1A 上移一行 + ESC[K 清行；print 自带换行，用 base64 解码构造 ESC）</span>
+pb = <span class="f" data-page-node-id="eoiW0mZ8ZHst0aQD3ipFkv">pbar_new</span>(<span class="n" data-page-node-id="KGaHMBFDF051WBQRz2DrH2">100</span>, <span class="n" data-page-node-id="cp1CzKwffEtDbGszEDUTje">30</span>, <span class="s" data-page-node-id="FKuQm7b8EcIcbrSJcGHRv3">"下载"</span>);
+i = <span class="n" data-page-node-id="biTL2qle8eoz6sNbMqUBT3">0</span>;
+<span class="k" data-page-node-id="kpuIrvZt6s61XIv8rWVnJU">while</span> (i &lt;= <span class="n" data-page-node-id="QyxumXDt50Je07Gwtt4WLO">100</span>) {
+    pb = <span class="f" data-page-node-id="FeAZVyRtceDMV9ACfjzIYM">pbar_update</span>(pb, i);
+    pb = <span class="f" data-page-node-id="PMVCNmteyAY0a6diGKBjJB">pbar_show</span>(pb);        <span class="c" data-page-node-id="v6j5g6EASwFFomNNd0dtCu">// 原地刷新，返回新对象</span>
+    <span class="f" data-page-node-id="gFeBwO1tZADiHi2wvDmkm6">time.sleep</span>(<span class="n" data-page-node-id="Jh7YAK4moo5UqCHFkJzcbM">0.05</span>);
+    i = i + <span class="n" data-page-node-id="z8E4aONLk4h0pr9LWFZ5lY">1</span>;
 }
-<span class="f">pbar_finish</span>(pb);              <span class="c">// 补齐到 100% 并换行</span>
+<span class="f" data-page-node-id="DCMHt4ljPuRfvGfMN3Uh7g">pbar_finish</span>(pb);              <span class="c" data-page-node-id="z8T4xEAFLhCBIVI842EKme">// 补齐到 100% 并换行</span>
 
-<span class="c">// 剩余时间估算（渲染到字符串）：print(pbar_render_full(pb, time.now()));</span>
-<span class="c">// 老终端兼容（每帧新行）：pb = pbar_update(pb, i); pbar_line(pb);</span></code></pre>
+<span class="c" data-page-node-id="0G54qZ9lSLbO1cFaGzteFz">// 剩余时间估算（渲染到字符串）：print(pbar_render_full(pb, time.now()));</span>
+<span class="c" data-page-node-id="295igChz2TQbkU8w0dpWzh">// 老终端兼容（每帧新行）：pb = pbar_update(pb, i); pbar_line(pb);</span></code></pre>
   </div>
 </main>
 
@@ -844,22 +878,23 @@ function searchExamples(q) {
 }
 </script>
 
-<footer>
-  <div class="links">
-    <a href="index.html">首页</a>
-    <a href="docs.html">文档</a>
-    <a href="tutorial.html">教程</a>
-    <a href="examples.html">示例</a>
-    <a href="stdlib.html">标准库</a>
-    <a href="install.html">安装</a>
-    <a href="download.html">下载</a>
-    <a href="perf.html">性能</a>
-    <a href="changelog.html">更新日志</a>
-    <a href="faq.html">FAQ</a>
-    <a href="about.html">关于</a>
-    <a href="https://github.com/shichencike/Hone">GitHub</a>
+<footer data-page-node-id="tXjibd9EIKXg5wMAW6oadE">
+  <div class="links" data-page-node-id="NKBShBKdqpDKVUJALeue2P">
+    <a href="index.html" data-page-node-id="yKWgZuZQb8WzYLN2IDeFI0">首页</a>
+    <a href="docs.html" data-page-node-id="H5HPF4c7mxONPG4X12MYGo">文档</a>
+    <a href="language.html">语言</a>
+    <a href="tutorial.html" data-page-node-id="jfzw0js2ctTb1v4Byse4Hx">教程</a>
+    <a href="examples.html" data-page-node-id="QWsAIXn2sHChJ26N4hPIgw">示例</a>
+    <a href="stdlib.html" data-page-node-id="nH9qa6ZCagUClWhmCesrY8">标准库</a>
+    <a href="install.html" data-page-node-id="qvqOnGk2aqEArVwGO3wcdX">安装</a>
+    <a href="download.html" data-page-node-id="av18Ifm4XXZBh3tBWQeQX7">下载</a>
+    <a href="perf.html" data-page-node-id="2f9PnckaAYFlEkeDPFVKz3">性能</a>
+    <a href="changelog.html" data-page-node-id="xfbwapN3LruM6HyehY6TbT">更新日志</a>
+    <a href="faq.html" data-page-node-id="Yh93DpgVipJV2zOGnRCWge">FAQ</a>
+    <a href="about.html" data-page-node-id="QFkvlj8nhfCkXSbGXoLux8">关于</a>
+    <a href="https://github.com/shichencike/Hone" data-page-node-id="kDjN5lB4eqNcAIuhVaBtoB">GitHub</a>
   </div>
-  Hone v0.7.9 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.7.11 · MIT License · <span class="sword" data-page-node-id="LqGrtqsiylryKe18mmxSpq">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

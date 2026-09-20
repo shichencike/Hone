@@ -24,18 +24,22 @@ pub struct ErrorObj {
     pub file: String,
     pub line: usize,
     pub col: usize,
+    pub len: usize,
     pub context: String,
+    pub help: Option<String>,
 }
 
 impl ErrorObj {
-    fn from_err(e: &ZError) -> Self {
+    pub fn from_err(e: &ZError) -> Self {
         ErrorObj {
             code: e.code,
             message: e.msg.clone(),
             file: e.file.clone(),
             line: e.line,
             col: e.col,
+            len: e.len,
             context: e.line_text.clone(),
+            help: e.help.clone(),
         }
     }
 }
@@ -47,6 +51,8 @@ pub struct LambdaVal {
     pub params: Vec<Param>,
     pub body: Vec<Stmt>,
     pub captured: HashMap<String, Value>,
+    /// VM 专用：编译后的 lambda chunk 在 Vm.chunks 中的下标；解释器恒为 None。
+    pub vm_chunk: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -97,7 +103,7 @@ enum FutureState {
 }
 
 impl FutureVal {
-    fn new() -> Arc<Self> {
+    pub(crate) fn new() -> Arc<Self> {
         Arc::new(FutureVal {
             state: Mutex::new(FutureState::Pending),
             cv: Condvar::new(),
@@ -105,14 +111,14 @@ impl FutureVal {
     }
 
     /// 后台线程完成后写入结果并唤醒等待者。
-    fn complete(&self, result: Result<Value, ZError>) {
+    pub(crate) fn complete(&self, result: Result<Value, ZError>) {
         let mut s = self.state.lock().unwrap();
         *s = FutureState::Done(result);
         self.cv.notify_one();
     }
 
     /// 阻塞等待结果（错误原样传播，ZError 带子线程执行位置）。
-    fn wait(&self) -> Result<Value, ZError> {
+    pub(crate) fn wait(&self) -> Result<Value, ZError> {
         let mut s = self.state.lock().unwrap();
         loop {
             match &*s {
@@ -209,6 +215,9 @@ pub enum Flow {
     Return(Value),
     Break,
     Continue,
+    /// `goto 标签;`：在本语句块内查标签直接跳转；本层无此标签则向外层语句块传播，
+    /// 直至某个语句块含该标签（语义与字节码 VM 的跳转一致）。
+    Goto(String),
 }
 
 #[derive(Clone)]
@@ -658,13 +667,33 @@ impl Interp {
     // ---------- 语句 ----------
 
     pub fn exec_stmts(&mut self, env: &mut Env, stmts: &[Stmt]) -> Result<Flow, ZError> {
-        for s in stmts {
-            match self.exec_stmt(env, s)? {
-                Flow::Return(v) => return Ok(Flow::Return(v)),
-                Flow::Break => return Ok(Flow::Break),
-                Flow::Continue => return Ok(Flow::Continue),
+        // 标签表按需构建（仅当本块内出现 goto 时才扫描），标签指向其下标，
+        // 跳转后从该下标继续执行（Label 语句本身是无动作）。
+        let mut labels: Option<HashMap<&str, usize>> = None;
+        let mut i = 0usize;
+        while i < stmts.len() {
+            match self.exec_stmt(env, &stmts[i])? {
                 Flow::Normal => {}
+                Flow::Goto(name) => {
+                    if labels.is_none() {
+                        let mut m = HashMap::new();
+                        for (idx, s) in stmts.iter().enumerate() {
+                            if let Stmt::Label { name, .. } = s {
+                                m.insert(name.as_str(), idx);
+                            }
+                        }
+                        labels = Some(m);
+                    }
+                    if let Some(&t) = labels.as_ref().unwrap().get(name.as_str()) {
+                        i = t;
+                        continue;
+                    }
+                    // 本层没有该标签：交给外层语句块（预处理阶段已保证最终能命中）
+                    return Ok(Flow::Goto(name));
+                }
+                other => return Ok(other),
             }
+            i += 1;
         }
         Ok(Flow::Normal)
     }
@@ -783,6 +812,12 @@ impl Interp {
                 }
             }
             Stmt::Block { stmts, .. } => self.exec_block(env, stmts),
+            // 标签：位置标记，无运行期动作（goto 的落点）
+            Stmt::Label { .. } => Ok(Flow::Normal),
+            // 跳转：交给 exec_stmts 在本层或外层语句块内解析标签
+            Stmt::Goto { name, .. } => Ok(Flow::Goto(name.clone())),
+            // 宏定义：已由预处理阶段展开并从 AST 中移除，此处仅为穷尽匹配
+            Stmt::MacroDef { .. } => Ok(Flow::Normal),
             Stmt::If { cond, then_branch, else_branch, .. } => {
                 let c = self.eval_expr(env, cond)?;
                 if let Value::Bool(b) = c {
@@ -826,10 +861,11 @@ impl Interp {
                     // 复用作用域必须清空：否则上一轮迭代体内声明的变量会泄漏到下一轮
                     body_scope.clear();
                     match flow? {
-                        Flow::Return(v) => return Ok(Flow::Return(v)),
                         Flow::Break => break,
                         Flow::Continue => {} // 跳过剩余语句，进入下一次迭代
                         Flow::Normal => {}
+                        // return / goto 向外层传播
+                        other => return Ok(other),
                     }
                 }
                 Ok(Flow::Normal)
@@ -843,10 +879,11 @@ impl Interp {
                     body_scope = env.scopes.pop().expect("do-while body scope");
                     body_scope.clear();
                     match flow? {
-                        Flow::Return(v) => return Ok(Flow::Return(v)),
                         Flow::Break => break,
                         Flow::Continue => {} // 跳过剩余语句，直接判断条件
                         Flow::Normal => {}
+                        // return / goto 向外层传播
+                        other => return Ok(other),
                     }
                     let c = self.eval_expr(env, cond)?;
                     if let Value::Bool(b) = c {
@@ -869,8 +906,9 @@ impl Interp {
                 // 循环体复用单个作用域 HashMap
                 if let Some(i) = init {
                     match self.exec_stmt(env, i)? {
-                        Flow::Return(v) => return Ok(Flow::Return(v)),
                         Flow::Break | Flow::Continue | Flow::Normal => {}
+                        // return / goto 向外层传播
+                        other => return Ok(other),
                     }
                 }
                 let mut body_scope = HashMap::new();
@@ -895,16 +933,18 @@ impl Interp {
                     body_scope = env.scopes.pop().expect("for body scope");
                     body_scope.clear();
                     match flow? {
-                        Flow::Return(v) => return Ok(Flow::Return(v)),
                         Flow::Break => break,
                         Flow::Continue => {} // 跳过剩余语句，执行 step 后进入下一轮
                         Flow::Normal => {}
+                        // return / goto 向外层传播
+                        other => return Ok(other),
                     }
                     if let Some(s) = step {
                         match self.exec_stmt(env, s)? {
-                            Flow::Return(v) => return Ok(Flow::Return(v)),
                             Flow::Break => break,
                             Flow::Continue | Flow::Normal => {}
+                            // return / goto 向外层传播
+                            other => return Ok(other),
                         }
                     }
                 }
@@ -933,10 +973,11 @@ impl Interp {
                             // 复用作用域必须清空：否则上一轮迭代体内声明的变量会泄漏到下一轮
                             body_scope.clear();
                             match flow? {
-                                Flow::Return(v) => return Ok(Flow::Return(v)),
                                 Flow::Break => break,
                                 Flow::Continue => {} // 跳过剩余语句，进入下一次迭代
                                 Flow::Normal => {}
+                                // return / goto 向外层传播
+                                other => return Ok(other),
                             }
                         }
                         Ok(Flow::Normal)
@@ -955,10 +996,11 @@ impl Interp {
                             // 复用作用域必须清空：否则上一轮迭代体内声明的变量会泄漏到下一轮
                             body_scope.clear();
                             match flow? {
-                                Flow::Return(v) => return Ok(Flow::Return(v)),
                                 Flow::Break => break,
                                 Flow::Continue => {} // 跳过剩余语句，进入下一次迭代
                                 Flow::Normal => {}
+                                // return / goto 向外层传播
+                                other => return Ok(other),
                             }
                         }
                         Ok(Flow::Normal)
@@ -1846,10 +1888,11 @@ impl Interp {
             Flow::Return(v) => Ok(v),
             Flow::Normal => Ok(Value::Null),
             // checker 已保证 break/continue 只在循环体内，循环会捕获它们，
-            // 因此正常情况下不会逃逸到函数体；兜底防内部不一致
-            Flow::Break | Flow::Continue => Err(self.runtime_err(
+            // 因此正常情况下不会逃逸到函数体；goto 同理（预处理已校验标签同函数）。
+            // 三者逃逸均为内部不一致，此处兜底报错。
+            Flow::Break | Flow::Continue | Flow::Goto(_) => Err(self.runtime_err(
                 codes::SYNTAX,
-                "loop control escaped a function body (internal error)",
+                "loop/`goto` control escaped a function body (internal error)",
                 span,
                 None::<&str>,
             )),
@@ -1907,9 +1950,9 @@ impl Interp {
         match flow? {
             Flow::Return(v) => Ok(v),
             Flow::Normal => Ok(Value::Null),
-            Flow::Break | Flow::Continue => Err(self.runtime_err(
+            Flow::Break | Flow::Continue | Flow::Goto(_) => Err(self.runtime_err(
                 codes::SYNTAX,
-                "loop control escaped a lambda body (internal error)",
+                "loop/`goto` control escaped a lambda body (internal error)",
                 span,
                 None::<&str>,
             )),
@@ -2403,6 +2446,7 @@ impl Interp {
                     params: params.clone(),
                     body: body.clone(),
                     captured,
+                    vm_chunk: None,
                 })))
             }
             Expr::Await { expr, span } => {

@@ -208,6 +208,36 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// 标签定义：`label NAME;` 或 `NAME:`（作为位置标记，供同函数内的 `goto` 跳转）。
+    /// 标签不产生任何运行期动作，只标记语句序列中的一个位置。
+    Label {
+        name: String,
+        span: Span,
+    },
+    /// 无条件跳转：`goto NAME;`（只能跳到同一函数内、且从跳转点向外层可见的标签）。
+    Goto {
+        name: String,
+        span: Span,
+    },
+    /// 宏定义：`macro NAME(参数...) => 表达式;`（表达式宏）
+    ///        `macro NAME(参数...) { 语句... }`（语句宏，展开为独立作用域块）
+    /// 宏在解析后被预处理阶段完全展开（AST 级替换），运行期不存在宏。
+    MacroDef {
+        name: String,
+        /// 形参（仅用名字；ty/default 恒为空，宏参数是纯语法替换）
+        params: Vec<Param>,
+        body: MacroBody,
+        span: Span,
+    },
+}
+
+/// 宏体：表达式宏（可嵌入表达式位置）或语句宏（展开为独立作用域的语句序列）。
+#[derive(Debug, Clone)]
+pub enum MacroBody {
+    /// `macro NAME(a) => a * 2;`
+    Expr(Expr),
+    /// `macro NAME(a) { print(a); }`
+    Stmts(Vec<Stmt>),
 }
 
 /// enum 变体：名称 + 可选载荷字段类型（空 = 简单变体）。
@@ -497,5 +527,46 @@ pub fn expr_span(e: &Expr) -> Span {
         | Expr::Ternary { span: s, .. }
         | Expr::Lambda { span: s, .. }
         | Expr::Await { span: s, .. } => *s,
+    }
+}
+
+impl Stmt {
+    /// 返回语句自身携带的源码位置（各变体均含 `span` 字段）。
+    pub fn span(&self) -> Span {
+        match self {
+            Stmt::Assign { span, .. }
+            | Stmt::IndexAssign { span, .. }
+            | Stmt::DestructAssign { span, .. }
+            | Stmt::AssignOp { span, .. }
+            | Stmt::VarDecl { span, .. }
+            | Stmt::Block { span, .. }
+            | Stmt::If { span, .. }
+            | Stmt::While { span, .. }
+            | Stmt::DoWhile { span, .. }
+            | Stmt::ForC { span, .. }
+            | Stmt::ForIn { span, .. }
+            | Stmt::Return { span, .. }
+            | Stmt::Break { span, .. }
+            | Stmt::Continue { span, .. }
+            | Stmt::FnDef { span, .. }
+            | Stmt::DebugPrint { span, .. }
+            | Stmt::ExprStmt { span, .. }
+            | Stmt::Breakpoint { span, .. }
+            | Stmt::Export { span, .. }
+            | Stmt::Import { span, .. }
+            | Stmt::Load { span, .. }
+            | Stmt::Use { span, .. }
+            | Stmt::Alias { span, .. }
+            | Stmt::Go { span, .. }
+            | Stmt::Try { span, .. }
+            | Stmt::Throw { span, .. }
+            | Stmt::StructDef { span, .. }
+            | Stmt::ClassDef { span, .. }
+            | Stmt::EnumDef { span, .. }
+            | Stmt::AsyncFnDef { span, .. }
+            | Stmt::Label { span, .. }
+            | Stmt::Goto { span, .. }
+            | Stmt::MacroDef { span, .. } => *span,
+        }
     }
 }

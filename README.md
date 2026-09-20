@@ -3,13 +3,25 @@
 轻量级、跨平台、可嵌入的脚本语言。用 Rust 实现，单文件可执行程序，开箱即用。
 
 > 设计规范：`hone.md`（v1.2）
-> 当前版本：v0.7.9（枚举/运算符重载/hone watch/async-await，详见 CHANGELOG）
+> 当前版本：v0.7.11（goto / 标签、macro 宏、H105/H106 编译期校验，详见 CHANGELOG）
 
 ## 构建
 
 ```bash
 cargo build --release
 # 产物：target/release/hone（Windows 下为 hone.exe）
+```
+
+> **验证前务必重新构建。** `cargo check` 不产出可执行文件；
+> `target/` 下的旧二进制会静默沿用，导致「改了代码但行为没变」的误判。
+
+回归测试（`tests/`）统一使用 `target/debug/hone.exe`，**需先 `cargo build`**：
+
+```bash
+cargo build                    # 生成 debug 二进制，回归脚本依赖它
+python tests/regress3.py       # 解释器 vs VM 逐字节
+python tests/regress_err.py    # 错误诊断逐字符对齐
+python tests/regress_ir.py     # 文本 IR 往返
 ```
 
 ## 性能
@@ -25,6 +37,22 @@ cargo build --release
 关键手段：函数定义 `Arc` 共享（免每次调用的 AST 深拷贝）、循环作用域复用 +
 原地赋值更新（免每轮迭代的堆分配）、字符串拼接预分配容量（免 O(n²) 整串复制）。
 二进制体积约 3.7MB（strip + fat LTO + opt-level z）。基准脚本见 `bench/` 目录。
+
+### AOT 原生编译（`hone build --exe -c`）
+
+相对解释器有**接近一个数量级**的稳定加速（MinGW-w64 gcc 16.2.0，预热后取多轮最快值）：
+
+| 基准 | AOT | 解释器 | 加速比 |
+|------|-----|--------|--------|
+| 递归 fib(26) | 267 ms | 2530 ms | 9.5× |
+| 循环累加 200 万次 | 514 ms | 6203 ms | 12.1× |
+
+产物体积约 58.6 KB，零运行时依赖。作为对照，等价的 `rustc -O` 跑 2000 万次循环约 274 ms，
+AOT 版约 2962 ms——**慢约 10 倍**：AOT 生成的 C 对每次整数运算都做装箱
+（`hn_int()`）、深拷贝（`hn_copy()`）与释放，gcc 无法优化成寄存器运算。
+这是「列表/字典值语义 + 统一装箱 `HnValue`」的必然代价，调高优化级别无效。
+AOT 的真实定位是「比解释器快一个数量级、几十 KB、零依赖」的分发方案，
+不是「接近 C 的性能」。
 
 ## 用法
 
@@ -43,7 +71,6 @@ hone explain <code>       # 查询错误码含义（如 hone explain H201）
 hone get                  # 读取当前目录 hone.json 清单，批量下载全部模块（类似 package.json / Cargo.toml）
 hone get <module> <url>   # 下载模块依赖并缓存到 ~/.hn/cache/，并写入/更新 hone.json 清单
 hone get <script.hn>      # 预下载脚本中所有 import 声明的模块
-hone upgrade [-w] <file.hn> # 按映射表自动迁移旧版本语法（-w 覆盖写）
 hone lsp                  # 启动语言服务器（补全/诊断，LSP over stdio）
 hone watch <script.hn>    # 监控脚本文件变更自动重跑（[--interval=N] 毫秒，默认 500，Ctrl+C 退出）
 hone repl                 # 交互式解释器（Python 式：表达式回显/多行续行/.vars 查看变量）
@@ -67,6 +94,19 @@ int z = 30;        // 显式类型（C 风格）
 // 控制流：条件必须是 bool
 if (x > 5) { print("大"); } else { print("小"); }
 while (i < 10) { i = i + 1; }
+
+// goto / 标签：手工循环、跳出多层嵌套（编译期校验，见 examples/goto_demo.hn）
+i = 0;
+again:
+print(i);
+i = i + 1;
+if (i < 3) { goto again; }
+
+// macro：表达式宏 / 语句宏（解析后做 AST 替换，各后端行为一致）
+macro SQ(n) => n * n;              // 表达式宏：SQ(3) → 3 * 3
+macro SAY(msg) { print(msg); }     // 语句宏：展开为独立作用域块
+print(SQ(3));                      // 9
+SAY("hi");
 
 // 集合：列表与字典字面量（动态元素类型，可混合）
 nums = [1, 2, 3];
@@ -451,6 +491,8 @@ help: Hone types are locked after inference; no implicit conversion is allowed
 | 词法/语法 | H102 | 字符串未闭合 |
 | 词法/语法 | H103 | 注释未闭合 |
 | 词法/语法 | H104 | 语句缺少分号 |
+| 标签/跳转 | H105 | 未定义标签、标签重复、跨函数跳转、跳进内层语句块、向前跳过变量声明 |
+| 宏 | H106 | 宏非顶层定义、重复定义、与函数/类/枚举重名、实参个数不符、越界用法 |
 | 网络 | H201 | 连接/请求超时 |
 | 网络 | H202 | 连接被拒绝 |
 | 网络 | H203 | DNS 解析失败 |
@@ -479,12 +521,16 @@ help: Hone types are locked after inference; no implicit conversion is allowed
   str → const char*（支持数值/布尔/字符串运算、strcmp 比较、str 拼接与返回值 static 缓冲 2048B）；
   导出函数建议显式标注参数与返回类型（无调用点时无法推导）；
   需要系统 C 编译器（gcc/clang，可用 `CC` 环境变量指定），找不到时保留生成的 `.c` 源码并提示手动编译
-- `import` / `load` / `load lazy` / `use` / `alias` / `hone get` / `hone upgrade` / `hone lsp` 已实现
-  （upgrade 按映射表迁移旧语法；lsp 提供诊断/补全/hover，冒烟测试见 `tests/lsp_smoke.py`）
+- `import` / `load` / `load lazy` / `use` / `alias` / `hone get` / `hone lsp` 已实现
+  （lsp 提供诊断/补全/hover，冒烟测试见 `tests/lsp_smoke.py`；旧语法迁移工具 `hone upgrade` 已于 v0.7 移除）
 - `import "mod" from "url" as alias;` 支持以别名导入模块，函数名前缀自动替换
 - `try/catch/throw` 错误处理：捕获可恢复错误；catch 绑定的 `error` 类型变量含
   `code`/`message`/`file`/`line`/`col`/`context` 字段；`throw str` 构造 H600 用户错误，
   `throw error` 重抛
+- `goto` / 标签（H105）与 `macro`（H106）已实现：`goto` 在解释器与字节码 VM 下均支持
+  （AOT 原生编译暂不支持 `goto`，会给出 H999 提示）；宏在解析后的预处理阶段做纯 AST 展开，
+  三个后端行为完全一致。安全规则（同函数唯一 / 不跳进内层块 / 不跳过声明 / 宏体无环且不越界）
+  见 `hone.md` 1.4.1、1.4.2，示例见 `examples/goto_demo.hn`、`examples/macro_demo.hn`
 - `hone run --restart=N` / `--backoff=a,b,c` / `--restart-on=Hxxx` 自动重启策略
   （重启仅对可重入错误生效；默认最多 3 次，间隔 1/3/10 秒）
 - `hone run --resume` 检查点恢复（`db` 自动落盘，脚本变更后自动失效）
@@ -508,7 +554,7 @@ help: Hone types are locked after inference; no implicit conversion is allowed
   `sys` 模块 Windows API ✅、`hone build --dll`（int 子集）✅
 - 🚧 阶段 3（基本完成）：`import` 远程模块 ✅、`load lazy` 懒加载 ✅、
   `use` / `alias` ✅、可视化编辑器 ✅（editor/index.html）、`hone get` ✅、
-  `hone upgrade` ✅、`hone lsp` ✅
+  `hone lsp` ✅（`hone upgrade` 已移除）
 - ✅ 阶段 4：官网 ✅（已部署至 https://hone.xo.je，源文件在 `官网/` 目录）、
   `--dll` float/str/bool 类型映射 ✅、GitHub 首次提交 ✅；推广待做
 - 🚧 阶段 5（新增）：内置函数扩展（log/path/args/env/db/regex/crypto）✅、

@@ -9,6 +9,15 @@ import sys
 LOCAL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "官网")
 REMOTE_DIR = "/htdocs"
 
+# 不上传的文件：站点打包产物、编辑器/源码等仓库杂项。
+# `官网.zip` 若上传会暴露在网站根目录供任意人下载，且它是可再生的冗余备份。
+UPLOAD_EXCLUDE = {
+    "官网.zip",
+    "website.zip",
+    "README.md",
+    "upload_ftp.py",
+}
+
 
 def read_cred(path):
     with open(path, encoding="utf-8") as f:
@@ -57,6 +66,10 @@ def main():
     for fn in files:
         local = os.path.join(LOCAL_DIR, fn)
         if not os.path.isfile(local):
+            continue
+        # 站点打包产物与仓库杂项不上传（避免把 官网.zip 暴露在网站根目录）
+        if fn in UPLOAD_EXCLUDE or fn.startswith("."):
+            print(f"exclude {fn}")
             continue
         size = os.path.getsize(local)
         if remote_sizes.get(fn) == size:
