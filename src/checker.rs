@@ -24,6 +24,10 @@ pub enum Ty {
     Str,
     /// 单个 Unicode 字符（'a' / '\n' / '中'）
     Char,
+    /// 单个字节值（0-255）；与 int 严格隔离（不隐式转换，算术须先 to_int）
+    Byte,
+    /// 字节序列（b"..."）
+    Bytes,
     /// catch 绑定的错误对象类型（e.code / e.message 等）
     Error,
     Void,
@@ -38,6 +42,8 @@ impl Ty {
             Ty::Bool => "bool",
             Ty::Str => "str",
             Ty::Char => "char",
+            Ty::Byte => "byte",
+            Ty::Bytes => "bytes",
             Ty::Error => "error",
             Ty::Void => "void",
             Ty::Unknown => "unknown",
@@ -51,6 +57,8 @@ impl Ty {
             TyName::Bool => Ty::Bool,
             TyName::Str => Ty::Str,
             TyName::Char => Ty::Char,
+            TyName::Byte => Ty::Byte,
+            TyName::Bytes => Ty::Bytes,
             // 类型变量不直接映射具体类型（build_fn_info 中由类型参数槽接管）
             TyName::Var(_) => Ty::Unknown,
         }
@@ -69,7 +77,7 @@ struct TyRes {
     slot: Option<usize>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct FnInfo {
     name: String,
     params: Vec<String>,
@@ -113,6 +121,16 @@ pub struct Checker {
     /// 类定义：类名 → (方法名 → FnInfo)。成员函数不进入全局符号表，
     /// 只能经 `类.方法(...)` 调用（resolve_call 按限定名解析）。
     classes: HashMap<String, HashMap<String, FnInfo>>,
+    /// 实例类（type）定义：类型名 → 静态视图（父类型名、字段表、方法表）
+    types: HashMap<String, TypeDefEntry>,
+}
+
+/// 实例类（type）定义的静态视图：父类型名、字段表（名, 类型, 只读）、方法表（方法名 → FnInfo）。
+#[derive(Debug, Clone)]
+struct TypeDefEntry {
+    base: Option<String>,
+    fields: Vec<(String, Ty, bool)>,
+    methods: HashMap<String, FnInfo>,
 }
 
 impl Checker {
@@ -137,6 +155,7 @@ impl Checker {
             structs: HashMap::new(),
             enums: HashMap::new(),
             classes: HashMap::new(),
+            types: HashMap::new(),
         };
 
         // Phase A：注册顶层函数并构建全局绑定
@@ -252,7 +271,7 @@ impl Checker {
                         Some("struct names must be unique"),
                     ));
                 }
-                let mapped = fields.iter().map(|(f, t)| (f.clone(), Ty::from_annot(t.clone()))).collect();
+                let mapped = fields.iter().map(|(f, t, _)| (f.clone(), Ty::from_annot(t.clone()))).collect();
                 self.structs.insert(name.clone(), mapped);
             }
             Stmt::ClassDef { name, methods, span } => {
@@ -277,6 +296,35 @@ impl Checker {
                     }
                 }
                 self.classes.insert(name.clone(), methods_map);
+            }
+            Stmt::TypeDef { name, base, fields, methods, span } => {
+                // 注册实例类（type）定义：名称唯一（不与 struct/class 冲突）
+                if self.types.contains_key(name) || self.structs.contains_key(name) || self.classes.contains_key(name) {
+                    return Err(self.zerr(
+                        codes::SYNTAX,
+                        format!("type `{}` is already defined", name),
+                        *span,
+                        Some("type names must be unique and not clash with struct/class names"),
+                    ));
+                }
+                let mut methods_map: HashMap<String, FnInfo> = HashMap::new();
+                for m in methods {
+                    if let Stmt::FnDef { name: mname, type_params, params, ret, body, span: mspan, tmp } = m {
+                        if !tmp {
+                            let info = self.build_fn_info(&format!("{}.{}", name, mname), type_params, params, ret.clone(), body, *mspan)?;
+                            methods_map.insert(mname.clone(), info);
+                        }
+                    }
+                }
+                let fields = fields.iter().map(|(f, t, ro)| (f.clone(), Ty::from_annot(t.clone()), *ro)).collect();
+                self.types.insert(
+                    name.clone(),
+                    TypeDefEntry {
+                        base: base.clone(),
+                        fields,
+                        methods: methods_map,
+                    },
+                );
             }
             Stmt::EnumDef { name, variants, span } => {
                 // 注册枚举定义：名称唯一（不与 struct/class 冲突）；变体名在枚举内唯一
@@ -686,18 +734,116 @@ impl Checker {
             let fname = format!("{}.{}", cls, m);
             self.check_fn(&fname)?;
         }
+        // 再检查实例类（type）成员方法（以「类型名.方法名」限定键展示）
+        let type_methods: Vec<(String, String)> = self
+            .types
+            .iter()
+            .flat_map(|(t, e)| e.methods.keys().map(move |m| (t.clone(), m.clone())))
+            .collect();
+        for (t, m) in type_methods {
+            let fname = format!("{}.{}", t, m);
+            self.check_fn(&fname)?;
+        }
         // 再检查全局语句
         self.check_stmts(top_stmts)?;
         Ok(())
     }
 
+    /// 沿继承链收集字段（父→子，同名子类覆盖）：返回 (字段名, 类型, 只读) 列表。
+    fn type_fields(&self, entry: &TypeDefEntry) -> Vec<(String, Ty, bool)> {
+        let mut all: Vec<(String, Ty, bool)> = Vec::new();
+        let mut cur = entry.base.clone();
+        let mut seen: HashSet<String> = HashSet::new();
+        while let Some(tname) = cur.take() {
+            if !seen.insert(tname.clone()) {
+                break;
+            }
+            if let Some(e) = self.types.get(&tname) {
+                all.extend(e.fields.iter().cloned());
+                cur = e.base.clone();
+            } else {
+                break;
+            }
+        }
+        all.extend(entry.fields.iter().cloned());
+        // 同名覆盖：子类字段取代父类（保持父→子的声明顺序）
+        let mut out: Vec<(String, Ty, bool)> = Vec::new();
+        for f in all.into_iter().rev() {
+            if !out.iter().any(|o| o.0 == f.0) {
+                out.push(f);
+            }
+        }
+        out.reverse();
+        out
+    }
+
+    /// 任一已注册类型（含继承链）是否定义了名为 name 的方法。
+    /// 供限定名调用 `变量.方法(...)` 的拼写校验：实例为动态类型，静态阶段无法确定具体类型。
+    fn any_type_has_method(&self, name: &str) -> bool {
+        self.types.values().any(|e| self.type_has_method(e, name))
+    }
+
+    /// 沿继承链找名为 name 的方法（子类覆盖父类），与运行时 `invoke_type_method` 语义一致。
+    /// 供 `new Type(...)` 在有 `init` 时按 init 的参数签名校验实参。
+    fn find_type_method_info(&self, entry: &TypeDefEntry, name: &str) -> Option<FnInfo> {
+        if let Some(f) = entry.methods.get(name) {
+            return Some(f.clone());
+        }
+        let mut cur = entry.base.clone();
+        let mut seen: HashSet<String> = HashSet::new();
+        while let Some(tname) = cur.take() {
+            if !seen.insert(tname.clone()) {
+                break;
+            }
+            match self.types.get(&tname) {
+                Some(e) => {
+                    if let Some(f) = e.methods.get(name) {
+                        return Some(f.clone());
+                    }
+                    cur = e.base.clone();
+                }
+                None => break,
+            }
+        }
+        None
+    }
+
+    /// 沿继承链查方法是否存在（子类覆盖父类）。
+    fn type_has_method(&self, entry: &TypeDefEntry, name: &str) -> bool {
+        if entry.methods.contains_key(name) {
+            return true;
+        }
+        let mut cur = entry.base.clone();
+        let mut seen: HashSet<String> = HashSet::new();
+        while let Some(tname) = cur.take() {
+            if !seen.insert(tname.clone()) {
+                break;
+            }
+            match self.types.get(&tname) {
+                Some(e) => {
+                    if e.methods.contains_key(name) {
+                        return true;
+                    }
+                    cur = e.base.clone();
+                }
+                None => break,
+            }
+        }
+        false
+    }
+
     fn check_fn(&mut self, name: &str) -> Result<(), ZError> {
-        // 类方法（类名.方法名）从 classes 表取，普通函数从 fns 表取
+        // 类方法（类名.方法名）从 classes 表取，type 方法从 types 表取，普通函数从 fns 表取
         let info = if let Some((cls, m)) = name.split_once('.') {
             if let Some(methods) = self.classes.get(cls) {
                 match methods.get(m) {
                     Some(i) => i.clone(),
                     None => return Ok(()), // 不是类方法限定名，按普通函数走下方
+                }
+            } else if let Some(entry) = self.types.get(cls) {
+                match entry.methods.get(m) {
+                    Some(i) => i.clone(),
+                    None => return Ok(()),
                 }
             } else {
                 return Ok(());
@@ -794,7 +940,8 @@ impl Checker {
         match stmt {
             Stmt::EnumDef { .. } => Ok(()), // 注册已在 Phase A 完成，检查阶段无运行语义
             Stmt::AsyncFnDef { .. } => Ok(()), // 注册已在 Phase A 完成，检查阶段无运行语义
-            Stmt::VarDecl { name, ty, init, span } => {
+            Stmt::TypeDef { .. } => Ok(()), // 注册已在 Phase A 完成（方法体经 check_all 校验）
+            Stmt::VarDecl { name, ty, init, span, .. } => {
                 let annot = Ty::from_annot(ty.clone());
                 if let Some(e) = init {
                     let res = self.check_expr(e)?;
@@ -878,6 +1025,20 @@ impl Checker {
                 for (name, _) in targets {
                     self.bind_or_unify(name, None, *span)?;
                 }
+                Ok(())
+            }
+            Stmt::FieldAssign { target, value, span } => {
+                // 字段赋值：基变量须已声明（`self` 在方法体内是参数，同样合法），右侧表达式须合法
+                let base = self.field_chain_base(target, *span)?;
+                self.globals.get(&base).ok_or_else(|| {
+                    self.zerr(
+                        codes::UNDEFINED,
+                        format!("cannot assign to field of undeclared variable `{}`", base),
+                        *span,
+                        Some("declare the variable first, e.g. `p = Point(1, 2);`"),
+                    )
+                })?;
+                let _v = self.check_expr(value)?;
                 Ok(())
             }
             Stmt::AssignOp { name, op, value, span } => {
@@ -1074,10 +1235,20 @@ impl Checker {
                 let res = self.check_expr(value)?;
                 self.check_throw_value(res, *span)
             }
+            // with 上下文管理器：target 表达式须合法；块体在新作用域中检查；
+            // `as r` 绑定的资源变量类型动态（__enter__ 返回值由运行时决定）
+            Stmt::With { target, var, body, span } => {
+                self.check_expr(target)?;
+                self.global_scopes.push(HashMap::new());
+                if let Some(v) = var {
+                    self.bind_or_unify(v, None, *span)?;
+                }
+                self.check_stmts(body)?;
+                self.global_scopes.pop();
+                Ok(())
+            }
         }
     }
-
-    // ---------- 语句检查（函数体内） ----------
 
     fn check_stmt_in_fn(
         &mut self,
@@ -1090,7 +1261,8 @@ impl Checker {
         match stmt {
             Stmt::EnumDef { .. } => Ok(()), // 注册已在 Phase A 完成，检查阶段无运行语义
             Stmt::AsyncFnDef { .. } => Ok(()), // 注册已在 Phase A 完成，检查阶段无运行语义
-            Stmt::VarDecl { name, ty, init, span } => {
+            Stmt::TypeDef { .. } => Ok(()), // 注册已在 Phase A 完成（方法体经 check_all 校验）
+            Stmt::VarDecl { name, ty, init, span, .. } => {
                 let annot = Ty::from_annot(ty.clone());
                 if let Some(e) = init {
                     let res = self.check_expr_in_fn(e, scopes, scope_stack, param_slots, ret_slot)?;
@@ -1174,6 +1346,20 @@ impl Checker {
                 for (name, _) in targets {
                     self.bind_in_stack(name, None, *span, scopes, scope_stack)?;
                 }
+                Ok(())
+            }
+            Stmt::FieldAssign { target, value, span } => {
+                // 字段赋值：基变量须已声明，右侧表达式须合法（字段类型运行时校验）
+                let base = self.field_chain_base(target, *span)?;
+                lookup_in_stack(&base, scopes, scope_stack).ok_or_else(|| {
+                    self.zerr(
+                        codes::UNDEFINED,
+                        format!("cannot assign to field of undeclared variable `{}`", base),
+                        *span,
+                        Some("declare the variable first, e.g. `p = Point(1, 2);`"),
+                    )
+                })?;
+                let _v = self.check_expr_in_fn(value, scopes, scope_stack, param_slots, ret_slot)?;
                 Ok(())
             }
             Stmt::AssignOp { name, op, value, span } => {
@@ -1398,6 +1584,40 @@ impl Checker {
                 let res = self.check_expr_in_fn(value, scopes, scope_stack, param_slots, ret_slot)?;
                 self.check_throw_value(res, *span)
             }
+            // with 上下文管理器：target 表达式须合法；块体在新作用域中检查
+            Stmt::With { target, var, body, span } => {
+                let res = self.check_expr_in_fn(target, scopes, scope_stack, param_slots, ret_slot)?;
+                let _ = res;
+                let idx = scopes.len();
+                scopes.push(HashMap::new());
+                scope_stack.push(idx);
+                if let Some(v) = var {
+                    self.bind_in_stack(v, None, *span, scopes, scope_stack)?;
+                }
+                self.check_stmts_with_scopes(body, scopes, scope_stack, param_slots, ret_slot)?;
+                scope_stack.pop();
+                scopes.pop();
+                Ok(())
+            }
+        }
+    }
+
+    /// 字段链的基变量名：p.a.b → p（链底须为标识符，否则报错）。
+    fn field_chain_base(&self, target: &Expr, span: Span) -> Result<String, ZError> {
+        let mut cur = target;
+        loop {
+            match cur {
+                Expr::Field { obj, .. } => cur = obj,
+                Expr::Ident { name, .. } => return Ok(name.clone()),
+                _ => {
+                    return Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        "field assignment target must be a field chain `obj.field`",
+                        span,
+                        Some("use `obj.field = x` or `obj.a.b = x`"),
+                    ))
+                }
+            }
         }
     }
 
@@ -1418,6 +1638,8 @@ impl Checker {
         match obj.ty {
             // 字符串按下标取单个字符（返回 str）
             Ty::Str => Ok(TyRes { ty: Ty::Str, slot: None }),
+            // 字节序列按下标取单个字节（返回 byte）
+            Ty::Bytes => Ok(TyRes { ty: Ty::Byte, slot: None }),
             // 列表/动态值：元素类型动态，返回 Unknown
             Ty::Unknown => Ok(TyRes { ty: Ty::Unknown, slot: None }),
             // 类型不支持但定义了 __index → 放行（运行时回退重载）
@@ -1561,6 +1783,106 @@ impl Checker {
                 let i = self.check_expr(index)?;
                 self.check_index(o, i, *span)
             }
+            Expr::Slice { obj, lo, hi, span } => {
+                let o = self.check_expr(obj)?;
+                // 列表为动态类型（Unknown）；已知标量类型不可切片
+                if !matches!(o.ty, Ty::Unknown | Ty::Bytes) {
+                    return Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("cannot slice a value of type `{}`", o.ty.name()),
+                        *span,
+                        Some("slicing is supported on lists and bytes, e.g. `a[1:3]`"),
+                    ));
+                }
+                for e in lo.iter().chain(hi.iter()) {
+                    let r = self.check_expr(e)?;
+                    if !matches!(r.ty, Ty::Int | Ty::Unknown) {
+                        return Err(self.zerr(
+                            codes::TYPE_MISMATCH,
+                            format!("slice index must be an int, got `{}`", r.ty.name()),
+                            *span,
+                            Some("slice form: `a[i:j]` (either endpoint may be omitted)"),
+                        ));
+                    }
+                }
+                // 切片结果为 list/bytes 副本（元素类型动态）
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::MethodCall { obj, name, args, span } => {
+                // 接收者为已注册类型名：不是实例，静态报错（运行时同样不可用）
+                if let Expr::Ident { name: rname, .. } = obj.as_ref() {
+                    if self.types.contains_key(rname) {
+                        return Err(self.zerr(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` is a type, not an instance", rname),
+                            *span,
+                            Some(&format!("call its methods on an instance, e.g. `new {}(...).{}(...)`", rname, name)),
+                        ));
+                    }
+                }
+                // 接收者为 `new T(...)`：沿继承链校验方法存在（拼写错误尽早报错）
+                if let Expr::New { ty, .. } = obj.as_ref() {
+                    if let Some(entry) = self.types.get(ty).cloned() {
+                        if !self.type_has_method(&entry, name) {
+                            return Err(self.zerr(
+                                codes::UNDEFINED,
+                                format!("type `{}` has no method `{}`", ty, name),
+                                *span,
+                                Some("check the method name, or the `extends` chain"),
+                            ));
+                        }
+                    }
+                }
+                self.check_expr(obj)?;
+                for a in args {
+                    self.check_expr(a)?;
+                }
+                // 方法返回值类型动态（由方法体推断，运行期决定）
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::New { ty, args, span } => {
+                // 实例构造：type 须已注册。
+                // 有 init 时实参按 init 的自参（去掉首参 self）顺序绑定；否则按继承链字段顺序绑定。
+                let entry = self.types.get(ty).ok_or_else(|| {
+                    self.zerr(
+                        codes::UNDEFINED,
+                        format!("`new` requires a `type` definition, `{}` is not a type", ty),
+                        *span,
+                        Some("define it with `type Name { ... }` before constructing an instance"),
+                    )
+                })?;
+                let init = self.find_type_method_info(entry, "init");
+                let fields = self.type_fields(entry);
+                for (i, a) in args.iter().enumerate() {
+                    let aty = self.check_expr(a)?;
+                    if let Some(init) = &init {
+                        if let Some(slot) = init.param_slots.get(i + 1) {
+                            self.unify_slot(*slot, aty, *span, format!("parameter `{}` of `{}`, passed to `new {}`", init.params[i + 1], init.name, ty))?;
+                        } else {
+                            return Err(self.zerr(
+                                codes::ARG_COUNT,
+                                format!("`new {}` calls `init`, which takes at most {} argument(s) after self", ty, init.param_slots.len().saturating_sub(1)),
+                                *span,
+                                Some("check `init`'s parameters"),
+                            ));
+                        }
+                    } else {
+                        let (fname, fty, _ro) = fields
+                            .get(i)
+                            .ok_or_else(|| {
+                                self.zerr(
+                                    codes::ARG_COUNT,
+                                    format!("`new {}` takes {} field(s), got {}", ty, fields.len(), args.len()),
+                                    *span,
+                                    Some("construct with `new Type(field1, field2, ...)` matching the field order"),
+                                )
+                            })?;
+                        self.unify_with(*fty, aty, *span, format!("field `{}` of type `{}`", fname, ty))?;
+                    }
+                }
+                // 实例为动态类型（字段/方法访问在运行时校验）
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
             Expr::Unary { op, expr, span } => {
                 let res = self.check_expr(expr)?;
                 self.check_unary(*op, res, *span)
@@ -1570,6 +1892,8 @@ impl Checker {
             Expr::BoolLit(..) => Ok(TyRes { ty: Ty::Bool, slot: None }),
             Expr::StrLit(..) => Ok(TyRes { ty: Ty::Str, slot: None }),
             Expr::CharLit(..) => Ok(TyRes { ty: Ty::Char, slot: None }),
+            Expr::ByteLit(..) => Ok(TyRes { ty: Ty::Byte, slot: None }),
+            Expr::BytesLit(..) => Ok(TyRes { ty: Ty::Bytes, slot: None }),
             Expr::ListLit(items, _) => {
                 for it in items {
                     self.check_expr(it)?;
@@ -1762,6 +2086,107 @@ impl Checker {
                 let i = self.check_expr_in_fn(index, scopes, scope_stack, param_slots, ret_slot)?;
                 self.check_index(o, i, *span)
             }
+            Expr::Slice { obj, lo, hi, span } => {
+                let o = self.check_expr_in_fn(obj, scopes, scope_stack, param_slots, ret_slot)?;
+                // 列表为动态类型（Unknown）；已知标量类型不可切片
+                if !matches!(o.ty, Ty::Unknown | Ty::Bytes) {
+                    return Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("cannot slice a value of type `{}`", o.ty.name()),
+                        *span,
+                        Some("slicing is supported on lists and bytes, e.g. `a[1:3]`"),
+                    ));
+                }
+                for e in lo.iter().chain(hi.iter()) {
+                    let r = self.check_expr_in_fn(e, scopes, scope_stack, param_slots, ret_slot)?;
+                    if !matches!(r.ty, Ty::Int | Ty::Unknown) {
+                        return Err(self.zerr(
+                            codes::TYPE_MISMATCH,
+                            format!("slice index must be an int, got `{}`", r.ty.name()),
+                            *span,
+                            Some("slice form: `a[i:j]` (either endpoint may be omitted)"),
+                        ));
+                    }
+                }
+                // 切片结果为 list/bytes 副本（元素类型动态）
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::MethodCall { obj, name, args, span } => {
+                // 接收者为已注册类型名：不是实例，静态报错（运行时同样不可用）
+                if let Expr::Ident { name: rname, .. } = obj.as_ref() {
+                    if self.types.contains_key(rname) {
+                        return Err(self.zerr(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` is a type, not an instance", rname),
+                            *span,
+                            Some(&format!("call its methods on an instance, e.g. `new {}(...).{}(...)`", rname, name)),
+                        ));
+                    }
+                }
+                // 接收者为 `new T(...)`：沿继承链校验方法存在（拼写错误尽早报错）
+                if let Expr::New { ty, .. } = obj.as_ref() {
+                    if let Some(entry) = self.types.get(ty).cloned() {
+                        if !self.type_has_method(&entry, name) {
+                            return Err(self.zerr(
+                                codes::UNDEFINED,
+                                format!("type `{}` has no method `{}`", ty, name),
+                                *span,
+                                Some("check the method name, or the `extends` chain"),
+                            ));
+                        }
+                    }
+                }
+                self.check_expr_in_fn(obj, scopes, scope_stack, param_slots, ret_slot)?;
+                for a in args {
+                    self.check_expr_in_fn(a, scopes, scope_stack, param_slots, ret_slot)?;
+                }
+                // 方法返回值类型动态（由方法体推断，运行期决定）
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
+            Expr::New { ty, args, span } => {
+                // 实例构造：type 须已注册。
+                // 有 init 时实参按 init 的自参（去掉首参 self）顺序绑定；否则按继承链字段顺序绑定。
+                let entry = self.types.get(ty).ok_or_else(|| {
+                    self.zerr(
+                        codes::UNDEFINED,
+                        format!("`new` requires a `type` definition, `{}` is not a type", ty),
+                        *span,
+                        Some("define it with `type Name { ... }` before constructing an instance"),
+                    )
+                })?;
+                let init = self.find_type_method_info(entry, "init");
+                let fields = self.type_fields(entry);
+                for (i, a) in args.iter().enumerate() {
+                    let aty = self.check_expr_in_fn(a, scopes, scope_stack, param_slots, ret_slot)?;
+                    if let Some(init) = &init {
+                        // 有 init：实参 i 对应 init 参数 (i+1)（0 为 self），按 init 的参数槽校验
+                        if let Some(slot) = init.param_slots.get(i + 1) {
+                            self.unify_slot(*slot, aty, *span, format!("parameter `{}` of `{}`, passed to `new {}`", init.params[i + 1], init.name, ty))?;
+                        } else {
+                            return Err(self.zerr(
+                                codes::ARG_COUNT,
+                                format!("`new {}` calls `init`, which takes at most {} argument(s) after self", ty, init.param_slots.len().saturating_sub(1)),
+                                *span,
+                                Some("check `init`'s parameters"),
+                            ));
+                        }
+                    } else {
+                        let (fname, fty, _ro) = fields
+                            .get(i)
+                            .ok_or_else(|| {
+                                self.zerr(
+                                    codes::ARG_COUNT,
+                                    format!("`new {}` takes {} field(s), got {}", ty, fields.len(), args.len()),
+                                    *span,
+                                    Some("construct with `new Type(field1, field2, ...)` matching the field order"),
+                                )
+                            })?;
+                        self.unify_with(*fty, aty, *span, format!("field `{}` of type `{}`", fname, ty))?;
+                    }
+                }
+                // 实例为动态类型（字段/方法访问在运行时校验）
+                Ok(TyRes { ty: Ty::Unknown, slot: None })
+            }
             Expr::Unary { op, expr, span } => {
                 let res = self.check_expr_in_fn(expr, scopes, scope_stack, param_slots, ret_slot)?;
                 self.check_unary(*op, res, *span)
@@ -1771,6 +2196,8 @@ impl Checker {
             Expr::BoolLit(..) => Ok(TyRes { ty: Ty::Bool, slot: None }),
             Expr::StrLit(..) => Ok(TyRes { ty: Ty::Str, slot: None }),
             Expr::CharLit(..) => Ok(TyRes { ty: Ty::Char, slot: None }),
+            Expr::ByteLit(..) => Ok(TyRes { ty: Ty::Byte, slot: None }),
+            Expr::BytesLit(..) => Ok(TyRes { ty: Ty::Bytes, slot: None }),
             Expr::ListLit(items, _) => {
                 for it in items {
                     self.check_expr_in_fn(it, scopes, scope_stack, param_slots, ret_slot)?;
@@ -1853,16 +2280,20 @@ impl Checker {
         if res.ty == Ty::Unknown {
             return Ok(TyRes { ty: Ty::Unknown, slot: None });
         }
+        // type 实例（动态类型）与 byte/bytes：字段访问在运行时校验
+        if res.ty == Ty::Byte || res.ty == Ty::Bytes {
+            return Ok(TyRes { ty: Ty::Unknown, slot: None });
+        }
         if res.ty != Ty::Error {
             return Err(self.zerr(
                 codes::TYPE_MISMATCH,
                 format!(
-                    "field access `.{}` requires an `error`, `struct`, or `dict` value, got `{}`",
+                    "field access `.{}` requires an `error`, `struct`, `dict` or `type` instance, got `{}`",
                     field,
                     res.ty.name()
                 ),
                 span,
-                Some("struct instances and dicts support field access; errors expose code/message/..."),
+                Some("struct/struct instances and dicts support field access; errors expose code/message/..."),
             ));
         }
         match field {
@@ -2050,7 +2481,7 @@ impl Checker {
     }
 
     /// 复合赋值类型检查：`x op= y` 等价于 `x = x op y`，要求 x 已声明且与 y 类型兼容。
-    /// str 仅支持 +=（字符串拼接）；其余运算符要求数字。
+    /// str/bytes 仅支持 +=（拼接）；byte/数字支持算术运算符。
     fn check_compound_assign(
         &mut self,
         slot: usize,
@@ -2060,22 +2491,22 @@ impl Checker {
         span: Span,
         name: &str,
     ) -> Result<(), ZError> {
-        if cur == Ty::Str {
+        if cur == Ty::Str || cur == Ty::Bytes {
             if op != CompoundOp::Add {
                 return Err(self.zerr(
                     codes::TYPE_MISMATCH,
-                    format!("`{}` cannot be applied to `str` variable `{}` (only `+=` supports str concatenation)", op.symbol(), name),
+                    format!("`{}` cannot be applied to `{}` variable `{}` (only `+=` supports concatenation)", op.symbol(), cur.name(), name),
                     span,
                     None::<&str>,
                 ));
             }
-            return self.unify_with(Ty::Str, rhs, span, format!("variable `{}`", name));
+            return self.unify_with(cur, rhs, span, format!("variable `{}`", name));
         }
         if cur == Ty::Unknown {
             // 类型未定：按普通赋值绑定右侧类型（运行期校验由解释器保证）
             return self.unify_slot(slot, rhs, span, format!("variable `{}`", name));
         }
-        if !cur.is_numeric() {
+        if !cur.is_numeric() && cur != Ty::Byte {
             return Err(self.zerr(
                 codes::TYPE_MISMATCH,
                 format!("`{}` requires a numeric variable, `{}` is `{}`", op.symbol(), name, cur.name()),
@@ -2238,14 +2669,7 @@ impl Checker {
                     }
                     return Ok(());
                 }
-                if self.strict {
-                    return Err(self.zerr(
-                        codes::TYPE_MISMATCH,
-                        format!("cannot compare with `{}` using `{}`", t.name(), sym),
-                        span,
-                        Some("add explicit type annotations"),
-                    ));
-                }
+                // 无槽位的 Unknown（type 实例字段/方法返回值）：运行期动态比较
                 Ok(())
             }
             (t, Ty::Unknown) => {
@@ -2255,14 +2679,7 @@ impl Checker {
                     }
                     return Ok(());
                 }
-                if self.strict {
-                    return Err(self.zerr(
-                        codes::TYPE_MISMATCH,
-                        format!("cannot compare `{}` with `{}`", t.name(), sym),
-                        span,
-                        Some("add explicit type annotations"),
-                    ));
-                }
+                // 无槽位的 Unknown（type 实例字段/方法返回值）：运行期动态比较
                 Ok(())
             }
             (a, b) if a == b => Ok(()),
@@ -2270,7 +2687,7 @@ impl Checker {
                 codes::TYPE_MISMATCH,
                 format!("cannot compare `{}` with `{}` using `{}`", a.name(), b.name(), sym),
                 span,
-                Some("Hone has no implicit type conversion; make both sides the same type"),
+                Some("Hone has no implicit type conversion; make both sides the same type (convert `byte` with `int(b)` or `to_int(b)` first)"),
             )),
         }
     }
@@ -2289,7 +2706,7 @@ impl Checker {
                 }
                 Ok(())
             }
-            (Ty::Unknown, t) if t.is_numeric() || t == Ty::Char => {
+            (Ty::Unknown, t) if t.is_numeric() || t == Ty::Char || t == Ty::Byte => {
                 if let Some(slot) = l.slot {
                     if !self.strict {
                         self.unify_slot_ty(slot, t, span, format!("`{}` operand", sym))?;
@@ -2306,7 +2723,7 @@ impl Checker {
                 }
                 Ok(())
             }
-            (t, Ty::Unknown) if t.is_numeric() || t == Ty::Char => {
+            (t, Ty::Unknown) if t.is_numeric() || t == Ty::Char || t == Ty::Byte => {
                 if let Some(slot) = r.slot {
                     if !self.strict {
                         self.unify_slot_ty(slot, t, span, format!("`{}` operand", sym))?;
@@ -2329,13 +2746,14 @@ impl Checker {
                 span,
                 Some("convert one side with `to_int` / `to_float` first"),
             )),
-            // char 与 char 按码点比较（'a' < 'b'）
+            // char 与 char 按码点比较（'a' < 'b'）；byte 与 byte 按数值比较
             (Ty::Char, Ty::Char) => Ok(()),
-            (a, _) if !a.is_numeric() && a != Ty::Char => Err(self.zerr(
+            (Ty::Byte, Ty::Byte) => Ok(()),
+            (a, _) if !a.is_numeric() && a != Ty::Char && a != Ty::Byte => Err(self.zerr(
                 codes::TYPE_MISMATCH,
-                format!("`{}` requires numeric or char operands, got `{}`", sym, a.name()),
+                format!("`{}` requires numeric, char or byte operands, got `{}`", sym, a.name()),
                 span,
-                Some("comparison operators work on `int` / `float` / `char`"),
+                Some("comparison operators work on `int` / `float` / `char` / `byte`"),
             )),
             _ => Ok(()),
         }
@@ -2365,7 +2783,7 @@ impl Checker {
                 Ok(Ty::Unknown)
             }
             (Ty::Unknown, t) => {
-                if t.is_numeric() {
+                if t.is_numeric() || t == Ty::Byte {
                     if let Some(slot) = l.slot {
                         if !self.strict {
                             self.unify_slot_ty(slot, t, span, format!("`{}` operand", sym))?;
@@ -2380,20 +2798,28 @@ impl Checker {
                         }
                     }
                     return Ok(Ty::Str);
+                }
+                if op == BinOp::Add && t == Ty::Bytes {
+                    if let Some(slot) = l.slot {
+                        if !self.strict {
+                            self.unify_slot_ty(slot, Ty::Bytes, span, "`+` operand".to_string())?;
+                        }
+                    }
+                    return Ok(Ty::Bytes);
                 }
                 Err(self.zerr(
                     codes::TYPE_MISMATCH,
                     format!("cannot apply `{}` to `{}`", sym, t.name()),
                     span,
                     Some(format!(
-                        "`{}` works on numbers{}",
+                        "`{}` works on numbers and bytes{}",
                         sym,
-                        if op == BinOp::Add { " and `+` also concatenates strings" } else { "" }
+                        if op == BinOp::Add { "; `+` also concatenates strings and bytes" } else { "" }
                     )),
                 ))
             }
             (t, Ty::Unknown) => {
-                if t.is_numeric() {
+                if t.is_numeric() || t == Ty::Byte {
                     if let Some(slot) = r.slot {
                         if !self.strict {
                             self.unify_slot_ty(slot, t, span, format!("`{}` operand", sym))?;
@@ -2408,6 +2834,14 @@ impl Checker {
                         }
                     }
                     return Ok(Ty::Str);
+                }
+                if op == BinOp::Add && t == Ty::Bytes {
+                    if let Some(slot) = r.slot {
+                        if !self.strict {
+                            self.unify_slot_ty(slot, Ty::Bytes, span, "`+` operand".to_string())?;
+                        }
+                    }
+                    return Ok(Ty::Bytes);
                 }
                 Err(self.zerr(
                     codes::TYPE_MISMATCH,
@@ -2416,13 +2850,15 @@ impl Checker {
                     Some("check the operand type"),
                 ))
             }
-            (a, b) if a.is_numeric() && b.is_numeric() && a != b => Err(self.zerr(
-                codes::TYPE_MISMATCH,
-                format!("cannot apply `{}` to `{}` and `{}` (no implicit conversion)", sym, a.name(), b.name()),
-                span,
-                Some("convert one side with `to_int` / `to_float` first"),
-            )),
-            (a, b) if a.is_numeric() && b.is_numeric() => Ok(a),
+            (a, b) if (a.is_numeric() || a == Ty::Byte) && (b.is_numeric() || b == Ty::Byte) && a != b => Err(
+                self.zerr(
+                    codes::TYPE_MISMATCH,
+                    format!("cannot apply `{}` to `{}` and `{}` (no implicit conversion)", sym, a.name(), b.name()),
+                    span,
+                    Some("convert one side with `to_int` / `to_float` / `int` first"),
+                ),
+            ),
+            (a, b) if (a.is_numeric() || a == Ty::Byte) && (b.is_numeric() || b == Ty::Byte) => Ok(a),
             (Ty::Str, Ty::Str) => {
                 if op == BinOp::Add {
                     Ok(Ty::Str)
@@ -2432,6 +2868,19 @@ impl Checker {
                         format!("cannot apply `{}` to `str`", sym),
                         span,
                         Some("`+` concatenates strings; other arithmetic is numeric-only"),
+                    ))
+                }
+            }
+            // 字节序列拼接：bytes + bytes（其余算术不支持）
+            (Ty::Bytes, Ty::Bytes) => {
+                if op == BinOp::Add {
+                    Ok(Ty::Bytes)
+                } else {
+                    Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("cannot apply `{}` to `bytes`", sym),
+                        span,
+                        Some("`+` concatenates bytes; other arithmetic is numeric-only (convert with `to_int(b)` first)"),
                     ))
                 }
             }
@@ -2462,7 +2911,7 @@ impl Checker {
                     }
                     Ok(res)
                 }
-                t if t.is_numeric() => Ok(TyRes { ty: t, slot: None }),
+                t if t.is_numeric() || t == Ty::Byte => Ok(TyRes { ty: t, slot: None }),
                 // 类型不支持但定义了 __neg → 放行（运行时回退重载）
                 _ if self.fns.contains_key("__neg") => Ok(TyRes { ty: Ty::Unknown, slot: None }),
                 other => Err(self.zerr(
@@ -2639,6 +3088,21 @@ impl Checker {
                     format!("class `{}` has no method `{}`", cls, method),
                     span,
                     Some("check the method name"),
+                ));
+            }
+        }
+        // 限定名 `变量.方法(...)`：基名是已声明变量 → 实例方法调用（实例为动态类型，
+        // 静态阶段仅校验方法名存在于某注册类型的继承链中；运行期再精确报错）
+        if let Some((base, method)) = callee.split_once('.') {
+            if self.globals.contains_key(base) {
+                if self.any_type_has_method(method) {
+                    return Ok(TyRes { ty: Ty::Unknown, slot: None });
+                }
+                return Err(self.zerr(
+                    codes::UNDEFINED,
+                    format!("variable `{}` has no method `{}`", base, method),
+                    span,
+                    Some("check the method name, or the `extends` chain"),
                 ));
             }
         }
@@ -3050,12 +3514,27 @@ impl Checker {
                 self.expect_str(name, args, 1, span, "the key")?;
                 Ok(TyRes { ty: Ty::Bool, slot: None })
             }
-            "is_int" | "is_float" | "is_str" | "is_bool" | "is_list" | "is_dict" | "is_null" => {
+            "is_int" | "is_float" | "is_str" | "is_bool" | "is_list" | "is_dict" | "is_null" | "is_byte" | "is_bytes" => {
                 self.arg_count(name, n, 1, span)?;
                 Ok(TyRes { ty: Ty::Bool, slot: None })
             }
-            "type_of" | "to_str" | "json_stringify" => {
+            "type_of" | "json_stringify" => {
                 self.arg_count(name, n, 1, span)?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            // to_str(v[, enc])：数值/bool/char 转字符串；bytes/byte 按编码（默认 utf-8）解码
+            "to_str" => {
+                if !(1..=2).contains(&n) {
+                    return Err(self.zerr(
+                        codes::ARG_COUNT,
+                        format!("wrong number of arguments: `to_str` expects 1-2 (value[, encoding]), got {}", n),
+                        span,
+                        Some("form: `to_str(1)` / `to_str(b\"abc\")` / `to_str(bs, \"latin-1\")`"),
+                    ));
+                }
+                if n == 2 {
+                    self.expect_str(name, args, 1, span, "the encoding")?;
+                }
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
             "assert" => {
@@ -3104,8 +3583,17 @@ impl Checker {
             }
             "char" => {
                 self.arg_count(name, n, 1, span)?;
-                self.expect_int(name, args, 0, span, "the code point")?;
-                Ok(TyRes { ty: Ty::Char, slot: None })
+                // 码点可来自 int 或 byte（byte 0-255 是合法 ASCII 码点）
+                match args[0].ty {
+                    Ty::Int | Ty::Byte => Ok(TyRes { ty: Ty::Char, slot: None }),
+                    Ty::Unknown => Ok(TyRes { ty: Ty::Char, slot: None }),
+                    other => Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("`char` expects an `int` or `byte` code point, got `{}`", other.name()),
+                        span,
+                        Some("pass a Unicode code point, e.g. `char(65)` or `char(byte(65))`"),
+                    )),
+                }
             }
             "char_at" => {
                 self.arg_count(name, n, 2, span)?;
@@ -3122,6 +3610,56 @@ impl Checker {
                 self.arg_count(name, n, 1, span)?;
                 self.expect_char(name, args, 0, span, "the character")?;
                 Ok(TyRes { ty: Ty::Bool, slot: None })
+            }
+            // ---- byte / bytes 类型内置函数 ----
+            // byte(x)：int（0..=255）显式转 byte；byte 原样返回
+            "byte" => {
+                self.arg_count(name, n, 1, span)?;
+                match args[0].ty {
+                    Ty::Int | Ty::Byte => Ok(TyRes { ty: Ty::Byte, slot: None }),
+                    Ty::Unknown => Ok(TyRes { ty: Ty::Byte, slot: None }),
+                    other => Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("`byte` expects an `int` or `byte`, got `{}`", other.name()),
+                        span,
+                        Some("convert an `int` (0..=255) to `byte`, e.g. `byte(65)`"),
+                    )),
+                }
+            }
+            // to_bytes(s[, enc]) / to_bytes(list)：字符串按编码（默认 utf-8）转 bytes，或 int 列表转 bytes
+            "to_bytes" => {
+                if !(1..=2).contains(&n) {
+                    return Err(self.zerr(
+                        codes::ARG_COUNT,
+                        format!("wrong number of arguments: `to_bytes` expects 1-2 (value[, encoding]), got {}", n),
+                        span,
+                        Some("form: `to_bytes(\"abc\")` or `to_bytes(\"abc\", \"utf-8\")` or `to_bytes([1, 2])`"),
+                    ));
+                }
+                if n == 2 {
+                    self.expect_str(name, args, 1, span, "the encoding")?;
+                }
+                Ok(TyRes { ty: Ty::Bytes, slot: None })
+            }
+            // hex(b)：bytes/byte → 十六进制字符串
+            "hex" => {
+                self.arg_count(name, n, 1, span)?;
+                match args[0].ty {
+                    Ty::Byte | Ty::Bytes => Ok(TyRes { ty: Ty::Str, slot: None }),
+                    Ty::Unknown => Ok(TyRes { ty: Ty::Str, slot: None }),
+                    other => Err(self.zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("`hex` expects a `bytes` or `byte`, got `{}`", other.name()),
+                        span,
+                        Some("convert bytes to a hex string, e.g. `hex(b\"ab\")`"),
+                    )),
+                }
+            }
+            // unhex(s)：十六进制字符串 → bytes
+            "unhex" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the hex string")?;
+                Ok(TyRes { ty: Ty::Bytes, slot: None })
             }
             // input / read_int / read_float：0-1 个参数（可选提示文本），从标准输入读取
             "input" | "read_int" | "read_float" => {
@@ -3896,7 +4434,10 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Throw { span, .. }
         | Stmt::Label { span, .. }
         | Stmt::Goto { span, .. }
-        | Stmt::MacroDef { span, .. } => *span,
+        | Stmt::MacroDef { span, .. }
+        | Stmt::With { span, .. }
+        | Stmt::TypeDef { span, .. }
+        | Stmt::FieldAssign { span, .. } => *span,
     }
 }
 
@@ -3932,6 +4473,8 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "is_list",
         "is_dict",
         "is_null",
+        "is_byte",
+        "is_bytes",
         "type_of",
         "assert",
         "assert_eq",
@@ -3946,6 +4489,10 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "char_is_digit",
         "char_is_alpha",
         "char_is_space",
+        "byte",
+        "to_bytes",
+        "hex",
+        "unhex",
         "input",
         "read_int",
         "read_float",

@@ -2,8 +2,8 @@
 
 轻量级、跨平台、可嵌入的脚本语言。用 Rust 实现，单文件可执行程序，开箱即用。
 
-> 设计规范：`hone.md`（v1.2）
-> 当前版本：v0.7.11（goto / 标签、macro 宏、H105/H106 编译期校验，详见 CHANGELOG）
+> 设计规范：`hone.md`（v1.3）
+> 当前版本：v0.7.12（with 上下文、type 实例类、byte/bytes 字节类型、readonly、切片，详见 CHANGELOG）
 
 ## 构建
 

@@ -37,7 +37,7 @@ function toggleTheme(){
     <a href="download.html" data-page-node-id="eEb9ctwmfWEM2zlbbHNOD6">下载</a>
     <a href="perf.html" data-page-node-id="WQxcN6UGTD6KeARGF6JZuF">性能</a>
   </nav>
-  <span class="ver" data-page-node-id="Mp8gQCnHL2vaMHUePlmod8">v0.7.11</span>
+  <span class="ver" data-page-node-id="Mp8gQCnHL2vaMHUePlmod8">v0.7.12</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题" data-page-node-id="zj6PY80PuEMTkboK4qwk0r"><span class="ti-light" data-page-node-id="LktrffL4F6CKI848e0Mifu">☀️</span><span class="ti-dark" data-page-node-id="rqv8PGOlliZr7MyuFuxpjH">🌙</span></button>
 </header>
 
@@ -361,6 +361,48 @@ msg = <span class="k" data-page-node-id="QGmeoC7sDNRje2aIq71jIy">match</span> st
 <span class="f" data-page-node-id="ErkCvB6urhYlHq0dFj57RL">print</span>(<span class="f" data-page-node-id="XWemYAvUpKy5oC8akO5YOI">char_upper</span>(<span class="s" data-page-node-id="B8IzwZpMWHPozqRB1yveIF">'a'</span>));    <span class="c" data-page-node-id="4ExnfZy4W146MxzHjEV5Il">// A</span>
 <span class="f" data-page-node-id="inhuRdycDEsvbAPhk4z61Z">print</span>(<span class="f" data-page-node-id="ovVIQ88umNd9UWdTw6vKf1">char_is_digit</span>(<span class="s" data-page-node-id="uwo0DSTfaAa8j0CoD73j94">'5'</span>));  <span class="c" data-page-node-id="VXNxFtpfaA84tNGnkeRkPv">// true</span>
 <span class="f" data-page-node-id="Z0H8IfBPviUCW9nHBEoMxX">print</span>(<span class="f" data-page-node-id="BituIppmlusWXW4E3VzsfU">char_is_alpha</span>(<span class="s" data-page-node-id="0ACT3lPJZN1KtMPtOp6N5J">'中'</span>)); <span class="c" data-page-node-id="DDPWI8E43fvy1psoolGAyc">// true</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">4.9 byte / bytes 字节类型</div>
+    <div class="note">byte 8 位值（0b 字面量 / byte(int) 转换，与 int 严格隔离）；bytes 字节序列（b"..." 字面量，len/索引/切片/+ 拼接/==/迭代）；byte/to_bytes/hex/unhex/is_byte/is_bytes（完整示例：examples/byte_demo.hn）</div>
+<pre><code>b = 0b1010001;                  <span class="c">// byte：8 位无符号字节值</span>
+bs = b"abc";                    <span class="c">// bytes：字节序列字面量</span>
+<span class="f">print</span>(<span class="f">type_of</span>(b));           <span class="c">// byte</span>
+<span class="f">print</span>(<span class="f">len</span>(bs));               <span class="c">// 3</span>
+<span class="f">print</span>(bs[<span class="n">0</span>]);                <span class="c">// 0b01100001（索引取 byte）</span>
+<span class="f">print</span>(b"ab" + b"cd" == b"abcd"); <span class="c">// true（+ 拼接、== 比较）</span>
+<span class="f">print</span>(bs[<span class="n">1</span>:<span class="n">3</span>]);              <span class="c">// b"bc"（切片，端点可省略）</span>
+<span class="f">print</span>(<span class="f">hex</span>(bs));               <span class="c">// 616263</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">to_bytes</span>(<span class="s">"你好"</span>)));  <span class="c">// 你好（utf-8 往返）</span>
+<span class="f">print</span>(<span class="f">is_byte</span>(bs[<span class="n">1</span>]));      <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">to_int</span>(byte(<span class="n">65</span>)));     <span class="c">// 65（byte → int 显式回转）</span></code></pre>
+  </div>
+
+  <div class="example">
+    <div class="title">4.10 type 实例类 与 with 上下文</div>
+    <div class="note">type：字段 + fn 方法（self 显式首参）+ extends 继承 + init 构造器 + readonly 字段；构造 new Type(...)；with expr as r：进入调 __enter__、退出（含报错）必调 __exit__（完整示例：examples/with_type_demo.hn）</div>
+<pre><code><span class="k">type</span> <span class="f">Square</span> <span class="k">extends</span> <span class="f">Shape</span> {
+    side: <span class="k">int</span>,
+    <span class="k">fn</span> <span class="f">init</span>(self, side: <span class="k">int</span>) {
+        self.name = <span class="s">"square"</span>;
+        self.side = side;
+        self.area = side * side;
+    }
+    <span class="k">fn</span> <span class="f">perimeter</span>(self) { <span class="k">return</span> self.side * <span class="n">4</span>; }
+};
+s = <span class="k">new</span> <span class="f">Square</span>(<span class="n">5</span>);           <span class="c">// 实参绑定 init 参数（去掉 self）</span>
+<span class="f">print</span>(s.perimeter());       <span class="c">// 20（self 自动填充）</span>
+s.side = <span class="n">6</span>;                 <span class="c">// 字段可写（非 readonly）</span>
+
+<span class="k">type</span> <span class="f">Guard</span> {
+    active: <span class="k">int</span>,
+    <span class="k">fn</span> <span class="f">__enter__</span>(self) { self.active = <span class="n">1</span>; <span class="k">return</span> self; }
+    <span class="k">fn</span> <span class="f">__exit__</span>(self)  { self.active = <span class="n">0</span>; }
+};
+g = <span class="k">new</span> <span class="f">Guard</span>();
+<span class="k">with</span> g <span class="k">as</span> r { <span class="f">print</span>(r.active); }  <span class="c">// 1</span>
+<span class="f">print</span>(g.active);            <span class="c">// 0（块结束自动清理，报错路径同样执行）</span></code></pre>
   </div>
 
   <h3 data-page-node-id="uUm5WmsGaEuytF3CgBLnqA"><span class="hash" data-page-node-id="N1D8mz6nHuUXrpm5UsRbl5">#</span>5. 内置函数</h3>
@@ -894,7 +936,7 @@ function searchExamples(q) {
     <a href="about.html" data-page-node-id="QFkvlj8nhfCkXSbGXoLux8">关于</a>
     <a href="https://github.com/shichencike/Hone" data-page-node-id="kDjN5lB4eqNcAIuhVaBtoB">GitHub</a>
   </div>
-  Hone v0.7.11 · MIT License · <span class="sword" data-page-node-id="LqGrtqsiylryKe18mmxSpq">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.7.12 · MIT License · <span class="sword" data-page-node-id="LqGrtqsiylryKe18mmxSpq">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

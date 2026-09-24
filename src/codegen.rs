@@ -42,6 +42,10 @@ impl CType {
             TyName::Str => CType::Str,
             // char 在 C ABI 中以 Unicode 码点（int）表示
             TyName::Char => CType::Int,
+            // byte 是 8 位无符号整数，C ABI 中按 int 表示
+            TyName::Byte => CType::Int,
+            // bytes 在 C ABI 中以字节数（int）表示（仅长度可导出）
+            TyName::Bytes => CType::Int,
             // 泛型类型参数在 DLL 导出时无单一 C 类型，按默认 int 处理
             TyName::Var(_) => CType::Int,
         }
@@ -448,6 +452,26 @@ impl Codegen {
             Expr::BoolLit(..) => Ok(CType::Bool),
             Expr::StrLit(..) => Ok(CType::Str),
             Expr::CharLit(..) => Ok(CType::Int),
+            // 字节类型/切片/type 实例为解释器特性，DLL 构建暂不支持
+            Expr::ByteLit(..) | Expr::BytesLit(..) => Ok(CType::Int),
+            Expr::Slice { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "slicing is not supported in DLL builds",
+                *span,
+                Some("slicing works in interpreted mode only"),
+            )),
+            Expr::MethodCall { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "`type` instance methods are not supported in DLL builds",
+                *span,
+                Some("`type` instances work in interpreted mode only"),
+            )),
+            Expr::New { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "`type` instances are not supported in DLL builds",
+                *span,
+                Some("`type` instances work in interpreted mode only"),
+            )),
             Expr::Ident { name, span } => vt.get(name).copied().ok_or_else(|| {
                 self.zerr(
                     codes::UNDEFINED,
@@ -780,7 +804,7 @@ impl Codegen {
                 }
                 Ok(())
             }
-            Stmt::VarDecl { name, ty, init, span } => {
+            Stmt::VarDecl { name, ty, init, span, .. } => {
                 let annot = CType::from_annot(ty.clone());
                 if let Some(e) = init {
                     let (t, code) = self.gen_expr(e, ctx)?;
@@ -1055,6 +1079,29 @@ impl Codegen {
             Expr::StrLit(s, _) => Ok((CType::Str, c_str_lit(s))),
             // 字符字面量在 C 中按 Unicode 码点（int）表示
             Expr::CharLit(c, _) => Ok((CType::Int, format!("0x{:X}", *c as u32))),
+            // 字节字面量在 C 中按无符号 8 位整数值（int）表示
+            Expr::ByteLit(b, _) => Ok((CType::Int, format!("{}u", b))),
+            // 字节序列字面量在 C 中以字节数（int）表示
+            Expr::BytesLit(items, _) => Ok((CType::Int, format!("{}", items.len()))),
+            // 切片/type 实例为解释器特性，DLL 构建暂不支持
+            Expr::Slice { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "slicing is not supported in DLL builds",
+                *span,
+                Some("slicing works in interpreted mode only"),
+            )),
+            Expr::MethodCall { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "`type` instance methods are not supported in DLL builds",
+                *span,
+                Some("`type` instances work in interpreted mode only"),
+            )),
+            Expr::New { span, .. } => Err(self.zerr(
+                codes::NOT_IMPLEMENTED,
+                "`type` instances are not supported in DLL builds",
+                *span,
+                Some("`type` instances work in interpreted mode only"),
+            )),
             Expr::Ident { name, span } => match ctx.var_types.get(name) {
                 Some(t) => Ok((*t, name.clone())),
                 None => Err(self.zerr(
@@ -1333,6 +1380,9 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::Throw { span, .. }
         | Stmt::Label { span, .. }
         | Stmt::Goto { span, .. }
-        | Stmt::MacroDef { span, .. } => *span,
+        | Stmt::MacroDef { span, .. }
+        | Stmt::With { span, .. }
+        | Stmt::TypeDef { span, .. }
+        | Stmt::FieldAssign { span, .. } => *span,
     }
 }

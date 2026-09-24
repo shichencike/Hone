@@ -14,6 +14,10 @@ pub enum Tok {
     CharLit(char),
     /// 插值字符串 f"..."：携带已拆分的片段（文字段 / 代码段原始文本），由 parser 子解析代码段
     FStr(Vec<FStrPart>),
+    /// 字节字面量 0b01000001：单个 byte（0-255，词法层校验最多 8 位）
+    ByteLit(u8),
+    /// 字节序列字面量 b"..."：bytes 类型（转义 \n \t \r \\ \" \xNN；非 ASCII 按 UTF-8 编码）
+    BytesLit(Vec<u8>),
     // 关键字
     Fn,
     If,
@@ -55,12 +59,22 @@ pub enum Tok {
     Goto,
     // 宏定义：`macro NAME(参数) => 表达式;` / `macro NAME(参数) { 语句 }`
     Macro,
+    // 上下文管理器：with expr [as r] { ... }（__enter__/__exit__ 协议）
+    With,
+    // type 实例类：type 名称 [extends 父类] { 字段; fn 方法(self, ...) {} }；new 构造；extends 继承
+    Type,
+    New,
+    Extends,
+    // 只读修饰符：readonly 变量 / 参数 / struct 字段（禁止重新赋值）
+    Readonly,
     // 类型关键字
     TInt,
     TFloat,
     TBool,
     TStr,
     TChar,
+    TByte,
+    TBytes,
     // 运算符与符号
     Plus,
     Minus,
@@ -158,6 +172,15 @@ impl Tok {
             Tok::TBool => "type `bool`".into(),
             Tok::TStr => "type `str`".into(),
             Tok::TChar => "type `char`".into(),
+            Tok::TByte => "type `byte`".into(),
+            Tok::TBytes => "type `bytes`".into(),
+            Tok::With => "`with`".into(),
+            Tok::Type => "`type`".into(),
+            Tok::New => "`new`".into(),
+            Tok::Extends => "`extends`".into(),
+            Tok::Readonly => "`readonly`".into(),
+            Tok::ByteLit(_) => "byte literal".to_string(),
+            Tok::BytesLit(_) => "bytes literal".to_string(),
             Tok::Plus => "`+`".into(),
             Tok::Minus => "`-`".into(),
             Tok::Star => "`*`".into(),
@@ -395,22 +418,33 @@ impl Lexer {
                 "await" => Tok::Await,
                 "goto" => Tok::Goto,
                 "macro" => Tok::Macro,
+                "with" => Tok::With,
+                "type" => Tok::Type,
+                "new" => Tok::New,
+                "extends" => Tok::Extends,
+                "readonly" => Tok::Readonly,
                 "int" => Tok::TInt,
                 "float" => Tok::TFloat,
                 "bool" => Tok::TBool,
                 "str" => Tok::TStr,
                 "char" => Tok::TChar,
+                "byte" => Tok::TByte,
+                "bytes" => Tok::TBytes,
                 _ => {
                     // 标识符恰好为 `f` 且紧跟引号 → 插值字符串 f"..."
                     if s == "f" && self.peek() == Some('"') {
                         return self.lex_fstring();
+                    }
+                    // 标识符恰好为 `b` 且紧跟引号 → 字节序列字面量 b"..."
+                    if s == "b" && self.peek() == Some('"') {
+                        return self.lex_bytes();
                     }
                     Tok::Ident(s)
                 }
             });
         }
 
-        // 数字字面量（整数 / 浮点数）
+        // 数字字面量（整数 / 浮点数 / 0b 二进制字节）
         if c.is_ascii_digit() || (c == '.' && self.peek2().map_or(false, |d| d.is_ascii_digit())) {
             return self.lex_number();
         }
@@ -632,6 +666,40 @@ impl Lexer {
     }
 
     fn lex_number(&mut self) -> Result<Tok, ZError> {
+        // 二进制字节字面量 0b01000001：byte 类型（0-255），最多 8 位，超位报错
+        if self.peek() == Some('0') && self.peek2() == Some('b') {
+            self.bump();
+            self.bump();
+            let mut bits = 0usize;
+            let mut val: u8 = 0;
+            while let Some(c) = self.peek() {
+                if c == '0' || c == '1' {
+                    if bits >= 8 {
+                        return Err(self.err(
+                            crate::error::codes::SYNTAX,
+                            format!("byte literal `0b{}` has {} bits (max 8)", val, bits + 1),
+                            1,
+                            Some("a `byte` literal is at most 8 bits, e.g. `0b11111111`; use `int` literals for larger values"),
+                        ));
+                    }
+                    val = val.wrapping_shl(1) | c as u8 - b'0';
+                    bits += 1;
+                    self.bump();
+                } else {
+                    break;
+                }
+            }
+            if bits == 0 {
+                return Err(self.err(
+                    crate::error::codes::SYNTAX,
+                    "byte literal `0b` is empty",
+                    2,
+                    Some("write at least one binary digit, e.g. `0b1001`"),
+                ));
+            }
+            return Ok(Tok::ByteLit(val));
+        }
+
         let mut is_float = false;
         let mut text = String::new();
 
@@ -862,6 +930,114 @@ impl Lexer {
             ));
         }
         Ok(Tok::CharLit(c))
+    }
+
+    /// 词法分析字节序列字面量 b"..."。调用前已消费 `b`，此处消费开头的 `"`。
+    /// 支持转义 \n \t \r \\ \" 与 \xNN（单字节十六进制）；非 ASCII 字符按 UTF-8 编码入字节序列。
+    fn lex_bytes(&mut self) -> Result<Tok, ZError> {
+        self.bump(); // 开头的 "
+        let mut bytes: Vec<u8> = Vec::new();
+        loop {
+            match self.peek() {
+                None => {
+                    return Err(self.err(
+                        crate::error::codes::UNTERMINATED_STRING,
+                        "unterminated bytes literal",
+                        1,
+                        Some("close the bytes literal with `\"`"),
+                    ));
+                }
+                Some('\n') => {
+                    return Err(self.err(
+                        crate::error::codes::UNTERMINATED_STRING,
+                        "unterminated bytes literal (newline inside literal)",
+                        1,
+                        Some("close the bytes literal before the newline"),
+                    ));
+                }
+                Some('"') => {
+                    self.bump();
+                    break;
+                }
+                Some('\\') => {
+                    self.bump();
+                    match self.peek() {
+                        Some('n') => {
+                            bytes.push(b'\n');
+                            self.bump();
+                        }
+                        Some('t') => {
+                            bytes.push(b'\t');
+                            self.bump();
+                        }
+                        Some('r') => {
+                            bytes.push(b'\r');
+                            self.bump();
+                        }
+                        Some('\\') => {
+                            bytes.push(b'\\');
+                            self.bump();
+                        }
+                        Some('"') => {
+                            bytes.push(b'"');
+                            self.bump();
+                        }
+                        Some('x') => {
+                            self.bump();
+                            let h1 = self.peek().and_then(|c| c.to_digit(16)).ok_or_else(|| {
+                                self.err(
+                                    crate::error::codes::SYNTAX,
+                                    "invalid escape sequence `\\x` in bytes literal",
+                                    2,
+                                    Some("expected two hex digits after `\\x`, e.g. `\\x41`"),
+                                )
+                            })?;
+                            let h1c = self.peek().unwrap();
+                            self.bump();
+                            let h2 = self.peek().and_then(|c| c.to_digit(16)).ok_or_else(|| {
+                                self.err(
+                                    crate::error::codes::SYNTAX,
+                                    format!("invalid escape sequence `\\x{}` in bytes literal", h1c),
+                                    3,
+                                    Some("expected two hex digits after `\\x`, e.g. `\\x41`"),
+                                )
+                            })?;
+                            let h2c = self.peek().unwrap();
+                            self.bump();
+                            bytes.push((h1 << 4 | h2) as u8);
+                            let _ = h2c;
+                        }
+                        Some(c) => {
+                            return Err(self.err(
+                                crate::error::codes::SYNTAX,
+                                format!("invalid escape sequence `\\{}` in bytes literal", c),
+                                2,
+                                Some("supported escapes: \\n \\t \\r \\\\ \\\" \\xNN"),
+                            ));
+                        }
+                        None => {
+                            return Err(self.err(
+                                crate::error::codes::UNTERMINATED_STRING,
+                                "unterminated bytes literal",
+                                1,
+                                Some("close the bytes literal with `\"`"),
+                            ));
+                        }
+                    }
+                }
+                Some(c) => {
+                    if (c as u32) < 0x80 {
+                        bytes.push(c as u8);
+                    } else {
+                        // 非 ASCII 字符按 UTF-8 编码
+                        let mut buf = [0u8; 4];
+                        bytes.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+                    }
+                    self.bump();
+                }
+            }
+        }
+        Ok(Tok::BytesLit(bytes))
     }
 
     /// 词法分析三引号原始字符串 """..."""。调用前已确认当前字符为 `"` 且后随 `""`。

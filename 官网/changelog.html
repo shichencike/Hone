@@ -37,13 +37,46 @@ function toggleTheme(){
     <a href="download.html" data-page-node-id="GGejq1kH1dLsQclPGD7QnV">下载</a>
     <a href="perf.html" data-page-node-id="UKdgsmsYKMKg43JtTK2O6E">性能</a>
   </nav>
-  <span class="ver" data-page-node-id="LikLmPQ9RSurJAcYWZuTEN">v0.7.11</span>
+  <span class="ver" data-page-node-id="LikLmPQ9RSurJAcYWZuTEN">v0.7.12</span>
   <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题" data-page-node-id="WEx94CCw03PidBHzNHbFGx"><span class="ti-light" data-page-node-id="IP4wnB3QN9CCKbzSKc52fP">☀️</span><span class="ti-dark" data-page-node-id="81CEyz5g22CwaoiLa8ktNO">🌙</span></button>
 </header>
 
 <main data-page-node-id="S5n0baL82z8XcBIB7QMbLi">
   <h2 data-page-node-id="dqfn6Mtk3SwzERFGpCYrEL"><span class="hash" data-page-node-id="8QvTG0jkBOeOvYLOlyBl7Z">#</span>更新日志</h2>
   <p data-page-node-id="GZzQ7Eq0mroA1hUsKZqlsi">各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md" data-page-node-id="tn2LZztCXhsACyFmGFobev">GitHub</a>。</p>
+
+  <div class="release">
+    <span class="ver-tag">v0.7.12</span><span class="date">2026-09-25</span>
+    <h4>新增</h4>
+    <ul>
+      <li><strong>with 上下文管理器</strong>：<code>with expr as r { ... }</code>，进入时调 <code>__enter__()</code>（返回值绑定 <code>r</code>，仅块内可见），退出时（<strong>含报错路径</strong>）必调 <code>__exit__()</code>，错误不被吞。与 try/catch 正交：块内 throw 先执行 <code>__exit__</code> 再向外传播（完整示例：<code>examples/with_type_demo.hn</code>）</li>
+      <li><strong>type 实例类</strong>：<code>type 名称 [extends 父类] { 字段: 类型, ...; fn 方法(self, ...) { ... } };</code>，带方法、继承与构造器的实例类
+        <ul>
+          <li>所有方法（含 <code>init</code>/<code>__enter__</code>/<code>__exit__</code>）必须把 <code>self</code> 作为<strong>显式首参</strong>，调用 <code>obj.method(...)</code> 时自动填充实例</li>
+          <li>构造 <code>new Type(实参...)</code>：实参绑定 <code>init</code> 的参数（去掉 self）；无 <code>init</code> 时按<strong>继承链字段顺序</strong>（父类在前）绑定</li>
+          <li>字段引用语义：方法体内 <code>self.f = x</code> 的写入对调用方实例立即可见</li>
+          <li><code>readonly</code> 字段两种写法等价：<code>readonly f: int</code> / <code>f: readonly int</code>；与 struct（纯数据 dict，位置构造）互补</li>
+        </ul>
+      </li>
+      <li><strong>byte / bytes 字节类型</strong>
+        <ul>
+          <li><code>byte</code>：8 位无符号值，字面量 <code>0b1010001</code> 或 <code>byte(int)</code> 显式转换（越界报错）；与 int 严格隔离（无隐式转换），<code>to_int(b)</code> / <code>char(b)</code> 回转</li>
+          <li><code>bytes</code>：字节序列，字面量 <code>b"abc"</code>；支持 <code>len</code> / 索引（取 byte）/ 切片 / <code>+</code> 拼接 / <code>==</code> / for-in 迭代</li>
+          <li>内置函数 <code>byte</code> / <code>to_bytes(s, enc?)</code>（默认 utf-8、支持 latin-1；int 列表 → bytes）/ <code>hex</code> / <code>unhex</code>；谓词 <code>is_byte</code> / <code>is_bytes</code>；<code>type_of</code> 返回 <code>byte</code> / <code>bytes</code></li>
+          <li>JSON 序列化对 byte/bytes/type 实例明确报错（提示先转 str/hex 或组 dict）</li>
+        </ul>
+      </li>
+      <li><strong>readonly 只读修饰</strong>：只读变量 <code>readonly int x = 5;</code>（与 <code>x : readonly int = 5;</code> 等价）、只读参数 <code>fn f(readonly int y) { ... }</code>、struct/type 只读字段（静态拦截 + 运行时兜底）</li>
+      <li><strong>切片</strong>：<code>a[i:j]</code>（list / bytes；任一端点可省略 <code>a[i:]</code> / <code>a[:j]</code>），与 <code>a[i]</code> 索引同位置可链式（str 暂不支持切片）</li>
+    </ul>
+    <h4>变更</h4>
+    <ul>
+      <li>字段赋值 <code>obj.f = v</code>：<code>+=</code>/<code>-=</code>/<code>*=</code>/<code>/=</code>/<code>%=</code> 复合赋值在 AST 层展开为 <code>obj.f = obj.f op v</code>（各后端统一只见普通字段赋值）</li>
+      <li>解释器 <code>Value</code> 新增 <code>Byte(u8)</code> / <code>Bytes(Vec&lt;u8&gt;)</code> / <code>TypeInst</code> 变体；struct 字段表记录 readonly 标志</li>
+      <li>AOT（<code>build --exe -c</code>）/ VM（<code>--vm</code>）/ DLL（<code>build --dll</code>）：type 实例、with、字段赋值、字节字面量为解释器特性，按既有"不支持即报 H999"模式兜底（goto 在 AOT 的同一处理方式）</li>
+      <li>新增示例 <code>examples/byte_demo.hn</code>、<code>examples/with_type_demo.hn</code>；文档与官网同步（语言参考 §3/§7.5/§7.11、示例页 4.9）</li>
+    </ul>
+  </div>
 
   <div class="release" data-page-node-id="qDUhs5x0SnRFBPb50OOpa3">
     <span class="ver-tag" data-page-node-id="FudSZxREKPnMSaSxoG8by8">v0.7.11</span><span class="date" data-page-node-id="nN2TUiAkgz2j8bPaPN9pqH">2026-09-13</span>
@@ -586,7 +619,7 @@ function toggleTheme(){
     <a href="about.html" data-page-node-id="kDGEa298K0tIO2ySc3V8h6">关于</a>
     <a href="https://github.com/shichencike/Hone" data-page-node-id="6AMOmHnRFK3Hd9zAPu8oUS">GitHub</a>
   </div>
-  Hone v0.7.11 · MIT License · <span class="sword" data-page-node-id="z7Z0UzfmJGc7vovXnwzypN">🗡️</span> Hone – 为效率而生，为乐趣而造
+  Hone v0.7.12 · MIT License · <span class="sword" data-page-node-id="z7Z0UzfmJGc7vovXnwzypN">🗡️</span> Hone – 为效率而生，为乐趣而造
 </footer>
 </body>
 </html>

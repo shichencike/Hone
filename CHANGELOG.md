@@ -1,5 +1,45 @@
 # Changelog
 
+## [v0.7.12] - 2026-09-25
+
+### 新增
+- **with 上下文管理器**：`with expr as r { ... }`，进入时调 `__enter__()`
+  （返回值绑定 `r`，仅块内可见），退出时（**含报错路径**）必调 `__exit__()`，错误不被吞
+  - 与 try/catch 正交：块内 throw 会先执行 `__exit__` 再向外传播
+  - 示例 `examples/with_type_demo.hn`
+- **type 实例类**：`type 名称 [extends 父类] { 字段: 类型, ...; fn 方法(self, ...) { ... } };`
+  - 所有方法（含 `init`/`__enter__`/`__exit__`）必须把 `self` 作为**显式首参**，调用自动填充实例
+  - 构造 `new Type(实参...)`：实参绑定 `init` 的参数（去掉 self）；无 `init` 时按
+    **继承链字段顺序**（父类在前）绑定
+  - 字段引用语义：方法体内 `self.f = x` 的写入对调用方实例立即可见
+  - `extends` 继承字段与方法；`readonly` 字段两种写法等价：`readonly f: int` / `f: readonly int`
+  - 与 `struct`（纯数据 dict，位置构造）互补：type 提供方法、继承与构造器
+  - 示例 `examples/with_type_demo.hn`
+- **byte / bytes 字节类型**
+  - `byte`：8 位无符号值，字面量 `0b1010001` 或 `byte(int)` 显式转换（越界报错）；
+    与 int 严格隔离（无隐式转换），`to_int(b)` / `char(b)` 回转
+  - `bytes`：字节序列，字面量 `b"abc"`；支持 `len` / 索引（取 byte）/ 切片 / `+` 拼接 /
+    `==` / 迭代；`hex(b)` / `unhex(s)` / `to_bytes(str, enc?)`（默认 utf-8，支持 latin-1）/
+    `to_str(bytes, enc?)` / `to_bytes([int...])`
+  - 新增谓词 `is_byte` / `is_bytes`；`type_of` 返回 `byte` / `bytes`
+  - JSON 序列化对 byte/bytes/type 实例明确报错（提示先转 str/hex 或组 dict）
+  - 示例 `examples/byte_demo.hn`
+- **readonly 只读修饰**
+  - 只读变量 `readonly int x = 5;`（两种写法等价：`x : readonly int = 5;`）
+  - 只读参数 `fn f(readonly int y) { ... }`
+  - struct 只读字段、type 只读字段（静态拦截 + 运行时兜底）
+- **切片**：`a[i:j]`（list / bytes；任一端点可省略：`a[i:]` / `a[:j]`），
+  与 `a[i]` 索引同位置可链式（str 暂不支持切片，按码点用 `char_at` 逐字符取）
+
+### 变更
+- 字段赋值 `obj.f = v`：`+`/`-`/`*`/`/`/`%` 复合赋值在 AST 层展开为
+  `obj.f = obj.f op v`（各后端统一只见普通字段赋值）
+- 解释器 `Value` 新增 `Byte(u8)` / `Bytes(Vec<u8>)` / `TypeInst` 变体；
+  struct 字段表记录 readonly 标志
+- AOT（`build --exe -c`）/ VM（`--vm`）/ DLL（`build --dll`）：type 实例、with、
+  字段赋值、字节字面量为解释器特性，按既有"不支持即报 H999"模式兜底
+  （goto 在 AOT 的同一处理方式）
+
 ## [v0.7.11] - 2026-09-13
 
 ### 新增

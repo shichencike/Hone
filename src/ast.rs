@@ -37,12 +37,21 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
+    /// 字段赋值：p.f = x;  target 为字段链表达式（如 p.f、p.a.b），基变量为链底 Ident。
+    /// struct 实例（dict 表示）按字段名写回；type 实例按实例字段表写回；readonly 字段报错。
+    FieldAssign {
+        target: Expr,
+        value: Expr,
+        span: Span,
+    },
     /// 显式类型声明：int x = 10; / x : int = 10; / x : int;
+    /// readonly int x = 5; 只读变量：声明后不可重新赋值（含复合赋值/自增自减）。
     VarDecl {
         name: String,
         ty: TyName,
         init: Option<Expr>,
         span: Span,
+        readonly: bool,
     },
     /// 裸代码块 { ... }
     Block {
@@ -176,10 +185,12 @@ pub enum Stmt {
         value: Expr,
         span: Span,
     },
-    /// struct 名称 { 字段: 类型, ... };  结构体定义（数据形态声明，构造 = 名称(字段...)）
+    /// struct 名称 { [readonly] 字段: 类型, ... };  结构体定义（数据形态声明，构造 = 名称(字段...)）
+    /// 字段 readonly：构造后不可再写（p.f = x 报错），两种写法等价：`readonly f: int` / `f: readonly int`
     StructDef {
         name: String,
-        fields: Vec<(String, TyName)>,
+        /// (字段名, 类型, 是否只读)
+        fields: Vec<(String, TyName, bool)>,
         span: Span,
     },
     /// class 名称 { fn 方法(...) {...} ... }  类定义。
@@ -206,6 +217,32 @@ pub enum Stmt {
         params: Vec<Param>,
         ret: Option<TyName>,
         body: Vec<Stmt>,
+        span: Span,
+    },
+    /// with 上下文管理器：with expr [as r] { ... }
+    /// 进入时调 target 的 `__enter__()`（其返回值绑定 r，r 仅块内可见），
+    /// 退出时（含报错）必调 `__exit__()` 清理；__exit__ 不能吞掉块内错误。
+    /// 协议按鸭子类型查找：type 实例走 类型.__enter__(实例)；内置 Ptr 句柄（如 sqlite）运行时特判。
+    With {
+        target: Box<Expr>,
+        /// `as r` 绑定的变量名（None = 只走协议不绑定）
+        var: Option<String>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
+    /// type 实例类定义：type 名称 [extends 父类] { [readonly] 字段: 类型; fn 方法(self, ...) { ... } }
+    /// 与 struct 的区别：带行为（方法）；与 class 的区别：class 是静态命名空间（无实例），
+    /// type 有实例对象（new 构造）。方法首参约定为 self（显式首参，调用时自动填充实例）；
+    /// 特殊方法 init(参数...)：构造时自动调用，不允许 return 值。
+    /// 继承：单继承（extends），字段/方法沿继承链合并，子类方法覆盖父类。
+    TypeDef {
+        name: String,
+        /// 父类型名（单继承；None = 根类型）
+        base: Option<String>,
+        /// (字段名, 类型, 是否只读)；继承合并时同名子类覆盖父类
+        fields: Vec<(String, TyName, bool)>,
+        /// 方法（每个元素为 FnDef，首参名为 self）
+        methods: Vec<Stmt>,
         span: Span,
     },
     /// 标签定义：`label NAME;` 或 `NAME:`（作为位置标记，供同函数内的 `goto` 跳转）。
@@ -256,6 +293,8 @@ pub struct Param {
     /// 默认参数值：fn f(a = 10, b = "x")  调用时可省略尾部实参。
     /// 默认表达式在调用时求值，可引用其前面的参数（如 b = a * 2）。
     pub default: Option<Expr>,
+    /// 只读参数：`fn f(x: readonly int)` 体内不可重新赋值
+    pub readonly: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -265,6 +304,10 @@ pub enum TyName {
     Bool,
     Str,
     Char,
+    /// 单个字节值（0-255），字面量 `0b01000001`；与 int 严格隔离
+    Byte,
+    /// 字节序列，字面量 `b"..."`
+    Bytes,
     /// 泛型类型参数引用（fn name[T] 中的 T，注解写 `x: T`）
     Var(String),
 }
@@ -330,6 +373,10 @@ pub enum Expr {
     StrLit(String, Span),
     /// 字符字面量 'a'（词法层已校验恰好一个 Unicode 字符）
     CharLit(char, Span),
+    /// 字节字面量 0b01000001（词法层已校验最多 8 位，值域 0-255）
+    ByteLit(u8, Span),
+    /// 字节序列字面量 b"..."
+    BytesLit(Vec<u8>, Span),
     /// 标识符；模块函数经点号合并为完整名（如 "time.now"）
     Ident { name: String, span: Span },
     /// 列表字面量 [a, b, c]
@@ -364,6 +411,14 @@ pub enum Expr {
     OptionalField { obj: Box<Expr>, field: String, span: Span },
     /// 索引访问：a[i]（列表按下标取元素；下标越界/非列表在运行时报错）
     Index { obj: Box<Expr>, index: Box<Expr>, span: Span },
+    /// 切片访问：a[i:j]（半开区间 [i, j)；端点可省略 a[:j] / a[i:] / a[:]；越界自动截断不报错）
+    /// list 返回 list 副本；bytes 返回 bytes 副本
+    Slice {
+        obj: Box<Expr>,
+        lo: Option<Box<Expr>>,
+        hi: Option<Box<Expr>>,
+        span: Span,
+    },
     Unary { op: UnOp, expr: Box<Expr>, span: Span },
     Binary { op: BinOp, lhs: Box<Expr>, rhs: Box<Expr>, span: Span },
     Call { callee: String, args: Vec<Expr>, span: Span },
@@ -372,6 +427,20 @@ pub enum Expr {
     Match {
         value: Box<Expr>,
         arms: Vec<(Pattern, Expr)>,
+        span: Span,
+    },
+    /// 实例方法调用：obj.method(arg, ...)（receiver 为任意表达式，如 a[i].m()、new T(1).m()）
+    /// 求值：receiver 须为 type 实例；方法按 类型.method 沿继承链查找，实例自动作为首参（self）传入
+    MethodCall {
+        obj: Box<Expr>,
+        name: String,
+        args: Vec<Expr>,
+        span: Span,
+    },
+    /// 实例构造：new Type(arg, ...)（Type 须为已定义的 type；自动调用 init 方法）
+    New {
+        ty: String,
+        args: Vec<Expr>,
         span: Span,
     },
     /// 自增/自减表达式：i++ / i-- / ++i / --i（仅作用于已声明的变量名）
@@ -510,6 +579,8 @@ pub fn expr_span(e: &Expr) -> Span {
         | Expr::BoolLit(_, s)
         | Expr::StrLit(_, s)
         | Expr::CharLit(_, s)
+        | Expr::ByteLit(_, s)
+        | Expr::BytesLit(_, s)
         | Expr::ListLit(_, s)
         | Expr::DictLit(_, s)
         | Expr::ListComp { span: s, .. }
@@ -519,10 +590,13 @@ pub fn expr_span(e: &Expr) -> Span {
         | Expr::Field { span: s, .. }
         | Expr::OptionalField { span: s, .. }
         | Expr::Index { span: s, .. }
+        | Expr::Slice { span: s, .. }
         | Expr::Call { span: s, .. }
         | Expr::Unary { span: s, .. }
         | Expr::Binary { span: s, .. }
         | Expr::Match { span: s, .. }
+        | Expr::MethodCall { span: s, .. }
+        | Expr::New { span: s, .. }
         | Expr::IncDec { span: s, .. }
         | Expr::Ternary { span: s, .. }
         | Expr::Lambda { span: s, .. }
@@ -538,6 +612,7 @@ impl Stmt {
             | Stmt::IndexAssign { span, .. }
             | Stmt::DestructAssign { span, .. }
             | Stmt::AssignOp { span, .. }
+            | Stmt::FieldAssign { span, .. }
             | Stmt::VarDecl { span, .. }
             | Stmt::Block { span, .. }
             | Stmt::If { span, .. }
@@ -563,6 +638,8 @@ impl Stmt {
             | Stmt::StructDef { span, .. }
             | Stmt::ClassDef { span, .. }
             | Stmt::EnumDef { span, .. }
+            | Stmt::TypeDef { span, .. }
+            | Stmt::With { span, .. }
             | Stmt::AsyncFnDef { span, .. }
             | Stmt::Label { span, .. }
             | Stmt::Goto { span, .. }

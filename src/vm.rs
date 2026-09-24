@@ -333,7 +333,16 @@ impl Compiler {
                 }
                 Stmt::StructDef { name, fields, .. } => {
                     self.struct_defs
-                        .insert(name.clone(), fields.iter().map(|(n, _)| n.clone()).collect());
+                        .insert(name.clone(), fields.iter().map(|(n, _, _)| n.clone()).collect());
+                }
+                // type 实例类：注册成员方法（「类型名.方法名」限定键），供运行时解析
+                Stmt::TypeDef { name, methods, .. } => {
+                    for m in methods {
+                        if let Stmt::FnDef { name: mf_name, params: mf_params, body: mf_body, .. } = m {
+                            let fname = format!("{}.{}", name, mf_name);
+                            self.compile_fn(&fname, mf_params, mf_body);
+                        }
+                    }
                 }
                 Stmt::EnumDef { name, variants, .. } => {
                     let vs: Vec<(String, usize)> = variants
@@ -359,6 +368,7 @@ impl Compiler {
                 Stmt::FnDef { .. }
                 | Stmt::AsyncFnDef { .. }
                 | Stmt::ClassDef { .. }
+                | Stmt::TypeDef { .. }
                 | Stmt::StructDef { .. }
                 | Stmt::EnumDef { .. }
                 | Stmt::Alias { .. }
@@ -732,6 +742,12 @@ impl Compiler {
             }
             // 宏定义：已由预处理阶段展开并从 AST 移除（仅为穷尽匹配）
             Stmt::MacroDef { .. } => {}
+            // with 上下文管理器 / 字段赋值 / type 定义：VM 暂不支持，解释器兜底
+            Stmt::With { .. } => self.fail(codes::NOT_IMPLEMENTED, "VM: `with` 上下文管理器暂不支持"),
+            Stmt::FieldAssign { .. } => self.fail(codes::NOT_IMPLEMENTED, "VM: 字段赋值 `obj.field = x` 暂不支持"),
+            Stmt::TypeDef { .. } => {
+                // type 定义已由 compile 阶段注册方法（仅穷尽匹配）
+            }
             Stmt::DebugPrint { expr, .. } => {
                 let r = self.compile_expr(expr);
                 self.emit(Instr::DebugPrint(r));
@@ -853,6 +869,27 @@ impl Compiler {
                 let r = self.tmp();
                 self.emit(Instr::LoadK(r, k));
                 r
+            }
+            // 字节类型/切片/type 实例为解释器特性，VM 暂不支持（fail 兜底）
+            Expr::ByteLit(_, _) => {
+                self.fail(codes::NOT_IMPLEMENTED, "VM: `byte` 字面量暂不支持");
+                0
+            }
+            Expr::BytesLit(_, _) => {
+                self.fail(codes::NOT_IMPLEMENTED, "VM: `bytes` 字面量暂不支持");
+                0
+            }
+            Expr::Slice { .. } => {
+                self.fail(codes::NOT_IMPLEMENTED, "VM: 切片 `a[i:j]` 暂不支持");
+                0
+            }
+            Expr::MethodCall { .. } => {
+                self.fail(codes::NOT_IMPLEMENTED, "VM: `type` 实例方法暂不支持");
+                0
+            }
+            Expr::New { .. } => {
+                self.fail(codes::NOT_IMPLEMENTED, "VM: `type` 实例暂不支持");
+                0
             }
             Expr::Ident { name, .. } => match self.lookup(name) {
                 Some(r) => r,
@@ -2382,6 +2419,23 @@ fn value_to_str(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Str(s) => s.clone(),
         Value::Char(c) => c.to_string(),
+        // 字节值 / 字节序列：以十六进制表示（与解释器 display 风格一致）
+        Value::Byte(b) => format!("0x{:02x}", b),
+        Value::Bytes(items) => {
+            let s: String = items.iter().map(|b| format!("{:02x}", b)).collect();
+            format!("b\"{}\"", s)
+        }
+        // type 实例：Type(field: value, ...)
+        Value::TypeInst(inst) => {
+            let parts: Vec<String> = inst
+                .fields
+                .read()
+                .unwrap()
+                .iter()
+                .map(|(k, v)| format!("{}: {}", k, value_to_str(v)))
+                .collect();
+            format!("{}({})", inst.ty, parts.join(", "))
+        }
         Value::Null => "null".to_string(),
         Value::List(l) => {
             let parts: Vec<String> = l.iter().map(value_to_str).collect();

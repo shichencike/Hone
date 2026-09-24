@@ -69,6 +69,28 @@ struct SseConn {
 static SSE_CONNS: LazyLock<Mutex<HashMap<i64, SseConn>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 static SSE_NEXT_ID: AtomicI64 = AtomicI64::new(1);
 
+/// with 上下文管理器：内置句柄资源表（句柄 id → 资源类型）。
+/// 退出时由 `with_close` 派发对应的 close（sqlite.close / http.sse_close）。
+/// 仅对「真实句柄」生效——非句柄的普通整数不在此表中，with 退出时静默通过。
+static WITH_RES: LazyLock<Mutex<HashMap<i64, &'static str>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// 登记一个内置句柄为 with 管理的资源（open 时调用）。
+pub fn with_register(id: i64, kind: &'static str) {
+    WITH_RES.lock().unwrap().insert(id, kind);
+}
+
+/// with 退出时关闭内置句柄资源：按真实注册表派发 close，返回是否实际关闭。
+/// 非句柄（不在表中）或已关闭 → 返回 false，不报错。
+pub fn with_close(id: i64) -> bool {
+    let kind = { WITH_RES.lock().unwrap().remove(&id) };
+    let Some(kind) = kind else { return false };
+    match kind {
+        "sqlite" => crate::sqlitemod::with_close_sqlite(id),
+        "sse" => SSE_CONNS.lock().unwrap().remove(&id).is_some(),
+        _ => false,
+    }
+}
+
 /// --resume 持久化目标：(状态文件路径, 脚本内容哈希)。启用后 db.set 自动落盘。
 static STATE_FILE: Mutex<Option<(PathBuf, String)>> = Mutex::new(None);
 
@@ -203,6 +225,8 @@ pub fn is_builtin(name: &str) -> bool {
             | "is_list"
             | "is_dict"
             | "is_null"
+            | "is_byte"
+            | "is_bytes"
             | "type_of"
             | "assert"
             | "assert_eq"
@@ -217,6 +241,10 @@ pub fn is_builtin(name: &str) -> bool {
             | "char_is_digit"
             | "char_is_alpha"
             | "char_is_space"
+            | "byte"
+            | "to_bytes"
+            | "hex"
+            | "unhex"
             | "input"
             | "read_int"
             | "read_float"
@@ -403,13 +431,14 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 Value::Str(s) => Ok(Value::Int(s.len() as i64)),
                 Value::List(items) => Ok(Value::Int(items.len() as i64)),
                 Value::Dict(entries) => Ok(Value::Int(entries.len() as i64)),
+                Value::Bytes(b) => Ok(Value::Int(b.len() as i64)),
                 other => Err(err(
                     codes::TYPE_MISMATCH,
-                    format!("`len` expects a string, list, or dict, got `{}`", other.type_name()),
+                    format!("`len` expects a string, list, dict, or bytes, got `{}`", other.type_name()),
                     span,
                     file,
                     src,
-                    Some("`len` returns the byte length of a string, or the element count of a list/dict"),
+                    Some("`len` returns the byte length of a string/bytes, or the element count of a list/dict"),
                 )),
             }
         }
@@ -609,6 +638,14 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             Ok(Value::Bool(matches!(v, Value::Null)))
         }
+        "is_byte" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            Ok(Value::Bool(matches!(v, Value::Byte(_))))
+        }
+        "is_bytes" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            Ok(Value::Bool(matches!(v, Value::Bytes(_))))
+        }
         "to_str" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             match v {
@@ -618,7 +655,65 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 Value::Str(s) => Ok(Value::Str(s.clone())),
                 // char 转单字符字符串
                 Value::Char(c) => Ok(Value::Str(c.to_string())),
-                Value::List(_) | Value::Dict(_) | Value::Lambda(_) | Value::Enum(_) | Value::Future(_) => Ok(Value::Str(v.display())),
+                // 字节/字节序列按编码转字符串：to_str(b, "utf-8"|"ascii"|"latin-1")，默认 utf-8
+                Value::Byte(_) | Value::Bytes(_) => {
+                    let bytes: Vec<u8> = match v {
+                        Value::Byte(b) => vec![*b],
+                        Value::Bytes(b) => b.clone(),
+                        _ => unreachable!(),
+                    };
+                    let enc = match args.get(1) {
+                        Some(Value::Str(s)) => s.as_str(),
+                        Some(other) => {
+                            return Err(err(
+                                codes::TYPE_MISMATCH,
+                                format!("`to_str` encoding must be a `str`, got `{}`", other.type_name()),
+                                span,
+                                file,
+                                src,
+                                Some("supported encodings: `\"utf-8\"` (default), `\"ascii\"`, `\"latin-1\"`"),
+                            ))
+                        }
+                        None => "utf-8",
+                    };
+                    match enc {
+                        "utf-8" => String::from_utf8(bytes).map(Value::Str).map_err(|_| {
+                            err(
+                                codes::TYPE_MISMATCH,
+                                "cannot decode bytes as `utf-8` (invalid UTF-8)",
+                                span,
+                                file,
+                                src,
+                                Some("pass `\"utf-8\"` (default), `\"ascii\"`, or `\"latin-1\"`"),
+                            )
+                        }),
+                        "ascii" => {
+                            if bytes.iter().any(|b| *b >= 0x80) {
+                                Err(err(
+                                    codes::TYPE_MISMATCH,
+                                    "cannot decode bytes as `ascii` (contains non-ASCII byte)",
+                                    span,
+                                    file,
+                                    src,
+                                    Some("use `\"utf-8\"` or `\"latin-1\"` for non-ASCII bytes"),
+                                ))
+                            } else {
+                                Ok(Value::Str(bytes.iter().map(|b| *b as char).collect()))
+                            }
+                        }
+                        "latin-1" => Ok(Value::Str(bytes.iter().map(|b| char::from(*b).to_string()).collect())),
+                        other => Err(err(
+                            codes::TYPE_MISMATCH,
+                            format!("unknown encoding `{}`", other),
+                            span,
+                            file,
+                            src,
+                            Some("supported encodings: `\"utf-8\"` (default), `\"ascii\"`, `\"latin-1\"`"),
+                        )),
+                    }
+                }
+                Value::List(_) | Value::Dict(_) | Value::Lambda(_) | Value::Enum(_)
+                | Value::Future(_) | Value::TypeInst(_) => Ok(Value::Str(v.display())),
                 Value::Null => Ok(Value::Str("null".to_string())),
             }
         }
@@ -626,6 +721,8 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             match v {
                 Value::Int(i) => Ok(Value::Int(*i)),
+                // byte 显式转 int（byte 与 int 严格隔离，须显式转换）
+                Value::Byte(b) => Ok(Value::Int(*b as i64)),
                 Value::Float(f) => {
                     if f.is_finite() {
                         Ok(Value::Int(f.trunc() as i64))
@@ -718,6 +815,8 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "char" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             match v {
+                // byte（0-255）是合法 ASCII 码点，直接转 char
+                Value::Byte(b) => Ok(Value::Char(*b as char)),
                 Value::Int(i) => {
                     let u = *i as u32;
                     match char::from_u32(u) {
@@ -769,6 +868,209 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 ));
             }
             Ok(Value::Char(chars[i as usize]))
+        }
+        // ---- byte / bytes 类型内置函数 ----
+        // byte(x)：把 int 显式转 byte（越界报错）
+        "byte" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            match v {
+                Value::Int(i) => {
+                    if *i < 0 || *i > 255 {
+                        Err(err(
+                            codes::TYPE_MISMATCH,
+                            format!("`byte` range is 0..=255, got {}", i),
+                            span,
+                            file,
+                            src,
+                            Some("byte is an 8-bit value; use `int(x)` to convert back"),
+                        ))
+                    } else {
+                        Ok(Value::Byte(*i as u8))
+                    }
+                }
+                Value::Byte(b) => Ok(Value::Byte(*b)),
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`byte` expects an `int` or `byte`, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("convert an `int` (0..=255) to `byte`, e.g. `byte(65)`"),
+                )),
+            }
+        }
+        // to_bytes(s, enc?) / to_bytes(list)：字符串按编码转 bytes，或 int 列表转 bytes
+        "to_bytes" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            match v {
+                Value::Str(s) => {
+                    let enc = match args.get(1) {
+                        Some(Value::Str(e)) => e.as_str(),
+                        Some(other) => {
+                            return Err(err(
+                                codes::TYPE_MISMATCH,
+                                format!("`to_bytes` encoding must be a `str`, got `{}`", other.type_name()),
+                                span,
+                                file,
+                                src,
+                                Some("supported encodings: `\"utf-8\"` (default), `\"ascii\"`, `\"latin-1\"`"),
+                            ))
+                        }
+                        None => "utf-8",
+                    };
+                    match enc {
+                        "utf-8" => Ok(Value::Bytes(s.as_bytes().to_vec())),
+                        "ascii" => {
+                            if s.bytes().any(|b| b >= 0x80) {
+                                Err(err(
+                                    codes::TYPE_MISMATCH,
+                                    "cannot encode str as `ascii` (contains non-ASCII char)",
+                                    span,
+                                    file,
+                                    src,
+                                    Some("use `\"utf-8\"` or `\"latin-1\"` for non-ASCII"),
+                                ))
+                            } else {
+                                Ok(Value::Bytes(s.as_bytes().to_vec()))
+                            }
+                        }
+                        "latin-1" => {
+                            let mut out = Vec::new();
+                            for c in s.chars() {
+                                if (c as u32) > 0xff {
+                                    return Err(err(
+                                        codes::TYPE_MISMATCH,
+                                        "cannot encode str as `latin-1` (char out of range)",
+                                        span,
+                                        file,
+                                        src,
+                                        Some("latin-1 supports U+0000..=U+00FF"),
+                                    ));
+                                }
+                                out.push(c as u32 as u8);
+                            }
+                            Ok(Value::Bytes(out))
+                        }
+                        other => Err(err(
+                            codes::TYPE_MISMATCH,
+                            format!("unknown encoding `{}`", other),
+                            span,
+                            file,
+                            src,
+                            Some("supported encodings: `\"utf-8\"` (default), `\"ascii\"`, `\"latin-1\"`"),
+                        )),
+                    }
+                }
+                Value::List(items) => {
+                    let mut out = Vec::new();
+                    for (i, it) in items.iter().enumerate() {
+                        match it {
+                            Value::Byte(b) => out.push(*b),
+                            Value::Int(x) => {
+                                if *x < 0 || *x > 255 {
+                                    return Err(err(
+                                        codes::TYPE_MISMATCH,
+                                        format!("byte value at index {} out of range 0..=255", i),
+                                        span,
+                                        file,
+                                        src,
+                                        Some("each element must be an `int` 0..=255 or a `byte`"),
+                                    ));
+                                }
+                                out.push(*x as u8);
+                            }
+                            other => {
+                                return Err(err(
+                                    codes::TYPE_MISMATCH,
+                                    format!(
+                                        "`to_bytes` list element at index {} must be `int`/`byte`, got `{}`",
+                                        i,
+                                        other.type_name()
+                                    ),
+                                    span,
+                                    file,
+                                    src,
+                                    Some("pass a list of `int` (0..=255) or `byte` values"),
+                                ))
+                            }
+                        }
+                    }
+                    Ok(Value::Bytes(out))
+                }
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`to_bytes` expects a `str` or `list`, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("encode a `str` (with optional encoding) or a list of ints into bytes"),
+                )),
+            }
+        }
+        // hex(x)：bytes → 十六进制字符串；byte → 两位十六进制
+        "hex" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            match v {
+                Value::Bytes(b) => {
+                    let s: String = b.iter().map(|x| format!("{:02x}", x)).collect();
+                    Ok(Value::Str(s))
+                }
+                Value::Byte(b) => Ok(Value::Str(format!("{:02x}", b))),
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`hex` expects a `bytes` or `byte`, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("convert bytes to a hex string, e.g. `hex(b\"ab\")`"),
+                )),
+            }
+        }
+        // unhex(s)：十六进制字符串 → bytes（支持带 0x 前缀或成对 hex 数字）
+        "unhex" => {
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            match v {
+                Value::Str(s) => {
+                    let t = s.trim();
+                    let t = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
+                    // 过滤非 hex 字符（允许空格/冒号分隔）
+                    let hex: Vec<u8> = t.chars().filter(|c| c.is_ascii_hexdigit()).map(|c| c as u8).collect();
+                    if hex.len() % 2 != 0 {
+                        return Err(err(
+                            codes::TYPE_MISMATCH,
+                            format!("`unhex` requires an even number of hex digits, got {}", hex.len()),
+                            span,
+                            file,
+                            src,
+                            Some("hex strings come in pairs, e.g. `\"4142\"` → `b\"AB\"`"),
+                        ));
+                    }
+                    let mut out = Vec::new();
+                    for pair in hex.chunks(2) {
+                        let s = std::str::from_utf8(pair).unwrap();
+                        let b = u8::from_str_radix(s, 16).map_err(|_| {
+                            err(
+                                codes::TYPE_MISMATCH,
+                                format!("invalid hex digit in `{}`", t),
+                                span,
+                                file,
+                                src,
+                                Some("hex digits are 0-9 and a-f"),
+                            )
+                        })?;
+                        out.push(b);
+                    }
+                    Ok(Value::Bytes(out))
+                }
+                other => Err(err(
+                    codes::TYPE_MISMATCH,
+                    format!("`unhex` expects a `str`, got `{}`", other.type_name()),
+                    span,
+                    file,
+                    src,
+                    Some("decode a hex string into bytes, e.g. `unhex(\"4142\")`"),
+                )),
+            }
         }
         "char_upper" | "char_lower" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
@@ -1313,6 +1615,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                     rdbuf: [0u8; 8192],
                 },
             );
+            WITH_RES.lock().unwrap().insert(id, "sse");
             Ok(Value::Int(id))
         }
         "http.sse_next" => {
@@ -3080,6 +3383,26 @@ fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String,
                 file,
                 src,
                 Some("call the lambda to get its result, or convert to a string first, e.g. to_str(f)"),
+            ));
+        }
+        Value::Byte(_) | Value::Bytes(_) => {
+            return Err(err(
+                codes::TYPE_MISMATCH,
+                "cannot serialize a `byte`/`bytes` value to JSON",
+                span,
+                file,
+                src,
+                Some("convert bytes to a string first, e.g. to_str(b) or hex(b)"),
+            ));
+        }
+        Value::TypeInst(inst) => {
+            return Err(err(
+                codes::TYPE_MISMATCH,
+                format!("cannot serialize an instance of `{}` to JSON", inst.ty),
+                span,
+                file,
+                src,
+                Some("JSON supports int/float/bool/str/char/list/dict; build a dict of the fields to serialize"),
             ));
         }
     };

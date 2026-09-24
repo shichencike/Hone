@@ -47,6 +47,14 @@ fn keyword_text(tok: &Tok) -> Option<&'static str> {
         Tok::TFloat => "float",
         Tok::TBool => "bool",
         Tok::TStr => "str",
+        Tok::TChar => "char",
+        Tok::TByte => "byte",
+        Tok::TBytes => "bytes",
+        Tok::With => "with",
+        Tok::Type => "type",
+        Tok::New => "new",
+        Tok::Extends => "extends",
+        Tok::Readonly => "readonly",
         _ => return None,
     })
 }
@@ -124,6 +132,47 @@ impl Parser {
         &self.toks[idx].0
     }
 
+    fn peek3(&self) -> &Tok {
+        let idx = (self.pos + 2).min(self.toks.len() - 1);
+        &self.toks[idx].0
+    }
+
+    /// 当前位置是否为字段赋值语句起点：`标识符 . 标识符 [ . 标识符 ... ] ( = | 复合赋值 )`
+    /// （如 `p.f = x`、`p.a.b += y`）。扫描 token 流确认点链后紧跟赋值号。
+    fn is_field_assign_here(&self) -> bool {
+        let last = self.toks.len() - 1;
+        let mut i = self.pos;
+        if !matches!(self.toks[i].0, Tok::Ident(_)) {
+            return false;
+        }
+        let mut dot_seen = false;
+        loop {
+            let di = (i + 1).min(last);
+            if self.toks[di].0 != Tok::Dot || di == last {
+                break;
+            }
+            let fi = (di + 1).min(last);
+            if !matches!(self.toks[fi].0, Tok::Ident(_)) {
+                return false;
+            }
+            dot_seen = true;
+            i = fi;
+        }
+        // 必须至少有一个 `. 标识符` 段才是字段赋值（`p = 5` 是普通赋值）
+        if !dot_seen {
+            return false;
+        }
+        matches!(
+            self.toks.get(i + 1).map(|(t, _)| t),
+            Some(Tok::Assign | Tok::PlusEq | Tok::MinusEq | Tok::StarEq | Tok::SlashEq | Tok::PercentEq)
+        )
+    }
+
+    /// 当前位置是否为实例方法调用后缀：`. 标识符 (`（如 a.m(1)、a[i].m(1)）
+    fn is_method_call_next(&self) -> bool {
+        self.at(&Tok::Dot) && matches!(self.peek2(), Tok::Ident(_)) && self.peek3() == &Tok::LParen
+    }
+
     fn next(&mut self) -> (Tok, Span) {
         let t = self.toks[self.pos.min(self.toks.len() - 1)].clone();
         if self.pos < self.toks.len() - 1 {
@@ -188,10 +237,18 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Result<Stmt, ZError> {
         match self.peek() {
-            Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr | Tok::TChar => self.parse_decl_c(),
+            Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr | Tok::TChar | Tok::TByte | Tok::TBytes | Tok::Readonly => {
+                self.parse_decl_c()
+            }
+            Tok::With => self.parse_with(),
+            Tok::Type => self.parse_type_def(),
+            Tok::New => self.parse_expr_stmt(),
             Tok::Ident(_) => {
                 if self.peek2() == &Tok::LParen && self.peek() == &Tok::Ident("debug_print".to_string()) {
                     self.parse_debug_print()
+                } else if self.is_field_assign_here() {
+                    // p.f = x;  字段赋值（struct / type 实例，支持链式 p.a.b）
+                    self.parse_field_assign()
                 } else if self.peek2() == &Tok::Colon {
                     // `x : int = 10;`（类型注解声明）与 `L:`（标签）都以 `标识符 :` 开头：
                     // 仅当本行在 `:` 之后不再有其他 token 时按标签解析，否则按类型注解声明解析。
@@ -294,8 +351,14 @@ impl Parser {
         }
     }
 
-    /// C 风格声明：int x = 10;
+    /// C 风格声明：int x = 10;  readonly int x = 5;（只读变量）
     fn parse_decl_c(&mut self) -> Result<Stmt, ZError> {
+        let readonly = if self.at(&Tok::Readonly) {
+            self.next();
+            true
+        } else {
+            false
+        };
         let (ty_tok, span) = self.next();
         let ty = match ty_tok {
             Tok::TInt => TyName::Int,
@@ -303,6 +366,8 @@ impl Parser {
             Tok::TBool => TyName::Bool,
             Tok::TStr => TyName::Str,
             Tok::TChar => TyName::Char,
+            Tok::TByte => TyName::Byte,
+            Tok::TBytes => TyName::Bytes,
             _ => unreachable!(),
         };
         let (name_tok, name_span) = self.next();
@@ -313,7 +378,7 @@ impl Parser {
                     &name_span,
                     codes::SYNTAX,
                     format!("expected a variable name after type, found {}", other.describe()),
-                    Some("declaration form: `int x = 10;`"),
+                    Some("declaration form: `int x = 10;` or `readonly int x = 5;`"),
                 ))
             }
         };
@@ -329,6 +394,7 @@ impl Parser {
             ty,
             init,
             span,
+            readonly,
         })
     }
 
@@ -346,6 +412,13 @@ impl Parser {
             }
         };
         self.expect(&Tok::Colon, "`:`")?;
+        // 类型位置 readonly：x : readonly int = 5（与 `readonly int x = 5;` 等价）
+        let readonly = if self.at(&Tok::Readonly) {
+            self.next();
+            true
+        } else {
+            false
+        };
         let ty = self.parse_type()?;
         let init = if self.at(&Tok::Assign) {
             self.next();
@@ -359,6 +432,7 @@ impl Parser {
             ty,
             init,
             span,
+            readonly,
         })
     }
 
@@ -452,6 +526,7 @@ impl Parser {
                     ty: None,
                     span: p_span,
                     default: None,
+                    readonly: false,
                 });
                 if self.at(&Tok::Comma) {
                     self.next();
@@ -484,8 +559,72 @@ impl Parser {
         })
     }
 
+    /// p.f = x;  字段赋值（struct / type 实例，支持链式 p.a.b = x）
+    fn parse_field_assign(&mut self) -> Result<Stmt, ZError> {
+        let (name_tok, span) = self.next();
+        let name = match name_tok {
+            Tok::Ident(s) => s,
+            _ => unreachable!(),
+        };
+        // 链式字段目标：p.a.b 逐层包装为 Expr::Field
+        let mut target = Expr::Ident { name, span };
+        while self.at(&Tok::Dot) {
+            self.next();
+            let (ftok, fspan) = self.next();
+            let field = match ftok {
+                Tok::Ident(s) => s,
+                other => {
+                    return Err(self.err_at(
+                        &fspan,
+                        codes::SYNTAX,
+                        format!("expected a field name after `.`, found {}", other.describe()),
+                        Some("field assignment form: `p.f = x`"),
+                    ))
+                }
+            };
+            target = Expr::Field { obj: Box::new(target), field, span };
+        }
+        let op = if matches!(self.peek(), Tok::PlusEq | Tok::MinusEq | Tok::StarEq | Tok::SlashEq | Tok::PercentEq) {
+            let (optok, _) = self.next();
+            Some(match optok {
+                Tok::PlusEq => CompoundOp::Add,
+                Tok::MinusEq => CompoundOp::Sub,
+                Tok::StarEq => CompoundOp::Mul,
+                Tok::SlashEq => CompoundOp::Div,
+                Tok::PercentEq => CompoundOp::Mod,
+                _ => unreachable!(),
+            })
+        } else {
+            None
+        };
+        self.expect(&Tok::Assign, "`=`")?;
+        let value = self.parse_expr()?;
+        self.expect_semi()?;
+        // 复合赋值 p.f += x 展开为 p.f = p.f + x（AST 层展开，各后端只见普通 FieldAssign）
+        let value = match op {
+            Some(cop) => {
+                let bin = match cop {
+                    CompoundOp::Add => BinOp::Add,
+                    CompoundOp::Sub => BinOp::Sub,
+                    CompoundOp::Mul => BinOp::Mul,
+                    CompoundOp::Div => BinOp::Div,
+                    CompoundOp::Mod => BinOp::Mod,
+                };
+                Expr::Binary {
+                    op: bin,
+                    lhs: Box::new(target.clone()),
+                    rhs: Box::new(value),
+                    span,
+                }
+            }
+            None => value,
+        };
+        Ok(Stmt::FieldAssign { target, value, span })
+    }
+
     /// x = expr;
-    fn parse_assign(&mut self) -> Result<Stmt, ZError> {        let (name_tok, span) = self.next();
+    fn parse_assign(&mut self) -> Result<Stmt, ZError> {
+        let (name_tok, span) = self.next();
         let name = match name_tok {
             Tok::Ident(s) => s,
             _ => unreachable!(),
@@ -793,13 +932,25 @@ impl Parser {
         })
     }
 
-    /// 参数：name | name : type | type name
+    /// 参数：name | name : type | type name | [readonly] 修饰（只读参数）
     fn parse_param(&mut self) -> Result<Param, ZError> {
-        let (tok, span) = self.next();
+        let mut readonly = false;
+        let (tok, span) = if self.at(&Tok::Readonly) {
+            self.next();
+            readonly = true;
+            self.next()
+        } else {
+            self.next()
+        };
         match tok {
             Tok::Ident(s) => {
                 let ty = if self.at(&Tok::Colon) {
                     self.next();
+                    // x : readonly int（readonly 在类型前）
+                    if self.at(&Tok::Readonly) {
+                        self.next();
+                        readonly = true;
+                    }
                     Some(self.parse_type()?)
                 } else {
                     None
@@ -811,15 +962,17 @@ impl Parser {
                 } else {
                     None
                 };
-                Ok(Param { name: s, ty, span, default })
+                Ok(Param { name: s, ty, span, default, readonly })
             }
-            Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr | Tok::TChar => {
+            Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr | Tok::TChar | Tok::TByte | Tok::TBytes => {
                 let ty = match tok {
                     Tok::TInt => TyName::Int,
                     Tok::TFloat => TyName::Float,
                     Tok::TBool => TyName::Bool,
                     Tok::TStr => TyName::Str,
                     Tok::TChar => TyName::Char,
+                    Tok::TByte => TyName::Byte,
+                    Tok::TBytes => TyName::Bytes,
                     _ => unreachable!(),
                 };
                 let (name_tok, name_span) = self.next();
@@ -846,12 +999,13 @@ impl Parser {
                     ty: Some(ty),
                     span,
                     default,
+                    readonly,
                 })
             }
             other => Err(self.err_here(
                 codes::SYNTAX,
                 format!("expected a parameter, found {}", other.describe()),
-                Some("parameter form: `a`, `a : int`, `int a`, or with a default `a = 10`"),
+                Some("parameter form: `a`, `a : int`, `int a`, `readonly int a`, or with a default `a = 10`"),
             )),
         }
     }
@@ -864,11 +1018,16 @@ impl Parser {
             Tok::TBool => Ok(TyName::Bool),
             Tok::TStr => Ok(TyName::Str),
             Tok::TChar => Ok(TyName::Char),
+            Tok::TByte => Ok(TyName::Byte),
+            Tok::TBytes => Ok(TyName::Bytes),
             // 泛型类型变量（fn name[T] 的 T）：注解写 `x: T`。是否已声明由 checker 校验。
             Tok::Ident(s) => Ok(TyName::Var(s)),
             other => Err(self.err_here(
                 codes::SYNTAX,
-                format!("expected a type name (`int`/`float`/`bool`/`str` or a type parameter), found {}", other.describe()),
+                format!(
+                    "expected a type name (`int`/`float`/`bool`/`str`/`char`/`byte`/`bytes` or a type parameter), found {}",
+                    other.describe()
+                ),
                 None::<&str>,
             )),
         }
@@ -1406,7 +1565,8 @@ impl Parser {
         Ok(Stmt::Alias { original, new_name, span })
     }
 
-    /// struct 名称 { 字段: 类型, ... };  定义结构体（数据形态声明）。
+    /// struct 名称 { [readonly] 字段: 类型, ... };  定义结构体（数据形态声明）。
+    /// 只读字段两种写法等价：`readonly f: int` / `f: readonly int`
     fn parse_struct_def(&mut self) -> Result<Stmt, ZError> {
         let (_, span) = self.next(); // struct
         let (tok, _) = self.next();
@@ -1423,6 +1583,10 @@ impl Parser {
         self.expect(&Tok::LBrace, "`{`")?;
         let mut fields = Vec::new();
         while !self.at(&Tok::RBrace) {
+            let readonly = self.at(&Tok::Readonly);
+            if readonly {
+                self.next();
+            }
             let (ftok, fspan) = self.next();
             let fname = match ftok {
                 Tok::Ident(s) => s,
@@ -1431,13 +1595,22 @@ impl Parser {
                         &fspan,
                         codes::SYNTAX,
                         format!("expected a field name, found {}", other.describe()),
-                        Some("fields look like `name: type`"),
+                        Some("fields look like `name: type` (optional `readonly` prefix)"),
                     ))
                 }
             };
             self.expect(&Tok::Colon, "`:`")?;
+            // 类型前 readonly：f: readonly int
+            let readonly = readonly || {
+                if self.at(&Tok::Readonly) {
+                    self.next();
+                    true
+                } else {
+                    false
+                }
+            };
             let ty = self.parse_type()?;
-            fields.push((fname, ty));
+            fields.push((fname, ty, readonly));
             if self.at(&Tok::Comma) {
                 self.next();
             } else {
@@ -1447,6 +1620,124 @@ impl Parser {
         self.expect(&Tok::RBrace, "`}`")?;
         self.expect_semi()?;
         Ok(Stmt::StructDef { name, fields, span })
+    }
+
+    /// with 上下文管理器：with expr [as r] { ... }
+    /// 进入调 __enter__()（返回值绑定 r，仅块内可见），退出（含报错）必调 __exit__()，错误不被吞。
+    fn parse_with(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // with
+        let target = self.parse_expr()?;
+        let var = if self.at(&Tok::As) {
+            self.next();
+            let (vtok, vspan) = self.next();
+            match vtok {
+                Tok::Ident(s) => Some(s),
+                other => {
+                    return Err(self.err_at(
+                        &vspan,
+                        codes::SYNTAX,
+                        format!("expected a variable name after `as`, found {}", other.describe()),
+                        Some("form: `with res as r { ... }`"),
+                    ))
+                }
+            }
+        } else {
+            None
+        };
+        self.expect(&Tok::LBrace, "`{`")?;
+        let body = self.parse_block_body()?; // 已消费 `}`
+        Ok(Stmt::With {
+            target: Box::new(target),
+            var,
+            body,
+            span,
+        })
+    }
+
+    /// type 实例类定义：type 名称 [extends 父类] { [readonly] 字段: 类型; fn 方法(self, ...) { ... } }
+    /// 方法与 class 成员同解析（FnDef）；首参约定为 self（显式首参，调用自动填充实例）。
+    fn parse_type_def(&mut self) -> Result<Stmt, ZError> {
+        let (_, span) = self.next(); // type
+        let (tok, _) = self.next();
+        let name = match tok {
+            Tok::Ident(s) => s,
+            other => {
+                return Err(self.err_here(
+                    codes::SYNTAX,
+                    format!("expected a type name after `type`, found {}", other.describe()),
+                    Some("`type` form: `type Name [extends Base] { field: type; fn method(self, ...) { ... } }`"),
+                ))
+            }
+        };
+        let base = if self.at(&Tok::Extends) {
+            self.next();
+            let (btok, bspan) = self.next();
+            match btok {
+                Tok::Ident(s) => Some(s),
+                other => {
+                    return Err(self.err_at(
+                        &bspan,
+                        codes::SYNTAX,
+                        format!("expected a base type name after `extends`, found {}", other.describe()),
+                        None::<&str>,
+                    ))
+                }
+            }
+        } else {
+            None
+        };
+        self.expect(&Tok::LBrace, "`{`")?;
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+        while !self.at(&Tok::RBrace) {
+            if self.at(&Tok::Fn) {
+                self.next(); // fn
+                methods.push(self.parse_fn_body(false)?);
+            } else {
+                // 字段：[readonly] name: type
+                let readonly = self.at(&Tok::Readonly);
+                if readonly {
+                    self.next();
+                }
+                let (ftok, fspan) = self.next();
+                let fname = match ftok {
+                    Tok::Ident(s) => s,
+                    other => {
+                        return Err(self.err_at(
+                            &fspan,
+                            codes::SYNTAX,
+                            format!("expected a field name or method definition (`fn`), found {}", other.describe()),
+                            Some("type body: `field: type` and/or `fn method(self, ...) { ... }`"),
+                        ))
+                    }
+                };
+                self.expect(&Tok::Colon, "`:`")?;
+                let readonly = readonly || {
+                    if self.at(&Tok::Readonly) {
+                        self.next();
+                        true
+                    } else {
+                        false
+                    }
+                };
+                let ty = self.parse_type()?;
+                fields.push((fname, ty, readonly));
+                if self.at(&Tok::Comma) {
+                    self.next();
+                }
+            }
+        }
+        self.expect(&Tok::RBrace, "`}`")?;
+        if self.at(&Tok::Semi) {
+            self.next();
+        }
+        Ok(Stmt::TypeDef {
+            name,
+            base,
+            fields,
+            methods,
+            span,
+        })
     }
 
     /// class 名称 { fn 方法(...) {...} ... }  类定义。
@@ -1959,18 +2250,86 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ZError> {
-        // 先解析原子表达式（字面量/标识符/调用/括号等），再处理后缀：可选链 ?. 与索引 [i]
+        // 先解析原子表达式（字面量/标识符/调用/括号等），再处理后缀：
+        // 索引 [i] / 切片 [i:j] / 实例方法 .m() / 可选链 ?.
         let mut expr = self.parse_primary_atom()?;
-        while self.at(&Tok::QuestionDot) || self.at(&Tok::LBracket) {
-            // 索引访问：a[i]（可链式 a[i][j]）
+        while self.at(&Tok::QuestionDot) || self.at(&Tok::LBracket) || self.is_method_call_next() {
+            // 索引访问 / 切片访问：a[i]（索引）/ a[i:j]（切片，可链式 a[i][j]、a[i:j][k]）
             if self.at(&Tok::LBracket) {
                 let (_, ispan) = self.next();
-                let idx = self.parse_expr()?;
-                self.expect(&Tok::RBracket, "`]`")?;
-                expr = Expr::Index {
+                // lo 端点：`a[:j]` 可省略；否则解析为 lo 表达式
+                let lo = if self.at(&Tok::Colon) {
+                    None
+                } else {
+                    Some(Box::new(self.parse_expr()?))
+                };
+                // 出现冒号 → 切片 a[i:j] / a[i:] / a[:]；否则为索引 a[i]
+                if self.at(&Tok::Colon) {
+                    self.next(); // 消费冒号
+                    // hi 端点可省略：a[i:] / a[:]
+                    let hi = if self.at(&Tok::RBracket) {
+                        None
+                    } else {
+                        Some(Box::new(self.parse_expr()?))
+                    };
+                    self.expect(&Tok::RBracket, "`]`")?;
+                    if lo.is_none() && hi.is_none() {
+                        // 裸 `a[]` 既非索引也非切片
+                        return Err(self.err_at(
+                            &ispan,
+                            codes::SYNTAX,
+                            "empty index `a[]` is not valid",
+                            Some("use `a[i]` for indexing or `a[i:j]` for slicing (either endpoint may be omitted)"),
+                        ));
+                    }
+                    expr = Expr::Slice {
+                        obj: Box::new(expr),
+                        lo,
+                        hi,
+                        span: ispan,
+                    };
+                } else {
+                    // 无冒号：lo 必为索引表达式（a[i]）
+                    let index = lo.ok_or_else(|| {
+                        self.err_at(
+                            &ispan,
+                            codes::SYNTAX,
+                            "empty index `a[]` is not valid",
+                            Some("use `a[i]` for indexing or `a[i:j]` for slicing"),
+                        )
+                    })?;
+                    self.expect(&Tok::RBracket, "`]`")?;
+                    expr = Expr::Index {
+                        obj: Box::new(expr),
+                        index,
+                        span: ispan,
+                    };
+                }
+                continue;
+            }
+            // 实例方法调用：a.m(1) / a[i].m(1) / new T(1).m(1)
+            if self.is_method_call_next() {
+                let (_, mspan) = self.next(); // .
+                let (ntok, nspan) = self.next();
+                let name = match ntok {
+                    Tok::Ident(s) => s,
+                    other => {
+                        return Err(self.err_at(
+                            &nspan,
+                            codes::SYNTAX,
+                            format!("expected a method name after `.`, found {}", other.describe()),
+                            Some("method call form: `obj.method(arg, ...)`"),
+                        ))
+                    }
+                };
+                self.expect(&Tok::LParen, "`(`")?;
+                let args = self.parse_args()?;
+                self.expect(&Tok::RParen, "`)`")?;
+                expr = Expr::MethodCall {
                     obj: Box::new(expr),
-                    index: Box::new(idx),
-                    span: ispan,
+                    name,
+                    args,
+                    span: mspan,
                 };
                 continue;
             }
@@ -2026,6 +2385,28 @@ impl Parser {
             Tok::False => Ok(Expr::BoolLit(false, span)),
             Tok::StrLit(s) => Ok(Expr::StrLit(s, span)),
             Tok::CharLit(c) => Ok(Expr::CharLit(c, span)),
+            // 字节字面量 0b01000001 / 字节序列字面量 b"..."
+            Tok::ByteLit(v) => Ok(Expr::ByteLit(v, span)),
+            Tok::BytesLit(v) => Ok(Expr::BytesLit(v, span)),
+            // 实例构造：new Type(arg, ...)
+            Tok::New => {
+                let (tok, nspan) = self.next();
+                let ty = match tok {
+                    Tok::Ident(s) => s,
+                    other => {
+                        return Err(self.err_at(
+                            &nspan,
+                            codes::SYNTAX,
+                            format!("expected a type name after `new`, found {}", other.describe()),
+                            Some("form: `new Point(3, 2.5)`（Point 须为已定义的 `type`）"),
+                        ))
+                    }
+                };
+                self.expect(&Tok::LParen, "`(`")?;
+                let args = self.parse_args()?;
+                self.expect(&Tok::RParen, "`)`")?;
+                Ok(Expr::New { ty, args, span })
+            }
             // 三引号原始字符串：内容不做转义处理，与普通字符串同值
             Tok::MultiStr(s) => Ok(Expr::StrLit(s, span)),
             // 匿名函数（lambda）：fn(参数) { ... }
@@ -2050,6 +2431,22 @@ impl Parser {
                     Ok(Expr::StrLit("char".to_string(), span))
                 }
             }
+            // `byte` 同时是内置函数名：后跟 `(` 时按函数调用 `byte(i)` 解析，否则同其他类型关键字
+            Tok::TByte => {
+                if self.at(&Tok::LParen) {
+                    self.next();
+                    let args = self.parse_args()?;
+                    self.expect(&Tok::RParen, "`)`")?;
+                    Ok(Expr::Call {
+                        callee: "byte".to_string(),
+                        args,
+                        span,
+                    })
+                } else {
+                    Ok(Expr::StrLit("byte".to_string(), span))
+                }
+            }
+            Tok::TBytes => Ok(Expr::StrLit("bytes".to_string(), span)),
             Tok::FStr(parts) => {
                 // 插值字符串：文字段保留（折叠转义大括号 {{ → {，}} → }），代码段子解析为表达式
                 let mut segs = Vec::new();

@@ -1,4 +1,4 @@
-Hone 编程语言 – 完整设计规范 v1.2（对应实现版本 v0.7.11）
+Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.7.12）
 
 项目代号：Hone
 设计者：时辰刺客
@@ -109,12 +109,22 @@ Hone 编程语言 – 完整设计规范 v1.2（对应实现版本 v0.7.11）
   · bool：布尔值（true / false）
   · str：UTF-8 字符串
   · char：单个 Unicode 字符（如 'a'，'中'），按码点比较与转换
+  · byte：8 位无符号字节值（0..=255），与 int 严格隔离（无隐式转换），支持 ==/!=/</>/<=/>= 比较；
+    回转用 to_int(b) / char(b)；仅解释器支持（VM/AOT/DLL 报 H999）
+  · bytes：字节序列，支持 len / 索引（取 byte）/ 切片 / + 拼接 / == / for-in 迭代；
+    仅解释器支持（VM/AOT/DLL 报 H999）
 · 字面量规则：
   · 整数：0，42，-1（无小数点）
   · 浮点数：必须包含小数点，如 3.14，-0.5，.2，2.0
   · 布尔：true，false
   · 字符串：双引号括起，如 "hello"，支持 \n，\t，\\，\"
   · 字符：单引号括起，如 'a'，'\n'，'中'；必须恰好一个字符（空/多字符报 H005），支持 \n，\t，\\，\"，\'
+  · 字节值：0b1010001（8 位二进制字面量，须恰好 8 位）；或 byte(81) 显式从 int 转换（越界报错）
+  · 字节序列：b"abc"（b 前缀双引号，转义规则同字符串）
+· 只读变量（readonly）：
+  · C 风格：readonly int x = 5;    类型位置写法：x : readonly int = 5;（两者等价）
+  · 初始化后禁止再赋值（静态拦截 + 运行时兜底，违反报 H002）
+  · 只读参数：fn f(readonly int y) { ... }（函数体内对 y 的赋值同样被拦截）
 
 1.4 控制流
 
@@ -228,10 +238,12 @@ print(pick(10, 20, false));   // 20（T=int）
 
 1.7 结构体（struct）
 
-· 语法：struct 名称 { 字段: 类型, ... };
+· 语法：struct 名称 { [readonly] 字段: 类型, ... };
 · 用于声明确定的数据形态（字段名与类型固定），实例用 dict 表示，字段访问 p.字段
 · 构造：名称(值1, 值2, ...)，按字段顺序传参；检查阶段校验字段个数与类型（H001/H011）
 · 运行时字段访问校验字段存在性（未知字段报 H002），实例可作为 dict 使用（keys/values 等）
+· 只读字段：readonly 修饰的字段初始化后禁止再赋值（静态拦截 + 运行时兜底）；
+  两种写法等价：readonly f: int 与 f: readonly int
 · 示例：
 
 struct Point { x: int, y: float };
@@ -632,6 +644,70 @@ try {
     print("捕获: " + e.message);   // 捕获: zero not allowed
 }
 
+1.22 type 实例类 与 with 上下文管理器
+
+· type 实例类：带方法、继承与构造器的实例类（与 struct「纯数据 dict」互补）
+  · 语法：type 名称 [extends 父类] { [readonly] 字段: 类型, ...; fn 方法(self, ...) { ... } };
+  · self 约定：所有方法（含 init / __enter__ / __exit__）必须把 self 作为**显式首参**，
+    调用 obj.method(...) 时自动填充实例（与 class 的「类名.方法」命名空间模式不同）
+  · 构造 new Type(实参...)：
+    - 有 init：实参绑定 init 的参数（去掉 self）
+    - 无 init：实参按**继承链字段顺序**（父类字段在前、子类在后）位置绑定
+  · 字段引用语义：方法体内 self.f = x 的写入对调用方实例立即可见
+  · extends 继承字段与方法；方法可覆盖父类同名方法
+  · readonly 字段：两种写法等价（readonly f: int / f: readonly int），赋值报 H002
+  · 限制：type 实例 / 方法调用 / 字段赋值为解释器特性，VM / AOT / DLL 构建报 H999（用 hone run 运行）
+· 示例（完整见 examples/with_type_demo.hn）：
+
+type Shape {
+    name: str, sides: int, area: int,
+    fn desc(self) {
+        return "shape " + self.name;
+    }
+};
+sq = new Shape("square", 4, 16);   // 无 init：按字段顺序绑定
+print(sq.desc());                  // shape square
+sq.area = 25;                      // 字段可写
+
+type Square extends Shape {
+    side: int,
+    fn init(self, side: int) {
+        self.name = "square";
+        self.sides = 4;
+        self.side = side;
+        self.area = side * side;
+    }
+    fn perimeter(self) {
+        return self.side * 4;
+    }
+};
+s = new Square(5);
+print(s.desc());        // shape square（继承方法）
+print(s.perimeter());   // 20（子类方法）
+
+· with 上下文管理器：with expr [as r] { ... }
+  · 进入：调 expr 的 __enter__()，返回值绑定 r（仅 with 块内可见）；不带 as 则不绑定
+  · 退出：**无论正常退出还是块内报错**，都必调 __exit__()；错误不被吞（先执行 __exit__ 再向外传播）
+  · 与 try/catch 正交：块内 throw 会先触发 __exit__ 再被外层 catch 捕获
+  · 限制：与 type 实例同（解释器特性，VM / AOT / DLL 报 H999）
+· 示例：
+
+type Guard {
+    active: int,
+    fn __enter__(self) {
+        self.active = 1;
+        return self;
+    }
+    fn __exit__(self) {
+        self.active = 0;
+    }
+};
+g = new Guard();
+with g as r {
+    print(r.active);   // 1（块内资源已激活）
+}
+print(g.active);       // 0（块结束自动清理；报错路径同样执行 __exit__）
+
 二、工具链与命令
 
 Hone 提供完整的命令行工具链，所有功能集成在单文件 hone（或 hone.exe）中：
@@ -675,8 +751,13 @@ hone --help / --version 帮助信息 / 版本信息
 · file_exists(path) → bool：检查文件是否存在
 · read_bytes(path) → list[int]：读取文件原始字节（每个元素为 0-255 的 int，二进制安全）
 · write_bytes(path, bytes)：将字节列表（int 0-255）原样写入文件
-· len(value) → int：返回字符串长度（字节数）、列表/字典元素个数
-· type_of(value) → str：返回变量类型名称（"int"、"float"、"bool"、"str"、"list"、"dict"、"null"、"error"、"ptr"）
+· len(value) → int：返回字符串长度（字节数）、列表/字典元素个数、bytes 字节数
+· type_of(value) → str：返回变量类型名称（"int"、"float"、"bool"、"str"、"char"、"byte"、"bytes"、"list"、"dict"、"null"、"error"、"ptr"）
+· byte(x) → byte：int（0..=255）显式转换为字节值（越界报 H002）；byte 原样返回
+· to_bytes(s, enc?) → bytes：str 按编码转字节序列（enc 缺省 "utf-8"，支持 "latin-1"）；int 列表（0-255）转字节序列
+· hex(b) → str：字节序列转十六进制字符串（"616263"）
+· unhex(s) → bytes：十六进制字符串转字节序列（长度须为偶数，非法字符报错）
+· is_byte(v) → bool / is_bytes(v) → bool：字节值 / 字节序列类型判断
 · http_get(url) → str：发送 HTTP GET 请求，返回响应体（支持 http:// 与 https://，TLS 为纯 Rust 实现、内置 Mozilla 根证书，
   校验失败自动回退系统根证书，可经 HONE_CA_BUNDLE / ~/.hn/ca.pem 信任私有 CA 的根证书与中间证书）
 · http_post(url, body) → str：发送 HTTP POST 请求（body 为字符串，支持 http:// 与 https://）
@@ -826,10 +907,10 @@ print(min(3, 7));  // 3
 
 3.7 类型转换函数
 
-· to_str(value) → str：将 int、float、bool 或 char 转换为字符串（bool → "true"/"false"，char → 单字符字符串，浮点数按默认格式输出）
-· to_int(value) → int：将 str（纯数字）或 float 转换为 int（截断小数部分），若 str 包含非数字字符则报错 error[H006]
+· to_str(value, enc?) → str：将 int、float、bool、char 或 bytes 转换为字符串（bool → "true"/"false"，char → 单字符字符串，bytes 按编码解码，enc 缺省 "utf-8"，支持 "latin-1"；浮点数按默认格式输出）
+· to_int(value) → int：将 str（纯数字）或 float 或 byte 转换为 int（截断小数部分），若 str 包含非数字字符则报错 error[H006]
 · to_float(value) → float：将 str（数字格式）或 int 转换为 float，若 str 格式非法则报错 error[H007]
-· char ↔ int 转换用 ord(c) / char(i)（见 3.5 字符串与字符函数）
+· char ↔ int 转换用 ord(c) / char(i)（见 3.5 字符串与字符函数）；byte ↔ int 用 byte(x) / to_int(b)
 
 示例：
 
@@ -1265,6 +1346,9 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   · `go` 并发调用——AOT 模式为单线程，请用解释器运行并发脚本
   · `async` 异步函数与 `await` 表达式——AOT 模式为单线程，请用解释器运行
   · `char` 类型（字面量与声明）——仅解释器 / VM 支持
+  · `byte` / `bytes` 类型（字面量、声明与 byte/to_bytes/hex/unhex 内置）——仅解释器支持
+  · `type` 实例类 / `with` 上下文 / 字段赋值 `obj.f = x`——解释器特性，请用 `hone run` 运行
+  · 切片 `a[i:j]`（list / bytes）——解释器特性，请用 `hone run` 运行
   · `goto` 标签跳转——请用 `hone run`（解释器）或 `hone run --vm`（字节码 VM）运行
 · 已知限制：
   · 错误对象无 file/line/col/context 源码定位（运行时错误只带错误码与消息）

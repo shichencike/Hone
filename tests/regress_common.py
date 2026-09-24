@@ -18,6 +18,9 @@ SKIP = {
     "test_process_lib", "test_hone_lib_smoke",
     # smoke_spider 同样 import spider.hn，与 spider_demo 同类。
     "smoke_spider",
+    # byte/bytes 与 type 实例 / with / 字段赋值是解释器特性，VM 按设计报 H999 兜底，
+    # 无法 1:1 复现，故不参与逐字节比对（与 goto 在 AOT 的处理同一模式）。
+    "byte_demo", "with_type_demo",
     # https_demo 访问外网（example.com / httpbin.org）：返回内容与长度随网络变化，
     # 两次运行本就可能不同，属非逻辑差异。纳入 SKIP 以保证基线可复现。
     "https_demo",

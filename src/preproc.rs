@@ -296,6 +296,7 @@ fn expand_stmt(
             ty,
             init,
             span,
+            readonly,
         } => {
             let init = match init {
                 Some(mut e) => {
@@ -309,6 +310,7 @@ fn expand_stmt(
                 ty,
                 init,
                 span,
+                readonly,
             }
         }
         Stmt::Block { stmts, span } => Stmt::Block {
@@ -572,6 +574,8 @@ fn expand_expr(
         | Expr::BoolLit(..)
         | Expr::StrLit(..)
         | Expr::CharLit(..)
+        | Expr::ByteLit(..)
+        | Expr::BytesLit(..)
         | Expr::Ident { .. } => {}
         Expr::ListLit(items, _) => {
             for it in items.iter_mut() {
@@ -622,6 +626,26 @@ fn expand_expr(
         Expr::Index { obj, index, .. } => {
             expand_expr(ctx, env, obj)?;
             expand_expr(ctx, env, index)?;
+        }
+        Expr::Slice { obj, lo, hi, .. } => {
+            expand_expr(ctx, env, obj)?;
+            if let Some(x) = lo {
+                expand_expr(ctx, env, x)?;
+            }
+            if let Some(x) = hi {
+                expand_expr(ctx, env, x)?;
+            }
+        }
+        Expr::MethodCall { obj, args, .. } => {
+            expand_expr(ctx, env, obj)?;
+            for a in args.iter_mut() {
+                expand_expr(ctx, env, a)?;
+            }
+        }
+        Expr::New { args, .. } => {
+            for a in args.iter_mut() {
+                expand_expr(ctx, env, a)?;
+            }
         }
         Expr::Unary { expr, .. } => expand_expr(ctx, env, expr)?,
         Expr::Binary { lhs, rhs, .. } => {
@@ -741,6 +765,8 @@ fn subst_expr(ctx: &Ctx, e: &Expr, map: &ArgMap) -> Result<Expr, ZError> {
         Expr::BoolLit(v, s) => Expr::BoolLit(*v, *s),
         Expr::StrLit(v, s) => Expr::StrLit(v.clone(), *s),
         Expr::CharLit(v, s) => Expr::CharLit(*v, *s),
+        Expr::ByteLit(v, s) => Expr::ByteLit(*v, *s),
+        Expr::BytesLit(v, s) => Expr::BytesLit(v.clone(), *s),
         Expr::ListLit(items, s) => {
             let mut v = Vec::with_capacity(items.len());
             for it in items {
@@ -818,6 +844,41 @@ fn subst_expr(ctx: &Ctx, e: &Expr, map: &ArgMap) -> Result<Expr, ZError> {
             index: Box::new(subst_expr(ctx, index, map)?),
             span: *span,
         },
+        Expr::Slice { obj, lo, hi, span } => Expr::Slice {
+            obj: Box::new(subst_expr(ctx, obj, map)?),
+            lo: match lo {
+                Some(x) => Some(Box::new(subst_expr(ctx, x, map)?)),
+                None => None,
+            },
+            hi: match hi {
+                Some(x) => Some(Box::new(subst_expr(ctx, x, map)?)),
+                None => None,
+            },
+            span: *span,
+        },
+        Expr::MethodCall { obj, name, args, span } => {
+            let mut v = Vec::with_capacity(args.len());
+            for a in args {
+                v.push(subst_expr(ctx, a, map)?);
+            }
+            Expr::MethodCall {
+                obj: Box::new(subst_expr(ctx, obj, map)?),
+                name: name.clone(),
+                args: v,
+                span: *span,
+            }
+        }
+        Expr::New { ty, args, span } => {
+            let mut v = Vec::with_capacity(args.len());
+            for a in args {
+                v.push(subst_expr(ctx, a, map)?);
+            }
+            Expr::New {
+                ty: ty.clone(),
+                args: v,
+                span: *span,
+            }
+        }
         Expr::Unary { op, expr, span } => Expr::Unary {
             op: *op,
             expr: Box::new(subst_expr(ctx, expr, map)?),
@@ -959,6 +1020,7 @@ fn subst_stmt(ctx: &Ctx, s: &Stmt, map: &ArgMap) -> Result<Stmt, ZError> {
             ty,
             init,
             span,
+            readonly,
         } => {
             if let TyName::Var(t) = ty {
                 if map.contains_key(t.as_str()) {
@@ -978,6 +1040,7 @@ fn subst_stmt(ctx: &Ctx, s: &Stmt, map: &ArgMap) -> Result<Stmt, ZError> {
                     None => None,
                 },
                 span: *span,
+                readonly: *readonly,
             }
         }
         Stmt::IndexAssign { target, value, span } => Stmt::IndexAssign {

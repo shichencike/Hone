@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::{CStr, CString};
 use std::io::{self, Write};
 use std::os::raw::c_char;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
 
 use crate::ast::*;
 use crate::builtins;
@@ -63,6 +63,12 @@ pub enum Value {
     Str(String),
     /// 单个 Unicode 字符（'a' / '中'）
     Char(char),
+    /// 字节值：0b11000010（8 位，与 int 严格隔离，不隐式转换）
+    Byte(u8),
+    /// 字节序列：b"abc"（支持 len/索引/切片/+ 拼接/迭代/==）
+    Bytes(Vec<u8>),
+    /// 实例类（type）的实例：类型名 + 字段表
+    TypeInst(Arc<TypeInstVal>),
     /// 列表：[1, 2, 3]（也用于 JSON 数组）
     List(Vec<Value>),
     /// 字典：{"key": value}（保持插入顺序，也用于 JSON 对象）
@@ -87,6 +93,15 @@ pub struct EnumVal {
     pub ty: String,
     pub variant: String,
     pub payload: Vec<Value>,
+}
+
+/// 实例类（type）的值：类型名 + 字段表（按定义顺序）。
+/// 字段表用 RwLock：同一实例的所有引用（self 副本、方法内写回）共享同一份字段，
+/// 使 `init`/`__exit__`/方法体内 `self.field = x` 的写入对调用方持有的实例立即可见。
+#[derive(Debug)]
+pub struct TypeInstVal {
+    pub ty: String,
+    pub fields: RwLock<Vec<(String, Value)>>,
 }
 
 /// async 函数调用的 future：后台线程执行，`await` 阻塞等待结果。
@@ -137,6 +152,10 @@ impl PartialEq for Value {
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::Char(a), Value::Char(b)) => a == b,
+            (Value::Byte(a), Value::Byte(b)) => a == b,
+            (Value::Bytes(a), Value::Bytes(b)) => a == b,
+            // 实例类实例：按引用相等（同一 new 创建点视为相等，不做结构相等）
+            (Value::TypeInst(a), Value::TypeInst(b)) => Arc::ptr_eq(a, b),
             (Value::List(a), Value::List(b)) => a == b,
             (Value::Dict(a), Value::Dict(b)) => a == b,
             (Value::Null, Value::Null) => true,
@@ -161,6 +180,9 @@ impl Value {
             Value::Bool(_) => "bool",
             Value::Str(_) => "str",
             Value::Char(_) => "char",
+            Value::Byte(_) => "byte",
+            Value::Bytes(_) => "bytes",
+            Value::TypeInst(_) => "instance",
             Value::List(_) => "list",
             Value::Dict(_) => "dict",
             Value::Null => "null",
@@ -179,6 +201,34 @@ impl Value {
             Value::Bool(b) => b.to_string(),
             Value::Str(s) => s.clone(),
             Value::Char(c) => c.to_string(),
+            Value::Byte(b) => format!("0b{:08b}", b),
+            Value::Bytes(items) => {
+                let inner: Vec<String> = items
+                    .iter()
+                    .map(|b| {
+                        if b.is_ascii_graphic() || *b == b' ' {
+                            match *b {
+                                b'\\' => "\\\\".to_string(),
+                                b'"' => "\\\"".to_string(),
+                                other => char::from(other).to_string(),
+                            }
+                        } else {
+                            format!("\\x{:02x}", b)
+                        }
+                    })
+                    .collect();
+                format!("b\"{}\"", inner.join(""))
+            }
+            Value::TypeInst(inst) => {
+                let inner: Vec<String> = inst
+                    .fields
+                    .read()
+                    .unwrap()
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, v.display()))
+                    .collect();
+                format!("{}({})", inst.ty, inner.join(", "))
+            }
             Value::List(items) => {
                 let inner: Vec<String> = items.iter().map(|v| v.display()).collect();
                 format!("[{}]", inner.join(", "))
@@ -228,12 +278,15 @@ struct FnDef {
 
 pub struct Env {
     scopes: Vec<HashMap<String, Value>>,
+    /// 各作用域的只读变量名集合（与 scopes 平行；readonly 声明的变量与只读参数）
+    readonly_vars: Vec<HashSet<String>>,
 }
 
 impl Env {
     pub fn new() -> Self {
         Env {
             scopes: vec![HashMap::new()],
+            readonly_vars: vec![HashSet::new()],
         }
     }
 
@@ -255,6 +308,40 @@ impl Env {
             }
         }
         None
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+        self.readonly_vars.push(HashSet::new());
+    }
+
+    /// 循环体复用同一个作用域 HashMap（避免每轮迭代堆分配）：压入既有表，只读集合每轮新建。
+    fn push_reusable_scope(&mut self, m: HashMap<String, Value>) {
+        self.scopes.push(m);
+        self.readonly_vars.push(HashSet::new());
+    }
+
+    fn pop_scope(&mut self) -> Option<HashMap<String, Value>> {
+        let r = self.readonly_vars.pop();
+        let _ = r;
+        self.scopes.pop()
+    }
+
+    /// 声明只读变量：绑定值并登记只读标志（后续赋值/++/-- 报错由 checker 静态拦截，
+    /// 解释器运行时兜底）。
+    fn declare_readonly(&mut self, name: &str, v: Value) {
+        self.scopes.last_mut().unwrap().insert(name.to_string(), v);
+        self.readonly_vars.last_mut().unwrap().insert(name.to_string());
+    }
+
+    /// 该变量是否被声明为只读（沿作用域查其绑定层）。
+    fn is_readonly(&self, name: &str) -> bool {
+        for (s, r) in self.scopes.iter().rev().zip(self.readonly_vars.iter().rev()) {
+            if s.contains_key(name) {
+                return r.contains(name);
+            }
+        }
+        false
     }
 
     /// 赋值：找到最近绑定则原地更新（避免 String 分配与二次哈希），否则在当前作用域声明。
@@ -365,6 +452,8 @@ pub struct Interp {
     /// 类定义：类名 → (方法名 → FnDef)。成员函数不进全局 fns 表，
     /// 只能经 `类.方法(...)` 调用（call_fn 按限定名解析）。
     classes: HashMap<String, HashMap<String, Arc<FnDef>>>,
+    /// 实例类（type）定义：类名 → (父类名, 字段表(名,类型,只读), 方法表)
+    types: HashMap<String, (Option<String>, Vec<(String, TyName, bool)>, HashMap<String, Arc<FnDef>>)>,
     /// profiler 统计表（None = 未启用剖析，减少热路径开销）
     prof: Option<HashMap<String, ProfEntry>>,
     /// REPL 最近一次表达式语句的值（Python 式回显用）
@@ -467,6 +556,7 @@ fn run_impl(
     ip.collect_structs(&program.stmts);
     ip.collect_enums(&program.stmts);
     ip.collect_classes(&program.stmts);
+    ip.collect_types(&program.stmts);
     let mut env = Env::new();
     let exec = ip.exec_stmts(&mut env, &program.stmts);
     // 无论执行结果如何都取出剖析数据（DEBUG_QUIT 也需返回）
@@ -503,6 +593,7 @@ impl Interp {
             enums: HashMap::new(),
             async_fns: HashSet::new(),
             classes: HashMap::new(),
+            types: HashMap::new(),
             prof: None,
             last_expr: None,
             watch: Vec::new(),
@@ -574,7 +665,7 @@ impl Interp {
         for stmt in stmts {
             match stmt {
                 Stmt::StructDef { name, fields, .. } => {
-                    self.structs.insert(name.clone(), fields.iter().map(|(f, _)| f.clone()).collect());
+                    self.structs.insert(name.clone(), fields.iter().map(|(f, _, _)| f.clone()).collect());
                 }
                 Stmt::Block { stmts, .. } => self.collect_structs(stmts),
                 Stmt::If { then_branch, else_branch, .. } => {
@@ -660,6 +751,55 @@ impl Interp {
         }
     }
 
+    /// 收集所有实例类（type）定义（含嵌套），注册到 types 表；解释执行时 TypeDef 语句为 no-op。
+    pub fn collect_types(&mut self, stmts: &[Stmt]) {
+        for stmt in stmts {
+            match stmt {
+                Stmt::TypeDef { name, base, fields, methods, .. } => {
+                    let mut methods_map: HashMap<String, Arc<FnDef>> = HashMap::new();
+                    for m in methods {
+                        if let Stmt::FnDef { name: mname, params, body, tmp, .. } = m {
+                            if !tmp {
+                                methods_map.insert(
+                                    mname.clone(),
+                                    Arc::new(FnDef {
+                                        params: params.clone(),
+                                        body: body.clone(),
+                                    }),
+                                );
+                            }
+                        }
+                    }
+                    self.types.insert(
+                        name.clone(),
+                        (
+                            base.clone(),
+                            fields.clone(),
+                            methods_map,
+                        ),
+                    );
+                }
+                Stmt::Block { stmts, .. } => self.collect_types(stmts),
+                Stmt::If { then_branch, else_branch, .. } => {
+                    self.collect_types(then_branch);
+                    if let Some(eb) = else_branch {
+                        self.collect_types(eb);
+                    }
+                }
+                Stmt::While { body, .. } => self.collect_types(body),
+                Stmt::DoWhile { body, .. } => self.collect_types(body),
+                Stmt::ForC { body, .. } => self.collect_types(body),
+                Stmt::ForIn { body, .. } => self.collect_types(body),
+                Stmt::Try { body, handler, .. } => {
+                    self.collect_types(body);
+                    self.collect_types(handler);
+                }
+                Stmt::With { body, .. } => self.collect_types(body),
+                _ => {}
+            }
+        }
+    }
+
     fn runtime_err(&self, code: &'static str, msg: impl Into<String>, span: Span, help: Option<impl Into<String>>) -> ZError {
         ZError::new(code, msg, &self.file, &self.src, span.line, span.col, span.len.max(1), help)
     }
@@ -699,25 +839,42 @@ impl Interp {
     }
 
     fn exec_block(&mut self, env: &mut Env, stmts: &[Stmt]) -> Result<Flow, ZError> {
-        env.scopes.push(HashMap::new());
+        env.push_scope();
         let flow = self.exec_stmts(env, stmts);
-        env.scopes.pop();
+        env.pop_scope();
         flow
     }
 
     fn exec_stmt(&mut self, env: &mut Env, stmt: &Stmt) -> Result<Flow, ZError> {
         match stmt {
-            Stmt::VarDecl { name, ty, init, .. } => {
+            Stmt::VarDecl { name, ty, init, readonly, span: _ } => {
                 let v = match init {
                     Some(e) => self.eval_expr(env, e)?,
                     None => default_value(ty.clone()),
                 };
+                if *readonly {
+                    env.declare_readonly(name, v);
+                } else {
+                    env.declare(name, v);
+                }
+                Ok(Flow::Normal)
+            }
+            Stmt::Assign { name, value, span } => {
+                if env.is_readonly(name) {
+                    return Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("cannot assign to readonly variable `{}`", name),
+                        *span,
+                        Some("declare it without `readonly` to allow reassignment"),
+                    ));
+                }
+                let v = self.eval_expr(env, value)?;
                 env.set_or_declare(name, v);
                 Ok(Flow::Normal)
             }
-            Stmt::Assign { name, value, .. } => {
+            Stmt::FieldAssign { target, value, span } => {
                 let v = self.eval_expr(env, value)?;
-                env.set_or_declare(name, v);
+                self.set_field_value(env, target, v, *span)?;
                 Ok(Flow::Normal)
             }
             Stmt::IndexAssign { target, value, span } => {
@@ -795,6 +952,14 @@ impl Interp {
                 }
             }
             Stmt::AssignOp { name, op, value, span } => {
+                if env.is_readonly(name) {
+                    return Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("cannot use `{}` on readonly variable `{}`", op.symbol(), name),
+                        *span,
+                        Some("declare it without `readonly` to allow reassignment"),
+                    ));
+                }
                 let cur = env.get(name).cloned();
                 match cur {
                     Some(cur) => {
@@ -855,9 +1020,9 @@ impl Interp {
                             None::<&str>,
                         ));
                     }
-                    env.scopes.push(body_scope);
+                    env.push_reusable_scope(body_scope);
                     let flow = self.exec_stmts(env, body);
-                    body_scope = env.scopes.pop().expect("while body scope");
+                    body_scope = env.pop_scope().expect("while body scope");
                     // 复用作用域必须清空：否则上一轮迭代体内声明的变量会泄漏到下一轮
                     body_scope.clear();
                     match flow? {
@@ -874,9 +1039,9 @@ impl Interp {
                 // do-while：先执行一次循环体，再判断条件
                 let mut body_scope = HashMap::new();
                 loop {
-                    env.scopes.push(body_scope);
+                    env.push_reusable_scope(body_scope);
                     let flow = self.exec_stmts(env, body);
-                    body_scope = env.scopes.pop().expect("do-while body scope");
+                    body_scope = env.pop_scope().expect("do-while body scope");
                     body_scope.clear();
                     match flow? {
                         Flow::Break => break,
@@ -928,9 +1093,9 @@ impl Interp {
                             ));
                         }
                     }
-                    env.scopes.push(body_scope);
+                    env.push_reusable_scope(body_scope);
                     let flow = self.exec_stmts(env, body);
-                    body_scope = env.scopes.pop().expect("for body scope");
+                    body_scope = env.pop_scope().expect("for body scope");
                     body_scope.clear();
                     match flow? {
                         Flow::Break => break,
@@ -966,11 +1131,38 @@ impl Interp {
                         // 复用同一个作用域 HashMap：每轮迭代避免一次堆分配
                         let mut body_scope = HashMap::new();
                         for item in items {
-                            env.scopes.push(body_scope);
+                            env.push_reusable_scope(body_scope);
                             env.declare(var, item);
                             let flow = self.exec_stmts(env, body);
-                            body_scope = env.scopes.pop().expect("for-in scope");
+                            body_scope = env.pop_scope().expect("for-in scope");
                             // 复用作用域必须清空：否则上一轮迭代体内声明的变量会泄漏到下一轮
+                            body_scope.clear();
+                            match flow? {
+                                Flow::Break => break,
+                                Flow::Continue => {} // 跳过剩余语句，进入下一次迭代
+                                Flow::Normal => {}
+                                // return / goto 向外层传播
+                                other => return Ok(other),
+                            }
+                        }
+                        Ok(Flow::Normal)
+                    }
+                    // 字节序列：单变量绑定单个字节（byte 值）
+                    Value::Bytes(items) => {
+                        if var2.is_some() {
+                            return Err(self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                "`for k, v in` requires a dict, got bytes",
+                                *span,
+                                Some("iterate bytes with a single variable: `for b in bs`"),
+                            ));
+                        }
+                        let mut body_scope = HashMap::new();
+                        for b in items {
+                            env.push_reusable_scope(body_scope);
+                            env.declare(var, Value::Byte(b));
+                            let flow = self.exec_stmts(env, body);
+                            body_scope = env.pop_scope().expect("for-in scope");
                             body_scope.clear();
                             match flow? {
                                 Flow::Break => break,
@@ -986,13 +1178,13 @@ impl Interp {
                     Value::Dict(entries) => {
                         let mut body_scope = HashMap::new();
                         for (k, v) in entries {
-                            env.scopes.push(body_scope);
+                            env.push_reusable_scope(body_scope);
                             env.declare(var, Value::Str(k));
                             if let Some(v2) = var2 {
                                 env.declare(v2, v);
                             }
                             let flow = self.exec_stmts(env, body);
-                            body_scope = env.scopes.pop().expect("for-in scope");
+                            body_scope = env.pop_scope().expect("for-in scope");
                             // 复用作用域必须清空：否则上一轮迭代体内声明的变量会泄漏到下一轮
                             body_scope.clear();
                             match flow? {
@@ -1069,6 +1261,8 @@ impl Interp {
             Stmt::EnumDef { .. } => Ok(Flow::Normal), // 已扁平化注册
             Stmt::AsyncFnDef { .. } => Ok(Flow::Normal), // 已扁平化注册
             Stmt::ClassDef { .. } => Ok(Flow::Normal), // 已注册到 classes 表（成员函数不进全局 fns）
+            Stmt::TypeDef { .. } => Ok(Flow::Normal), // 已注册到 types 表（实例经 new 构造）
+            Stmt::With { target, var, body, span } => self.exec_with(env, target, var.as_deref(), body, *span),
             Stmt::Go { callee, args, span } => self.exec_go(env, callee, args, *span),
             Stmt::DebugPrint { expr, span: _ } => {
                 if self.debug {
@@ -1082,10 +1276,10 @@ impl Interp {
                     Ok(flow) => Ok(flow),
                     Err(e) => {
                         // 捕获可恢复错误：绑定错误对象后执行 handler
-                        env.scopes.push(HashMap::new());
+                        env.push_scope();
                         env.declare(catch_var, Value::Error(ErrorObj::from_err(&e)));
                         let flow = self.exec_stmts(env, handler);
-                        env.scopes.pop();
+                        env.pop_scope();
                         flow
                     }
                 }
@@ -1230,6 +1424,7 @@ impl Interp {
         let enums = self.enums.clone();
         let async_fns = self.async_fns.clone();
         let classes = self.classes.clone();
+        let types = self.types.clone();
         let file = self.file.clone();
         let src = self.src.clone();
         let callee = callee.to_string();
@@ -1251,6 +1446,7 @@ impl Interp {
                 enums,
                 async_fns,
                 classes,
+                types,
                 prof: None,
                 last_expr: None,
                 watch: Vec::new(),
@@ -1289,6 +1485,7 @@ impl Interp {
         let enums = self.enums.clone();
         let async_fns = self.async_fns.clone();
         let classes = self.classes.clone();
+        let types = self.types.clone();
         let file = self.file.clone();
         let src = self.src.clone();
         let callee = callee.to_string();
@@ -1310,6 +1507,7 @@ impl Interp {
                 enums,
                 async_fns,
                 classes,
+                types,
                 prof: None,
                 last_expr: None,
                 watch: Vec::new(),
@@ -1834,6 +2032,7 @@ impl Interp {
         }
         let mut call_env = Env {
             scopes: vec![HashMap::with_capacity(f.params.len())],
+            readonly_vars: vec![HashSet::new()],
         };
         for (i, p) in f.params.iter().enumerate() {
             let v = if i < args.len() {
@@ -1849,7 +2048,12 @@ impl Interp {
                     Some("pass the required argument, or give the parameter a default value"),
                 ));
             };
-            call_env.declare(&p.name, v);
+            if p.readonly {
+                // 只读参数：`fn f(x: readonly int)` 体内不可重新赋值
+                call_env.declare_readonly(&p.name, v);
+            } else {
+                call_env.declare(&p.name, v);
+            }
         }
         self.depth += 1;
         // profiler：记录调用图边并入栈；无论执行结果如何都必须出栈结算
@@ -1920,6 +2124,7 @@ impl Interp {
         }
         let mut call_env = Env {
             scopes: vec![f.captured.clone(), HashMap::with_capacity(f.params.len())],
+            readonly_vars: vec![HashSet::new(), HashSet::new()],
         };
         for (i, p) in f.params.iter().enumerate() {
             let v = if i < args.len() {
@@ -1935,7 +2140,12 @@ impl Interp {
                     Some("pass the required argument, or give the parameter a default value"),
                 ));
             };
-            call_env.declare(&p.name, v);
+            if p.readonly {
+                // 只读参数：lambda 参数同样支持 readonly 修饰
+                call_env.declare_readonly(&p.name, v);
+            } else {
+                call_env.declare(&p.name, v);
+            }
         }
         self.depth += 1;
         let t0 = if self.prof.is_some() { Some(std::time::Instant::now()) } else { None };
@@ -2010,7 +2220,349 @@ impl Interp {
         }
     }
 
+    // ---------- with 上下文管理器 ----------
+
+    /// with expr [as r] { ... } 执行：
+    /// 进入调 `__enter__()`（返回值绑定 r，仅块内可见）；块执行（无论成败）后必调 `__exit__()`；
+    /// `__exit__` 不能吞错：块报错时优先保留原始错误，`__exit__` 自身报错时（块成功）以 `__exit__` 错误为准。
+    fn exec_with(
+        &mut self,
+        env: &mut Env,
+        target: &Expr,
+        var: Option<&str>,
+        body: &[Stmt],
+        span: Span,
+    ) -> Result<Flow, ZError> {
+        let t = self.eval_expr(env, target)?;
+        let r = self.call_enter(&t, span)?;
+        env.push_scope();
+        if let Some(v) = var {
+            env.declare(v, r);
+        }
+        let body_result = self.exec_stmts(env, body);
+        let exit_result = self.call_exit(&t, span);
+        env.pop_scope();
+        match (body_result, exit_result) {
+            (Ok(flow), Ok(())) => Ok(flow),
+            (Ok(_), Err(e)) => Err(e), // __exit__ 报错（块成功）：以 __exit__ 错误为准
+            (Err(e), Ok(())) => Err(e), // 块报错：保留原始错误
+            // 块与 __exit__ 均报错：优先保留块的原始错误
+            (Err(e), Err(_)) => Err(e),
+        }
+    }
+
+    /// 进入上下文：
+    /// - type 实例 → 调 `类型.__enter__(self)`，返回值作为 with 资源（可绑定 r）；
+    /// - 内置 Int 句柄（sqlite/sse/guipro）→ 运行时特判，直接返回句柄本身作为资源；
+    /// - 其余类型 → 报错（不支持 with 协议）。
+    fn call_enter(&mut self, t: &Value, span: Span) -> Result<Value, ZError> {
+        match t {
+            Value::TypeInst(inst) => self.invoke_type_method(inst, "__enter__", Vec::new(), span),
+            // 内置句柄（Int id，注册于 builtins::with 资源表）：直接返回句柄作为资源
+            Value::Int(id) => Ok(Value::Int(*id)),
+            Value::Ptr(_) => Ok(t.clone()),
+            other => Err(self.err_no_context(other, "__enter__", span)),
+        }
+    }
+
+    /// 退出上下文（报错也调）：
+    /// - type 实例 → 调 `类型.__exit__(self)`（返回值忽略，不能吞错）；
+    /// - 内置 Int 句柄 → 运行时特判自动 close（sqlite.close / http.sse_close 等）；
+    /// - 其余类型 → 报错。
+    fn call_exit(&mut self, t: &Value, span: Span) -> Result<(), ZError> {
+        match t {
+            Value::TypeInst(inst) => {
+                self.invoke_type_method(inst, "__exit__", Vec::new(), span)?;
+                Ok(())
+            }
+            Value::Int(id) => {
+                // 内置句柄（Int id）：若登记于 with 资源表则派发 close；否则非资源，静默通过
+                let _ = crate::builtins::with_close(*id);
+                Ok(())
+            }
+            Value::Ptr(_) => Ok(()),
+            other => Err(self.err_no_context(other, "__exit__", span)),
+        }
+    }
+
+    /// 上下文协议缺失错误。
+    fn err_no_context(&self, v: &Value, method: &str, span: Span) -> ZError {
+        self.runtime_err(
+            codes::UNDEFINED,
+            format!(
+                "`with` target `{}` does not support `{}`",
+                v.type_name(),
+                method
+            ),
+            span,
+            Some(
+                "wrap the resource in a `type` defining `fn __enter__(self)` and `fn __exit__(self)`",
+            ),
+        )
+    }
+
+    /// 调用 type 实例的方法（沿继承链查找，子类覆盖父类）。
+    /// 实例自动作为首参 self 传入；extra_args 为 self 之外的实参。
+    /// 传入 &Arc 共享实例（引用语义）：方法体内 self.field 的写入对调用方立即可见。
+    fn invoke_type_method(
+        &mut self,
+        inst: &Arc<TypeInstVal>,
+        method: &str,
+        extra_args: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, ZError> {
+        let mut found: Option<Arc<FnDef>> = None;
+        let mut cur: Option<String> = Some(inst.ty.clone());
+        let mut seen: HashSet<String> = HashSet::new();
+        while let Some(tyname) = cur.take() {
+            if !seen.insert(tyname.clone()) {
+                break; // 继承环保护
+            }
+            if let Some((base, _, methods)) = self.types.get(&tyname) {
+                if let Some(f) = methods.get(method) {
+                    found = Some(f.clone());
+                    break;
+                }
+                cur = base.clone();
+            } else {
+                break; // 未知类型（不应发生，checker 已保证）
+            }
+        }
+        let f = found.ok_or_else(|| {
+            self.runtime_err(
+                codes::UNDEFINED,
+                format!("type `{}` has no method `{}`", inst.ty, method),
+                span,
+                Some("check the method name, or the `extends` chain"),
+            )
+        })?;
+        // 共享同一 Arc（引用语义），不深克隆
+        let mut full_args = vec![Value::TypeInst(inst.clone())];
+        full_args.extend(extra_args);
+        self.exec_user_fn(&format!("{}.{}", inst.ty, method), &f, full_args, span)
+    }
+
     // ---------- 表达式 ----------
+
+    /// 字段赋值：p.f = x; / p.a.b = x;（target 为字段链表达式，链底为变量名）。
+    /// struct 实例（dict）按字段名写回；type 实例按实例字段表写回；readonly 字段报错。
+    fn set_field_value(&mut self, env: &mut Env, target: &Expr, value: Value, span: Span) -> Result<(), ZError> {
+        // 收集字段链：p.a.b → [p, a, b]（链底在前）
+        let mut chain: Vec<&str> = Vec::new();
+        let mut cur = target;
+        loop {
+            match cur {
+                Expr::Field { obj, field, .. } => {
+                    chain.push(field);
+                    cur = obj;
+                }
+                Expr::Ident { name, .. } => {
+                    chain.push(name);
+                    break;
+                }
+                _ => {
+                    return Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        "field assignment target must be a field chain `obj.field`",
+                        span,
+                        Some("use `obj.field = x` or `obj.a.b = x`"),
+                    ))
+                }
+            }
+        }
+        chain.reverse();
+        let base_name = chain[0].to_string();
+        let base = env.get(&base_name).cloned().ok_or_else(|| {
+            self.runtime_err(
+                codes::UNDEFINED,
+                format!("`{}` is not defined", base_name),
+                span,
+                None::<&str>,
+            )
+        })?;
+        let updated = self.update_chain(base, &chain[1..], value, span)?;
+        env.set_or_declare(&base_name, updated);
+        Ok(())
+    }
+
+    /// 在已求值对象上按字段链更新并返回新值（链为 [基, 中间..., 叶] 去掉基）。
+    /// 值语义：dict/type 实例均克隆后写回，不影响其他引用同一数据的地方。
+    fn update_chain(&mut self, base: Value, chain: &[&str], value: Value, span: Span) -> Result<Value, ZError> {
+        match chain {
+            [] => Ok(base),
+            [f] => {
+                // 叶字段：readonly 检查 + 更新
+                match base {
+                    Value::TypeInst(inst) => {
+                        self.check_field_readonly(&inst.ty, f, span)?;
+                        // 引用语义：直接修改共享字段表，调用方持有的实例立即可见
+                        let mut fields = inst.fields.write().unwrap();
+                        if let Some(slot) = fields.iter_mut().find(|(k, _)| k == f) {
+                            slot.1 = value;
+                        } else {
+                            return Err(self.runtime_err(
+                                codes::UNDEFINED,
+                                format!("type `{}` has no field `{}`", inst.ty, f),
+                                span,
+                                None::<&str>,
+                            ));
+                        }
+                        Ok(Value::TypeInst(inst.clone()))
+                    }
+                    Value::Dict(entries) => {
+                        let mut entries = entries.clone();
+                        if let Some(slot) = entries.iter_mut().find(|(k, _)| k == f) {
+                            slot.1 = value;
+                        } else {
+                            return Err(self.runtime_err(
+                                codes::UNDEFINED,
+                                format!(
+                                    "no field `{}` (dict/struct has {})",
+                                    f,
+                                    entries.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")
+                                ),
+                                span,
+                                None::<&str>,
+                            ));
+                        }
+                        Ok(Value::Dict(entries))
+                    }
+                    other => Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("cannot assign to field `.{}` of type `{}`", f, other.type_name()),
+                        span,
+                        Some("field assignment targets a `struct`/`type` instance field"),
+                    )),
+                }
+            }
+            [f, rest @ ..] => {
+                // 中间层：取子对象、递归更新、写回基对象的该字段
+                let sub = self.field_value(base.clone(), f, span)?;
+                let new_sub = self.update_chain(sub, rest, value, span)?;
+                match base {
+                    Value::TypeInst(inst) => {
+                        // 引用语义：直接修改共享字段表
+                        let mut fields = inst.fields.write().unwrap();
+                        if let Some(slot) = fields.iter_mut().find(|(k, _)| k == f) {
+                            slot.1 = new_sub;
+                        }
+                        Ok(Value::TypeInst(inst.clone()))
+                    }
+                    Value::Dict(entries) => {
+                        let mut entries = entries.clone();
+                        if let Some(slot) = entries.iter_mut().find(|(k, _)| k == f) {
+                            slot.1 = new_sub;
+                        }
+                        Ok(Value::Dict(entries))
+                    }
+                    other => Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("cannot traverse field `.{}` of type `{}`", f, other.type_name()),
+                        span,
+                        None::<&str>,
+                    )),
+                }
+            }
+        }
+    }
+
+    /// 检查 type 实例字段是否只读（沿继承链查字段定义）。
+    fn check_field_readonly(&self, ty: &str, field: &str, span: Span) -> Result<(), ZError> {
+        let mut cur = Some(ty.to_string());
+        let mut seen: HashSet<String> = HashSet::new();
+        while let Some(tname) = cur.take() {
+            if !seen.insert(tname.clone()) {
+                break;
+            }
+            if let Some((base, fields, _)) = self.types.get(&tname) {
+                if let Some((_, _, ro)) = fields.iter().find(|(k, _, _)| k == field) {
+                    if *ro {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("field `{}` of type `{}` is readonly", field, tname),
+                            span,
+                            Some("remove `readonly` from the field definition to allow assignment"),
+                        ));
+                    }
+                    return Ok(());
+                }
+                cur = base.clone();
+            } else {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    /// 切片求值：a[i:j]（半开 [i,j)；端点可省；越界自动截断）。
+    /// list 返回 list 副本；bytes 返回 bytes 副本。
+    fn eval_slice(
+        &mut self,
+        env: &mut Env,
+        obj: &Expr,
+        lo: Option<&Expr>,
+        hi: Option<&Expr>,
+        span: Span,
+    ) -> Result<Value, ZError> {
+        let v = self.eval_expr(env, obj)?;
+        let len = match &v {
+            Value::List(items) => items.len(),
+            Value::Bytes(b) => b.len(),
+            other => {
+                return Err(self.runtime_err(
+                    codes::TYPE_MISMATCH,
+                    format!("cannot slice a value of type `{}`", other.type_name()),
+                    span,
+                    Some("slicing is supported on lists and byte sequences"),
+                ))
+            }
+        };
+        let lo_v = match lo {
+            Some(e) => match self.eval_expr(env, e)? {
+                Value::Int(x) => x,
+                other => {
+                    return Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("slice index must be an int, got `{}`", other.type_name()),
+                        span,
+                        None::<&str>,
+                    ))
+                }
+            },
+            None => 0,
+        };
+        let hi_v = match hi {
+            Some(e) => match self.eval_expr(env, e)? {
+                Value::Int(x) => x,
+                other => {
+                    return Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("slice index must be an int, got `{}`", other.type_name()),
+                        span,
+                        None::<&str>,
+                    ))
+                }
+            },
+            None => len as i64,
+        };
+        // 规范化：负索引从末尾算；越界截断
+        let lo = if lo_v < 0 { (len as i64 + lo_v).max(0) } else { lo_v.min(len as i64) };
+        let hi = if hi_v < 0 { (len as i64 + hi_v).max(0) } else { hi_v.min(len as i64) };
+        let lo = lo as usize;
+        let hi = hi.min(len as i64) as usize;
+        if lo > hi {
+            return Ok(match &v {
+                Value::List(_) => Value::List(Vec::new()),
+                Value::Bytes(_) => Value::Bytes(Vec::new()),
+                _ => unreachable!(),
+            });
+        }
+        Ok(match v {
+            Value::List(items) => Value::List(items[lo..hi].to_vec()),
+            Value::Bytes(b) => Value::Bytes(b[lo..hi].to_vec()),
+            _ => unreachable!(),
+        })
+    }
 
     /// 索引赋值：把 target（a[i] 或 m[i][j]...）更新为 value。
     /// 列表为值类型：每层克隆后写回基变量，保持拷贝语义（b = a 后改 a 不影响 b）。
@@ -2111,6 +2663,18 @@ impl Interp {
                 }
                 Ok(Value::Str(chars[i as usize].to_string()))
             }
+            // 字节序列索引返回单个字节（byte 值，与 int 严格隔离）
+            Value::Bytes(b) => {
+                if i < 0 || (i as usize) >= b.len() {
+                    return Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("index {} out of bounds (bytes length {})", i, b.len()),
+                        span,
+                        Some("check the index against `len(bytes)`"),
+                    ));
+                }
+                Ok(Value::Byte(b[i as usize]))
+            }
             other => Err(self.runtime_err(
                 codes::TYPE_MISMATCH,
                 format!("cannot index a value of type `{}`", other.type_name()),
@@ -2127,6 +2691,8 @@ impl Interp {
             Expr::BoolLit(v, _) => Ok(Value::Bool(*v)),
             Expr::StrLit(v, _) => Ok(Value::Str(v.clone())),
             Expr::CharLit(v, _) => Ok(Value::Char(*v)),
+            Expr::ByteLit(v, _) => Ok(Value::Byte(*v)),
+            Expr::BytesLit(v, _) => Ok(Value::Bytes(v.clone())),
             Expr::ListLit(items, _) => {
                 let mut vals = Vec::new();
                 for it in items {
@@ -2156,19 +2722,19 @@ impl Interp {
                             ));
                         }
                         for item in items {
-                            env.scopes.push(HashMap::new());
+                            env.push_scope();
                             env.declare(var, item);
                             let pass = self.comp_cond(env, cond.as_deref())?;
                             if pass {
                                 out.push(self.eval_expr(env, elem)?);
                             }
-                            env.scopes.pop();
+                            env.pop_scope();
                         }
                     }
                     // 字典推导式来源：var=键，var2=值（可选）
                     Value::Dict(entries) => {
                         for (k, v) in entries {
-                            env.scopes.push(HashMap::new());
+                            env.push_scope();
                             env.declare(var, Value::Str(k));
                             if let Some(v2) = var2 {
                                 env.declare(v2, v);
@@ -2177,7 +2743,7 @@ impl Interp {
                             if pass {
                                 out.push(self.eval_expr(env, elem)?);
                             }
-                            env.scopes.pop();
+                            env.pop_scope();
                         }
                     }
                     other => {
@@ -2205,18 +2771,18 @@ impl Interp {
                             ));
                         }
                         for item in items {
-                            env.scopes.push(HashMap::new());
+                            env.push_scope();
                             env.declare(var, item);
                             let pass = self.comp_cond(env, cond.as_deref())?;
                             if pass {
                                 out.push(self.comp_pair(env, key, value, *span)?);
                             }
-                            env.scopes.pop();
+                            env.pop_scope();
                         }
                     }
                     Value::Dict(entries) => {
                         for (k, v) in entries {
-                            env.scopes.push(HashMap::new());
+                            env.push_scope();
                             env.declare(var, Value::Str(k));
                             if let Some(v2) = var2 {
                                 env.declare(v2, v);
@@ -2225,7 +2791,7 @@ impl Interp {
                             if pass {
                                 out.push(self.comp_pair(env, key, value, *span)?);
                             }
-                            env.scopes.pop();
+                            env.pop_scope();
                         }
                     }
                     other => {
@@ -2310,6 +2876,123 @@ impl Interp {
                     self.index_value(v, idx, *span)
                 }
             }
+            Expr::Slice { obj, lo, hi, span } => self.eval_slice(env, obj, lo.as_deref(), hi.as_deref(), *span),
+            Expr::MethodCall { obj, name, args, span } => {
+                let receiver = self.eval_expr(env, obj)?;
+                let mut arg_vals = Vec::new();
+                for a in args {
+                    arg_vals.push(self.eval_expr(env, a)?);
+                }
+                match receiver {
+                    Value::TypeInst(inst) => self.invoke_type_method(&inst, name, arg_vals, *span),
+                    other => Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!(
+                            "method call `.{}` requires a `type` instance, got `{}`",
+                            name,
+                            other.type_name()
+                        ),
+                        *span,
+                        Some("methods can only be called on instances created with `new Type(...)`"),
+                    )),
+                }
+            }
+            Expr::New { ty, args, span } => {
+                let def = self.types.get(ty).cloned().ok_or_else(|| {
+                    self.runtime_err(
+                        codes::UNDEFINED,
+                        format!("`new` requires a `type` definition, `{}` is not a type", ty),
+                        *span,
+                        Some("define it with `type Name { ... }` before constructing an instance"),
+                    )
+                })?;
+                let (base, fields, _) = def;
+                // 收集继承链字段（父→子），保证父字段在前
+                let mut all_fields: Vec<(String, TyName, bool)> = Vec::new();
+                let mut cur = base.clone();
+                let mut seen: HashSet<String> = HashSet::new();
+                while let Some(tname) = cur.take() {
+                    if !seen.insert(tname.clone()) {
+                        break;
+                    }
+                    if let Some((nb, nf, _)) = self.types.get(&tname) {
+                        all_fields.extend(nf.iter().cloned());
+                        cur = nb.clone();
+                    } else {
+                        break;
+                    }
+                }
+                all_fields.extend(fields.iter().cloned());
+                // 按字段顺序绑定实参，缺省为零值
+                let mut field_vals: Vec<(String, Value)> = Vec::new();
+                for (i, (fname, fty, _ro)) in all_fields.iter().enumerate() {
+                    let v = if i < args.len() {
+                        let ae = &args[i];
+                        self.eval_expr(env, ae)?
+                    } else {
+                        default_value(fty.clone())
+                    };
+                    field_vals.push((fname.clone(), v));
+                }
+                if args.len() > all_fields.len() {
+                    return Err(self.runtime_err(
+                        codes::ARG_COUNT,
+                        format!(
+                            "`new {}` takes {} field(s), got {}",
+                            ty,
+                            all_fields.len(),
+                            args.len()
+                        ),
+                        *span,
+                        Some("construct with `new Type(field1, field2, ...)` matching the field order"),
+                    ));
+                }
+                // 构造后自动调用 init（若定义），self 为实例，不允许 return 值
+                let inst = Value::TypeInst(Arc::new(TypeInstVal {
+                    ty: ty.clone(),
+                    fields: RwLock::new(field_vals),
+                }));
+                // 找 init：优先本类型自己的定义（方法覆盖语义），再沿继承链向上找（父类兜底）
+                let mut init_found: Option<Arc<FnDef>> = self
+                    .types
+                    .get(ty)
+                    .and_then(|(_, _, m)| m.get("init").cloned());
+                if init_found.is_none() {
+                    let mut cur2 = base.clone();
+                    let mut seen2: HashSet<String> = HashSet::new();
+                    while let Some(tname) = cur2.take() {
+                        if !seen2.insert(tname.clone()) {
+                            break;
+                        }
+                        if let Some((nb, _, methods)) = self.types.get(&tname) {
+                            if let Some(f) = methods.get("init") {
+                                init_found = Some(f.clone());
+                                break;
+                            }
+                            cur2 = nb.clone();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                if let Some(init) = init_found {
+                    let mut full_args = vec![inst.clone()];
+                    for a in args {
+                        full_args.push(self.eval_expr(env, a)?);
+                    }
+                    let r = self.exec_user_fn(&format!("{}.init", ty), &init, full_args, *span)?;
+                    // init 不允许 return 值（checker 已保证，运行时兜底）
+                    if !matches!(r, Value::Null) {
+                        return Err(self.runtime_err(
+                            codes::SYNTAX,
+                            format!("`init` of `{}` must not return a value", ty),
+                            *span,
+                            Some("remove the `return` from `init`; assign to `self.field` instead"),
+                        ));
+                    }
+                }
+                Ok(inst)
+            }
             Expr::Unary { op, expr, span } => {
                 let v = self.eval_expr(env, expr)?;
                 // 先取类型名（match 会移动 v，错误分支仍需展示类型）
@@ -2379,14 +3062,14 @@ impl Interp {
                                     }
                                     // 有绑定：新作用域声明绑定变量，求值分支体后弹出
                                     if binds.iter().any(|b| b.is_some()) {
-                                        env.scopes.push(HashMap::new());
+                                        env.push_scope();
                                         for (b, pv) in binds.iter().zip(ev.payload.iter()) {
                                             if let Some(name) = b {
                                                 env.declare(name, pv.clone());
                                             }
                                         }
                                         let r = self.eval_expr(env, body)?;
-                                        env.scopes.pop();
+                                        env.pop_scope();
                                         return Ok(r);
                                     }
                                     return self.eval_expr(env, body);
@@ -2403,6 +3086,14 @@ impl Interp {
                 ))
             }
             Expr::IncDec { op, prefix, name, span } => {
+                if env.is_readonly(name) {
+                    return Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("cannot use `{}` on readonly variable `{}`", op.symbol(), name),
+                        *span,
+                        Some("declare it without `readonly` to allow reassignment"),
+                    ));
+                }
                 let cur = env.get(name).cloned();
                 match cur {
                     Some(cur) => {
@@ -2471,6 +3162,13 @@ impl Interp {
                 if let Some(Value::Lambda(f)) = env.get(callee).cloned() {
                     return self.exec_lambda(&f, arg_vals, *span);
                 }
+                // 限定名 `变量.方法(...)` 且变量求值为 type 实例 → 实例方法调用
+                // （parser 把 a.b.c(...) 统一解析为限定调用，此处按实例语义回退分发）
+                if let Some((base_name, method)) = callee.split_once('.') {
+                    if let Some(Value::TypeInst(inst)) = env.get(base_name).cloned() {
+                        return self.invoke_type_method(&inst, method, arg_vals, *span);
+                    }
+                }
                 self.call_fn(callee, arg_vals, *span)
             }
         }
@@ -2511,10 +3209,26 @@ impl Interp {
         Ok((ks, v))
     }
 
-    /// 字段访问核心：dict/struct 按键取字段，error 取错误属性；其他类型报错。
+    /// 字段访问核心：dict/struct 按键取字段，type 实例沿继承链取字段，error 取错误属性；其他类型报错。
     /// Field 与 OptionalField（?.）共用；可选链在调用方先做 null 短路。
     fn field_value(&self, v: Value, field: &str, span: Span) -> Result<Value, ZError> {
         match v {
+            Value::TypeInst(inst) => {
+                // 实例字段访问：按实例字段表取值
+                match inst.fields.read().unwrap().iter().find(|(k, _)| k == field) {
+                    Some((_, val)) => Ok(val.clone()),
+                    None => Err(self.runtime_err(
+                        codes::UNDEFINED,
+                        format!(
+                            "type `{}` has no field `{}`",
+                            inst.ty,
+                            field
+                        ),
+                        span,
+                        Some("check the field name, or the `extends` chain"),
+                    )),
+                }
+            }
             Value::Dict(entries) => {
                 // struct 实例 / dict 字段访问：按键查找
                 match entries.iter().find(|(k, _)| k == field) {
@@ -2682,9 +3396,13 @@ impl Interp {
             (Value::Bool(x), Value::Bool(y)) => Ok(x == y),
             (Value::Str(x), Value::Str(y)) => Ok(x == y),
             (Value::Char(x), Value::Char(y)) => Ok(x == y),
+            (Value::Byte(x), Value::Byte(y)) => Ok(x == y),
+            (Value::Bytes(x), Value::Bytes(y)) => Ok(x == y),
             (Value::List(x), Value::List(y)) => Ok(x == y),
             (Value::Dict(x), Value::Dict(y)) => Ok(x == y),
             (Value::Ptr(x), Value::Ptr(y)) => Ok(x == y),
+            // 实例类实例：按引用相等（与 PartialEq 一致，不做结构相等）
+            (Value::TypeInst(x), Value::TypeInst(y)) => Ok(Arc::ptr_eq(x, y)),
             // ptr 与整数比较：`p == 0` 判断 NULL，`p == n` 比较句柄数值
             (Value::Ptr(x), Value::Int(y)) => Ok(*x as i64 == *y),
             (Value::Int(x), Value::Ptr(y)) => Ok(*x == *y as i64),
@@ -2713,11 +3431,13 @@ impl Interp {
             }),
             // 字符按 Unicode 码点比较
             (Value::Char(x), Value::Char(y)) => Ok(x.cmp(y)),
+            // 字节按数值比较（0-255）
+            (Value::Byte(x), Value::Byte(y)) => Ok(x.cmp(y)),
             _ => Err(self.runtime_err(
                 codes::TYPE_MISMATCH,
                 format!("cannot compare `{}` with `{}`", a.type_name(), b.type_name()),
                 span,
-                Some("comparison operators work on `int` / `float` / `char`"),
+                Some("comparison operators work on `int` / `float` / `char` / `byte`"),
             )),
         }
     }
@@ -2793,6 +3513,12 @@ impl Interp {
                 Ok(Value::Float(r))
             }
             (Value::Str(x), Value::Str(y)) if op == BinOp::Add => Ok(Value::Str(format!("{}{}", x, y))),
+            // 字节序列拼接（+）
+            (Value::Bytes(x), Value::Bytes(y)) if op == BinOp::Add => {
+                let mut r = x.clone();
+                r.extend_from_slice(y);
+                Ok(Value::Bytes(r))
+            }
             _ => Err(self.runtime_err(
                 codes::TYPE_MISMATCH,
                 format!(
@@ -2815,6 +3541,8 @@ fn default_value(ty: TyName) -> Value {
         TyName::Bool => Value::Bool(false),
         TyName::Str => Value::Str(String::new()),
         TyName::Char => Value::Char('\0'),
+        TyName::Byte => Value::Byte(0),
+        TyName::Bytes => Value::Bytes(Vec::new()),
         // 泛型类型参数无固定默认值（编译期擦除，运行时不可达）
         TyName::Var(_) => Value::Null,
     }

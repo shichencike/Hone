@@ -223,6 +223,18 @@ fn get_db(handle: i64, span: Span, file: &str, src: &str) -> Result<*mut c_void,
         ))
 }
 
+/// with 退出时关闭 sqlite 句柄（由 `builtins::with_close` 派发）。
+/// 幂等：句柄已关闭或不存在时返回 false，不报错。
+pub fn with_close_sqlite(handle: i64) -> bool {
+    let db = match HANDLES.lock().unwrap().remove(&handle) {
+        Some(addr) => addr as *mut c_void,
+        None => return false,
+    };
+    let Some(api) = API.as_ref().ok() else { return false };
+    unsafe { (api.close)(db) };
+    true
+}
+
 /// sqlite 模块调用入口。
 pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Result<Value, ZError> {
     let api = API.as_ref().map_err(|e| {
@@ -257,6 +269,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             let id = *next;
             *next += 1;
             HANDLES.lock().unwrap().insert(id, db as usize);
+            crate::builtins::with_register(id, "sqlite");
             Ok(Value::Int(id))
         }
         "sqlite.close" => {

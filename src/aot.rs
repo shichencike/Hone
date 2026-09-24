@@ -1500,7 +1500,7 @@ impl AotGen {
                     }
                 }
                 Stmt::StructDef { name, fields, .. } => {
-                    self.structs.insert(name.clone(), fields.iter().map(|(f, _)| f.clone()).collect());
+                    self.structs.insert(name.clone(), fields.iter().map(|(f, _, _)| f.clone()).collect());
                 }
                 Stmt::EnumDef { name, variants, .. } => {
                     // 收集枚举：变体名 + 序号（tag 用于生成的 C 代码快速匹配）
@@ -1683,7 +1683,7 @@ impl AotGen {
                 out.push_str(&self.assign_var(name, &e));
                 Ok(())
             }
-            Stmt::VarDecl { name, ty, init, span } => {
+            Stmt::VarDecl { name, ty, init, span, .. } => {
                 let e = match init {
                     Some(i) => self.gen_expr(i)?,
                     None => match ty {
@@ -1700,6 +1700,17 @@ impl AotGen {
                                 "`char` is not supported in AOT native builds".to_string(),
                                 *span,
                                 Some("char works in interpreted mode only"),
+                            ));
+                        }
+                        // AOT 运行时暂无 byte/bytes 值类型
+                        TyName::Byte | TyName::Bytes => {
+                            return Err(zerr(
+                                &self.file,
+                                &self.src,
+                                codes::NOT_IMPLEMENTED,
+                                "`byte` / `bytes` are not supported in AOT native builds".to_string(),
+                                *span,
+                                Some("byte/bytes work in interpreted mode only"),
                             ));
                         }
                         TyName::Var(_) => "hn_null()".to_string(),
@@ -1952,6 +1963,30 @@ impl AotGen {
             Stmt::StructDef { .. } => Ok(()),           // 已收集
             Stmt::EnumDef { .. } => Ok(()),             // 已收集
             Stmt::ClassDef { .. } => Ok(()),            // 已收集
+            Stmt::TypeDef { name, span, .. } => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                format!("`type` 实例类 `{}` 在 AOT 原生构建中暂不支持", name),
+                *span,
+                Some("type 实例请用解释器 `hone run` 运行"),
+            )),
+            Stmt::With { span, .. } => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                "`with` 上下文管理器在 AOT 原生构建中暂不支持".to_string(),
+                *span,
+                Some("with 请用解释器 `hone run` 运行"),
+            )),
+            Stmt::FieldAssign { span, .. } => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                "字段赋值 `obj.field = x` 在 AOT 原生构建中暂不支持".to_string(),
+                *span,
+                Some("字段赋值请用解释器 `hone run` 运行"),
+            )),
             Stmt::Use { .. } => Ok(()),                 // 命名空间声明，无运行语义
             Stmt::Alias { .. } => Ok(()),               // 已收集（调用时解析）
             Stmt::Import { name, url: _, span, .. } => Err(zerr(
@@ -2202,6 +2237,47 @@ impl AotGen {
                 "`char` literals are not supported in AOT native builds".to_string(),
                 *span,
                 Some("char works in interpreted mode only"),
+            )),
+            // 字节类型/切片/type 实例为解释器特性，AOT 原生构建暂不支持
+            Expr::ByteLit(_, span) => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                "`byte` literals are not supported in AOT native builds".to_string(),
+                *span,
+                Some("byte works in interpreted mode only"),
+            )),
+            Expr::BytesLit(_, span) => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                "`bytes` literals are not supported in AOT native builds".to_string(),
+                *span,
+                Some("bytes work in interpreted mode only"),
+            )),
+            Expr::Slice { span, .. } => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                "slicing is not supported in AOT native builds".to_string(),
+                *span,
+                Some("slicing works in interpreted mode only"),
+            )),
+            Expr::MethodCall { span, .. } => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                "`type` instance methods are not supported in AOT native builds".to_string(),
+                *span,
+                Some("`type` instances work in interpreted mode only"),
+            )),
+            Expr::New { span, .. } => Err(zerr(
+                &self.file,
+                &self.src,
+                codes::NOT_IMPLEMENTED,
+                "`type` instances are not supported in AOT native builds".to_string(),
+                *span,
+                Some("`type` instances work in interpreted mode only"),
             )),
             Expr::Ident { name, span } => {
                 if let Some(v) = self.lookup(name) {
