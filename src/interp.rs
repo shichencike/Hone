@@ -172,7 +172,19 @@ impl PartialEq for Value {
     }
 }
 
+/// struct 实例的隐藏标记键：struct 实例是 `Value::Dict`，额外携带
+/// (`\u{0}__struct__` → struct 名) 标记，供运行时识别 struct 与 dict 来源
+/// （readonly 字段拦截、类型判断等）。该键必须在所有用户可见的 dict 路径
+/// （display / len / keys / values / for-in / 推导式 / 相等性 / 解构 /
+/// JSON / 字段访问报错）中屏蔽，不得暴露给用户（与 vm.rs 的标记一致）。
+pub const STRUCT_MARKER_KEY: &str = "\u{0}__struct__";
+
 impl Value {
+    /// 是否为隐藏 struct 标记键（用户可见路径需过滤，见 STRUCT_MARKER_KEY）。
+    pub fn is_hidden_struct_key(k: &str) -> bool {
+        k == STRUCT_MARKER_KEY
+    }
+
     pub fn type_name(&self) -> &'static str {
         match self {
             Value::Int(_) => "int",
@@ -234,8 +246,10 @@ impl Value {
                 format!("[{}]", inner.join(", "))
             }
             Value::Dict(entries) => {
+                // 隐藏 `__struct__` 标记键不显示
                 let inner: Vec<String> = entries
                     .iter()
+                    .filter(|(k, _)| !Value::is_hidden_struct_key(k))
                     .map(|(k, v)| format!("{}: {}", k, v.display()))
                     .collect();
                 format!("{{{}}}", inner.join(", "))
@@ -443,8 +457,9 @@ pub struct Interp {
     ffi_sigs: HashMap<String, FfiSig>,
     /// 函数别名（新名 → 原名）
     alias_map: HashMap<String, String>,
-    /// 结构体定义：名称 → 字段名（构造时按顺序生成 dict 实例）
-    structs: HashMap<String, Vec<String>>,
+    /// 结构体定义：名称 → 字段（名, 类型, 是否 readonly）。
+    /// 构造时按顺序生成带 `__struct__` 标记的 dict 实例，readonly 供运行时字段写入拦截。
+    structs: HashMap<String, Vec<(String, TyName, bool)>>,
     /// 枚举定义：名称 → 变体名列表（变体访问/构造/匹配时校验存在性）
     enums: HashMap<String, Vec<String>>,
     /// 异步函数名集合（async fn 定义）：调用时后台线程执行并返回 future
@@ -665,7 +680,7 @@ impl Interp {
         for stmt in stmts {
             match stmt {
                 Stmt::StructDef { name, fields, .. } => {
-                    self.structs.insert(name.clone(), fields.iter().map(|(f, _, _)| f.clone()).collect());
+                    self.structs.insert(name.clone(), fields.iter().map(|(f, t, ro)| (f.clone(), t.clone(), *ro)).collect());
                 }
                 Stmt::Block { stmts, .. } => self.collect_structs(stmts),
                 Stmt::If { then_branch, else_branch, .. } => {
@@ -925,6 +940,15 @@ impl Interp {
                             ));
                         }
                         for (name, key) in targets {
+                            // struct 隐藏标记键不暴露：解构它按缺键报错
+                            if Value::is_hidden_struct_key(key.as_deref().expect("dict destructure target carries a key")) {
+                                return Err(self.runtime_err(
+                                    codes::UNDEFINED,
+                                    format!("dict has no key `{}` for destructuring", key.as_deref().expect("dict destructure target carries a key")),
+                                    *span,
+                                    Some("check the key name, or the dict value being destructured"),
+                                ));
+                            }
                             let key = key.as_deref().expect("dict destructure target carries a key");
                             match entries.iter().find(|(k, _)| k == key) {
                                 Some((_, val)) => env.set_or_declare(name, val.clone()),
@@ -1174,14 +1198,14 @@ impl Interp {
                         }
                         Ok(Flow::Normal)
                     }
-                    // 字典：var=键，var2=值（可选）
+                    // 字典：var=键，var2=值（可选）；struct 实例跳过隐藏的 `__struct__` 标记键
                     Value::Dict(entries) => {
                         let mut body_scope = HashMap::new();
-                        for (k, v) in entries {
+                        for (k, v) in entries.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)) {
                             env.push_reusable_scope(body_scope);
-                            env.declare(var, Value::Str(k));
+                            env.declare(var, Value::Str(k.clone()));
                             if let Some(v2) = var2 {
-                                env.declare(v2, v);
+                                env.declare(v2, v.clone());
                             }
                             let flow = self.exec_stmts(env, body);
                             body_scope = env.pop_scope().expect("for-in scope");
@@ -1952,11 +1976,16 @@ impl Interp {
                     Some(format!(
                         "construct with `{}({})`",
                         callee,
-                        fields.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                        fields.iter().map(|(s, _, _)| s.as_str()).collect::<Vec<_>>().join(", ")
                     )),
                 ));
             }
-            Ok(Value::Dict(fields.into_iter().zip(args).collect()))
+            // 结构体构造：按字段顺序生成 dict 实例，并携带 `__struct__` 标记
+            //（与 vm.rs 一致；标记在所有用户可见 dict 路径中被过滤）。
+            let mut entries = Vec::with_capacity(fields.len() + 1);
+            entries.push((STRUCT_MARKER_KEY.to_string(), Value::Str(callee.to_string())));
+            entries.extend(fields.into_iter().map(|(f, _, _)| f).zip(args));
+            Ok(Value::Dict(entries))
         } else if let Some(v) = self.try_enum_construct(callee, &args, span)? {
             // 枚举变体构造：Shape.Circle(1.5) → 枚举值
             Ok(v)
@@ -2345,7 +2374,7 @@ impl Interp {
     // ---------- 表达式 ----------
 
     /// 字段赋值：p.f = x; / p.a.b = x;（target 为字段链表达式，链底为变量名）。
-    /// struct 实例（dict）按字段名写回；type 实例按实例字段表写回；readonly 字段报错。
+    /// struct 实例（dict）按字段名写回；type 实例按实例字段表写回；readonly 字段报错（H001）。
     fn set_field_value(&mut self, env: &mut Env, target: &Expr, value: Value, span: Span) -> Result<(), ZError> {
         // 收集字段链：p.a.b → [p, a, b]（链底在前）
         let mut chain: Vec<&str> = Vec::new();
@@ -2395,6 +2424,14 @@ impl Interp {
                 match base {
                     Value::TypeInst(inst) => {
                         self.check_field_readonly(&inst.ty, f, span)?;
+                        if Value::is_hidden_struct_key(f) {
+                            return Err(self.runtime_err(
+                                codes::UNDEFINED,
+                                format!("type `{}` has no field `{}`", inst.ty, f),
+                                span,
+                                None::<&str>,
+                            ));
+                        }
                         // 引用语义：直接修改共享字段表，调用方持有的实例立即可见
                         let mut fields = inst.fields.write().unwrap();
                         if let Some(slot) = fields.iter_mut().find(|(k, _)| k == f) {
@@ -2410,6 +2447,16 @@ impl Interp {
                         Ok(Value::TypeInst(inst.clone()))
                     }
                     Value::Dict(entries) => {
+                        // struct 实例 readonly 字段拦截（运行时兜底）
+                        self.is_struct_readonly_field(&entries, f, span)?;
+                        if Value::is_hidden_struct_key(f) {
+                            return Err(self.runtime_err(
+                                codes::UNDEFINED,
+                                format!("no field `{}` (dict/struct has {})", f, entries.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")),
+                                span,
+                                None::<&str>,
+                            ));
+                        }
                         let mut entries = entries.clone();
                         if let Some(slot) = entries.iter_mut().find(|(k, _)| k == f) {
                             slot.1 = value;
@@ -2419,7 +2466,7 @@ impl Interp {
                                 format!(
                                     "no field `{}` (dict/struct has {})",
                                     f,
-                                    entries.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")
+                                    entries.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")
                                 ),
                                 span,
                                 None::<&str>,
@@ -2441,6 +2488,14 @@ impl Interp {
                 let new_sub = self.update_chain(sub, rest, value, span)?;
                 match base {
                     Value::TypeInst(inst) => {
+                        if Value::is_hidden_struct_key(f) {
+                            return Err(self.runtime_err(
+                                codes::UNDEFINED,
+                                format!("type `{}` has no field `{}`", inst.ty, f),
+                                span,
+                                None::<&str>,
+                            ));
+                        }
                         // 引用语义：直接修改共享字段表
                         let mut fields = inst.fields.write().unwrap();
                         if let Some(slot) = fields.iter_mut().find(|(k, _)| k == f) {
@@ -2449,6 +2504,14 @@ impl Interp {
                         Ok(Value::TypeInst(inst.clone()))
                     }
                     Value::Dict(entries) => {
+                        if Value::is_hidden_struct_key(f) {
+                            return Err(self.runtime_err(
+                                codes::UNDEFINED,
+                                "cannot write to the hidden struct marker field".to_string(),
+                                span,
+                                None::<&str>,
+                            ));
+                        }
                         let mut entries = entries.clone();
                         if let Some(slot) = entries.iter_mut().find(|(k, _)| k == f) {
                             slot.1 = new_sub;
@@ -2464,6 +2527,28 @@ impl Interp {
                 }
             }
         }
+    }
+
+    /// 检查 dict 形态的 struct 实例字段是否 readonly（经 `__struct__` 标记查 struct 表）。
+    /// 普通 dict（无标记）直接放行。
+    fn is_struct_readonly_field(&self, entries: &[(String, Value)], field: &str, span: Span) -> Result<(), ZError> {
+        let name = match entries.iter().find(|(k, _)| k == STRUCT_MARKER_KEY) {
+            Some((_, Value::Str(s))) => s.clone(),
+            _ => return Ok(()),
+        };
+        if let Some(fields) = self.structs.get(&name) {
+            if let Some((_, _, ro)) = fields.iter().find(|(k, _, _)| k == field) {
+                if *ro {
+                    return Err(self.runtime_err(
+                        codes::TYPE_MISMATCH,
+                        format!("field `{}` of struct `{}` is readonly", field, name),
+                        span,
+                        Some("remove `readonly` from the field definition to allow assignment"),
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// 检查 type 实例字段是否只读（沿继承链查字段定义）。
@@ -2731,13 +2816,13 @@ impl Interp {
                             env.pop_scope();
                         }
                     }
-                    // 字典推导式来源：var=键，var2=值（可选）
+                    // 字典推导式来源：var=键，var2=值（可选）；struct 实例跳过隐藏的 `__struct__` 标记键
                     Value::Dict(entries) => {
-                        for (k, v) in entries {
+                        for (k, v) in entries.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)) {
                             env.push_scope();
-                            env.declare(var, Value::Str(k));
+                            env.declare(var, Value::Str(k.clone()));
                             if let Some(v2) = var2 {
-                                env.declare(v2, v);
+                                env.declare(v2, v.clone());
                             }
                             let pass = self.comp_cond(env, cond.as_deref())?;
                             if pass {
@@ -2781,11 +2866,11 @@ impl Interp {
                         }
                     }
                     Value::Dict(entries) => {
-                        for (k, v) in entries {
+                        for (k, v) in entries.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)) {
                             env.push_scope();
-                            env.declare(var, Value::Str(k));
+                            env.declare(var, Value::Str(k.clone()));
                             if let Some(v2) = var2 {
-                                env.declare(v2, v);
+                                env.declare(v2, v.clone());
                             }
                             let pass = self.comp_cond(env, cond.as_deref())?;
                             if pass {
@@ -3230,15 +3315,15 @@ impl Interp {
                 }
             }
             Value::Dict(entries) => {
-                // struct 实例 / dict 字段访问：按键查找
-                match entries.iter().find(|(k, _)| k == field) {
+                // struct 实例 / dict 字段访问：按键查找（跳过隐藏的 `__struct__` 标记键）
+                match entries.iter().find(|(k, _)| !Value::is_hidden_struct_key(k) && k == field) {
                     Some((_, val)) => Ok(val.clone()),
                     None => Err(self.runtime_err(
                         codes::UNDEFINED,
                         format!(
                             "unknown field `{}` (dict/struct has {})",
                             field,
-                            entries.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")
+                            entries.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")
                         ),
                         span,
                         Some("check the field name, or the struct definition"),
@@ -3389,6 +3474,33 @@ impl Interp {
         }
     }
 
+    /// dict 相等判定（`==`/`!=` 与 match 共用）：struct 实例要求同结构体名且
+    /// 可见字段相等；普通 dict 直接比较。隐藏的 `__struct__` 标记键不参与比较。
+    fn dict_values_eq(&self, x: &[(String, Value)], y: &[(String, Value)], span: Span) -> Result<bool, ZError> {
+        let nx: Option<&str> = x.iter().find(|(k, _)| k == STRUCT_MARKER_KEY).and_then(|(_, v)| match v {
+            Value::Str(s) => Some(s.as_str()),
+            _ => None,
+        });
+        let ny: Option<&str> = y.iter().find(|(k, _)| k == STRUCT_MARKER_KEY).and_then(|(_, v)| match v {
+            Value::Str(s) => Some(s.as_str()),
+            _ => None,
+        });
+        if let (Some(a), Some(b)) = (nx, ny) {
+            if a != b {
+                return Ok(false);
+            }
+            let vx: Vec<(&String, &Value)> = x.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).map(|(k, v)| (k, v)).collect();
+            let vy: Vec<(&String, &Value)> = y.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).map(|(k, v)| (k, v)).collect();
+            for ((kx, vx_), (ky, vy_)) in vx.iter().zip(vy.iter()) {
+                if kx != ky || !self.values_eq(vx_, vy_, span)? {
+                    return Ok(false);
+                }
+            }
+            return Ok(vx.len() == vy.len());
+        }
+        Ok(x == y)
+    }
+
     fn values_eq(&self, a: &Value, b: &Value, span: Span) -> Result<bool, ZError> {
         match (a, b) {
             (Value::Int(x), Value::Int(y)) => Ok(x == y),
@@ -3399,7 +3511,7 @@ impl Interp {
             (Value::Byte(x), Value::Byte(y)) => Ok(x == y),
             (Value::Bytes(x), Value::Bytes(y)) => Ok(x == y),
             (Value::List(x), Value::List(y)) => Ok(x == y),
-            (Value::Dict(x), Value::Dict(y)) => Ok(x == y),
+            (Value::Dict(x), Value::Dict(y)) => self.dict_values_eq(x, y, span),
             (Value::Ptr(x), Value::Ptr(y)) => Ok(x == y),
             // 实例类实例：按引用相等（与 PartialEq 一致，不做结构相等）
             (Value::TypeInst(x), Value::TypeInst(y)) => Ok(Arc::ptr_eq(x, y)),

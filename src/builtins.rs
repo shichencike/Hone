@@ -430,7 +430,10 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             match v {
                 Value::Str(s) => Ok(Value::Int(s.len() as i64)),
                 Value::List(items) => Ok(Value::Int(items.len() as i64)),
-                Value::Dict(entries) => Ok(Value::Int(entries.len() as i64)),
+                // 隐藏 `__struct__` 标记键不计入长度
+                Value::Dict(entries) => Ok(Value::Int(
+                    entries.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).count() as i64,
+                )),
                 Value::Bytes(b) => Ok(Value::Int(b.len() as i64)),
                 other => Err(err(
                     codes::TYPE_MISMATCH,
@@ -521,7 +524,11 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let d = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             match d {
                 Value::Dict(entries) => Ok(Value::List(
-                    entries.iter().map(|(k, _)| Value::Str(k.clone())).collect(),
+                    entries
+                        .iter()
+                        .filter(|(k, _)| !Value::is_hidden_struct_key(k))
+                        .map(|(k, _)| Value::Str(k.clone()))
+                        .collect(),
                 )),
                 other => Err(err(
                     codes::TYPE_MISMATCH,
@@ -536,7 +543,13 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "values" => {
             let d = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             match d {
-                Value::Dict(entries) => Ok(Value::List(entries.iter().map(|(_, v)| v.clone()).collect())),
+                Value::Dict(entries) => Ok(Value::List(
+                    entries
+                        .iter()
+                        .filter(|(k, _)| !Value::is_hidden_struct_key(k))
+                        .map(|(_, v)| v.clone())
+                        .collect(),
+                )),
                 other => Err(err(
                     codes::TYPE_MISMATCH,
                     format!("`values` expects a dict, got `{}`", other.type_name()),
@@ -551,7 +564,9 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let d = args.get(0).ok_or_else(|| arg_err(name, 2, 0, span, file, src))?;
             let k = as_str(&args[1], 1, name, span, file, src)?;
             match d {
-                Value::Dict(entries) => Ok(Value::Bool(entries.iter().any(|(ek, _)| ek == k))),
+                Value::Dict(entries) => Ok(Value::Bool(
+                    entries.iter().filter(|(ek, _)| !Value::is_hidden_struct_key(ek)).any(|(ek, _)| ek == k),
+                )),
                 other => Err(err(
                     codes::TYPE_MISMATCH,
                     format!("`has_key` expects a dict, got `{}`", other.type_name()),
@@ -2020,6 +2035,33 @@ fn arg_err(name: &str, want: usize, got: usize, span: Span, file: &str, src: &st
     )
 }
 
+/// dict 相等判定：struct 实例（带隐藏 `__struct__` 标记键）要求同结构体名且
+/// 可见字段相等；普通 dict 直接比较。隐藏的标记键不参与比较。
+fn dict_values_eq(x: &[(String, Value)], y: &[(String, Value)]) -> bool {
+    let mk = |d: &[(String, Value)]| -> Option<String> {
+        d.iter()
+            .find(|(k, _)| Value::is_hidden_struct_key(k))
+            .and_then(|(_, v)| match v {
+                Value::Str(s) => Some(s.clone()),
+                _ => None,
+            })
+    };
+    if let (Some(a), Some(b)) = (mk(x), mk(y)) {
+        if a != b {
+            return false;
+        }
+        let vx: Vec<(&String, &Value)> = x.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).map(|(k, v)| (k, v)).collect();
+        let vy: Vec<(&String, &Value)> = y.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).map(|(k, v)| (k, v)).collect();
+        vx.len() == vy.len()
+            && vx
+                .iter()
+                .zip(vy.iter())
+                .all(|((kx, vx_), (ky, vy_))| kx == ky && values_eq(vx_, vy_))
+    } else {
+        x == y
+    }
+}
+
 /// 深度值相等（列表/字典逐元素比较），供 contains / index_of 使用。
 fn values_eq(a: &Value, b: &Value) -> bool {
     match (a, b) {
@@ -2031,12 +2073,7 @@ fn values_eq(a: &Value, b: &Value) -> bool {
         (Value::List(x), Value::List(y)) => {
             x.len() == y.len() && x.iter().zip(y.iter()).all(|(i, j)| values_eq(i, j))
         }
-        (Value::Dict(x), Value::Dict(y)) => {
-            x.len() == y.len()
-                && x.iter()
-                    .zip(y.iter())
-                    .all(|((kx, vx), (ky, vy))| kx == ky && values_eq(vx, vy))
-        }
+        (Value::Dict(x), Value::Dict(y)) => dict_values_eq(x, y),
         _ => false,
     }
 }
@@ -3344,7 +3381,8 @@ fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String,
         }
         Value::Dict(entries) => {
             let mut map = serde_json::Map::new();
-            for (k, v) in entries {
+            // 隐藏 `__struct__` 标记键不序列化
+            for (k, v) in entries.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)) {
                 let jv: serde_json::Value = value_to_json(v, span, file, src).and_then(|s| {
                     serde_json::from_str(&s).map_err(|e| {
                         err(codes::TYPE_MISMATCH, format!("cannot serialize dict value: {}", e), span, file, src, None::<&str>)

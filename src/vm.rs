@@ -2442,8 +2442,10 @@ fn value_to_str(v: &Value) -> String {
             format!("[{}]", parts.join(", "))
         }
         Value::Dict(d) => {
+            // 隐藏 `__struct__` 标记键不显示（struct 实例内部携带）
             let parts: Vec<String> = d
                 .iter()
+                .filter(|(k, _)| !Value::is_hidden_struct_key(k))
                 .map(|(k, v)| format!("{}: {}", k, value_to_str(v)))
                 .collect();
             format!("{{{}}}", parts.join(", "))
@@ -2873,14 +2875,14 @@ fn v_destruct_get(obj: &Value, key: &Value, span: &Span, vm: &Vm) -> Result<Valu
 
 fn v_field(obj: &Value, field: &str, span: &Span, vm: &Vm) -> Result<Value, Value> {
     match obj {
-        Value::Dict(d) => match d.iter().find(|(k, _)| k == field) {
+        Value::Dict(d) => match d.iter().find(|(k, _)| !Value::is_hidden_struct_key(k) && k == field) {
             Some((_, v)) => Ok(v.clone()),
             None => Err(vm.mk_err(
                 codes::UNDEFINED,
                 format!(
                     "unknown field `{}` (dict/struct has {})",
                     field,
-                    d.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")
+                    d.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")
                 ),
                 span,
             )),
@@ -2913,7 +2915,10 @@ fn v_field(obj: &Value, field: &str, span: &Span, vm: &Vm) -> Result<Value, Valu
 fn v_len(v: &Value, span: &Span, vm: &Vm) -> Result<Value, Value> {
     match v {
         Value::List(l) => Ok(Value::Int(l.len() as i64)),
-        Value::Dict(d) => Ok(Value::Int(d.len() as i64)),
+        // 隐藏 `__struct__` 标记键不计入长度
+        Value::Dict(d) => Ok(Value::Int(
+            d.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).count() as i64,
+        )),
         Value::Str(s) => Ok(Value::Int(s.len() as i64)),
         other => Err(vm.mk_err(
             codes::TYPE_MISMATCH,
@@ -2926,7 +2931,12 @@ fn v_len(v: &Value, span: &Span, vm: &Vm) -> Result<Value, Value> {
 fn v_keys(v: &Value, span: &Span, vm: &Vm) -> Result<Value, Value> {
     match v {
         Value::Dict(d) => {
-            let keys: Vec<Value> = d.iter().map(|(k, _)| Value::Str(k.clone())).collect();
+            // 隐藏 `__struct__` 标记键不暴露（for-in / keys 共用此路径）
+            let keys: Vec<Value> = d
+                .iter()
+                .filter(|(k, _)| !Value::is_hidden_struct_key(k))
+                .map(|(k, _)| Value::Str(k.clone()))
+                .collect();
             Ok(Value::List(keys))
         }
         _ => Err(vm.mk_err(
