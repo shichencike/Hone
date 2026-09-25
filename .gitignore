@@ -31,3 +31,14 @@ rt_check.ir
 # 运行时缓存
 .hone_cache/
 *.hzp
+
+# Python 字节码缓存
+__pycache__/
+
+# 本地探针输出与切片实验稿（临时，可重新生成）
+.probe_out.txt
+.t_slice.hn
+.t_slice2.hn
+
+# 功能需求草稿（设计规范文档，同 ka.md）
+增加with，字节类型，只读类型,仔细问我.md
