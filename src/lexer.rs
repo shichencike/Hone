@@ -67,6 +67,8 @@ pub enum Tok {
     Extends,
     // 只读修饰符：readonly 变量 / 参数 / struct 字段（禁止重新赋值）
     Readonly,
+    // 写时复制容器：cow 变量（list/dict/str/bytes 共享缓冲，写时自动复制隔离）
+    Cow,
     // 类型关键字
     TInt,
     TFloat,
@@ -179,6 +181,7 @@ impl Tok {
             Tok::New => "`new`".into(),
             Tok::Extends => "`extends`".into(),
             Tok::Readonly => "`readonly`".into(),
+            Tok::Cow => "`cow`".into(),
             Tok::ByteLit(_) => "byte literal".to_string(),
             Tok::BytesLit(_) => "bytes literal".to_string(),
             Tok::Plus => "`+`".into(),
@@ -423,6 +426,7 @@ impl Lexer {
                 "new" => Tok::New,
                 "extends" => Tok::Extends,
                 "readonly" => Tok::Readonly,
+                "cow" => Tok::Cow,
                 "int" => Tok::TInt,
                 "float" => Tok::TFloat,
                 "bool" => Tok::TBool,

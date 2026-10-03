@@ -64,6 +64,7 @@ hone run --restart[=N] <script.hn> # 崩溃自动重启（N 为最大重启次�
                          可配合 --backoff=a,b,c 递增等待间隔，--restart-on=Hxxx 限定可重启错误码
 hone run --resume <script.hn> # 恢复上次 db 检查点并启用自动落盘（脚本变更后自动失效）
 hone fmt [-w] <file.hn>   # 代码格式化（Tab 缩进/运算符空格/大括号；-w 覆盖写，支持多文件）
+hone check <file.hn|目录> [--json] # 仅静态检查（解析+类型检查，不执行）；目录递归扫全部 .hn，--json 输出诊断 JSON，退出码 0/1
 hone build --dll <file.hn> # 打包 C ABI 动态库（int/float/bool/str 类型映射，需系统 C 编译器）
 hone build --exe <file.hn> # 将脚本与解释器打包为自释放独立可执行文件（[-o <out>] [--icon <ico>]）
 hone build --exe -c <file.hn> # AOT 原生编译：脚本 → C 中间文件 → gcc/clang → 原生可执行文件（--keep-c 保留中间 .c）
@@ -71,7 +72,7 @@ hone explain <code>       # 查询错误码含义（如 hone explain H201）
 hone get                  # 读取当前目录 hone.json 清单，批量下载全部模块（类似 package.json / Cargo.toml）
 hone get <module> <url>   # 下载模块依赖并缓存到 ~/.hn/cache/，并写入/更新 hone.json 清单
 hone get <script.hn>      # 预下载脚本中所有 import 声明的模块
-hone lsp                  # 启动语言服务器（补全/诊断，LSP over stdio）
+hone lsp                  # 启动语言服务器（诊断/补全/hover/定义/references/rename/签名帮助/折叠/大纲/格式化/语义高亮，LSP over stdio）
 hone watch <script.hn>    # 监控脚本文件变更自动重跑（[--interval=N] 毫秒，默认 500，Ctrl+C 退出）
 hone repl                 # 交互式解释器（Python 式：表达式回显/多行续行/.vars 查看变量）
 hone prof <file.hn>       # 剖析模式运行脚本，输出函数级热点报告（总耗时/调用次数/平均耗时）
@@ -90,6 +91,12 @@ s = "hello";       // str
 b = true;          // bool
 y : int = 20;      // 显式类型（Rust/TS 风格）
 int z = 30;        // 显式类型（C 风格）
+
+// cow 写时复制：集合共享只读缓冲，写者首次写时深拷贝隔离（仅解释器）
+cow xs = [1, 2, 3];
+cow ys = xs;          // 共享（O(1)，无拷贝）
+ys[0] = 99;           // 写时复制：ys 隔离，xs 不变
+assert(xs[0] == 1);
 
 // 控制流：条件必须是 bool
 if (x > 5) { print("大"); } else { print("小"); }
@@ -522,7 +529,9 @@ help: Hone types are locked after inference; no implicit conversion is allowed
   导出函数建议显式标注参数与返回类型（无调用点时无法推导）；
   需要系统 C 编译器（gcc/clang，可用 `CC` 环境变量指定），找不到时保留生成的 `.c` 源码并提示手动编译
 - `import` / `load` / `load lazy` / `use` / `alias` / `hone get` / `hone lsp` 已实现
-  （lsp 提供诊断/补全/hover，冒烟测试见 `tests/lsp_smoke.py`；旧语法迁移工具 `hone upgrade` 已于 v0.7 移除）
+  （lsp 提供诊断/补全/hover/跳转定义·类型定义/references/rename/签名帮助/折叠/
+  文档·全局符号/格式化/语义高亮，冒烟测试见 `tests/lsp_smoke.py`；
+  旧语法迁移工具 `hone upgrade` 已于 v0.7 移除）
 - `import "mod" from "url" as alias;` 支持以别名导入模块，函数名前缀自动替换
 - `try/catch/throw` 错误处理：捕获可恢复错误；catch 绑定的 `error` 类型变量含
   `code`/`message`/`file`/`line`/`col`/`context` 字段；`throw str` 构造 H600 用户错误，

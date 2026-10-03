@@ -297,6 +297,7 @@ fn expand_stmt(
             init,
             span,
             readonly,
+            cow,
         } => {
             let init = match init {
                 Some(mut e) => {
@@ -311,6 +312,7 @@ fn expand_stmt(
                 init,
                 span,
                 readonly,
+                cow,
             }
         }
         Stmt::Block { stmts, span } => Stmt::Block {
@@ -1021,6 +1023,7 @@ fn subst_stmt(ctx: &Ctx, s: &Stmt, map: &ArgMap) -> Result<Stmt, ZError> {
             init,
             span,
             readonly,
+            cow,
         } => {
             if let TyName::Var(t) = ty {
                 if map.contains_key(t.as_str()) {
@@ -1041,6 +1044,7 @@ fn subst_stmt(ctx: &Ctx, s: &Stmt, map: &ArgMap) -> Result<Stmt, ZError> {
                 },
                 span: *span,
                 readonly: *readonly,
+                cow: *cow,
             }
         }
         Stmt::IndexAssign { target, value, span } => Stmt::IndexAssign {

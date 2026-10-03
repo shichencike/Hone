@@ -393,6 +393,10 @@ impl Compiler {
         self.enter();
         let mut pnames = Vec::new();
         for p in params {
+            if p.cow {
+                self.fail(codes::NOT_IMPLEMENTED, "VM: `cow` 形参暂不支持");
+                return;
+            }
             self.decl(&p.name);
             pnames.push(p.name.clone());
         }
@@ -482,17 +486,23 @@ impl Compiler {
                 }
                 self.emit(Instr::Move(rvar, r));
             }
-            Stmt::VarDecl { name, init, .. } => match init {
-                Some(e) => {
-                    let rv = self.compile_expr(e);
-                    let r = self.decl(name);
-                    self.emit(Instr::Move(r, rv));
+            Stmt::VarDecl { name, init, cow, .. } => {
+                if *cow {
+                    self.fail(codes::NOT_IMPLEMENTED, "VM: `cow` 声明暂不支持");
+                } else {
+                    match init {
+                        Some(e) => {
+                            let rv = self.compile_expr(e);
+                            let r = self.decl(name);
+                            self.emit(Instr::Move(r, rv));
+                        }
+                        None => {
+                            let r = self.decl(name);
+                            self.emit(Instr::LoadNull(r));
+                        }
+                    }
                 }
-                None => {
-                    let r = self.decl(name);
-                    self.emit(Instr::LoadNull(r));
-                }
-            },
+            }
             Stmt::Block { stmts, .. } => {
                 self.enter();
                 for s2 in stmts {
@@ -2413,7 +2423,8 @@ fn normalize_throw(v: Value) -> Value {
 }
 
 fn value_to_str(v: &Value) -> String {
-    match v {
+    // COW 透明：cow 容器按内层值显示
+    match v.as_plain() {
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),
         Value::Bool(b) => b.to_string(),
@@ -2462,6 +2473,7 @@ fn value_to_str(v: &Value) -> String {
             }
         }
         Value::Future(_) => "<future>".to_string(),
+        Value::Cow(_) => unreachable!("as_plain strips COW"),
     }
 }
 

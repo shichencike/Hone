@@ -1,15 +1,22 @@
 // lsp.rs - Hone 语言服务器（LSP over stdio）
-// 支持：全文同步（didOpen/didChange）、诊断（语法/类型错误，publishDiagnostics）、
-//       上下文感知补全（关键字/内置函数/模块成员/文档变量/用户函数）、hover 说明、
-//       跳转定义（textDocument/definition）、文档大纲（documentSymbol）、
+// 支持：增量同步（didChange range 替换）、诊断（语法/类型错误，publishDiagnostics +
+//       version 回显 + 去重）、上下文感知补全（关键字/内置函数/模块成员/文档变量/用户函数）、
+//       hover 说明、跳转定义（definition，AST 符号/变量声明，支持 类.成员 限定名）、
+//       类型定义跳转（typeDefinition）、符号引用（references，跨所有打开文档）、
+//       重命名（rename，WorkspaceEdit 跨文档编辑）、代码格式化（formatting，复用 fmt）、
+//       签名帮助（signatureHelp，括号/逗号触发，用户函数+内置函数）、
+//       折叠区域（foldingRange，多行块/文档注释）、文档大纲（documentSymbol，AST 驱动）、
+//       全局符号搜索（workspace/symbol，跨文档子串匹配）、
 //       语义高亮（textDocument/semanticTokens/full，复用词法 token 分类）。
-// 协议：Content-Length 头 + JSON-RPC 2.0 body（serde_json 手工构造，无额外依赖）。
+// 协议：Content-Length 头 + JSON-RPC 2.0 body（serde_json 手工构造，无额外依赖）；
+//       错误按规范返回 -32700 Parse error / -32601 Method not found / -32602 Invalid params。
 
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 
 use serde_json::{json, Value};
 
+use crate::ast::{Program, Stmt, TyName};
 use crate::error::ZError;
 use crate::lexer::Tok;
 
@@ -17,108 +24,214 @@ use crate::lexer::Tok;
 pub fn run_lsp() -> Result<(), ZError> {
     let stdin = io::stdin();
     let mut handle = stdin.lock();
+    // uri → 文档文本
     let mut docs: HashMap<String, String> = HashMap::new();
+    // uri → 客户端文档版本号（didOpen/didChange 携带；诊断推送时回显）
+    let mut versions: HashMap<String, u64> = HashMap::new();
+    // didChangeConfiguration 的 workspace 配置（原样保存，供后续能力查询）
+    let mut workspace_config: Value = json!({});
+    // $/setTrace 的追踪级别（off/messages/verbose；当前仅保存）
+    let mut trace: Option<String> = None;
 
     loop {
-        let Some(msg) = read_message(&mut handle) else {
-            break; // EOF：客户端断开
+        let msg = match read_message(&mut handle) {
+            LspRead::Eof => break, // 客户端断开
+            LspRead::ParseErr => {
+                // 协议层损坏：回 -32700 Parse error（无 id 可回显）
+                send(rpc_error(&None, -32700, "Parse error: malformed message"));
+                continue;
+            }
+            LspRead::Msg(m) => m,
         };
-        let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+        let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("").to_string();
         let id = msg.get("id").cloned();
-        match method {
+        let params = msg.get("params").cloned().unwrap_or(json!({}));
+        // 有 id 的「请求」需要响应；无 id 的「通知」无需响应。
+        let is_request = id.is_some();
+
+        match method.as_str() {
             "initialize" => {
                 send(json!({"jsonrpc":"2.0","id":id,"result":initialize_result()}));
             }
-            "initialized" | "setTrace" => {}
+            "initialized" => {}
             "shutdown" => {
                 send(json!({"jsonrpc":"2.0","id":id,"result":null}));
             }
             "exit" => break,
+            "workspace/didChangeConfiguration" => {
+                workspace_config = params.get("settings").cloned().unwrap_or(json!({}));
+            }
+            "$/setTrace" => {
+                trace = params.get("value").and_then(|v| v.as_str()).map(String::from);
+            }
+            "workspace/symbol" => {
+                if !is_request {
+                    continue;
+                }
+                send(json!({"jsonrpc":"2.0","id":id,"result":workspace_symbol_result(&docs, &params)}));
+            }
             "textDocument/didClose" => {
-                if let Some(params) = msg.get("params") {
-                    let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
-                    docs.remove(&uri);
+                if let Some(uri) = params["textDocument"]["uri"].as_str() {
+                    docs.remove(uri);
+                    versions.remove(uri);
                 }
             }
             "textDocument/didOpen" => {
-                if let Some(params) = msg.get("params") {
-                    let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
-                    let text = params["textDocument"]["text"].as_str().unwrap_or("").to_string();
-                    docs.insert(uri.clone(), text.clone());
-                    publish_diagnostics(&uri, &text);
-                }
+                let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+                let text = params["textDocument"]["text"].as_str().unwrap_or("").to_string();
+                versions.insert(uri.clone(), params["textDocument"]["version"].as_u64().unwrap_or(0));
+                docs.insert(uri.clone(), text.clone());
+                publish_diagnostics(&uri, &text, versions.get(&uri).copied().unwrap_or(0));
             }
             "textDocument/didChange" => {
-                if let Some(params) = msg.get("params") {
-                    let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
-                    let changes = params["contentChanges"].as_array().cloned().unwrap_or_default();
-                    let entry = docs.entry(uri.clone()).or_default();
-                    for c in changes {
-                        if let Some(t) = c.get("text").and_then(|t| t.as_str()) {
-                            *entry = t.to_string();
-                        }
+                let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+                let changes = params["contentChanges"].as_array().cloned().unwrap_or_default();
+                let entry = docs.entry(uri.clone()).or_default();
+                for c in changes {
+                    let text = c.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                    if let Some(range) = c.get("range") {
+                        // 增量变更：range 替换
+                        apply_incremental(entry, range, text);
+                    } else {
+                        *entry = text.to_string(); // 无 range = 全文替换
                     }
-                    publish_diagnostics(&uri, entry);
                 }
+                if let Some(v) = params["textDocument"]["version"].as_u64() {
+                    versions.insert(uri.clone(), v);
+                }
+                publish_diagnostics(&uri, entry, versions.get(&uri).copied().unwrap_or(0));
             }
             "textDocument/completion" => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                if !is_request {
+                    continue;
+                }
                 let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
                 send(json!({"jsonrpc":"2.0","id":id,"result":completion_result(&docs, &uri, &params)}));
             }
             "textDocument/hover" => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                if !is_request {
+                    continue;
+                }
                 let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
                 send(json!({"jsonrpc":"2.0","id":id,"result":hover_result(&docs, &uri, &params)}));
             }
             "textDocument/definition" => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                if !is_request {
+                    continue;
+                }
                 let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
                 send(json!({"jsonrpc":"2.0","id":id,"result":definition_result(&docs, &uri, &params)}));
             }
+            "textDocument/typeDefinition" => {
+                if !is_request {
+                    continue;
+                }
+                let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+                send(json!({"jsonrpc":"2.0","id":id,"result":type_definition_result(&docs, &uri, &params)}));
+            }
+            "textDocument/references" => {
+                if !is_request {
+                    continue;
+                }
+                let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+                send(json!({"jsonrpc":"2.0","id":id,"result":references_result(&docs, &uri, &params)}));
+            }
+            "textDocument/rename" => {
+                if !is_request {
+                    continue;
+                }
+                let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+                send(json!({"jsonrpc":"2.0","id":id,"result":rename_result(&docs, &uri, &params)}));
+            }
+            "textDocument/formatting" => {
+                if !is_request {
+                    continue;
+                }
+                let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+                send(json!({"jsonrpc":"2.0","id":id,"result":formatting_result(&docs, &uri)}));
+            }
+            "textDocument/foldingRange" => {
+                if !is_request {
+                    continue;
+                }
+                let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+                send(json!({"jsonrpc":"2.0","id":id,"result":folding_range_result(&docs, &uri)}));
+            }
+            "textDocument/signatureHelp" => {
+                if !is_request {
+                    continue;
+                }
+                let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
+                send(json!({"jsonrpc":"2.0","id":id,"result":signature_help_result(&docs, &uri, &params)}));
+            }
             "textDocument/documentSymbol" => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                if !is_request {
+                    continue;
+                }
                 let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
                 send(json!({"jsonrpc":"2.0","id":id,"result":document_symbol_result(&docs, &uri, &params)}));
             }
             "textDocument/semanticTokens/full" => {
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
+                if !is_request {
+                    continue;
+                }
                 let uri = params["textDocument"]["uri"].as_str().unwrap_or("").to_string();
                 send(json!({"jsonrpc":"2.0","id":id,"result":semantic_tokens_result(&docs, &uri, &params)}));
             }
             _ => {
-                // 未实现的请求：返回 null 结果，避免客户端等待超时
-                if id.is_some() {
-                    send(json!({"jsonrpc":"2.0","id":id,"result":null}));
+                // 未知请求：按规范回 -32601 Method not found；未知通知忽略
+                if is_request {
+                    send(rpc_error(&id, -32601, &format!("Method not found: {}", method)));
                 }
             }
         }
+        let _ = &workspace_config; // 配置暂存（当前能力不依赖具体键，保留扩展点）
     }
     Ok(())
 }
 
+/// 读取一条 LSP 消息的结果。
+enum LspRead {
+    /// EOF：客户端断开
+    Eof,
+    /// 协议解析失败（Content-Length 缺失/非法、body 非 JSON）→ 回 -32700 Parse error
+    ParseErr,
+    /// 正常消息
+    Msg(Value),
+}
+
 /// 读取一条 LSP 消息：Content-Length 头 + 空行 + JSON body。
-fn read_message(handle: &mut impl BufRead) -> Option<Value> {
+fn read_message(handle: &mut impl BufRead) -> LspRead {
     let mut length: usize = 0;
     loop {
         let mut line = String::new();
-        if handle.read_line(&mut line).ok()? == 0 {
-            return None;
+        match handle.read_line(&mut line) {
+            Ok(0) => return LspRead::Eof,
+            Ok(_) => {}
+            Err(_) => return LspRead::ParseErr,
         }
         let line = line.trim_end();
         if line.is_empty() {
             break;
         }
         if let Some(v) = line.strip_prefix("Content-Length:") {
-            length = v.trim().parse().ok()?;
+            match v.trim().parse() {
+                Ok(v) => length = v,
+                Err(_) => return LspRead::ParseErr,
+            }
         }
     }
     if length == 0 {
-        return None;
+        return LspRead::Eof;
     }
     let mut buf = vec![0u8; length];
-    handle.read_exact(&mut buf).ok()?;
-    serde_json::from_slice(&buf).ok()
+    if handle.read_exact(&mut buf).is_err() {
+        return LspRead::Eof;
+    }
+    match serde_json::from_slice(&buf) {
+        Ok(v) => LspRead::Msg(v),
+        Err(_) => LspRead::ParseErr,
+    }
 }
 
 fn send(v: Value) {
@@ -128,14 +241,55 @@ fn send(v: Value) {
     let _ = out.flush();
 }
 
+/// JSON-RPC 错误响应（code 为规范错误码：-32700 Parse error / -32601 Method not found / -32602 Invalid params）。
+fn rpc_error(id: &Option<Value>, code: i64, message: &str) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+}
+
+/// 应用增量变更（didChange 带 range）：LSP 位置 0-based、character 按 UTF-16 单位 → 字节区间替换。
+fn apply_incremental(doc: &mut String, range: &Value, text: &str) {
+    let s = offset_of(doc, range["start"]["line"].as_u64().unwrap_or(0), range["start"]["character"].as_u64().unwrap_or(0));
+    let e = offset_of(doc, range["end"]["line"].as_u64().unwrap_or(0), range["end"]["character"].as_u64().unwrap_or(0));
+    let s = s.min(doc.len());
+    let e = e.min(doc.len());
+    if s <= e {
+        doc.replace_range(s..e, text);
+    }
+}
+
+/// (0-based 行号, UTF-16 字符偏移) → 文档内字节偏移（越界钳制到行尾/文档尾）。
+fn offset_of(doc: &str, line: u64, utf16_char: u64) -> usize {
+    let mut cur_line: u64 = 0;
+    let mut cur_units: u64 = 0;
+    for (i, c) in doc.char_indices() {
+        if cur_line == line && cur_units == utf16_char {
+            return i;
+        }
+        if c == '\n' {
+            cur_line += 1;
+            cur_units = 0;
+        } else if cur_line == line {
+            cur_units += c.len_utf16() as u64;
+        }
+    }
+    doc.len()
+}
+
 fn initialize_result() -> Value {
     json!({
         "capabilities": {
-            "textDocumentSync": { "openClose": true, "change": 1 },
+            "textDocumentSync": { "openClose": true, "change": 2 }, // 2 = Incremental（增量同步）
             "completionProvider": { "triggerCharacters": ["."] },
             "hoverProvider": true,
             "definitionProvider": true,
+            "typeDefinitionProvider": true,
+            "referencesProvider": true,
+            "renameProvider": true,
+            "documentFormattingProvider": true,
+            "foldingRangeProvider": true,
+            "signatureHelpProvider": { "triggerCharacters": ["(", ","] },
             "documentSymbolProvider": true,
+            "workspaceSymbolProvider": true,
             "semanticTokensProvider": {
                 "legend": {
                     "tokenTypes": [
@@ -153,30 +307,34 @@ fn initialize_result() -> Value {
 
 // ---------- 诊断 ----------
 
-/// 对文档做解析与类型检查，向客户端推送诊断（报告第一个错误）。
-fn publish_diagnostics(uri: &str, text: &str) {
-    let diagnostics: Vec<Value> = if text.trim().is_empty() {
-        vec![]
-    } else {
-        let path = uri.strip_prefix("file://").unwrap_or(uri);
-        let err = match crate::parser::Parser::parse(path, text) {
-            Ok(prog) => crate::checker::Checker::check(&prog, path, text).err(),
-            Err(e) => Some(e),
-        };
-        err.map(|e| vec![diagnostic_from_error(&e)]).unwrap_or_default()
+/// 对文档做解析与类型检查，向客户端推送诊断。
+/// 空文档不推送（避免无意义的清空消息）；`version` 回显客户端文档版本。
+fn publish_diagnostics(uri: &str, text: &str, version: u64) {
+    if text.trim().is_empty() {
+        return;
+    }
+    let path = uri.strip_prefix("file://").unwrap_or(uri);
+    let diagnostics = match crate::parser::Parser::parse(path, text) {
+        Ok(prog) => crate::checker::Checker::collect_errors(&prog, path, text)
+            .into_iter()
+            .map(|e| diagnostic_from_error(&e))
+            .collect(),
+        Err(e) => vec![diagnostic_from_error(&e)],
     };
     send(json!({
         "jsonrpc": "2.0",
         "method": "textDocument/publishDiagnostics",
-        "params": { "uri": uri, "diagnostics": diagnostics }
+        "params": { "uri": uri, "diagnostics": diagnostics, "version": version }
     }));
 }
 
-/// ZError（1-based 行列）→ LSP Diagnostic（0-based range）。
+/// ZError（1-based 行列）→ LSP Diagnostic（0-based range，UTF-16 单位）。
+/// severity 分级：语法/类型错误 = Error(1)；携带 help 的按 Error 保留并附相关说明。
+/// 同位置同码诊断去重（fixpoint 多轮检查可能重复报同一问题）。
 fn diagnostic_from_error(e: &ZError) -> Value {
     let line = e.line.saturating_sub(1) as u64;
     let col = e.col.saturating_sub(1) as u64;
-    json!({
+    let mut obj = json!({
         "range": {
             "start": { "line": line, "character": col },
             "end": { "line": line, "character": col + e.len.max(1) as u64 }
@@ -185,7 +343,36 @@ fn diagnostic_from_error(e: &ZError) -> Value {
         "source": "hone",
         "code": e.code,
         "message": format!("{}: {}", e.code, e.msg)
-    })
+    });
+    if let Some(help) = &e.help {
+        obj["relatedInformation"] = json!([
+            { "location": { "uri": "", "range": obj["range"].clone() }, "message": format!("help: {}", help) }
+        ]);
+    }
+    obj
+}
+
+/// 诊断去重：同 (line, col, code) 只保留第一条；按位置排序（编辑器展示顺序稳定）。
+fn dedup_diagnostics(diags: Vec<Value>) -> Vec<Value> {
+    let mut seen: HashSet<(u64, u64, String)> = HashSet::new();
+    let mut out: Vec<Value> = diags
+        .into_iter()
+        .filter(|d| {
+            let key = (
+                d["range"]["start"]["line"].as_u64().unwrap_or(0),
+                d["range"]["start"]["character"].as_u64().unwrap_or(0),
+                d["code"].as_str().unwrap_or("").to_string(),
+            );
+            seen.insert(key)
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        (a["range"]["start"]["line"].as_u64().unwrap_or(0),
+         a["range"]["start"]["character"].as_u64().unwrap_or(0))
+            .cmp(&(b["range"]["start"]["line"].as_u64().unwrap_or(0),
+                   b["range"]["start"]["character"].as_u64().unwrap_or(0)))
+    });
+    out
 }
 
 // ---------- 文档扫描辅助 ----------
@@ -495,49 +682,97 @@ fn hover_result(docs: &HashMap<String, String>, uri: &str, params: &Value) -> Va
     })
 }
 
+/// 光标处符号定位（definition / typeDefinition 共用）：
+/// 优先查 AST 符号表（含 类.方法 限定名与嵌套函数），再查变量赋值扫描。
+/// 返回 (符号名, 定义行, 定义列 0-based, 名称宽度, 是否类型符号)。
+fn lookup_sym(docs: &HashMap<String, String>, uri: &str, line: u64, character: u64)
+    -> Option<(String, u64, u64, u64, bool)>
+{
+    let text = docs.get(uri).map(|s| s.as_str()).unwrap_or("");
+    let word = word_at(text, line, character)?;
+    // AST 符号（顶层 + 嵌套 + 类/type 成员，限定名形如 "Foo.bar"）
+    if let Ok(prog) = crate::parser::Parser::parse("", text) {
+        let syms = ast_symbols(&prog);
+        let bare = word.split('.').last().unwrap_or(&word);
+        for s in &syms {
+            if s.name == word || s.name.split('.').last() == Some(bare) {
+                let sel = s.name.split('.').next_back().unwrap_or(&s.name).len() as u64;
+                return Some((
+                    s.name.clone(),
+                    s.line,
+                    s.col + s.len - sel, // 定位到名称本身（去掉 类名. 前缀）
+                    sel,
+                    matches!(s.kind, "type" | "class" | "struct" | "enum"),
+                ));
+            }
+        }
+    }
+    // 变量（`name = ...` 启发式）
+    let found = scan_vars(text).into_iter().find(|(n, _, _)| n == &word);
+    let (name, l, c) = found?;
+    let w = name.len() as u64;
+    Some((name, l, c, w, false))
+}
+
 fn definition_result(docs: &HashMap<String, String>, uri: &str, params: &Value) -> Value {
     let pos = &params["position"];
-    let line = pos["line"].as_u64().unwrap_or(0);
-    let character = pos["character"].as_u64().unwrap_or(0);
-    let text = docs.get(uri).map(|s| s.as_str()).unwrap_or("");
-    let Some(word) = word_at(text, line, character) else {
-        return json!(null);
-    };
-    let syms = scan_symbols(text);
-    let Some((_, _name, l, c)) = syms.iter().find(|(_, n, _, _)| *n == word) else {
+    let (line, character) = (pos["line"].as_u64().unwrap_or(0), pos["character"].as_u64().unwrap_or(0));
+    let Some((_name, l, c, w, _is_ty)) = lookup_sym(docs, uri, line, character) else {
         return json!(null);
     };
     json!([{
         "uri": uri,
         "range": {
-            "start": { "line": *l, "character": *c },
-            "end": { "line": *l, "character": *c + 2 }
+            "start": { "line": l, "character": c },
+            "end": { "line": l, "character": c + w }
         }
     }])
 }
 
+fn type_definition_result(docs: &HashMap<String, String>, uri: &str, params: &Value) -> Value {
+    let pos = &params["position"];
+    let (line, character) = (pos["line"].as_u64().unwrap_or(0), pos["character"].as_u64().unwrap_or(0));
+    let Some((_name, l, c, w, is_ty)) = lookup_sym(docs, uri, line, character) else {
+        return json!(null);
+    };
+    if !is_ty {
+        return json!(null); // 非类型符号：无类型定义
+    }
+    json!([{
+        "uri": uri,
+        "range": {
+            "start": { "line": l, "character": c },
+            "end": { "line": l, "character": c + w }
+        }
+    }])
+}
+
+/// documentSymbol：AST 驱动的文档大纲（fn/class/struct/enum/type，含 类.type 成员）。
 fn document_symbol_result(docs: &HashMap<String, String>, uri: &str, params: &Value) -> Value {
     let text = docs.get(uri).map(|s| s.as_str()).unwrap_or("");
     let _ = params;
-    let syms: Vec<Value> = scan_symbols(text)
+    let Ok(prog) = crate::parser::Parser::parse("", text) else { return json!([]) };
+    let syms: Vec<Value> = ast_symbols(&prog)
         .iter()
-        .map(|(kind, name, l, c)| {
-            let kind_id = match kind.as_str() {
+        .map(|s| {
+            let sel = s.name.split('.').next_back().unwrap_or(&s.name).len() as u64;
+            let kind_id = match s.kind {
                 "class" => 5,
                 "struct" => 23,
                 "enum" => 10,
+                "type" => 6,
                 _ => 12,
             };
             json!({
-                "name": name,
+                "name": s.name,
                 "kind": kind_id,
                 "range": {
-                    "start": { "line": *l, "character": *c },
-                    "end": { "line": *l, "character": *c + 2 }
+                    "start": { "line": s.line, "character": s.col },
+                    "end": { "line": s.line, "character": s.col + s.len }
                 },
                 "selectionRange": {
-                    "start": { "line": *l, "character": *c },
-                    "end": { "line": *l, "character": *c + name.len() as u64 }
+                    "start": { "line": s.line, "character": s.col + s.len - sel },
+                    "end": { "line": s.line, "character": s.col + s.len }
                 }
             })
         })
@@ -786,4 +1021,573 @@ fn scan_comments(text: &str, out: &mut Vec<(u64, u64, u64, u64, u64)>) {
         i += 1;
         col += 1;
     }
+}
+
+// ============================================================
+// 新增能力：跨文档搜索 / 格式化 / 折叠 / 引用 / 重命名 / 签名帮助 / 类型定义
+// ============================================================
+
+/// 词法 token 流（失败返回空流；调用方按空流处理即优雅退化）。
+fn tokenize_doc(text: &str) -> Vec<(Tok, crate::lexer::Span)> {
+    crate::lexer::Lexer::new("", text)
+        .tokenize()
+        .unwrap_or_default()
+}
+
+/// 从字节偏移 start 起，跨过 utf16 个 UTF-16 码元（可跨行），返回结束偏移。
+fn offset_after_units(text: &str, start: usize, units: u64) -> usize {
+    let mut left = units;
+    for (i, c) in text[start..].char_indices() {
+        if left == 0 {
+            return start + i;
+        }
+        left -= c.len_utf16() as u64;
+    }
+    text.len()
+}
+
+/// 字节偏移 → 0-based 行号。
+fn line_of(text: &str, idx: usize) -> u64 {
+    text[..idx.min(text.len())].bytes().filter(|&b| b == b'\n').count() as u64
+}
+
+/// AST 符号表条目（供 definition / typeDefinition / workspace symbol 使用）。
+struct AstSym {
+    kind: &'static str, // fn / class / struct / enum / type
+    name: String,       // 限定名：顶层为裸名，成员为「类名.方法名」
+    line: u64,          // 0-based
+    col: u64,           // 0-based
+    len: u64,
+}
+
+/// 收集文档 AST 中的符号（顶层 + 嵌套函数 + 类/type 成员），按 (行, 列) 排序。
+fn ast_symbols(prog: &Program) -> Vec<AstSym> {
+    let mut out: Vec<AstSym> = Vec::new();
+    for s in &prog.stmts {
+        collect_ast_stmt_syms(s, None, &mut out);
+    }
+    out.sort_by(|a, b| (a.line, a.col).cmp(&(b.line, b.col)));
+    out
+}
+
+fn collect_ast_stmt_syms(s: &Stmt, owner: Option<&str>, out: &mut Vec<AstSym>) {
+    match s {
+        Stmt::FnDef { name, span, body, tmp, .. } => {
+            if !tmp {
+                let full = match owner {
+                    Some(o) => format!("{}.{}", o, name),
+                    None => name.clone(),
+                };
+                out.push(AstSym {
+                    kind: "fn",
+                    name: full,
+                    line: span.line.saturating_sub(1) as u64,
+                    col: span.col.saturating_sub(1) as u64,
+                    len: span.len.max(1) as u64,
+                });
+            }
+            for b in body {
+                collect_ast_stmt_syms(b, owner, out);
+            }
+        }
+        Stmt::AsyncFnDef { name, span, body, .. } => {
+            let full = match owner {
+                Some(o) => format!("{}.{}", o, name),
+                None => name.clone(),
+            };
+            out.push(AstSym {
+                kind: "fn",
+                name: full,
+                line: span.line.saturating_sub(1) as u64,
+                col: span.col.saturating_sub(1) as u64,
+                len: span.len.max(1) as u64,
+            });
+            for b in body {
+                collect_ast_stmt_syms(b, owner, out);
+            }
+        }
+        Stmt::StructDef { name, span, .. } => out.push(AstSym {
+            kind: "struct",
+            name: name.clone(),
+            line: span.line.saturating_sub(1) as u64,
+            col: span.col.saturating_sub(1) as u64,
+            len: span.len.max(1) as u64,
+        }),
+        Stmt::EnumDef { name, span, .. } => out.push(AstSym {
+            kind: "enum",
+            name: name.clone(),
+            line: span.line.saturating_sub(1) as u64,
+            col: span.col.saturating_sub(1) as u64,
+            len: span.len.max(1) as u64,
+        }),
+        Stmt::TypeDef { name, span, methods, .. } => {
+            out.push(AstSym {
+                kind: "type",
+                name: name.clone(),
+                line: span.line.saturating_sub(1) as u64,
+                col: span.col.saturating_sub(1) as u64,
+                len: span.len.max(1) as u64,
+            });
+            for m in methods {
+                if let Stmt::FnDef { name: mn, span: ms, body, tmp, .. } = m {
+                    if !tmp {
+                        out.push(AstSym {
+                            kind: "fn",
+                            name: format!("{}.{}", name, mn),
+                            line: ms.line.saturating_sub(1) as u64,
+                            col: ms.col.saturating_sub(1) as u64,
+                            len: ms.len.max(1) as u64,
+                        });
+                        for b in body {
+                            collect_ast_stmt_syms(b, Some(name), out);
+                        }
+                    }
+                }
+            }
+        }
+        Stmt::ClassDef { name, span, methods, .. } => {
+            out.push(AstSym {
+                kind: "class",
+                name: name.clone(),
+                line: span.line.saturating_sub(1) as u64,
+                col: span.col.saturating_sub(1) as u64,
+                len: span.len.max(1) as u64,
+            });
+            for m in methods {
+                if let Stmt::FnDef { name: mn, span: ms, body, tmp, .. } = m {
+                    if !tmp {
+                        out.push(AstSym {
+                            kind: "fn",
+                            name: format!("{}.{}", name, mn),
+                            line: ms.line.saturating_sub(1) as u64,
+                            col: ms.col.saturating_sub(1) as u64,
+                            len: ms.len.max(1) as u64,
+                        });
+                        for b in body {
+                            collect_ast_stmt_syms(b, Some(name), out);
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 光标处定位 token：返回 (token, span, 流内下标)。
+/// 光标落在 token 字节区间 [start, end) 内或恰在 end 处（多行字符串 token 覆盖整段）。
+fn token_at(text: &str, line: u64, col: u64) -> Option<(Tok, crate::lexer::Span, usize)> {
+    let stream = tokenize_doc(text);
+    let cur = offset_of(text, line, col);
+    for (i, (tok, span)) in stream.iter().enumerate() {
+        let start = offset_of(text, span.line.saturating_sub(1) as u64, span.col.saturating_sub(1) as u64);
+        if start > cur {
+            break; // token 起点越过光标（流按位置有序）
+        }
+        let end = offset_after_units(text, start, span.len.max(1) as u64);
+        if cur <= end {
+            return Some((tok.clone(), *span, i));
+        }
+    }
+    None
+}
+
+/// 某行（0-based）的行内字符长度（0-based 列上界）。
+fn line_char_len(text: &str, line: u64) -> u64 {
+    let start = offset_of(text, line, 0);
+    let mut end = start;
+    while end < text.len() && text.as_bytes()[end] != b'\n' {
+        end += 1;
+    }
+    text[start..end].chars().map(|c| c.len_utf16() as u64).sum()
+}
+
+/// 从 start_idx（字节偏移，应指向 `{`）起配对大括号，返回匹配 `}` 的 0-based 行号（失败返回 start 行）。
+fn block_end_line(text: &str, start_idx: usize) -> u64 {
+    let mut depth = 0usize;
+    for (i, c) in text.char_indices().skip_while(|&(i, _)| i < start_idx) {
+        if c == '{' {
+            depth += 1;
+        } else if c == '}' {
+            if depth == 0 {
+                break; // 未配对的 `}`（不应发生），安全退出
+            }
+            depth -= 1;
+            if depth == 0 {
+                return line_of(text, i);
+            }
+        }
+    }
+    line_of(text, start_idx)
+}
+
+/// workspace/symbol：跨所有打开文档的全局符号搜索（子串匹配名称）。
+fn workspace_symbol_result(docs: &HashMap<String, String>, params: &Value) -> Value {
+    let query = params["query"].as_str().unwrap_or("");
+    let mut out: Vec<Value> = Vec::new();
+    for (uri, text) in docs {
+        let path = uri.strip_prefix("file://").unwrap_or(uri);
+        let Ok(prog) = crate::parser::Parser::parse(path, text) else { continue };
+        for sym in ast_symbols(&prog) {
+            if !query.is_empty() && !sym.name.contains(query) {
+                continue;
+            }
+            let sk = match sym.kind {
+                "fn" => 12,
+                "class" => 5,
+                "struct" => 23,
+                "enum" => 10,
+                "type" => 6,
+                _ => 23,
+            };
+            out.push(json!({
+                "name": sym.name,
+                "kind": sk,
+                "location": {
+                    "uri": uri,
+                    "range": {
+                        "start": { "line": sym.line, "character": sym.col },
+                        "end": { "line": sym.line, "character": sym.col + sym.len }
+                    }
+                }
+            }));
+        }
+    }
+    json!(out)
+}
+
+/// textDocument/formatting：复用 hone fmt 的格式化器（与 `hone fmt` 行为一致）。
+/// 无变化时返回空数组；语法错误时返回 null（错误已在诊断中呈现）。
+fn formatting_result(docs: &HashMap<String, String>, uri: &str) -> Value {
+    let Some(text) = docs.get(uri) else { return Value::Null };
+    let Ok(formatted) = crate::fmt::format(text) else { return Value::Null };
+    if formatted == *text {
+        return json!([]);
+    }
+    let start_idx = 0usize;
+    let end_idx = text.len();
+    let sl = line_of(text, start_idx);
+    let sc = 0u64;
+    let el = line_of(text, end_idx);
+    let ec = line_char_len(text, el);
+    json!([
+        {
+            "range": {
+                "start": { "line": sl, "character": sc },
+                "end": { "line": el, "character": ec }
+            },
+            "newText": formatted
+        }
+    ])
+}
+
+/// 类型注解显示名（用于签名帮助/文档）。
+fn ty_name(t: &TyName) -> String {
+    match t {
+        TyName::Int => "int".into(),
+        TyName::Float => "float".into(),
+        TyName::Bool => "bool".into(),
+        TyName::Str => "str".into(),
+        TyName::Char => "char".into(),
+        TyName::Byte => "byte".into(),
+        TyName::Bytes => "bytes".into(),
+        TyName::Var(s) => s.clone(),
+        TyName::Inferred => "_".into(),
+    }
+}
+
+/// 函数签名（signatureHelp 用）。
+struct FnSig {
+    name: String, // 限定名（类.方法）或裸名
+    params: Vec<String>, // 形参显示串：「name: type」
+    ret: Option<String>,
+}
+
+/// 收集文档中全部函数签名（含嵌套/类/type 成员/async，后定义覆盖先定义）。
+fn collect_all_syms(s: &Stmt, outer: Option<&str>, out: &mut Vec<FnSig>) {
+    match s {
+        Stmt::FnDef { name, params, ret, body, .. } |
+        Stmt::AsyncFnDef { name, params, ret, body, .. } => {
+            let full = match outer {
+                Some(o) => format!("{}.{}", o, name),
+                None => name.clone(),
+            };
+            if !matches!(s, Stmt::FnDef { tmp: true, .. }) {
+                let mut ps: Vec<String> = Vec::new();
+                for p in params {
+                    let mut d = p.name.clone();
+                    if let Some(t) = &p.ty {
+                        d.push_str(": ");
+                        d.push_str(&ty_name(t));
+                    }
+                    ps.push(d);
+                }
+                out.push(FnSig {
+                    name: full,
+                    params: ps,
+                    ret: ret.as_ref().map(ty_name),
+                });
+            }
+            for b in body {
+                collect_all_syms(b, Some(name), out);
+            }
+        }
+        Stmt::TypeDef { name, methods, .. } | Stmt::ClassDef { name, methods, .. } => {
+            for m in methods {
+                collect_all_syms(m, Some(name), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 跨所有打开文档收集 word 的引用位置（词法 token 精确匹配）。
+fn find_all_refs(docs: &HashMap<String, String>, word: &str) -> Vec<(String, u64, u64, u64)> {
+    let mut out: Vec<(String, u64, u64, u64)> = Vec::new();
+    for (uri, text) in docs {
+        for (tok, span) in tokenize_doc(text) {
+            if let Tok::Ident(n) = &tok {
+                if n == word {
+                    let l = span.line.saturating_sub(1) as u64;
+                    let c = span.col.saturating_sub(1) as u64;
+                    out.push((uri.clone(), l, c, word.len() as u64));
+                }
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    out
+}
+
+/// textDocument/references：跨所有打开文档的引用查找（include 文档作为独立 uri 打开时自动纳入）。
+fn references_result(docs: &HashMap<String, String>, uri: &str, params: &Value) -> Value {
+    let pos = &params["position"];
+    let (line, character) = (pos["line"].as_u64().unwrap_or(0), pos["character"].as_u64().unwrap_or(0));
+    let Some((word, ..)) = lookup_sym(docs, uri, line, character) else {
+        return json!([]);
+    };
+    let mut out: Vec<Value> = Vec::new();
+    for (u, l, c, w) in find_all_refs(docs, &word) {
+        out.push(json!({
+            "uri": u,
+            "range": {
+                "start": { "line": l, "character": c },
+                "end": { "line": l, "character": c + w }
+            }
+        }));
+    }
+    json!(out)
+}
+
+/// textDocument/rename：跨文档重命名（WorkspaceEdit）。无引用时返回 null。
+fn rename_result(docs: &HashMap<String, String>, uri: &str, params: &Value) -> Value {
+    let pos = &params["position"];
+    let new_name = params["newName"].as_str().unwrap_or("");
+    if new_name.is_empty() {
+        return json!(null);
+    }
+    let (line, character) = (pos["line"].as_u64().unwrap_or(0), pos["character"].as_u64().unwrap_or(0));
+    let Some((word, ..)) = lookup_sym(docs, uri, line, character) else {
+        return json!(null);
+    };
+    let refs = find_all_refs(docs, &word);
+    if refs.is_empty() {
+        return json!(null);
+    }
+    let mut changes: serde_json::Map<String, Value> = serde_json::Map::new();
+    for (u, l, c, w) in refs {
+        changes
+            .entry(u.clone())
+            .or_insert_with(|| json!([]))
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "range": {
+                    "start": { "line": l, "character": c },
+                    "end": { "line": l, "character": c + w }
+                },
+                "newText": new_name
+            }));
+    }
+    json!({ "changes": changes })
+}
+
+/// 从光标 token 向前回找配对的 `(`：返回 (被调用的函数名, 当前激活参数下标)。
+/// 规则：回扫时 LParen 使 c+1、RParen 使 c-1；c 达到 1 的 LParen 即调用开括号，
+/// 其前一 token 为被调名（标识符）；c==0 时遇到的逗号计入激活参数下标。
+fn find_call_at(
+    stream: &[(Tok, crate::lexer::Span)],
+    idx: usize,
+) -> Option<(String, u64)> {
+    let mut c: i64 = 0;
+    let mut commas: u64 = 0;
+    let mut i = idx;
+    loop {
+        let (tok, _span) = &stream[i];
+        match tok {
+            Tok::LParen => c += 1,
+            Tok::RParen => c -= 1,
+            Tok::Comma if c == 0 => commas += 1,
+            _ => {}
+        }
+        if c == 1 {
+            // 当前 token 是调用开括号：前一 token 应是被调名
+            let pi = i.checked_sub(1)?;
+            return match &stream[pi].0 {
+                Tok::Ident(n) => Some((n.clone(), commas)),
+                _ => None,
+            };
+        }
+        if i == 0 {
+            break;
+        }
+        i -= 1;
+    }
+    None
+}
+
+/// textDocument/signatureHelp：括号/逗号触发的调用签名帮助（用户函数 + 内置函数）。
+fn signature_help_result(docs: &HashMap<String, String>, uri: &str, params: &Value) -> Value {
+    let pos = &params["position"];
+    let (line, character) = (pos["line"].as_u64().unwrap_or(0), pos["character"].as_u64().unwrap_or(0));
+    let text = docs.get(uri).map(|s| s.as_str()).unwrap_or("");
+    let stream = tokenize_doc(text);
+    let Some((_tok, _span, idx)) = token_at(text, line, character) else {
+        return json!(null);
+    };
+    let Some((callee, active)) = find_call_at(&stream, idx) else {
+        return json!(null);
+    };
+    // 用户函数签名（后定义覆盖先定义；限定名精确匹配优先，其次裸名）
+    let mut map: HashMap<String, FnSig> = HashMap::new();
+    if let Ok(prog) = crate::parser::Parser::parse("", text) {
+        let mut v: Vec<FnSig> = Vec::new();
+        for s in &prog.stmts {
+            collect_all_syms(s, None, &mut v);
+        }
+        for f in v {
+            map.insert(f.name.clone(), f);
+        }
+    }
+    if let Some(sig) = map.get(&callee)
+        .or_else(|| callee.split('.').last().and_then(|b| map.get(b)))
+    {
+        let label = format!(
+            "{}({}){}",
+            sig.name,
+            sig.params.join(", "),
+            sig.ret.as_deref().map(|r| format!(" -> {}", r)).unwrap_or_default()
+        );
+        return json!({
+            "signatures": [{
+                "label": label,
+                "parameters": sig.params.iter().map(|p| json!({ "label": p })).collect::<Vec<_>>(),
+                "activeParameter": active.min(sig.params.len().saturating_sub(1) as u64)
+            }],
+            "activeSignature": 0
+        });
+    }
+    // 内置函数 / 模块函数：按点号前缀取文档
+    for (full, usage, doc) in MODULE_DOCS {
+        if full == &callee {
+            return json!({
+                "signatures": [{ "label": format!("{}：{}", usage, doc) }],
+                "activeSignature": 0
+            });
+        }
+    }
+    json!(null)
+}
+
+/// textDocument/foldingRange：多行大括号块（含 match 表达式体）与文档注释。
+fn folding_range_result(docs: &HashMap<String, String>, uri: &str) -> Value {
+    let text = docs.get(uri).map(|s| s.as_str()).unwrap_or("");
+    let mut out: Vec<Value> = Vec::new();
+    for (tok, span) in tokenize_doc(text) {
+        if matches!(tok, Tok::LBrace) {
+            let sl = span.line.saturating_sub(1) as u64;
+            let start = offset_of(text, sl, span.col.saturating_sub(1) as u64);
+            let el = block_end_line(text, start);
+            if el > sl {
+                out.push(json!({
+                    "startLine": sl,
+                    "endLine": el,
+                    "kind": "region"
+                }));
+            }
+        }
+    }
+    // 注释折叠（仅块注释/三引号串可跨行）：只跟踪行号
+    let chars: Vec<char> = text.chars().collect();
+    let n = chars.len();
+    let mut i = 0usize;
+    let mut line: u64 = 0;
+    while i < n {
+        let c = chars[i];
+        if c == '\n' {
+            line += 1;
+            i += 1;
+            continue;
+        }
+        if c == '/' && i + 1 < n && chars[i + 1] == '/' {
+            // 行注释：单行，不可折叠
+            while i < n && chars[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if c == '/' && i + 1 < n && chars[i + 1] == '*' {
+            let sl = line;
+            i += 2;
+            while i < n && !(chars[i] == '*' && i + 1 < n && chars[i + 1] == '/') {
+                if chars[i] == '\n' {
+                    line += 1;
+                }
+                i += 1;
+            }
+            if i < n {
+                i += 2; // 跳过 */
+            }
+            if line > sl {
+                out.push(json!({ "startLine": sl, "endLine": line, "kind": "comment" }));
+            }
+            continue;
+        }
+        if c == '"' {
+            if i + 2 < n && chars[i + 1] == '"' && chars[i + 2] == '"' {
+                let sl = line;
+                i += 3;
+                while i + 2 < n && !(chars[i] == '"' && chars[i + 1] == '"' && chars[i + 2] == '"') {
+                    if chars[i] == '\n' {
+                        line += 1;
+                    }
+                    i += 1;
+                }
+                if i + 2 < n {
+                    i += 3;
+                }
+                if line > sl {
+                    out.push(json!({ "startLine": sl, "endLine": line, "kind": "comment" }));
+                }
+            } else {
+                i += 1;
+                while i < n && chars[i] != '"' {
+                    if chars[i] == '\\' && i + 1 < n {
+                        i += 2;
+                        continue;
+                    }
+                    if chars[i] == '\n' {
+                        break;
+                    }
+                    i += 1;
+                }
+                if i < n && chars[i] == '"' {
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        i += 1;
+    }
+    json!(out)
 }

@@ -46,6 +46,37 @@ function toggleTheme(){
   <p data-page-node-id="GZzQ7Eq0mroA1hUsKZqlsi">各版本新增 / 变更 / 修复记录。完整 Changelog 见 <a href="https://github.com/shichencike/Hone/blob/master/CHANGELOG.md" data-page-node-id="tn2LZztCXhsACyFmGFobev">GitHub</a>。</p>
 
   <div class="release">
+    <span class="ver-tag">Unreleased</span><span class="date">待发布</span>
+    <h4>新增</h4>
+    <ul>
+      <li><strong>LSP 文本能力补全</strong>（<code>hone lsp</code>，LSP over stdio）：在既有的诊断 / 补全 / hover / 跳转定义 / 语义高亮基础上，新增 8 项标准文本能力，均无新增依赖
+        <ul>
+          <li><strong>references</strong>（<code>textDocument/references</code>）：跨<strong>所有已打开文档</strong>查找符号引用，词法 token 精确匹配（<code>includeDeclaration</code> 时含定义处）</li>
+          <li><strong>rename</strong>（<code>textDocument/rename</code>）：返回跨文档 <code>WorkspaceEdit</code>，一次改全部引用；无引用时返回 <code>null</code></li>
+          <li><strong>signatureHelp</strong>（<code>textDocument/signatureHelp</code>）：<code>(</code> / <code>,</code> 触发的调用签名帮助，解析光标所在调用的函数名与激活参数下标，展示用户函数 / 模块函数签名</li>
+          <li><strong>foldingRange</strong>（<code>textDocument/foldingRange</code>）：多行大括号块（含 match 体）与跨行注释（<code>/* */</code>、<code>"""</code>）折叠</li>
+          <li><strong>documentSymbol</strong>（<code>textDocument/documentSymbol</code>）：AST 驱动的文档大纲（fn / async fn / class / struct / enum / type，含嵌套成员）</li>
+          <li><strong>workspace/symbol</strong>：跨文档全局符号搜索（子串匹配名称）</li>
+          <li><strong>formatting</strong>（<code>textDocument/formatting</code>）：复用 <code>hone fmt</code> 格式化器，与 CLI 行为一致</li>
+          <li><strong>typeDefinition</strong>（<code>textDocument/typeDefinition</code>）：类型定义跳转（struct / enum / type / class）</li>
+          <li>协议错误遵循 LSP 规范：<code>-32700</code> Parse error、<code>-32601</code> Method not found、<code>-32602</code> Invalid params；端到端冒烟测试见 <code>tests/lsp_smoke.py</code></li>
+        </ul>
+      </li>
+      <li><strong>hone check 静态检查命令</strong>：<code>hone check &lt;file.hn|目录&gt; [--json]</code> 只做解析 + 类型检查、不执行代码；单文件通过输出 <code>check OK: &lt;file&gt;</code>，目录模式末尾输出 <code>N files, X passed, Y failed</code> 汇总；<code>--json</code> 诊断 JSON 输出到 stdout（便于 CI / 编辑器集成）</li>
+      <li><strong>cow 写时复制容器（COW）</strong>：<code>cow</code> 声明关键字，集合值共享只读缓冲、写者首次写时深拷贝隔离，以 <code>Arc</code> 引用计数归零自动回收（无追踪式垃圾回收）
+        <ul>
+          <li>覆盖 <code>list</code> / <code>dict</code> / <code>str</code> / <code>bytes</code>；<code>str</code>/<code>bytes</code> 不可变故零拷贝共享，<code>list</code>/<code>dict</code> 可变故写前检查唯一性</li>
+          <li>声明（均需初始化；list/dict 类型由初始化式推断，str/bytes 可显式标注）：<code>cow x = [1, 2];</code> / <code>cow str s = "hi";</code> / 类型位置 <code>x : cow str = "hi";</code>；只读可叠加 <code>cow readonly bytes b = b"…";</code>；cow 形参 <code>fn f(cow z) { ... }</code></li>
+          <li>共享与隔离：<code>cow→cow</code> 赋值共享缓冲（O(1)）；<code>cow→普通</code> 赋值在边界自动深拷贝</li>
+          <li>写时复制仅由原地赋值触发（<code>a[i] = x</code> 索引赋值、<code>a.k = x</code> 字段赋值）；<code>+=</code> 等复合赋值按既有值语义</li>
+          <li>透明性：<code>type_of</code> 报内层类型；<code>len</code> / <code>==</code> / 迭代 / 推导式 / 切片 / 内置函数均按内层值工作</li>
+          <li>仅解释器支持：VM（<code>--vm</code>）/ AOT（<code>build --exe -c</code>）/ DLL（<code>build --dll</code>）遇 <code>cow</code> 声明或形参报 H999</li>
+        </ul>
+      </li>
+    </ul>
+  </div>
+
+  <div class="release">
     <span class="ver-tag">v0.7.12</span><span class="date">2026-09-25</span>
     <h4>新增</h4>
     <ul>

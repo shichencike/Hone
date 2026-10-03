@@ -419,6 +419,9 @@ pub fn is_builtin(name: &str) -> bool {
 
 /// 调用内置函数。未知函数名由调用方保证不会到达（checker 已拦截）。
 pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
+    // COW 透明：容器实参在边界统一解包为普通值（独占零拷贝 / 共享深拷贝），
+    // 使全部 builtin 按内层 list/dict/str/bytes 统一处理，无需逐点适配 Cow 变体。
+    let args: Vec<Value> = args.into_iter().map(|a| a.unwrap_cow()).collect();
     match name {
         "print" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
@@ -663,7 +666,8 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         }
         "to_str" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
-            match v {
+            // COW 透明：cow 容器按内层值转换
+            match v.as_plain() {
                 Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Error(_) | Value::Ptr(_) => {
                     Ok(Value::Str(v.display()))
                 }
@@ -730,6 +734,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 Value::List(_) | Value::Dict(_) | Value::Lambda(_) | Value::Enum(_)
                 | Value::Future(_) | Value::TypeInst(_) => Ok(Value::Str(v.display())),
                 Value::Null => Ok(Value::Str("null".to_string())),
+                Value::Cow(_) => unreachable!("as_plain strips COW"),
             }
         }
         "to_int" => {
@@ -3355,6 +3360,8 @@ fn json_to_value(s: &str, span: Span, file: &str, src: &str) -> Result<Value, ZE
 }
 
 fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String, ZError> {
+    // COW 透明：cow 容器按内层值序列化
+    let v = v.as_plain();
     let jv = match v {
         Value::Int(i) => serde_json::Value::Number((*i).into()),
         Value::Float(f) => serde_json::Number::from_f64(*f)
@@ -3443,6 +3450,7 @@ fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String,
                 Some("JSON supports int/float/bool/str/char/list/dict; build a dict of the fields to serialize"),
             ));
         }
+        Value::Cow(_) => unreachable!("as_plain strips COW"),
     };
     Ok(jv.to_string())
 }

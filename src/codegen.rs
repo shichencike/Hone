@@ -48,6 +48,8 @@ impl CType {
             TyName::Bytes => CType::Int,
             // 泛型类型参数在 DLL 导出时无单一 C 类型，按默认 int 处理
             TyName::Var(_) => CType::Int,
+            // 类型推断（cow 声明）：parser 已强制带初始化，DLL 导出不可达
+            TyName::Inferred => CType::Int,
         }
     }
 
@@ -99,6 +101,40 @@ fn collect_exports_stmts(stmts: &[Stmt], out: &mut Vec<String>) {
     }
 }
 
+/// 扫描 AST，若存在 cow 声明/形参返回对应错误（DLL 后端不支持 COW）。
+fn check_cow_usage(stmts: &[Stmt], file: &str, src: &str) -> Option<ZError> {
+    for s in stmts {
+        if let Some(span) = find_cow_span(s) {
+            return Some(ZError::new(
+                codes::NOT_IMPLEMENTED,
+                "`cow` is not supported in DLL native builds",
+                file,
+                src,
+                span.line,
+                span.col,
+                span.len,
+                Some("cow works in interpreted mode only"),
+            ));
+        }
+    }
+    None
+}
+
+/// 在语句树中查找首个 cow 声明/形参的 span。
+fn find_cow_span(s: &Stmt) -> Option<Span> {
+    match s {
+        Stmt::VarDecl { span, cow, .. } if *cow => Some(*span),
+        Stmt::FnDef { params, .. } => {
+            if let Some(p) = params.iter().find(|p| p.cow) {
+                Some(p.span)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// 生成 C 源码。exports 为要导出的函数名列表。
 pub fn generate(program: &Program, exports: &[String], file: &str, src: &str) -> Result<String, ZError> {
     let mut cg = Codegen {
@@ -107,6 +143,11 @@ pub fn generate(program: &Program, exports: &[String], file: &str, src: &str) ->
         fns: HashMap::new(),
     };
     cg.collect_fns(&program.stmts)?;
+
+    // COW 声明/形参：DLL 后端无 Arc 语义运行时，不支持（H999）
+    if let Some(e) = check_cow_usage(&program.stmts, file, src) {
+        return Err(e);
+    }
 
     // 收集导出函数及其调用链上的所有函数（去重、保持顺序）
     let mut reachable: Vec<String> = Vec::new();
@@ -335,7 +376,15 @@ impl Codegen {
                         vt.insert(name.clone(), t);
                     }
                 }
-                Stmt::VarDecl { name, ty, init, .. } => {
+                Stmt::VarDecl { name, ty, init, cow, .. } => {
+                    if *cow {
+                        return Err(self.zerr(
+                            codes::NOT_IMPLEMENTED,
+                            "`cow` is not supported in DLL native builds".to_string(),
+                            s.span(),
+                            Some("cow works in interpreted mode only"),
+                        ));
+                    }
                     let annot = CType::from_annot(ty.clone());
                     if let Some(e) = init {
                         let t = self.infer_expr_type(e, vt, stack)?;

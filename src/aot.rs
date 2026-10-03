@@ -1573,6 +1573,16 @@ impl AotGen {
         body.push_str("    jmp_buf* _fsave = hn_jmp_top;\n");
         // 参数：复制 args（调用方负责释放数组元素）；缺省参数用默认表达式
         for (i, p) in f.params.iter().enumerate() {
+            if p.cow {
+                return Err(zerr(
+                    &self.file,
+                    &self.src,
+                    codes::NOT_IMPLEMENTED,
+                    "`cow` parameters are not supported in AOT native builds".to_string(),
+                    p.span,
+                    Some("cow works in interpreted mode only"),
+                ));
+            }
             let vname = format!("v{}", self.var_counter);
             self.var_counter += 1;
             self.scopes
@@ -1683,7 +1693,18 @@ impl AotGen {
                 out.push_str(&self.assign_var(name, &e));
                 Ok(())
             }
-            Stmt::VarDecl { name, ty, init, span, .. } => {
+            Stmt::VarDecl { name, ty, init, span, cow, .. } => {
+                if *cow {
+                    // AOT 不支持 COW 共享缓冲（无 Arc 语义运行时）
+                    return Err(zerr(
+                        &self.file,
+                        &self.src,
+                        codes::NOT_IMPLEMENTED,
+                        "`cow` is not supported in AOT native builds".to_string(),
+                        *span,
+                        Some("cow works in interpreted mode only"),
+                    ));
+                }
                 let e = match init {
                     Some(i) => self.gen_expr(i)?,
                     None => match ty {
@@ -1700,6 +1721,17 @@ impl AotGen {
                                 "`char` is not supported in AOT native builds".to_string(),
                                 *span,
                                 Some("char works in interpreted mode only"),
+                            ));
+                        }
+                        // AOT 不支持 COW 共享缓冲
+                        TyName::Inferred => {
+                            return Err(zerr(
+                                &self.file,
+                                &self.src,
+                                codes::NOT_IMPLEMENTED,
+                                "`cow` is not supported in AOT native builds".to_string(),
+                                *span,
+                                Some("cow works in interpreted mode only"),
                             ));
                         }
                         // AOT 运行时暂无 byte/bytes 值类型
@@ -2843,6 +2875,16 @@ impl AotGen {
             body_c.push_str(&format!("    HnValue {} = hn_copy(cap[{}]);\n", cname, i));
         }
         for (i, p) in params.iter().enumerate() {
+            if p.cow {
+                return Err(zerr(
+                    &self.file,
+                    &self.src,
+                    codes::NOT_IMPLEMENTED,
+                    "`cow` parameters are not supported in AOT native builds".to_string(),
+                    p.span,
+                    Some("cow works in interpreted mode only"),
+                ));
+            }
             let vname = format!("v{}", self.var_counter);
             self.var_counter += 1;
             self.scopes

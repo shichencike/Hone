@@ -197,6 +197,7 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
         }
         "fmt" => cmd_fmt(&args[1..]),
         "doc" => cmd_doc(&args[1..]),
+        "check" => cmd_check(&args[1..]),
         "test" => cmd_test(&args[1..]),
         "watch" => cmd_watch(&args[1..]),
         "bind" => cmd_bind(&args[1..]),
@@ -479,6 +480,7 @@ fn print_help() {
     println!("  hone debug <script.hn>   断点调试模式（breakpoint 关键字生效）");
     println!("  hone fmt [-w|-c] <file.hn>  代码格式化（Tab 缩进/运算符空格/大括号；-w 覆盖写，-c 只检查差异）");
     println!("  hone doc <file.hn>        从 fn/class 定义与上方 `//` 注释生成 Markdown API 文档");
+    println!("  hone check <file.hn|目录> [--json] 仅静态检查（解析+类型检查，不执行）；目录递归扫全部 .hn，--json 输出诊断 JSON 数组，退出码 0/1 表达成败");
     println!("  hone build --dll <file.hn> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
     println!("  hone build --exe <file.hn> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
     println!("  hone build --exe -c <file.hn> AOT 编译为原生可执行文件（脚本→C 中间文件→gcc/clang；默认删 .c，--keep-c 保留）");
@@ -1489,6 +1491,166 @@ fn cmd_doc(args: &[String]) -> Result<(), ZError> {
         }
     }
     println!();
+    Ok(())
+}
+
+/// hone check <file.hn|目录> [--json]：仅静态检查（解析 + 类型检查），不执行代码。
+/// 单文件：通过输出 `check OK: <file>`；失败输出诊断（stderr），退出码非 0。
+/// 目录：递归扫描全部 .hn（跳过隐藏目录与构建目录），逐个检查（单文件失败不中断），
+/// 末尾输出汇总；有失败即退出码非 0。
+/// --json：stdout 输出诊断 JSON 数组（每失败文件一项，全通过为 []），文本信息走 stderr，
+/// 便于 CI / 编辑器集成（`hone check src/ --json | jq`）。
+fn cmd_check(args: &[String]) -> Result<(), ZError> {
+    let json = args.iter().any(|a| a == "--json");
+    let mut roots: Vec<String> = Vec::new();
+    let mut files: Vec<String> = Vec::new();
+    let mut dir_roots = 0usize;
+    for a in args {
+        if a == "--json" {
+            continue;
+        }
+        let meta = std::fs::metadata(a).map_err(|e| {
+            ZError::plain(
+                codes::NOT_FOUND,
+                format!("cannot access `{}`: {}", a, e),
+                Some("check the path"),
+            )
+        })?;
+        roots.push(a.clone());
+        if meta.is_dir() {
+            dir_roots += 1;
+            collect_check_files(a, &mut files)?;
+        } else {
+            files.push(a.clone());
+        }
+    }
+    if roots.is_empty() {
+        return Err(ZError::plain(
+            codes::SYNTAX,
+            "missing file or directory: `hone check <file.hn|directory> [--json]`",
+            Some("example: `hone check src/` or `hone check mylib.hn --json`"),
+        ));
+    }
+    files.sort();
+    files.dedup();
+    if files.is_empty() {
+        println!("no .hn files found under `{}`", roots.join(", "));
+        return Ok(());
+    }
+
+    let mut diags: Vec<serde_json::Value> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
+    for f in &files {
+        let err = match std::fs::read_to_string(f) {
+            Ok(src) => match run_check_one(f, &src) {
+                Ok(()) => None,
+                Err(e) => {
+                    diags.push(check_diag_json(f, &e));
+                    Some(e)
+                }
+            },
+            Err(io) => {
+                let e = ZError::plain(
+                    codes::FILE_NOT_FOUND,
+                    format!("cannot read `{}`: {}", f, io),
+                    Some("check the path"),
+                );
+                diags.push(check_diag_json(f, &e));
+                Some(e)
+            }
+        };
+        match err {
+            Some(e) => {
+                if !json {
+                    eprintln!("{}", e);
+                }
+                failed.push(f.clone());
+            }
+            None => {
+                if !json {
+                    println!("check OK: {}", f);
+                }
+            }
+        }
+    }
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&diags).unwrap_or_else(|_| "[]".to_string())
+        );
+    } else if dir_roots > 0 || files.len() > 1 {
+        println!();
+        println!(
+            "check: {} files, {} passed, {} failed",
+            files.len(),
+            files.len() - failed.len(),
+            failed.len()
+        );
+    }
+    if !failed.is_empty() {
+        return Err(ZError::plain(
+            codes::CHECK_FAILED,
+            format!("{} of {} file(s) failed check", failed.len(), files.len()),
+            Some("fix the diagnostics above; run `hone explain <code>` for an error code"),
+        ));
+    }
+    Ok(())
+}
+
+/// 仅解析 + 类型检查（不执行），供 hone check 使用。
+fn run_check_one(path: &str, src: &str) -> Result<(), ZError> {
+    let program = parser::Parser::parse(path, src)?;
+    checker::Checker::check(&program, path, src)?;
+    Ok(())
+}
+
+/// ZError → JSON 诊断对象（`hone check --json` 用）。
+fn check_diag_json(file: &str, e: &ZError) -> serde_json::Value {
+    let shown = if e.file.is_empty() { file } else { e.file.as_str() };
+    serde_json::json!({
+        "file": shown,
+        "code": e.code,
+        "message": e.msg,
+        "line": e.line,
+        "col": e.col,
+        "len": e.len,
+        "line_text": e.line_text,
+        "help": e.help,
+    })
+}
+
+/// 递归收集目录下所有 .hn 文件（跳过隐藏目录与构建/缓存目录，按名排序保证确定性）。
+fn collect_check_files(dir: &str, out: &mut Vec<String>) -> Result<(), ZError> {
+    let mut entries: Vec<std::path::PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| {
+            ZError::plain(
+                codes::NOT_FOUND,
+                format!("cannot read directory `{}`: {}", dir, e),
+                Some("check the path"),
+            )
+        })?
+        .map(|e| {
+            e.map(|e| e.path())
+                .map_err(|e| ZError::plain(codes::SYSCALL, format!("cannot read dir entry: {}", e), None::<&str>))
+        })
+        .collect::<Result<_, _>>()?;
+    entries.sort();
+    for path in entries {
+        let name = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if path.is_dir() {
+            let skip = name.starts_with('.')
+                || matches!(name.as_str(), "target" | "node_modules" | "dist" | "out");
+            if !skip {
+                collect_check_files(&path.to_string_lossy(), out)?;
+            }
+        } else if name.ends_with(".hn") {
+            out.push(path.to_string_lossy().into_owned());
+        }
+    }
     Ok(())
 }
 

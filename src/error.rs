@@ -128,6 +128,7 @@ pub mod codes {
     pub const NETWORK: &str = "H200"; // 网络请求失败（通用）
     pub const NOT_FOUND: &str = "H404"; // 文件或库不存在（通用）
     pub const NOT_IMPLEMENTED: &str = "H999"; // 尚未实现
+    pub const CHECK_FAILED: &str = "H900"; // hone check 静态检查失败（汇总错误，具体定位见单条诊断）
 
     // --- H100 区段：词法/语法细分 ---
     pub const ILLEGAL_CHAR: &str = "H101"; // 非法字符

@@ -1,5 +1,51 @@
 # Changelog
 
+## [Unreleased]
+
+### 新增
+- **LSP 文本能力补全**（`hone lsp`，LSP over stdio）：在既有的诊断 / 补全 / hover /
+  跳转定义 / 语义高亮基础上，新增 8 项标准文本能力，均无新增依赖
+  - **references**（`textDocument/references`）：跨**所有已打开文档**查找符号引用，
+    词法 token 精确匹配（`includeDeclaration` 时含定义处）
+  - **rename**（`textDocument/rename`）：返回跨文档 `WorkspaceEdit`，一次改全部引用；
+    无引用时返回 `null`
+  - **signatureHelp**（`textDocument/signatureHelp`）：`(`/`,` 触发的调用签名帮助，
+    解析光标所在调用的函数名与激活参数下标，展示用户函数 / 模块函数签名
+  - **foldingRange**（`textDocument/foldingRange`）：多行大括号块（含 match 体）与
+    跨行注释（`/* */`、`"""`）折叠
+  - **documentSymbol**（`textDocument/documentSymbol`）：AST 驱动的文档大纲
+    （fn / async fn / class / struct / enum / type，含嵌套成员）
+  - **workspace/symbol**（`workspace/symbol`）：跨文档全局符号搜索（子串匹配名称）
+  - **formatting**（`textDocument/formatting`）：复用 `hone fmt` 格式化器，与 CLI 行为一致
+  - **typeDefinition**（`textDocument/typeDefinition`）：类型定义跳转（struct / enum / type / class）
+  - 协议错误遵循 LSP 规范：`-32700` Parse error、`-32601` Method not found、
+    `-32602` Invalid params；未实现能力（如 documentHighlight）返回 `-32601`
+  - 端到端冒烟测试见 `tests/lsp_smoke.py`（stdio 启动服务器，验证全部能力 + 协议错误码）
+- **hone check 静态检查命令**：`hone check <file.hn|目录> [--json]` 只做解析 + 类型检查、
+  不执行代码
+  - 单文件：通过输出 `check OK: <file>`（退出码 0）；失败输出诊断到 stderr，退出码非 0
+  - 目录：递归扫描全部 `.hn`（跳过隐藏目录与 target/node_modules 等构建目录），
+    逐个检查（单文件失败不中断），末尾输出 `N files, X passed, Y failed` 汇总
+  - `--json`：诊断 JSON 数组输出到 stdout（每失败文件一项，全通过为 `[]`），
+    便于 CI / 编辑器集成
+  - 失败退出时输出汇总错误码 H900（单条诊断保留原错误码 H001/H005 等）
+- **cow 写时复制容器（COW）**：`cow` 声明关键字，集合值共享只读缓冲、写者首次写时深拷贝隔离，
+  以 `Arc` 引用计数归零自动回收（无追踪式垃圾回收）
+  - 覆盖 `list` / `dict` / `str` / `bytes`；`str`/`bytes` 不可变故为零拷贝共享，
+    `list`/`dict` 可变故写前检查唯一性（独占直接原地写，共享则深拷贝隔离）
+  - 声明形式（均需初始化，list/dict 类型由初始化式推断，str/bytes 可显式标注）：
+    `cow x = [1, 2];` / `cow str s = "hi";` / 类型位置 `x : cow str = "hi";`（等价）
+  - 只读可叠加：`cow readonly bytes b = b"…";`；cow 形参：`fn f(cow z) { ... }`
+  - 共享与隔离：`cow→cow` 赋值共享缓冲（O(1)）；`cow→普通` 赋值在边界自动深拷贝，
+    普通变量永远不共享 cow 缓冲
+  - 透明性：`type_of` 报内层类型（`type_of(cow x)` → `"list"`）、`len` / `==` / 迭代 /
+    推导式 / 切片 / 内置函数均按内层值工作，报错文案不变
+  - 写操作范围：仅原地赋值语句（`a[i] = x` 索引赋值、`a.k = x` 字段赋值）；
+    `+=` 等复合赋值不触发写时复制（按既有值语义）
+  - 仅解释器支持：VM（`--vm`）/ AOT（`build --exe -c`）/ DLL（`build --dll`）
+    遇 `cow` 声明或形参报 H999（"cow works in interpreted mode only"）
+  - 冒烟测试 `tests/smoke/cow_read.hn`
+
 ## [v0.7.12] - 2026-09-25
 
 ### 新增

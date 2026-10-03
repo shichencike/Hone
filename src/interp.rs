@@ -85,6 +85,18 @@ pub enum Value {
     Enum(Arc<EnumVal>),
     /// async 函数调用的 future：await 等待结果
     Future(Arc<FutureVal>),
+    /// COW 容器：共享缓冲的 list/dict/str/bytes（`cow` 声明；写时自动复制隔离）
+    Cow(Arc<CowInner>),
+}
+
+/// COW（写时复制）容器：Arc 共享缓冲，data 恒为 list/dict/str/bytes。
+/// 共享态（引用计数 > 1）：写者先深拷贝缓冲再写（与其余共享者隔离）；
+/// 独占态（引用计数 == 1）：写者直接解包原地修改（零拷贝）。
+/// 无追踪式 GC：引用计数归零时缓冲由 Rust 自动释放。
+#[derive(Debug)]
+pub struct CowInner {
+    /// 内层值（不变式：List / Dict / Str / Bytes）
+    pub data: Value,
 }
 
 /// 枚举值内容：枚举名 + 变体名 + 可选载荷（简单变体载荷为空）。
@@ -167,6 +179,9 @@ impl PartialEq for Value {
             (Value::Enum(a), Value::Enum(b)) => a.ty == b.ty && a.variant == b.variant && a.payload == b.payload,
             // future 无结构相等：同一创建点的引用视为相等
             (Value::Future(a), Value::Future(b)) => Arc::ptr_eq(a, b),
+            // COW 容器按内层值结构比较（与对应的 list/dict/str/bytes 透明相等）
+            (Value::Cow(a), other) => a.data == *other,
+            (other, Value::Cow(a)) => a.data == *other,
             _ => false,
         }
     }
@@ -203,6 +218,8 @@ impl Value {
             Value::Lambda(_) => "fn",
             Value::Enum(_) => "enum",
             Value::Future(_) => "future",
+            // COW 容器类型透明：按其内层值报告
+            Value::Cow(c) => c.data.type_name(),
         }
     }
 
@@ -268,7 +285,60 @@ impl Value {
                 }
             }
             Value::Future(_) => "future".to_string(),
+            // COW 容器显示透明：与内层值完全一致
+            Value::Cow(c) => c.data.display(),
         }
+    }
+
+    /// 是否为 COW 容器（内层恒为 list/dict/str/bytes）。
+    pub fn is_cow(&self) -> bool {
+        matches!(self, Value::Cow(_))
+    }
+
+    /// 借用 COW 内层值（非 COW 返回 None）。
+    pub fn as_cow_inner(&self) -> Option<&Value> {
+        match self {
+            Value::Cow(c) => Some(&c.data),
+            _ => None,
+        }
+    }
+
+    /// 透明读：COW 容器返回内层值的借用，非 COW 返回自身。
+    /// 用于索引/迭代/len/相等/内置函数等所有读点，使 `cow` 值对其底层类型透明。
+    pub fn as_plain(&self) -> &Value {
+        match self {
+            Value::Cow(c) => &c.data,
+            other => other,
+        }
+    }
+
+    /// 解包 COW 为普通值：独占缓冲时零拷贝取出；共享时深拷贝隔离。
+    /// 非 COW 值原样返回。用于「cow → 普通变量」的边界赋值。
+    pub fn unwrap_cow(self) -> Value {
+        match self {
+            Value::Cow(c) => {
+                // 独占（引用计数归一）：零拷贝取出缓冲；共享：深拷贝隔离
+                Arc::try_unwrap(c).map(|ci| ci.data).unwrap_or_else(|c| c.data.clone())
+            }
+            other => other,
+        }
+    }
+
+    /// 将普通 list/dict/str/bytes 包装为 COW 容器（cow 声明/共享赋值时）；
+    /// 已是 COW 或非容器类型则原样返回。
+    pub fn wrap_cow(v: Value) -> Value {
+        match v {
+            Value::List(_) | Value::Dict(_) | Value::Str(_) | Value::Bytes(_) => {
+                Value::Cow(Arc::new(CowInner { data: v }))
+            }
+            other => other,
+        }
+    }
+
+    /// 写时复制读取：COW 独占则零拷贝取出，COW 共享则深拷贝隔离，非 COW 原样返回。
+    /// 用于写路径的「先透明取出、写回时重新包装」——写者拿到独立缓冲，不与共享者互相影响。
+    pub fn isolate_cow(self) -> Value {
+        self.unwrap_cow()
     }
 }
 
@@ -294,6 +364,10 @@ pub struct Env {
     scopes: Vec<HashMap<String, Value>>,
     /// 各作用域的只读变量名集合（与 scopes 平行；readonly 声明的变量与只读参数）
     readonly_vars: Vec<HashSet<String>>,
+    /// 各作用域的 COW 变量名集合（与 scopes 平行；`cow` 声明的变量与 cow 形参）。
+    /// 身份按变量名记录：普通值赋给 cow 变量时需知道该包装为 COW 缓冲；
+    /// 普通变量收到 COW 值时需知道该解包（边界深拷贝）。
+    cow_vars: Vec<HashSet<String>>,
 }
 
 impl Env {
@@ -301,6 +375,7 @@ impl Env {
         Env {
             scopes: vec![HashMap::new()],
             readonly_vars: vec![HashSet::new()],
+            cow_vars: vec![HashSet::new()],
         }
     }
 
@@ -327,17 +402,20 @@ impl Env {
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
         self.readonly_vars.push(HashSet::new());
+        self.cow_vars.push(HashSet::new());
     }
 
     /// 循环体复用同一个作用域 HashMap（避免每轮迭代堆分配）：压入既有表，只读集合每轮新建。
     fn push_reusable_scope(&mut self, m: HashMap<String, Value>) {
         self.scopes.push(m);
         self.readonly_vars.push(HashSet::new());
+        self.cow_vars.push(HashSet::new());
     }
 
     fn pop_scope(&mut self) -> Option<HashMap<String, Value>> {
         let r = self.readonly_vars.pop();
         let _ = r;
+        let _c = self.cow_vars.pop();
         self.scopes.pop()
     }
 
@@ -356,6 +434,41 @@ impl Env {
             }
         }
         false
+    }
+
+    /// 该变量是否被声明为 COW（沿作用域查其绑定层）。
+    fn is_cow_var(&self, name: &str) -> bool {
+        for (s, c) in self.scopes.iter().rev().zip(self.cow_vars.iter().rev()) {
+            if s.contains_key(name) {
+                return c.contains(name);
+            }
+        }
+        false
+    }
+
+    /// 声明 COW 变量：绑定值并登记 COW 标志（COW 语义见 assign_value 注释）。
+    pub fn declare_cow(&mut self, name: &str, v: Value) {
+        self.scopes.last_mut().unwrap().insert(name.to_string(), v);
+        self.cow_vars.last_mut().unwrap().insert(name.to_string());
+    }
+
+    /// 声明只读 COW 变量：readonly cow 修饰组合。
+    pub fn declare_cow_readonly(&mut self, name: &str, v: Value) {
+        self.scopes.last_mut().unwrap().insert(name.to_string(), v);
+        self.readonly_vars.last_mut().unwrap().insert(name.to_string());
+        self.cow_vars.last_mut().unwrap().insert(name.to_string());
+    }
+
+    /// COW 感知的变量赋值（cow 声明与 cow 形参的绑定均经此）：
+    /// - cow 变量：COW 值直接共享（Arc clone，O(1) 零拷贝）；普通容器值包装为新 COW 缓冲；
+    /// - 普通变量：COW 值解包（独占零拷贝 / 共享则边界深拷贝隔离）。
+    fn assign_value(&mut self, name: &str, v: Value) {
+        if self.is_cow_var(name) {
+            let v = if v.is_cow() { v } else { Value::wrap_cow(v) };
+            self.set_or_declare(name, v);
+        } else {
+            self.set_or_declare(name, v.unwrap_cow());
+        }
     }
 
     /// 赋值：找到最近绑定则原地更新（避免 String 分配与二次哈希），否则在当前作用域声明。
@@ -862,12 +975,21 @@ impl Interp {
 
     fn exec_stmt(&mut self, env: &mut Env, stmt: &Stmt) -> Result<Flow, ZError> {
         match stmt {
-            Stmt::VarDecl { name, ty, init, readonly, span: _ } => {
+            Stmt::VarDecl { name, ty, init, readonly, cow, span: _ } => {
                 let v = match init {
                     Some(e) => self.eval_expr(env, e)?,
                     None => default_value(ty.clone()),
                 };
-                if *readonly {
+                if *cow {
+                    // COW 声明：值包装为 COW 共享缓冲（list/dict/str/bytes；
+                    // 非容器值原样，类型不符由 checker 拦截）
+                    let v = if v.is_cow() { v } else { Value::wrap_cow(v) };
+                    if *readonly {
+                        env.declare_cow_readonly(name, v);
+                    } else {
+                        env.declare_cow(name, v);
+                    }
+                } else if *readonly {
                     env.declare_readonly(name, v);
                 } else {
                     env.declare(name, v);
@@ -884,7 +1006,7 @@ impl Interp {
                     ));
                 }
                 let v = self.eval_expr(env, value)?;
-                env.set_or_declare(name, v);
+                env.assign_value(name, v);
                 Ok(Flow::Normal)
             }
             Stmt::FieldAssign { target, value, span } => {
@@ -899,7 +1021,8 @@ impl Interp {
                 Ok(Flow::Normal)
             }
             Stmt::DestructAssign { targets, value, span } => {
-                let v = self.eval_expr(env, value)?;
+                // COW 透明读：cow 容器先取出内层（共享则深拷贝，独占零拷贝）
+                let v = self.eval_expr(env, value)?.isolate_cow();
                 let is_dict = targets.iter().all(|(_, k)| k.is_some());
                 match v {
                     // 列表解构：按位置依次绑定
@@ -989,7 +1112,7 @@ impl Interp {
                     Some(cur) => {
                         let rhs = self.eval_expr(env, value)?;
                         let v = self.compound_assign(*op, cur, rhs, *span)?;
-                        env.set_or_declare(name, v);
+                        env.assign_value(name, v);
                         Ok(Flow::Normal)
                     }
                     None => Err(self.runtime_err(
@@ -1141,7 +1264,8 @@ impl Interp {
             }
             Stmt::ForIn { var, var2, iter, body, span } => {
                 let it = self.eval_expr(env, iter)?;
-                match it {
+                // COW 透明读：迭代借用内层容器，循环变量按元素克隆绑定
+                match it.as_plain() {
                     // 列表：单变量绑定元素
                     Value::List(items) => {
                         if var2.is_some() {
@@ -1156,7 +1280,7 @@ impl Interp {
                         let mut body_scope = HashMap::new();
                         for item in items {
                             env.push_reusable_scope(body_scope);
-                            env.declare(var, item);
+                            env.declare(var, item.clone());
                             let flow = self.exec_stmts(env, body);
                             body_scope = env.pop_scope().expect("for-in scope");
                             // 复用作用域必须清空：否则上一轮迭代体内声明的变量会泄漏到下一轮
@@ -1184,7 +1308,7 @@ impl Interp {
                         let mut body_scope = HashMap::new();
                         for b in items {
                             env.push_reusable_scope(body_scope);
-                            env.declare(var, Value::Byte(b));
+                            env.declare(var, Value::Byte(*b));
                             let flow = self.exec_stmts(env, body);
                             body_scope = env.pop_scope().expect("for-in scope");
                             body_scope.clear();
@@ -1310,7 +1434,8 @@ impl Interp {
             }
             Stmt::Throw { value, span } => {
                 let v = self.eval_expr(env, value)?;
-                match v {
+                // COW 透明：cow str 抛出与普通 str 等价
+                match v.as_plain() {
                     // 抛字符串：构造一个 H600 用户错误
                     Value::Str(s) => Err(self.runtime_err(codes::THROW, s, *span, None::<&str>)),
                     // 重抛 error 值：同文件保留原始定位，跨文件退化并附原始位置
@@ -1318,7 +1443,7 @@ impl Interp {
                         if e.file == self.file {
                             Err(ZError::new(
                                 e.code,
-                                e.message,
+                                e.message.clone(),
                                 &self.file,
                                 &self.src,
                                 e.line,
@@ -1836,7 +1961,8 @@ impl Interp {
                         ))
                     }
                 },
-                FfiTy::Str => match a {
+                // COW 透明：cow str 按普通 C 字符串传递
+                FfiTy::Str => match a.as_plain() {
                     Value::Str(s) => {
                         let cs = CString::new(s.as_bytes()).map_err(|_| {
                             self.runtime_err(
@@ -2062,6 +2188,7 @@ impl Interp {
         let mut call_env = Env {
             scopes: vec![HashMap::with_capacity(f.params.len())],
             readonly_vars: vec![HashSet::new()],
+            cow_vars: vec![HashSet::new()],
         };
         for (i, p) in f.params.iter().enumerate() {
             let v = if i < args.len() {
@@ -2077,9 +2204,22 @@ impl Interp {
                     Some("pass the required argument, or give the parameter a default value"),
                 ));
             };
+            // COW 形参绑定：cow 值共享（Arc O(1)）、普通容器包装为 COW 缓冲；
+            // 普通形参收到 COW 值：边界隔离（独占零拷贝 / 共享深拷贝）
+            let v = if p.cow {
+                if v.is_cow() { v } else { Value::wrap_cow(v) }
+            } else {
+                v.unwrap_cow()
+            };
             if p.readonly {
                 // 只读参数：`fn f(x: readonly int)` 体内不可重新赋值
-                call_env.declare_readonly(&p.name, v);
+                if p.cow {
+                    call_env.declare_cow_readonly(&p.name, v);
+                } else {
+                    call_env.declare_readonly(&p.name, v);
+                }
+            } else if p.cow {
+                call_env.declare_cow(&p.name, v);
             } else {
                 call_env.declare(&p.name, v);
             }
@@ -2154,6 +2294,7 @@ impl Interp {
         let mut call_env = Env {
             scopes: vec![f.captured.clone(), HashMap::with_capacity(f.params.len())],
             readonly_vars: vec![HashSet::new(), HashSet::new()],
+            cow_vars: vec![HashSet::new(), HashSet::new()],
         };
         for (i, p) in f.params.iter().enumerate() {
             let v = if i < args.len() {
@@ -2169,9 +2310,21 @@ impl Interp {
                     Some("pass the required argument, or give the parameter a default value"),
                 ));
             };
+            // COW 形参绑定：与用户函数一致（cow 共享/包装，普通形参边界隔离）
+            let v = if p.cow {
+                if v.is_cow() { v } else { Value::wrap_cow(v) }
+            } else {
+                v.unwrap_cow()
+            };
             if p.readonly {
                 // 只读参数：lambda 参数同样支持 readonly 修饰
-                call_env.declare_readonly(&p.name, v);
+                if p.cow {
+                    call_env.declare_cow_readonly(&p.name, v);
+                } else {
+                    call_env.declare_readonly(&p.name, v);
+                }
+            } else if p.cow {
+                call_env.declare_cow(&p.name, v);
             } else {
                 call_env.declare(&p.name, v);
             }
@@ -2408,9 +2561,10 @@ impl Interp {
                 span,
                 None::<&str>,
             )
-        })?;
+        })?
+        .isolate_cow(); // COW 写时复制：独占零拷贝，共享隔离
         let updated = self.update_chain(base, &chain[1..], value, span)?;
-        env.set_or_declare(&base_name, updated);
+        env.assign_value(&base_name, updated); // cow 变量重新包装回 COW 缓冲
         Ok(())
     }
 
@@ -2590,7 +2744,8 @@ impl Interp {
         span: Span,
     ) -> Result<Value, ZError> {
         let v = self.eval_expr(env, obj)?;
-        let len = match &v {
+        // COW 透明读：切片只借用内层缓冲拷贝区间，无需隔离
+        let len = match v.as_plain() {
             Value::List(items) => items.len(),
             Value::Bytes(b) => b.len(),
             other => {
@@ -2636,13 +2791,13 @@ impl Interp {
         let lo = lo as usize;
         let hi = hi.min(len as i64) as usize;
         if lo > hi {
-            return Ok(match &v {
+            return Ok(match v.as_plain() {
                 Value::List(_) => Value::List(Vec::new()),
                 Value::Bytes(_) => Value::Bytes(Vec::new()),
                 _ => unreachable!(),
             });
         }
-        Ok(match v {
+        Ok(match v.as_plain() {
             Value::List(items) => Value::List(items[lo..hi].to_vec()),
             Value::Bytes(b) => Value::Bytes(b[lo..hi].to_vec()),
             _ => unreachable!(),
@@ -2672,7 +2827,8 @@ impl Interp {
                 ));
             }
         };
-        let cur = self.eval_expr(env, obj)?; // 当前层容器（列表）
+        // 当前层容器：COW 写时复制——独占零拷贝取出，共享则深拷贝隔离写者
+        let cur = self.eval_expr(env, obj)?.isolate_cow();
         let items = match cur {
             Value::List(items) => items,
             other => {
@@ -2695,9 +2851,9 @@ impl Interp {
         let mut new_items = items.clone();
         new_items[i as usize] = value;
         match obj.as_ref() {
-            // 基变量：写回环境
+            // 基变量：写回环境（cow 变量经 assign_value 重新包装为 COW 缓冲）
             Expr::Ident { name, .. } => {
-                env.set_or_declare(name, Value::List(new_items));
+                env.assign_value(name, Value::List(new_items));
                 Ok(())
             }
             // 内层仍是索引：把更新后的容器作为新值递归写回
@@ -2724,7 +2880,8 @@ impl Interp {
                 ));
             }
         };
-        match v {
+        // COW 透明读：按内层值取索引（借用零拷贝，无需隔离）
+        match v.as_plain() {
             Value::List(items) => {
                 if i < 0 || (i as usize) >= items.len() {
                     return Err(self.runtime_err(
@@ -2795,7 +2952,8 @@ impl Interp {
             Expr::ListComp { elem, var, var2, iter, cond, span } => {
                 let it = self.eval_expr(env, iter)?;
                 let mut out = Vec::new();
-                match it {
+                // COW 透明读：推导式迭代借用内层容器
+                match it.as_plain() {
                     // 列表推导式：单变量绑定元素
                     Value::List(items) => {
                         if var2.is_some() {
@@ -2808,7 +2966,7 @@ impl Interp {
                         }
                         for item in items {
                             env.push_scope();
-                            env.declare(var, item);
+                            env.declare(var, item.clone());
                             let pass = self.comp_cond(env, cond.as_deref())?;
                             if pass {
                                 out.push(self.eval_expr(env, elem)?);
@@ -2845,7 +3003,8 @@ impl Interp {
             Expr::DictComp { key, value, var, var2, iter, cond, span } => {
                 let it = self.eval_expr(env, iter)?;
                 let mut out = Vec::new();
-                match it {
+                // COW 透明读：推导式迭代借用内层容器
+                match it.as_plain() {
                     Value::List(items) => {
                         if var2.is_some() {
                             return Err(self.runtime_err(
@@ -2857,7 +3016,7 @@ impl Interp {
                         }
                         for item in items {
                             env.push_scope();
-                            env.declare(var, item);
+                            env.declare(var, item.clone());
                             let pass = self.comp_cond(env, cond.as_deref())?;
                             if pass {
                                 out.push(self.comp_pair(env, key, value, *span)?);
@@ -3279,8 +3438,9 @@ impl Interp {
     fn comp_pair(&mut self, env: &mut Env, key: &Expr, value: &Expr, span: Span) -> Result<(String, Value), ZError> {
         let k = self.eval_expr(env, key)?;
         let v = self.eval_expr(env, value)?;
-        let ks = match k {
-            Value::Str(s) => s,
+        // COW 透明读：cow str 键与普通 str 键等价
+        let ks = match k.as_plain() {
+            Value::Str(s) => s.clone(),
             other => {
                 return Err(self.runtime_err(
                     codes::TYPE_MISMATCH,
@@ -3297,7 +3457,8 @@ impl Interp {
     /// 字段访问核心：dict/struct 按键取字段，type 实例沿继承链取字段，error 取错误属性；其他类型报错。
     /// Field 与 OptionalField（?.）共用；可选链在调用方先做 null 短路。
     fn field_value(&self, v: Value, field: &str, span: Span) -> Result<Value, ZError> {
-        match v {
+        // COW 透明读：借用内层值做字段查找（cow dict/struct 零拷贝）
+        match v.as_plain() {
             Value::TypeInst(inst) => {
                 // 实例字段访问：按实例字段表取值
                 match inst.fields.read().unwrap().iter().find(|(k, _)| k == field) {
@@ -3502,6 +3663,8 @@ impl Interp {
     }
 
     fn values_eq(&self, a: &Value, b: &Value, span: Span) -> Result<bool, ZError> {
+        // COW 透明：按内层值比较（报错文案 type_name 亦报内层类型）
+        let (a, b) = (a.as_plain(), b.as_plain());
         match (a, b) {
             (Value::Int(x), Value::Int(y)) => Ok(x == y),
             (Value::Float(x), Value::Float(y)) => Ok(x == y),
@@ -3566,14 +3729,15 @@ impl Interp {
         // 字符串拼接快速路径：预留容量一次分配，避免 format! 的额外开销
         // （只借用检查，非 Str 情况落回下方原有算术逻辑）
         if op == BinOp::Add {
-            if let (Value::Str(x), Value::Str(y)) = (&a, &b) {
+            if let (Value::Str(x), Value::Str(y)) = (a.as_plain(), b.as_plain()) {
                 let mut out = String::with_capacity(x.len() + y.len());
                 out.push_str(x);
                 out.push_str(y);
                 return Ok(Value::Str(out));
             }
         }
-        match (&a, &b) {
+        // COW 透明：按内层值运算（cow str 拼接 / 数值运算命中内建路径）
+        match (a.as_plain(), b.as_plain()) {
             (Value::Int(x), Value::Int(y)) => {
                 let r = match op {
                     BinOp::Add => x.checked_add(*y),
@@ -3657,6 +3821,8 @@ fn default_value(ty: TyName) -> Value {
         TyName::Bytes => Value::Bytes(Vec::new()),
         // 泛型类型参数无固定默认值（编译期擦除，运行时不可达）
         TyName::Var(_) => Value::Null,
+        // 类型推断（cow 声明）：parser 已强制带初始化，运行时不可达
+        TyName::Inferred => Value::Null,
     }
 }
 

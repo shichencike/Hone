@@ -61,6 +61,8 @@ impl Ty {
             TyName::Bytes => Ty::Bytes,
             // 类型变量不直接映射具体类型（build_fn_info 中由类型参数槽接管）
             TyName::Var(_) => Ty::Unknown,
+            // cow 声明未带显式类型：由初始化表达式推断（见 cow 声明检查）
+            TyName::Inferred => Ty::Unknown,
         }
     }
 
@@ -123,6 +125,10 @@ pub struct Checker {
     classes: HashMap<String, HashMap<String, FnInfo>>,
     /// 实例类（type）定义：类型名 → 静态视图（父类型名、字段表、方法表）
     types: HashMap<String, TypeDefEntry>,
+    /// collect 模式（LSP 多错误诊断）：true 时错误推入 errors 并继续检查，不中断
+    collect: bool,
+    /// collect 模式收集到的全部错误
+    errors: Vec<ZError>,
 }
 
 /// 实例类（type）定义的静态视图：父类型名、字段表（名, 类型, 只读）、方法表（方法名 → FnInfo）。
@@ -156,6 +162,8 @@ impl Checker {
             enums: HashMap::new(),
             classes: HashMap::new(),
             types: HashMap::new(),
+            collect: false,
+            errors: Vec::new(),
         };
 
         // Phase A：注册顶层函数并构建全局绑定
@@ -176,6 +184,48 @@ impl Checker {
         ck.strict = true;
         ck.check_all(&program.stmts)?;
         Ok(())
+    }
+
+    /// 收集全部静态错误（LSP 多错误诊断用）：与 `check` 同构（Phase A + 不动点 + strict），
+    /// 但错误记录后继续检查，不中断。返回空 Vec 表示无错误。
+    pub fn collect_errors(program: &Program, file: &str, src: &str) -> Vec<ZError> {
+        let builtins = builtin_names();
+        let mut ck = Checker {
+            file: file.to_string(),
+            src: src.to_string(),
+            slots: Vec::new(),
+            globals: HashMap::new(),
+            global_scopes: vec![HashMap::new()],
+            fns: HashMap::new(),
+            changed: false,
+            strict: false,
+            has_return: false,
+            loop_depth: 0,
+            has_external: false,
+            ffi_sigs: HashMap::new(),
+            header_cache: HashMap::new(),
+            builtins,
+            structs: HashMap::new(),
+            enums: HashMap::new(),
+            classes: HashMap::new(),
+            types: HashMap::new(),
+            collect: true,
+            errors: Vec::new(),
+        };
+        if let Err(e) = ck.register_top(&program.stmts) {
+            ck.note_err(e);
+        }
+        // 不动点循环（collect 模式单轮不中断；上限 4 轮，note_err 已去重）
+        for _ in 0..4 {
+            ck.changed = false;
+            ck.check_all(&program.stmts).ok();
+            if !ck.changed {
+                break;
+            }
+        }
+        ck.strict = true;
+        ck.check_all(&program.stmts).ok();
+        ck.errors
     }
 
     // ---------- Phase A：注册与绑定构建 ----------
@@ -722,7 +772,11 @@ impl Checker {
         // 先检查所有用户函数
         let names: Vec<String> = self.fns.keys().cloned().collect();
         for name in names {
-            self.check_fn(&name)?;
+            match self.check_fn(&name) {
+                Ok(()) => {}
+                Err(e) if self.collect => self.note_err(e),
+                Err(e) => return Err(e),
+            }
         }
         // 再检查类成员函数（以「类名.方法名」限定键展示）
         let class_methods: Vec<(String, String)> = self
@@ -732,7 +786,11 @@ impl Checker {
             .collect();
         for (cls, m) in class_methods {
             let fname = format!("{}.{}", cls, m);
-            self.check_fn(&fname)?;
+            match self.check_fn(&fname) {
+                Ok(()) => {}
+                Err(e) if self.collect => self.note_err(e),
+                Err(e) => return Err(e),
+            }
         }
         // 再检查实例类（type）成员方法（以「类型名.方法名」限定键展示）
         let type_methods: Vec<(String, String)> = self
@@ -742,11 +800,22 @@ impl Checker {
             .collect();
         for (t, m) in type_methods {
             let fname = format!("{}.{}", t, m);
-            self.check_fn(&fname)?;
+            match self.check_fn(&fname) {
+                Ok(()) => {}
+                Err(e) if self.collect => self.note_err(e),
+                Err(e) => return Err(e),
+            }
         }
         // 再检查全局语句
-        self.check_stmts(top_stmts)?;
-        Ok(())
+        if self.collect {
+            for stmt in top_stmts {
+                if let Err(e) = self.check_stmt(stmt) {
+                    self.note_err(e);
+                }
+            }
+            return Ok(());
+        }
+        self.check_stmts(top_stmts)
     }
 
     /// 沿继承链收集字段（父→子，同名子类覆盖）：返回 (字段名, 类型, 只读) 列表。
@@ -929,7 +998,12 @@ impl Checker {
         ret_slot: usize,
     ) -> Result<(), ZError> {
         for stmt in stmts {
-            self.check_stmt_in_fn(stmt, scopes, scope_stack, param_slots, ret_slot)?;
+            match self.check_stmt_in_fn(stmt, scopes, scope_stack, param_slots, ret_slot) {
+                Ok(()) => {}
+                // collect 模式：记录后继续检查后续语句（可能产生级联错误，与 rustc 等工业编译器一致）
+                Err(e) if self.collect => self.note_err(e),
+                Err(e) => return Err(e),
+            }
         }
         Ok(())
     }
@@ -942,12 +1016,21 @@ impl Checker {
             Stmt::AsyncFnDef { .. } => Ok(()), // 注册已在 Phase A 完成，检查阶段无运行语义
             Stmt::TypeDef { .. } => Ok(()), // 注册已在 Phase A 完成（方法体经 check_all 校验）
             Stmt::VarDecl { name, ty, init, span, .. } => {
-                let annot = Ty::from_annot(ty.clone());
-                if let Some(e) = init {
-                    let res = self.check_expr(e)?;
-                    self.unify_with(annot, res, *span, format!("variable `{}`", name))?;
-                }
-                self.bind_or_unify(name, Some(annot), *span)?;
+                let annot = if matches!(ty, TyName::Inferred) {
+                    // cow 声明未带显式类型：由初始化表达式推断变量类型（parser 保证带初始化）
+                    match init {
+                        Some(e) => self.check_expr(e)?.ty,
+                        None => Ty::Unknown,
+                    }
+                } else {
+                    let annot = Ty::from_annot(ty.clone());
+                    if let Some(e) = init {
+                        let res = self.check_expr(e)?;
+                        self.unify_with(annot, res, *span, format!("variable `{}`", name))?;
+                    }
+                    annot
+                };
+                self.bind_or_unify(name, if annot == Ty::Unknown { None } else { Some(annot) }, *span)?;
                 Ok(())
             }
             Stmt::Assign { name, value, span } => {
@@ -1263,12 +1346,21 @@ impl Checker {
             Stmt::AsyncFnDef { .. } => Ok(()), // 注册已在 Phase A 完成，检查阶段无运行语义
             Stmt::TypeDef { .. } => Ok(()), // 注册已在 Phase A 完成（方法体经 check_all 校验）
             Stmt::VarDecl { name, ty, init, span, .. } => {
-                let annot = Ty::from_annot(ty.clone());
-                if let Some(e) = init {
-                    let res = self.check_expr_in_fn(e, scopes, scope_stack, param_slots, ret_slot)?;
-                    self.unify_with(annot, res, *span, format!("variable `{}`", name))?;
-                }
-                self.bind_in_stack(name, Some(annot), *span, scopes, scope_stack)?;
+                let annot = if matches!(ty, TyName::Inferred) {
+                    // cow 声明未带显式类型：由初始化表达式推断变量类型（parser 保证带初始化）
+                    match init {
+                        Some(e) => self.check_expr_in_fn(e, scopes, scope_stack, param_slots, ret_slot)?.ty,
+                        None => Ty::Unknown,
+                    }
+                } else {
+                    let annot = Ty::from_annot(ty.clone());
+                    if let Some(e) = init {
+                        let res = self.check_expr_in_fn(e, scopes, scope_stack, param_slots, ret_slot)?;
+                        self.unify_with(annot, res, *span, format!("variable `{}`", name))?;
+                    }
+                    annot
+                };
+                self.bind_in_stack(name, if annot == Ty::Unknown { None } else { Some(annot) }, *span, scopes, scope_stack)?;
                 Ok(())
             }
             Stmt::Assign { name, value, span } => {
@@ -4397,6 +4489,18 @@ impl Checker {
 
     fn zerr(&self, code: &'static str, msg: impl Into<String>, span: Span, help: Option<impl Into<String>>) -> ZError {
         ZError::new(code, msg, &self.file, &self.src, span.line, span.col, span.len.max(1), help)
+    }
+
+    /// collect 模式记录错误（去重：同码/同位置/同消息只记一次），不中断检查。
+    fn note_err(&mut self, e: ZError) {
+        if self
+            .errors
+            .iter()
+            .any(|x| x.code == e.code && x.line == e.line && x.col == e.col && x.msg == e.msg)
+        {
+            return;
+        }
+        self.errors.push(e);
     }
 }
 

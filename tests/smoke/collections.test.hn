@@ -1,0 +1,77 @@
+// 冒烟测试：list / dict 容器（双引擎通用）
+// 注意：Hone 无 d["k"] 索引语法，按官方范式用遍历取键值
+
+// 列表
+l = [1, 2, 3];
+assert_eq(len(l), 3);
+assert_eq(l[0], 1);
+assert_eq(l[2], 3);
+l[1] = 20;
+assert_eq(l[1], 20);
+append(l, 4);
+assert_eq(len(l), 4);
+assert_eq(l[3], 4);
+
+// 空列表
+e = [];
+assert_eq(len(e), 0);
+assert(is_list(e), "is_list empty");
+append(e, 9);
+assert_eq(len(e), 1);
+assert_eq(e[0], 9);
+
+// 列表成员与查找
+assert(contains([1, 2, 3], 2), "contains true");
+assert(!contains([1, 2, 3], 9), "contains false");
+assert_eq(index_of([10, 20, 30], 20), 1);
+assert_eq(index_of([10, 20, 30], 99), -1);
+
+// 列表推导
+sq = [x * x for x in [1, 2, 3, 4]];
+assert_eq(sq, [1, 4, 9, 16]);
+flt = [x for x in [1, 2, 3, 4, 5] if x % 2 == 1];
+assert_eq(flt, [1, 3, 5]);
+
+// 嵌套列表
+nest = [[1, 2], [3, 4]];
+assert_eq(len(nest), 2);
+assert_eq(nest[1][0], 3);
+
+// 深拷贝
+a = [1, 2];
+b = clone(a);
+append(b, 3);
+assert_eq(len(a), 2, "clone 独立");
+assert_eq(len(b), 3);
+
+// 字典
+d = {"x": 1, "y": 2};
+assert_eq(len(d), 2);
+assert(has_key(d, "x"), "has_key true");
+assert(!has_key(d, "z"), "has_key false");
+assert_eq(d.x, 1);
+assert_eq(d.y, 2);
+
+// 字典迭代（官方取键范式）
+sum = 0;
+for k, v in d {
+    sum = sum + v;
+}
+assert_eq(sum, 3);
+
+ks = keys(d);
+assert_eq(len(ks), 2);
+vs = values(d);
+assert_eq(len(vs), 2);
+
+// 空字典（0.7.12 修复的语言级缺口）
+ed = {};
+assert(is_dict(ed), "is_dict empty");
+assert_eq(len(ed), 0);
+assert(!has_key(ed, "a"), "empty no key");
+
+// 字典推导
+dm = {k: k * 10 for k in [1, 2, 3]};
+assert_eq(len(dm), 3);
+assert_eq(dm.1, 10);
+assert_eq(dm.3, 30);

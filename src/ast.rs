@@ -52,6 +52,8 @@ pub enum Stmt {
         init: Option<Expr>,
         span: Span,
         readonly: bool,
+        /// 写时复制容器：`cow x = [1, 2];`（仅 list/dict/str/bytes）
+        cow: bool,
     },
     /// 裸代码块 { ... }
     Block {
@@ -295,6 +297,8 @@ pub struct Param {
     pub default: Option<Expr>,
     /// 只读参数：`fn f(x: readonly int)` 体内不可重新赋值
     pub readonly: bool,
+    /// 写时复制参数：`fn f(x: cow list)` 实参按共享传入，写时自动复制隔离
+    pub cow: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -310,6 +314,8 @@ pub enum TyName {
     Bytes,
     /// 泛型类型参数引用（fn name[T] 中的 T，注解写 `x: T`）
     Var(String),
+    /// 类型推断（cow 声明未显式标注类型：类型由初始化表达式推断）
+    Inferred,
 }
 
 /// load 签名块中的 C ABI 类型（typed FFI）。

@@ -1,0 +1,85 @@
+// 冒烟测试：控制流（while / for / break / continue / if 链）
+
+// while + 累加
+i = 0;
+sum = 0;
+while (i < 10) {
+    sum = sum + i;
+    i = i + 1;
+}
+assert_eq(sum, 45);
+assert_eq(i, 10);
+
+// for 遍历列表
+total = 0;
+for v in [1, 2, 3, 4] {
+    total = total + v;
+}
+assert_eq(total, 10);
+
+// for 键值对遍历
+kv = {"a": 1, "b": 2};
+cnt = 0;
+for k, v in kv {
+    cnt = cnt + v;
+}
+assert_eq(cnt, 3);
+
+// break：只跳出最近一层
+i = 0;
+r = 0;
+while (i < 10) {
+    if (i == 3) { break; }
+    i = i + 1;
+}
+assert_eq(i, 3, "while break");
+
+s = 0;
+for x in [1, 2, 3, 4, 5] {
+    if (x > 2) { break; }
+    s = s + x;
+}
+assert_eq(s, 3, "for break");
+
+// continue
+c = 0;
+i = 0;
+while (i < 6) {
+    if (i % 2 == 0) { i = i + 1; continue; }
+    c = c + i;
+    i = i + 1;
+}
+assert_eq(c, 3 + 5, "continue 跳过偶数");
+
+// if / else if / else 链
+fn grade(n) {
+    if (n >= 90) { return "A"; }
+    else if (n >= 80) { return "B"; }
+    else if (n >= 60) { return "C"; }
+    else { return "D"; }
+}
+assert_eq(grade(95), "A");
+assert_eq(grade(85), "B");
+assert_eq(grade(65), "C");
+assert_eq(grade(30), "D");
+
+// 三元表达式
+fn pick(v) {
+    return v > 0 ? "pos" : "non";
+}
+assert_eq(pick(1), "pos");
+assert_eq(pick(-1), "non");
+
+// 嵌套循环 + break 作用域
+found = 0;
+i = 0;
+while (i < 5) {
+    j = 0;
+    while (j < 5) {
+        if (j == 2) { break; }
+        j = j + 1;
+    }
+    found = found + j;
+    i = i + 1;
+}
+assert_eq(found, 10, "嵌套 break 只出内层");

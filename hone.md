@@ -125,6 +125,21 @@ Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.7.12）
   · C 风格：readonly int x = 5;    类型位置写法：x : readonly int = 5;（两者等价）
   · 初始化后禁止再赋值（运行时拦截，违反报 H001）
   · 只读参数：fn f(readonly int y) { ... }（函数体内对 y 的赋值同样被拦截）
+· 写时复制容器（cow，copy-on-write）：
+  · 声明形式（必须带初始化；list/dict 无类型关键字，类型由初始化式推断；str/bytes 可显式标注）：
+    cow x = [1, 2];    cow str s = "hi";    cow b = {a: 1};
+    类型位置等价写法：x : cow str = "hi";    只读可叠加：cow readonly bytes b = b"…";
+  · 语义：cow 值携带只读共享缓冲（Arc 引用计数）；cow→cow 赋值共享同一缓冲（O(1)，无拷贝）；
+    cow→普通赋值在边界自动深拷贝（普通变量永不共享 cow 缓冲）
+  · 写时复制：对 cow 容器的**原地赋值**（索引赋值 a[i] = x、字段赋值 a.k = x）触发写路径——
+    独占（引用计数 1）直接原地写；共享则先深拷贝出私有缓冲再写，其他共享者不受影响
+  · str/bytes 不可变，仅零拷贝共享（无写路径）；list/dict 可变，写前检查唯一性
+  · += 等复合赋值不触发写时复制（按既有值语义处理）
+  · 透明性：type_of(cow 值) 报内层类型（"list"/"dict"/"str"/"bytes"）；len、==/!=、for-in、
+    推导式、切片、to_str/to_json/内置函数均按内层值工作，报错文案与普通值一致
+  · 回收：无追踪式垃圾回收；Arc 引用计数归零自动释放（含独占/共享路径）
+  · cow 形参：fn f(cow z) { ... }（实参为 cow 值时共享绑定；实参为普通值时按值语义隔离）
+  · 仅解释器支持：VM（--vm）/ AOT（build --exe -c）/ DLL（build --dll）遇 cow 声明或形参报 H999
 
 1.4 控制流
 
@@ -720,6 +735,7 @@ hone run <script.hn> 执行 Hone 脚本（默认命令，支持 --restart/--resu
 hone fmt [options] <file.hn> 代码格式化（统一 Tab 缩进、运算符空格、大括号位置）
 hone fmt -w *.hn 直接覆盖写入源文件
 hone test [目录] 递归扫描 *.test.hn 测试文件，运行并汇总 PASS/FAIL（配合 assert/assert_eq 断言，按文件输出断言统计）
+hone check <file.hn|目录> [--json] 仅静态检查（解析 + 类型检查，不执行代码）；目录递归扫描全部 .hn（跳过隐藏/构建目录），--json 向 stdout 输出诊断 JSON 数组，退出码 0/1 表达成败（CI/编辑器集成）
 hone watch <script.hn> 监控脚本文件变更自动重跑（跨平台轮询 mtime+大小，[--interval=N] 毫秒，默认 500，Ctrl+C 退出）
 hone build --dll <script.hn> 将脚本打包成 C ABI 动态库（DLL / SO / DYLIB）
 hone build --exe <script.hn> 打包独立可执行文件（解释器 + 脚本自释放，[-o <out>] [--icon <ico>]）
@@ -731,7 +747,9 @@ hone get 读取当前目录 hone.json 清单并批量下载全部模块（类似
 hone get <module> <url> 下载单个模块并缓存到本地，同时写入/更新 hone.json 清单
 hone self-update [url] 从 URL 下载最新 hone 二进制并替换当前程序（也可用环境变量 HONE_UPDATE_URL）
 hone explain <code> 查看错误码解释与修复建议（如 hone explain H201）
-hone lsp 启动语言服务器（代码补全、跳转定义、语义高亮 semantic tokens）
+hone lsp 启动语言服务器（诊断、补全、hover、跳转定义 / 类型定义、引用查找 references、
+重命名 rename、签名帮助 signatureHelp、折叠 foldingRange、文档 / 全局符号大纲、
+代码格式化 formatting、语义高亮 semantic tokens；LSP over stdio，无额外依赖）
 hone prof <script.hn> 以剖析模式运行脚本，输出函数级热点报告（总耗时 / 调用次数 / 平均耗时，按总耗时降序）
 hone poop <file.hn> 屎山检测（if 嵌套深度 + 圈复杂度）
 hone --help / --version 帮助信息 / 版本信息
@@ -1439,6 +1457,7 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · H404：文件或库不存在
 · H600：用户主动抛出（throw）
 · H700：assert 断言失败（测试框架）
+· H900：hone check 静态检查失败（汇总错误；具体定位见单条诊断，配合 --json 输出）
 
 5.3 报错原则
 
@@ -1729,6 +1748,9 @@ hone_lib/img.hn 中的 new → img_new、to_ppm → img_to_ppm，见 examples/te
 · 条件输出：debug_print(expr); 仅在 hone debug 模式打印，普通运行自动跳过（可留在源码中）
 · 临时函数：tmp fn 名称(...) { ... } 编译时自动忽略，适合开发期草稿
 · 静态检查：hone 运行前先做类型检查，多数错误（H001 类型、H005 参数个数）在跑之前就报出
+· 独立检查命令：hone check <file.hn|目录> [--json] 只做解析+类型检查、不执行代码；
+  目录递归扫全部 .hn 并汇总（单文件失败不中断），--json 输出诊断 JSON 数组到 stdout，
+  退出码 0/1 表达成败，适合 CI / 提交前检查
 · 错误码解释：hone explain H201 查看任意错误码的含义与修复建议
 · 复杂度分析：hone poop <file.hn> 输出 if 嵌套深度与圈复杂度，定位「屎山」热点
 · 自动化测试：hone test [目录] 递归扫描 *.test.hn，配合 assert(条件[, 消息]) 断言，汇总 PASS/FAIL
