@@ -18,15 +18,17 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: hone-linux-x86_64
+            cmd: cargo build --release --locked --target x86_64-unknown-linux-gnu
           - name: termux-aarch64
             os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             artifact: hone-termux-aarch64
-            linker: rust-lld
+            cmd: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: hone-windows-x86_64.exe
+            cmd: cargo build --release --locked --target x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -36,9 +38,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      # .cargo/config.toml 里的 linker 是开发机本机绝对路径，CI 上改用工具链自带的 rust-lld（仅 musl 目标）
+      # Termux(musl) 目标用 zig 链接：rust-lld 在 aarch64-musl 上缺 libdl（-ldl 解析失败），
+      # zig 自带 musl libc 存根可正常链接；其余平台用原生 cargo build。
+      - name: Install zig
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        uses: goto-bus-stop/setup-zig@v2
+      - name: Install cargo-zigbuild
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: cargo install cargo-zigbuild --locked
       - name: build release
-        run: cargo build --release --locked --target ${{ matrix.target }} ${{ matrix.linker && format('--config target.{0}.linker="rust-lld"', matrix.target) || '' }}
+        shell: bash
+        run: ${{ matrix.cmd }}
       - name: copy artifact
         shell: bash
         run: |
@@ -67,13 +77,16 @@ jobs:
         run: |
           set -e
           mkdir -p dist/pkg
-          cp "dist/hone-linux-x86_64/hone-linux-x86_64" "dist/pkg/hone-linux-x86_64"
-          tar -czf "dist/pkg/hone-linux-x86_64.tar.gz" -C "dist/hone-linux-x86_64" "hone-linux-x86_64"
-          cp "dist/hone-termux-aarch64/hone-termux-aarch64" "dist/pkg/hone-termux-aarch64"
-          tar -czf "dist/pkg/hone-termux-aarch64.tar.gz" -C "dist/hone-termux-aarch64" "hone-termux-aarch64"
-          cp "dist/hone-windows-x86_64/hone-windows-x86_64.exe" "dist/pkg/hone-windows-x86_64.exe"
+          # download-artifact@v4 的子目录名与产物名一致（windows 产物名带 .exe），
+          # 按 basename 复制最稳妥，不受子目录命名影响
+          find dist -type f | sort
+          find dist -type f -exec cp {} dist/pkg/ \;
+          tar -czf "dist/pkg/hone-linux-x86_64.tar.gz" -C "dist/pkg" "hone-linux-x86_64"
+          tar -czf "dist/pkg/hone-termux-aarch64.tar.gz" -C "dist/pkg" "hone-termux-aarch64"
           cp install.sh "dist/pkg/install.sh"
           cp install.ps1 "dist/pkg/install.ps1"
+          ls -la dist/pkg
+          test -f dist/pkg/hone-windows-x86_64.exe
           cd dist/pkg
           sha256sum * > checksums.txt
           cat checksums.txt
@@ -82,70 +95,3 @@ jobs:
         with:
           files: dist/pkg/*
           generate_release_notes: true
-
-      # 以下两步需要预先配置：新建 tap/bucket 仓库 + 仓库 Secrets 里添加 TAP_TOKEN（PAT，权限 repo）
-      # 未配置 TAP_TOKEN 时自动跳过，不影响 Releases 发布
-      - name: update Homebrew tap
-        if: ${{ secrets.TAP_TOKEN != '' }}
-        env:
-          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
-        run: |
-          set -e
-          SHA=$(grep 'hone-linux-x86_64.tar.gz' dist/pkg/checksums.txt | awk '{print $1}')
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/shichencike/homebrew-hone.git" tap
-          cat > tap/hone.rb <<EOF
-          class Hone < Formula
-            desc "轻量级、跨平台、可嵌入的脚本语言"
-            homepage "https://github.com/shichencike/Hone"
-            url "https://github.com/shichencike/Hone/releases/download/${GITHUB_REF_NAME}/hone-linux-x86_64.tar.gz"
-            sha256 "${SHA}"
-            version "${GITHUB_REF_NAME#v}"
-            def install
-              bin.install "hone-linux-x86_64" => "hone"
-            end
-          end
-          EOF
-          cd tap
-          git config user.email "hone-ci@users.noreply.github.com"
-          git config user.name "hone-ci"
-          git add hone.rb
-          git commit -m "hone ${GITHUB_REF_NAME}"
-          git push
-
-      - name: update Scoop bucket
-        if: ${{ secrets.TAP_TOKEN != '' }}
-        env:
-          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
-        run: |
-          set -e
-          SHA=$(grep 'hone-windows-x86_64.exe' dist/pkg/checksums.txt | awk '{print $1}')
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/shichencike/scoop-hone.git" bucket
-          cat > bucket/hone.json <<EOF
-          {
-            "version": "${GITHUB_REF_NAME#v}",
-            "description": "轻量级、跨平台、可嵌入的脚本语言",
-            "homepage": "https://github.com/shichencike/Hone",
-            "license": "MIT",
-            "architecture": {
-              "64bit": {
-                "url": "https://github.com/shichencike/Hone/releases/download/${GITHUB_REF_NAME}/hone-windows-x86_64.exe",
-                "hash": "${SHA}"
-              }
-            },
-            "bin": [["hone-windows-x86_64.exe", "hone"]],
-            "checkver": "github",
-            "autoupdate": {
-              "architecture": {
-                "64bit": {
-                  "url": "https://github.com/shichencike/Hone/releases/download/\$version/hone-windows-x86_64.exe"
-                }
-              }
-            }
-          }
-          EOF
-          cd bucket
-          git config user.email "hone-ci@users.noreply.github.com"
-          git config user.name "hone-ci"
-          git add hone.json
-          git commit -m "hone ${GITHUB_REF_NAME}"
-          git push

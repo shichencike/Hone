@@ -1,0 +1,9 @@
+// req_smoke.hn - 非流式 http.request 对照测试（排查 H201 超时）
+url = "http://127.0.0.1:8897/v1/chat/completions";
+hdrs = {"Content-Type": "application/json", "Authorization": "Bearer mock-key"};
+body = json_stringify({
+    "model": "mock",
+    "messages": [{"role": "user", "content": "你好，Hone"}],
+});
+r = http.request(url, {"method": "POST", "headers": hdrs, "body": body, "timeout": 15});
+print("非流式响应: " + to_str(r));

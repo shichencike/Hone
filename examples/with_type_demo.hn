@@ -1,0 +1,119 @@
+// with_type_demo.hn - type 实例类与 with 上下文管理器演示
+// type 定义实例类：字段 + fn 方法（self 显式首参）+ extends 继承 + init 构造器
+// 构造：new Type(实参...)（实参绑定 init 参数，无 init 时按继承链字段顺序绑定）
+// 方法调用：obj.method(...)（self 自动填充实例）
+// with 上下文：with expr as r { ... }，进入调 __enter__()（返回值绑定 r），
+//              退出（含报错路径）必调 __exit__()，错误不被吞
+// 注意：type/with/字段赋值为解释器特性，VM / AOT / DLL 构建报 H999
+
+// 1. 基本字段与方法（无 init：按继承链字段顺序绑定）
+type Shape {
+    name: str,
+    sides: int,
+    area: int,
+    fn desc(self) {
+        return "shape " + self.name;
+    }
+};
+sq = new Shape("square", 4, 16);
+print(sq.name);            // square
+print(sq.area);            // 16
+print(sq.desc());          // shape square
+sq.area = 25;              // 字段可写
+print(sq.area);            // 25
+
+// 2. init 构造器（self 首参）
+type Box {
+    w: int,
+    h: int,
+    size: int,
+    fn init(self, w: int, h: int) {
+        self.w = w;
+        self.h = h;
+        self.size = w * h;
+    }
+    fn swap(self) {
+        t = self.w;
+        self.w = self.h;
+        self.h = t;
+    }
+};
+bx = new Box(3, 4);
+print(bx.size); // 12
+bx.swap();
+print(to_str(bx.w) + "-" + to_str(bx.h)); // 4-3
+
+// 3. extends 继承（父类字段在前，子类字段在后；方法可覆盖，可调用父类同名方法）
+type Square extends Shape {
+    side: int,
+    fn init(self, side: int) {
+        self.name = "square";
+        self.sides = 4;
+        self.side = side;
+        self.area = side * side;
+    }
+    fn perimeter(self) {
+        return self.side * 4;
+    }
+};
+s = new Square(5);
+print(s.side);        // 5
+print(s.area);        // 25（init 设置）
+print(s.sides);       // 4（继承字段）
+print(s.name);        // square（继承链构造）
+print(s.desc());      // shape square（继承方法）
+print(s.perimeter()); // 20（子类方法）
+
+// 4. readonly 字段（两种写法等价：readonly f: int / f: readonly int）
+type Config {
+    readonly api_key: str,
+    port: int,
+};
+c = new Config("secret", 8080);
+print(c.api_key); // secret
+c.port = 9090;    // 普通字段可写
+print(c.port);    // 9090
+// c.api_key = "x"; // 取消注释可看 H002（只读字段不可赋值）
+
+// 5. with 上下文管理器
+type Guard {
+    active: int,
+    fn __enter__(self) {
+        self.active = 1;
+        return self;
+    }
+    fn __exit__(self) {
+        self.active = 0;
+    }
+};
+g = new Guard();
+with g as r {
+    print(r.active); // 1（块内资源已激活）
+    print(r == g);   // true（__enter__ 返回 self）
+}
+print(g.active); // 0（块结束自动清理）
+
+// 6. with 中报错：__exit__ 仍必被调用，错误向外传播
+type Lock {
+    held: int,
+    fn __enter__(self) {
+        self.held = 1;
+    }
+    fn __exit__(self) {
+        self.held = 0;
+    }
+};
+lk = new Lock();
+ok = false;
+try {
+    with lk {
+        print(lk.held); // 1
+        throw "boom";
+    }
+} catch e {
+    ok = true;
+}
+print(ok);        // true（错误传播，未被吞）
+print(lk.held);   // 0（__exit__ 在报错路径同样执行）
+
+print("WITH TYPE OK");

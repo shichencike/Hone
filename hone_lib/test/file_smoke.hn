@@ -1,0 +1,38 @@
+// hone_lib/test/file_smoke.hn - 文件二进制读写冒烟测试
+// 运行: hone hone_lib/test/file_smoke.hn
+// 验证：write_bytes 写二进制（含 0x00/0x80/0xFF 等非 UTF-8 字节）→ read_bytes 读回一致；
+//       read_file 仍可读文本；越界 / 非整数字节报错。
+td = temp.dir("hone-file-");
+p = path.join(td, "data.bin");
+data = [72, 0, 105, 255, 128, 13, 10, 0];
+
+write_bytes(p, data);
+got = read_bytes(p);
+assert(got == data, "binary round-trip mismatch, got " + to_str(len(got)) + " bytes");
+
+// 文本读写不受影响
+tp = path.join(td, "t.txt");
+write_file(tp, "hello");
+assert(read_file(tp) == "hello", "text read failed");
+
+// 越界字节（>255）报类型错误
+err = false;
+try {
+    write_bytes(p, [1, 300]);
+} catch e {
+    err = true;
+}
+assert(err, "out-of-range byte should raise");
+
+// 非整数元素报类型错误
+err = false;
+try {
+    write_bytes(p, ["a"]);
+} catch e {
+    err = true;
+}
+assert(err, "non-int byte should raise");
+
+// 清理临时目录
+print("cleanup: " + to_str(temp.remove(td)));
+print("file smoke ok");

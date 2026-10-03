@@ -1,0 +1,8 @@
+// 基准 2：纯算术循环
+i = 0;
+sum = 0;
+while (i < 20000000) {
+    sum = sum + i;
+    i = i + 1;
+}
+print(sum);

@@ -1,0 +1,52 @@
+// test_music_lib.hn - hone_lib/music.hn 音乐标准库调用测试（本地路径 import）
+// 运行: hone examples/test_music_lib.hn
+import "music" from "./hone_lib/music.hn";
+
+print("== 音名 → MIDI ==");
+print(music_note_to_midi("C4"));    // 60
+print(music_note_to_midi("A4"));    // 69
+print(music_note_to_midi("A#4"));   // 70
+print(music_note_to_midi("Bb3"));   // 58
+print(music_note_to_midi("C0"));    // 12
+print(music_note_to_midi("G9"));    // 127
+
+print("== MIDI → 音名 ==");
+print(music_midi_to_note(60));      // C4
+print(music_midi_to_note(69));      // A4
+print(music_midi_to_note(58));      // A#3
+print(music_midi_to_note(0));       // C-1
+print(music_midi_to_note(127));     // G9
+
+print("== 频率 ==");
+print(music_note_to_freq("A4"));    // 440.0
+print(music_midi_to_freq(69));      // 440.0
+print(music_midi_to_freq(60));      // 约 261.6
+print(music_freq_to_midi(440.0));   // 69
+print(music_freq_to_midi(261.6));   // 60
+
+print("== 音阶 ==");
+print(to_str(music_scale(60, "major")));            // [60, 62, 64, 65, 67, 69, 71]
+print(to_str(music_scale(60, "minor")));            // [60, 62, 63, 65, 67, 68, 70]
+print(to_str(music_scale(60, "pentatonic_major"))); // [60, 62, 64, 67, 69]
+print(to_str(music_scale(60, "blues")));            // [60, 63, 65, 66, 67, 70]
+print(to_str(music_scale_names()));
+
+print("== 和弦 ==");
+print(to_str(music_chord(60, "major")));  // [60, 64, 67]
+print(to_str(music_chord(60, "minor")));  // [60, 63, 67]
+print(to_str(music_chord(60, "maj7")));   // [60, 64, 67, 71]
+print(to_str(music_chord(60, "dom7")));   // [60, 64, 67, 70]
+print(to_str(music_chord(60, "power")));  // [60, 67, 72]
+print(to_str(music_chord_names()));
+
+print("== 时值与 BPM ==");
+print(music_beat_sec(120));                       // 0.5
+print(music_note_dur_sec(120, "quarter"));        // 0.5
+print(music_note_dur_sec(120, "whole"));          // 2.0
+print(music_note_dur_sec(120, "eighth"));         // 0.25
+print(music_dur_sec(120, 3.0));                   // 1.5
+
+print("== 组合使用: C 大调音阶频率 ==");
+for n in music_scale(60, "major") {
+    print(music_midi_to_note(n) + " " + to_str(music_midi_to_freq(n)));
+}

@@ -42,6 +42,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: aarch64-musl
-      # .cargo/config.toml 里的 linker 是开发机本机绝对路径，CI 上改用工具链自带的 rust-lld
+      # musl 目标用 zig 链接（rust-lld 缺 libdl 会 -ldl 失败）；zig 自带 musl libc 存根
+      - uses: goto-bus-stop/setup-zig@v2
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked
       - name: build
-        run: cargo build --release --locked --target aarch64-unknown-linux-musl --config 'target.aarch64-unknown-linux-musl.linker="rust-lld"'
+        run: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl

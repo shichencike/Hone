@@ -1,6 +1,12 @@
 # Rust 构建产物（所有层级）
 target/
 
+# AtomCode 代理配置（会话记忆等，不属项目代码）
+.atomcode/
+
+# WorkBuddy 会话记忆与工作区状态
+.workbuddy/
+
 # 敏感凭据（切勿提交）
 token.txt
 ftp.txt
@@ -11,3 +17,28 @@ ka[.][.]md
 # build --dll 生成的临时 C 源码
 *.c
 !tests/ka_lib/src/*.c
+
+# 测试生成物
+examples/plot_test.svg
+
+# 官网打包产物（可再生，用 upload_ftp.py 重新打包）
+官网/官网.zip
+
+# 过期的诊断/中间产物（可随时重新生成）
+build_errors.txt
+rt_check.ir
+
+# 运行时缓存
+.hone_cache/
+*.hzp
+
+# Python 字节码缓存
+__pycache__/
+
+# 本地探针输出与切片实验稿（临时，可重新生成）
+.probe_out.txt
+.t_slice.hn
+.t_slice2.hn
+
+# 功能需求草稿（设计规范文档，同 ka.md）
+增加with，字节类型，只读类型,仔细问我.md

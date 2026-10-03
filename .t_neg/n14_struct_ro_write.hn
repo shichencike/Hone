@@ -1,0 +1,4 @@
+struct RO { readonly a: int, b: int };
+r = RO(1, 2);
+r.a = 9;
+print(r.a);

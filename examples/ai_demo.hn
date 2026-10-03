@@ -1,0 +1,118 @@
+// ai_demo.hn - AI 编程助手标准库端到端演示
+// 运行: hone examples/ai_demo.hn
+// 覆盖: 配置读取、代码生成、代码审查、错误解释、自动修复、流式对话、工具调用代理
+// 说明: 默认对接本地 Ollama（http://localhost:11434/v1）。若本机未运行 Ollama 或
+//       未配置 HN_AI_KEY/HN_AI_BASE，示例会打印友好提示而非崩溃，方便查看 API 形态。
+import "ai" from "./hone_lib/ai.hn";
+
+// ---------- 0. 配置 ----------
+cfg = ai_config();
+print("== 生效配置 ==");
+print("base : " + cfg.base);
+print("model: " + cfg.model);
+print("key  : " + (if_cfg_key(cfg)));
+
+fn if_cfg_key(c) -> str {
+    if (len(c.key) > 0) { return "*** (已配置)"; }
+    return "(未配置，将直连本地 Ollama)";
+}
+
+// ---------- 1. 代码生成 ----------
+print("");
+print("== 1. ai_generate：按描述生成 Hone 代码 ==");
+code = "";
+try {
+    code = ai_generate("写一个 Hone 函数，计算斐波那契数列第 n 项（递归实现）");
+    print(code);
+} catch e {
+    print("(未能连接 AI 后端) " + to_str(e.code) + ": " + to_str(e.message));
+    print("提示：启动本地 Ollama，或设置 HN_AI_BASE / HN_AI_KEY 环境变量");
+}
+
+// ---------- 2. 代码审查 ----------
+print("");
+print("== 2. ai_review：审查一段有问题的代码 ==");
+sample = "fn sum_to(n : int) -> int {\n"
+       + "    total = 0;\n"
+       + "    i = 1;\n"
+       + "    while (i <= n) {\n"
+       + "        total = total + i;\n"
+       + "        // 缺少 i = i + 1，死循环\n"
+       + "    }\n"
+       + "    return total;\n"
+       + "}";
+print(sample);
+print("--- AI 审查意见 ---");
+try {
+    print(ai_review(sample));
+} catch e {
+    print("(未能连接 AI 后端) " + to_str(e.code));
+}
+
+// ---------- 3. 错误解释 ----------
+print("");
+print("== 3. ai_explain：解释 Hone 错误码 ==");
+try {
+    print(ai_explain("H201 网络连接/请求超时"));
+} catch e {
+    print("(未能连接 AI 后端) " + to_str(e.code));
+}
+
+// ---------- 4. 自动修复 ----------
+print("");
+print("== 4. ai_fix：报错信息 + 源码 → 修复后代码 ==");
+buggy = "fn div(a : int, b : int) -> int {\n"
+      + "    return a / b;   // b 为 0 时除零错误\n"
+      + "}\n"
+      + "x = div(10, 0);";
+try {
+    print(ai_fix(buggy, "除零错误：Hxxx division by zero"));
+} catch e {
+    print("(未能连接 AI 后端) " + to_str(e.code));
+}
+
+// ---------- 5. 流式对话（SSE 逐字输出）----------
+print("");
+print("== 5. ai_chat：流式对话（SSE 逐字输出）==");
+msgs = [
+    {"role": "system", "content": "你是一个简洁的中文助手。"},
+    {"role": "user", "content": "用一句话介绍 Hone 脚本语言"}
+];
+try {
+    full = ai_chat(msgs, {"stream": true});
+    print("");
+    print("--- 完整回复 ---");
+    print(full);
+} catch e {
+    print("(未能连接 AI 后端) " + to_str(e.code));
+}
+
+// ---------- 6. 工具调用代理（AI 可执行终端命令）----------
+print("");
+print("== 6. ai_agent：工具调用代理 ==");
+print("让 AI 自己决定调用终端命令（run_shell）完成多步任务。");
+print("例：查看当前目录文件并统计数量");
+try {
+    r = ai_agent("列出当前目录下的 .hn 文件，并告诉我有多少个");
+    print(r);
+} catch e {
+    print("(未能连接 AI 后端) " + to_str(e.code));
+}
+
+// ---------- 7. 直接调用工具（不需要 AI 后端）----------
+print("");
+print("== 7. ai_run_tool：本地直接执行工具 ==");
+out = ai_run_tool("list_dir", {"path": "."});
+print("list_dir(.) 输出前 3 行:");
+lines = regex.split("\n", out);
+count = 0;
+for l in lines {
+    if (count < 3) { print("  " + l); }
+    count = count + 1;
+}
+print("... 共 " + to_str(len(lines)) + " 项");
+
+print("");
+print("演示结束。配置真实 AI 后端：");
+print("  本地 Ollama: 运行 ollama serve，并 ollama pull qwen2.5-coder:7b");
+print("  远程 API  : 设置 HN_AI_BASE=https://api.deepseek.com/v1 HN_AI_KEY=sk-xxx HN_AI_MODEL=deepseek-chat");

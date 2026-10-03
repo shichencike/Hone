@@ -1,0 +1,425 @@
+// .t_brutal.hn - 暴力测试：with / byte / bytes / readonly / type 实例 / 切片
+// 正向断言 + 运行时负向（try/catch 验证报错路径）
+// 说明：编译期必错的用例放 .t_neg*.hn；struct 只读字段缺口单独放 .t_gap_struct_ro.hn
+
+// ============ 1. byte 类型 ============
+assert(byte(0) == byte(0), "byte 0");
+assert(byte(255) == byte(255), "byte 255");
+assert(byte(65) != byte(66), "byte 不等");
+assert(byte(1) < byte(2), "byte 小于");
+assert(byte(2) > byte(1), "byte 大于");
+assert(byte(3) <= byte(3), "byte 小于等于");
+assert(byte(3) >= byte(3), "byte 大于等于");
+assert(to_int(byte(255)) == 255, "to_int(byte 255)");
+assert(char(byte(65)) == 'A', "char(byte)");
+assert(char(byte(233)) == 'é', "char(byte é)");
+assert(to_str(byte(65)) == "A", "to_str(byte) 解码为字符");
+b = 0b10010001;
+assert(b == byte(145), "字面量 0b10010001 == 145");
+assert(hex(b) == "91", "hex(byte)");
+assert(is_byte(b), "is_byte 真");
+assert(!is_byte(145), "is_byte(int) 假");
+assert(byte(7) == 0b00000111, "byte() 与字面量互通");
+
+// byte 负向（运行时报错 H001）
+try { t1 = byte(256); assert(false, "byte(256) 应报错"); }
+catch e { assert(e.code == "H001", "byte(256) 错误码, got " + e.code); }
+try { t2 = byte(-1); assert(false, "byte(-1) 应报错"); }
+catch e { assert(e.code == "H001", "byte(-1) 错误码"); }
+try { n1 = to_int("abc"); assert(false, "to_int 应报错"); }
+catch e { assert(e.code == "H006", "to_int 错误码, got " + e.code); }
+
+// ============ 2. bytes 类型 ============
+bs = b"abc";
+assert(len(bs) == 3, "len(bytes)");
+assert(bs[0] == byte(97), "bs[0]");
+assert(bs[2] == byte(99), "bs[2]");
+assert(is_bytes(bs), "is_bytes 真");
+assert(!is_bytes("abc"), "is_bytes(str) 假");
+assert(type_of(bs) == "bytes", "type_of bytes");
+assert(type_of(byte(1)) == "byte", "type_of byte");
+bs_empty = b"";
+assert(len(bs_empty) == 0, "空 bytes len");
+bs_esc = b"\n\t\\\"";
+assert(len(bs_esc) == 4, "bytes 转义 len");
+assert(bs_esc[0] == byte(10), "bytes \\n");
+assert(bs_esc[1] == byte(9), "bytes \\t");
+assert(bs_esc[2] == byte(92), "bytes \\\\");
+assert(bs_esc[3] == byte(34), "bytes \\\"");
+bs_hex = b"\x41\x42";
+assert(bs_hex == b"AB", "bytes \\x 转义");
+bs_cn = to_bytes("你好");
+assert(len(bs_cn) == 6, "utf-8 中文 6 字节");
+assert(to_str(bs_cn) == "你好", "utf-8 往返");
+bs_l1 = to_bytes("é", "latin-1");
+assert(len(bs_l1) == 1, "latin-1 单字节");
+assert(bs_l1[0] == byte(233), "latin-1 字节值");
+assert(to_str(bs_l1, "latin-1") == "é", "latin-1 往返");
+bs_list = to_bytes([72, 105, 33]);
+assert(bs_list == b"Hi!", "int 列表转 bytes");
+
+// bytes 拼接 / 相等 / 迭代
+bs2 = b"ab" + b"cd";
+assert(bs2 == b"abcd", "bytes +");
+assert(b"abc" != b"abd", "bytes 比较 !=");
+assert(b"abc" == b"abc", "bytes 比较 ==");
+total = 0;
+for c in bs {
+    total = total + to_int(c);
+}
+assert(total == 294, "for-in bytes 求和");
+cnt = 0;
+for c in b"xy" {
+    cnt = cnt + 1;
+}
+assert(cnt == 2, "for-in bytes 计数");
+// bytes 索引负向（运行时报错 H001）
+try { c1 = bs[3]; assert(false, "越界应报错"); }
+catch e { assert(e.code == "H001", "bytes 越界错误码"); }
+try { c2 = bs[-1]; assert(false, "负索引应报错"); }
+catch e { assert(e.code == "H001", "bytes 负索引错误码"); }
+// hex / unhex
+assert(unhex("414243") == b"ABC", "unhex 基本");
+assert(unhex("0x4142") == b"AB", "unhex 带 0x 前缀");
+assert(hex(unhex("01FF")) == "01ff", "hex/unhex 往返");
+try { h1 = unhex("abc"); assert(false, "奇数 hex 应报错"); }
+catch e { assert(e.code == "H001", "unhex 奇数错误码"); }
+// 非法 utf-8 解码报错
+bad_utf8 = to_bytes([255, 254], "latin-1");
+try { s1 = to_str(bad_utf8, "utf-8"); assert(false, "非法 utf-8 应报错"); }
+catch e { assert(e.code == "H001", "非法 utf-8 错误码"); }
+// 未知编码报错
+try { b1 = to_bytes("x", "utf-9"); assert(false, "未知编码应报错"); }
+catch e { assert(e.code == "H001", "未知编码错误码"); }
+
+// ============ 3. 切片 ============
+l = [10, 20, 30, 40];
+assert(l[1:3] == [20, 30], "list 切片 [1:3]");
+assert(l[:2] == [10, 20], "list 切片 [:2]");
+assert(l[2:] == [30, 40], "list 切片 [2:]");
+assert(l[0:4] == [10, 20, 30, 40], "list 全切片 [0:4]");
+assert(l[1:-1] == [20, 30], "list 负索引切片");
+assert(l[3:1] == [], "lo>hi 空结果");
+assert(l[10:20] == [], "越界截断");
+assert(l[-2:-1] == [30], "list 双侧负索引");
+orig = [1, 2];
+sub = orig[0:2];
+sub[0] = 99;
+assert(orig[0] == 1, "切片是副本不影响原列表");
+// bytes 切片
+assert(b"abcd"[1:3] == b"bc", "bytes 切片");
+assert(b"abcd"[:2] == b"ab", "bytes 切片 [:2]");
+assert(b"abcd"[2:] == b"cd", "bytes 切片 [2:]");
+assert(b"abcd"[-2:] == b"cd", "bytes 负切片");
+assert(b"abcd"[5:9] == b"", "bytes 越界空切片");
+assert(b"abcd"[0:4] == b"abcd", "bytes 全切片 [0:4]");
+// 链式切片
+assert(l[0:4][1:3] == [20, 30], "链式切片");
+
+// ============ 4. readonly ============
+readonly int rx = 5;
+assert(rx == 5, "readonly 读");
+// 各种写路径（运行时 H001；文档承诺 H002，此处按代码实际断言）
+try { rx = 6; assert(false, "readonly = 应报错"); }
+catch e { assert(e.code == "H001", "readonly = 错误码, got " + e.code); }
+try { rx += 1; assert(false, "readonly += 应报错"); }
+catch e { assert(e.code == "H001", "readonly += 错误码"); }
+try { rx++; assert(false, "readonly ++ 应报错"); }
+catch e { assert(e.code == "H001", "readonly ++ 错误码"); }
+try { --rx; assert(false, "readonly -- 应报错"); }
+catch e { assert(e.code == "H001", "readonly -- 错误码"); }
+// 普通变量可写（对照）
+mutable = 1;
+mutable = 2;
+mutable += 1;
+assert(mutable == 3, "普通变量可写");
+// readonly 参数：体内赋值报错
+fn ro_mut(readonly int a) {
+    a = 5;
+    return a;
+}
+try { rv = ro_mut(1); assert(false, "readonly 参数赋值应报错"); }
+catch e { assert(e.code == "H001", "readonly 参数错误码"); }
+fn ro_fn(readonly int a) {
+    return a * 2;
+}
+assert(ro_fn(21) == 42, "readonly 参数正常求值");
+// TS 风格 readonly
+x : readonly int = 7;
+assert(x == 7, "x: readonly int 读");
+try { x = 8; assert(false, "TS 风格 readonly 应报错"); }
+catch e { assert(e.code == "H001", "TS readonly 错误码"); }
+
+// struct 构造与字段（只读字段缺口单测在 .t_gap_struct_ro.hn）
+struct Point {
+    x: int,
+    y: int,
+};
+p = Point(1, 2);
+assert(p.x == 1 && p.y == 2, "struct 构造");
+p.y = 9;
+assert(p.y == 9, "普通字段可写");
+
+// struct readonly 字段：可读、非只读字段可写、隐藏 __struct__ 标记不泄漏
+struct RO2 {
+    readonly id: int,
+    name: str,
+};
+ro2 = RO2(1, "a");
+assert(ro2.id == 1, "readonly 字段可读");
+assert(ro2.name == "a", "普通字段可读");
+ro2.name = "b";
+assert(ro2.name == "b", "普通字段可写");
+assert(len(ro2) == 2, "readonly struct len 不含隐藏键");
+assert(len(keys(ro2)) == 2, "keys 不含隐藏键");
+assert(has_key(ro2, "id") && has_key(ro2, "name"), "字段键存在");
+ro2_cnt = 0;
+for rk in ro2 {
+    ro2_cnt = ro2_cnt + 1;
+}
+assert(ro2_cnt == 2, "for-in 不含隐藏键");
+
+// ============ 5. type 实例类 ============
+type Animal {
+    name: str,
+    legs: int,
+    kind: str,
+    fn init(self, name: str, legs: int) {
+        self.name = name;
+        self.legs = legs;
+        self.kind = "animal";
+    }
+    fn info(self) {
+        return self.name + " has " + to_str(self.legs) + " legs";
+    }
+    fn speak(self, sound: str) {
+        return self.name + " says " + sound;
+    }
+};
+type Dog extends Animal {
+    breed: str,
+    fn init(self, name: str, breed: str) {
+        self.name = name;
+        self.legs = 4;
+        self.kind = "animal";
+        self.breed = breed;
+    }
+    fn speak(self, sound: str) {
+        return self.name + " says " + sound + " (override)";
+    }
+};
+d = new Dog("Rex", "lab");
+assert(d.name == "Rex", "实例字段");
+assert(d.legs == 4, "继承字段");
+assert(d.breed == "lab", "子类字段");
+assert(d.kind == "animal", "继承字段值");
+assert(d.info() == "Rex has 4 legs", "继承方法");
+assert(d.speak("woof") == "Rex says woof (override)", "方法覆盖");
+a = new Animal("cat", 4);
+assert(a.speak("meow") == "cat says meow", "基类方法");
+assert(a.info() == "cat has 4 legs", "基类 info");
+// 字段写
+d.breed = "shepherd";
+assert(d.breed == "shepherd", "字段可写");
+// 引用语义：两个引用指向同一实例
+ref2 = d;
+ref2.legs = 6;
+assert(d.legs == 6, "引用语义");
+d.legs = 4;
+// 无 init 按字段顺序构造
+type Coord {
+    px: int,
+    py: int,
+};
+c1 = new Coord(3, 4);
+assert(c1.px == 3 && c1.py == 4, "无 init 字段顺序构造");
+// 实例 == 引用相等
+same = new Coord(1, 1);
+other = new Coord(1, 1);
+assert(same == same, "同实例相等");
+assert(same != other, "不同实例不等");
+assert(type_of(d) == "instance", "type_of instance");
+// 实例 JSON 序列化报错（运行时 H001）
+try { j1 = json_stringify(d); assert(false, "实例序列化应报错"); }
+catch e { assert(e.code == "H001", "json 实例错误码"); }
+// 继承环保护（extends 自身）不应崩溃
+type SelfRef extends SelfRef {
+    v: int,
+};
+
+// ============ 6. with ============
+type Res {
+    opened: int,
+    closed: int,
+    fn __enter__(self) {
+        self.opened = 1;
+        return self;
+    }
+    fn __exit__(self) {
+        self.closed = 1;
+    }
+};
+r = new Res();
+assert(r.opened == 0 && r.closed == 0, "with 前初始状态");
+with r as res {
+    assert(r.opened == 1, "块内 enter 已执行");
+    assert(res == r, "as 绑定同一实例");
+    assert(res.opened == 1, "res 字段访问");
+}
+assert(r.closed == 1, "块结束 exit 已执行");
+// 无 as 形式
+r2 = new Res();
+with r2 {
+    assert(r2.opened == 1, "无 as 的 with");
+}
+assert(r2.closed == 1, "无 as 的 with exit");
+// 块内报错：exit 仍执行，原始错误保留
+r3 = new Res();
+caught_code = "";
+try {
+    with r3 as w {
+        assert(w.opened == 1, "错误路径 enter 已执行");
+        throw "boom";
+    }
+} catch e {
+    caught_code = e.code;
+}
+assert(caught_code == "H600", "with 内 throw 错误码, got " + caught_code);
+assert(r3.closed == 1, "报错时 exit 仍执行");
+// exit 报错（块成功）：以 exit 错误为准
+type BadExit {
+    fn __enter__(self) {
+        return self;
+    }
+    fn __exit__(self) {
+        throw "exit fail";
+    }
+};
+be = new BadExit();
+exit_msg = "";
+exit_code = "";
+try {
+    with be {
+    }
+} catch e {
+    exit_msg = e.message;
+    exit_code = e.code;
+}
+assert(exit_code == "H600", "exit 错误码, got " + exit_code);
+assert(exit_msg == "exit fail", "exit 错误传递");
+// 缺 __enter__ 协议（运行时 H002）
+type NoProto {
+    v: int,
+};
+np = new NoProto();
+try {
+    with np {
+    }
+    assert(false, "缺 __enter__ 应报错");
+} catch e { assert(e.code == "H002", "缺 __enter__ 错误码, got " + e.code); }
+// 缺 __exit__ 协议（运行时 H002）
+type NoExit {
+    fn __enter__(self) {
+        return self;
+    }
+};
+ne = new NoExit();
+try {
+    with ne {
+    }
+    assert(false, "缺 __exit__ 应报错");
+} catch e { assert(e.code == "H002", "缺 __exit__ 错误码, got " + e.code); }
+// __enter__ 返回值可绑定任意值
+type RetInt {
+    fn __enter__(self) {
+        return 99;
+    }
+    fn __exit__(self) {
+    }
+};
+ri = new RetInt();
+with ri as v {
+    assert(v == 99, "__enter__ 返回值绑定");
+}
+// 普通 int 非句柄：静默通过（内置句柄特判的兜底路径）
+with 12345 {
+    assert(true, "非句柄 Int with 静默通过");
+}
+
+// ============ 7. 字段赋值 ============
+pt = Point(1, 2);
+pt.x = 10;
+assert(pt.x == 10 && pt.y == 2, "字段赋值");
+// 实例字段赋值
+type Outer {
+    inner: str,
+    val: int,
+};
+o = new Outer();
+o.inner = "hi";
+assert(o.inner == "hi", "实例字段赋值");
+// 不存在字段（运行时 H002）
+try { pt.z = 3; assert(false, "不存在字段应报错"); }
+catch e { assert(e.code == "H002", "不存在字段错误码, got " + e.code); }
+// 不存在实例字段（运行时 H002）
+try { o.nope = 1; assert(false, "不存在实例字段应报错"); }
+catch e { assert(e.code == "H002", "不存在实例字段错误码"); }
+// 标量字段赋值（运行时 H001）
+s = "abc";
+try { s.q = 1; assert(false, "str 字段赋值应报错"); }
+catch e { assert(e.code == "H001", "str 字段赋值错误码, got " + e.code); }
+
+// ============ 8. 综合交互 ============
+type Buf {
+    data: bytes,
+    entered: int,
+    fn init(self) {
+        self.data = b"";
+        self.entered = 0;
+    }
+    fn __enter__(self) {
+        self.entered = 1;
+        return self;
+    }
+    fn __exit__(self) {
+        self.entered = 0;
+    }
+    fn push(self, b: byte) {
+        self.data = self.data + to_bytes([to_int(b)]);
+    }
+    fn take(self, n: int) {
+        r = self.data[0:n];
+        self.data = self.data[n:];
+        return r;
+    }
+    fn size(self) {
+        return len(self.data);
+    }
+};
+buf = new Buf();
+assert(buf.entered == 0, "Buf 进入前未 enter");
+with buf as b {
+    assert(buf.entered == 1, "Buf __enter__ 已执行");
+    b.push(byte(72));
+    b.push(byte(105));
+    assert(b.size() == 2, "Buf 长度");
+    part = b.take(1);
+    assert(part == b"H", "Buf take");
+    assert(b.data == b"i", "Buf 剩余");
+}
+assert(buf.size() == 1, "with 外看实例状态");
+assert(buf.entered == 0, "Buf __exit__ 已执行");
+// readonly 变量 + 实例交互
+readonly int counter = 100;
+t = new Animal("t", 2);
+assert(counter == 100 && t.legs == 2, "综合");
+// bytes 作为实例字段
+type Blob {
+    raw: bytes,
+};
+blob = new Blob();
+blob.raw = b"\x01\x02\x03";
+assert(blob.raw[1] == byte(2), "实例 bytes 字段索引");
+assert(len(blob.raw[0:2]) == 2, "实例 bytes 字段切片");
+
+print("BRUTAL ALL OK");

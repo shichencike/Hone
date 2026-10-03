@@ -1,0 +1,23 @@
+// input_demo.hn - 标准输入函数演示
+// input(prompt?)     读取一行，返回 str（EOF 抛 H306）
+// read_int(prompt?)  读取一行并解析为 int（格式错误抛 H006，EOF 抛 H306）
+// read_float(prompt?) 读取一行并解析为 float（格式错误抛 H007，EOF 抛 H306）
+// 运行：hone examples/input_demo.hn，然后键入输入；或管道喂入：
+//       echo -e "Alice\n42\n3.14" | hone examples/input_demo.hn
+
+name = input("请输入你的名字: ");
+print("你好, " + name + "!");
+
+age = read_int("请输入年龄: ");
+print("明年你 " + to_str(age + 1) + " 岁");
+
+height = read_float("请输入身高(m): ");
+print("身高 " + to_str(height) + "m, 两倍 = " + to_str(height * 2.0));
+
+// EOF 场景演示：用 try-catch 捕获 H306
+try {
+    empty = input("（此处可输入 Ctrl+Z / Ctrl+D 结束输入）: ");
+    print("读到: " + empty);
+} catch e {
+    print("input 失败: " + to_str(e));
+}

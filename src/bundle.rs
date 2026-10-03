@@ -17,6 +17,8 @@ use crate::error::codes;
 use crate::error::ZError;
 
 const MAGIC: &[u8; 8] = b"KABND001";
+/// 仅脚本包（hone build --script）的魔数。
+const PKG_MAGIC: &[u8; 8] = b"HNZP0010";
 const TAIL_LEN: usize = 56;
 
 /// 打包 exe 中解析出的内嵌信息。
@@ -72,6 +74,46 @@ pub fn build(
     out.extend_from_slice(&fnv1a64(hone).to_le_bytes());
     out.extend_from_slice(&fnv1a64(script.as_bytes()).to_le_bytes());
     out
+}
+
+/// 组装仅脚本包: [magic 8][name_len 4][name][script_len 4][script][crc 8]。
+/// 用于 `hone build --script`：只携带脚本（不内嵌解释器），体积小，可配合任意 hone 运行时执行。
+pub fn build_script_pkg(script: &str, name: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(PKG_MAGIC.len() + 4 + name.len() + 4 + script.len() + 8);
+    out.extend_from_slice(PKG_MAGIC);
+    out.extend_from_slice(&(name.len() as u32).to_le_bytes());
+    out.extend_from_slice(name.as_bytes());
+    out.extend_from_slice(&(script.len() as u32).to_le_bytes());
+    out.extend_from_slice(script.as_bytes());
+    out.extend_from_slice(&fnv1a64(script.as_bytes()).to_le_bytes());
+    out
+}
+
+/// 解析仅脚本包，返回 (脚本名, 脚本内容)。魔数不匹配或校验失败返回 None。
+pub fn parse_script_pkg(data: &[u8]) -> Option<(String, String)> {
+    if data.len() < PKG_MAGIC.len() + 4 + 4 + 8 || &data[..PKG_MAGIC.len()] != PKG_MAGIC {
+        return None;
+    }
+    let mut off = PKG_MAGIC.len();
+    let name_len = rd_u32(data, off) as usize;
+    off += 4;
+    if data.len() < off + name_len + 4 {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&data[off..off + name_len]).into_owned();
+    off += name_len;
+    let script_len = rd_u32(data, off) as usize;
+    off += 4;
+    if data.len() < off + script_len + 8 {
+        return None;
+    }
+    let script = String::from_utf8_lossy(&data[off..off + script_len]).into_owned();
+    off += script_len;
+    let crc = rd_u64(data, off);
+    if crc != fnv1a64(script.as_bytes()) {
+        return None;
+    }
+    Some((name, script))
 }
 
 /// 检测当前可执行文件是否携带打包数据。普通 hone 返回 Ok(None)。

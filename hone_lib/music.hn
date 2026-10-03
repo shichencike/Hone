@@ -1,0 +1,474 @@
+// hone_lib/music.hn - 音乐理论标准库（用 Hone 编写）
+// 用法: import "music" from "./hone_lib/music.hn";
+// 函数统一 music_ 前缀，import as 可整体改前缀
+// 覆盖: 音名解析 / MIDI 编号 / 频率换算 / 音阶 / 和弦 / 时值与 BPM /
+//       音程与移调 / 调号与调性 / 顺阶和声 / 音分与纯律比率
+// 说明: Hone 无 pow/sqrt/log 等数学内置，频率按十二平均律半音比迭代计算；
+//       音分用 2^(1/1200) 逐次乘 + 二分逼近；无列表索引语法，
+//       取元素用辅助函数 music_list_get（按索引遍历）。
+
+// ---------- 通用辅助 ----------
+
+// 按键取字典值（Hone 无 d["k"] 索引语法，遍历实现；键不存在返回 ""）
+fn music_dict_get(d, key : str) {
+    for k, v in d {
+        if (k == key) { return v; }
+    }
+    return "";
+}
+
+// 取列表第 i 个元素（Hone 无 l[i] 索引语法，遍历计数实现；越界返回 ""）
+fn music_list_get(l, i : int) {
+    k = 0;
+    for x in l {
+        if (k == i) { return x; }
+        k = k + 1;
+    }
+    return "";
+}
+
+// ---------- 音名 ↔ MIDI 编号 ----------
+// 音名格式: 字母(C D E F G A B) + 可选升降号(# b) + 可选八度数字(0-9)，缺八度默认 4
+// 例: C4=60, A4=69, A#4=70, Bb3=58, C0=12, G9=127
+
+// 音名 → MIDI 编号
+fn music_note_to_midi(note : str) -> int {
+    digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+    // 提取八度数字（缺省 4）
+    octave = 4;
+    for d in digits {
+        if (str_contains(note, d)) { octave = to_int(d); }
+    }
+    // 去掉升降号与八度数字，剩下字母
+    s = str_replace(note, "#", "");
+    s = str_replace(s, "b", "");
+    for d in digits {
+        s = str_replace(s, d, "");
+    }
+    // 字母 → 半音序号（C=0 D=2 E=4 F=5 G=7 A=9 B=11）
+    semitone = 0;
+    if (s == "C") { semitone = 0; }
+    if (s == "D") { semitone = 2; }
+    if (s == "E") { semitone = 4; }
+    if (s == "F") { semitone = 5; }
+    if (s == "G") { semitone = 7; }
+    if (s == "A") { semitone = 9; }
+    if (s == "B") { semitone = 11; }
+    m = 12 * (octave + 1) + semitone;
+    if (str_contains(note, "#")) { m = m + 1; }
+    if (str_contains(note, "b")) { m = m - 1; }
+    return m;
+}
+
+// MIDI 编号 → 音名（升号记法，如 58 → A#3）
+fn music_midi_to_note(m : int) -> str {
+    names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    idx = m % 12;
+    octave = m / 12 - 1;
+    return music_list_get(names, idx) + to_str(octave);
+}
+
+// ---------- MIDI ↔ 频率 ----------
+// 十二平均律: A4=69 → 440Hz，半音比 r=2^(1/12)≈1.0594630943592953
+// 无 pow 内置，按半音差迭代乘/除 r（MIDI 0-127 最多 69 次，精度足够）
+
+// MIDI 编号 → 频率(Hz)
+fn music_midi_to_freq(m : int) -> float {
+    f = 440.0;
+    r = 1.0594630943592953;
+    d = m - 69;
+    i = 0;
+    if (d >= 0) {
+        while (i < d) {
+            f = f * r;
+            i = i + 1;
+        }
+    } else {
+        while (i > d) {
+            f = f / r;
+            i = i - 1;
+        }
+    }
+    return f;
+}
+
+// 频率(Hz) → 最近 MIDI 编号（0-127 扫描）
+fn music_freq_to_midi(freq : float) -> int {
+    best = 69;
+    bestdiff = abs(freq - music_midi_to_freq(69));
+    m = 0;
+    while (m <= 127) {
+        diff = abs(freq - music_midi_to_freq(m));
+        if (diff < bestdiff) {
+            bestdiff = diff;
+            best = m;
+        }
+        m = m + 1;
+    }
+    return best;
+}
+
+// 音名 → 频率(Hz)
+fn music_note_to_freq(note : str) -> float {
+    return music_midi_to_freq(music_note_to_midi(note));
+}
+
+// ---------- 音阶 ----------
+// 返回 root(根音 MIDI 编号) 上的音阶各音 MIDI 编号列表
+// 支持: major / minor / pentatonic_major / pentatonic_minor / blues /
+//       chromatic / dorian / mixolydian（未知名称默认大调）
+
+fn music_scale_intervals(name : str) {
+    if (name == "major") { return [0, 2, 4, 5, 7, 9, 11]; }
+    if (name == "minor") { return [0, 2, 3, 5, 7, 8, 10]; }
+    if (name == "pentatonic_major") { return [0, 2, 4, 7, 9]; }
+    if (name == "pentatonic_minor") { return [0, 3, 5, 7, 10]; }
+    if (name == "blues") { return [0, 3, 5, 6, 7, 10]; }
+    if (name == "chromatic") { return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]; }
+    if (name == "dorian") { return [0, 2, 3, 5, 7, 9, 10]; }
+    if (name == "mixolydian") { return [0, 2, 4, 5, 7, 9, 10]; }
+    if (name == "phrygian") { return [0, 1, 3, 5, 7, 8, 10]; }
+    if (name == "lydian") { return [0, 2, 4, 6, 7, 9, 11]; }
+    if (name == "locrian") { return [0, 1, 3, 5, 6, 8, 10]; }
+    if (name == "harmonic_minor") { return [0, 2, 3, 5, 7, 8, 11]; }
+    if (name == "melodic_minor") { return [0, 2, 3, 5, 7, 9, 11]; }
+    if (name == "whole_tone") { return [0, 2, 4, 6, 8, 10]; }
+    if (name == "octatonic") { return [0, 1, 3, 4, 6, 7, 9, 10]; }
+    if (name == "diminished") { return [0, 2, 3, 5, 6, 8, 9, 11]; }
+    return [0, 2, 4, 5, 7, 9, 11];
+}
+
+fn music_scale(root : int, name : str) {
+    iv = music_scale_intervals(name);
+    r = [];
+    for x in iv {
+        r = append(r, root + x);
+    }
+    return r;
+}
+
+// 支持的全部音阶名
+fn music_scale_names() {
+    return ["major", "minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian", "harmonic_minor", "melodic_minor", "pentatonic_major", "pentatonic_minor", "blues", "whole_tone", "octatonic", "diminished", "chromatic"];
+}
+
+// ---------- 和弦 ----------
+// 返回 root(根音 MIDI 编号) 上的和弦各音 MIDI 编号列表
+// 支持: major / minor / dim / aug / maj7 / min7 / dom7 / sus2 / sus4 / power
+
+fn music_chord_intervals(name : str) {
+    if (name == "major") { return [0, 4, 7]; }
+    if (name == "minor") { return [0, 3, 7]; }
+    if (name == "dim") { return [0, 3, 6]; }
+    if (name == "aug") { return [0, 4, 8]; }
+    if (name == "maj7") { return [0, 4, 7, 11]; }
+    if (name == "min7") { return [0, 3, 7, 10]; }
+    if (name == "dom7") { return [0, 4, 7, 10]; }
+    if (name == "sus2") { return [0, 2, 7]; }
+    if (name == "sus4") { return [0, 5, 7]; }
+    if (name == "5") { return [0, 7]; }
+    if (name == "6") { return [0, 4, 7, 9]; }
+    if (name == "m6") { return [0, 3, 7, 9]; }
+    if (name == "add9") { return [0, 4, 7, 14]; }
+    if (name == "7sus4") { return [0, 5, 7, 10]; }
+    if (name == "dim7") { return [0, 3, 6, 9]; }
+    if (name == "m7b5") { return [0, 3, 6, 10]; }
+    if (name == "mmaj7") { return [0, 3, 7, 11]; }
+    if (name == "9") { return [0, 4, 7, 10, 14]; }
+    if (name == "11") { return [0, 4, 7, 10, 14, 17]; }
+    if (name == "power") { return [0, 7, 12]; }
+    return [0, 4, 7];
+}
+
+fn music_chord(root : int, name : str) {
+    iv = music_chord_intervals(name);
+    r = [];
+    for x in iv {
+        r = append(r, root + x);
+    }
+    return r;
+}
+
+// 支持的全部和弦名
+fn music_chord_names() {
+    return ["major", "minor", "dim", "aug", "sus2", "sus4", "5", "6", "m6", "add9", "maj7", "min7", "dom7", "7sus4", "dim7", "m7b5", "mmaj7", "9", "11", "power"];
+}
+
+// ---------- 时值与 BPM ----------
+// 节拍: whole=4拍, half=2拍, quarter=1拍, eighth=0.5拍, sixteenth=0.25拍, 32nd=0.125拍
+
+// 每拍时长(秒)，bpm 为每分钟拍数: 60 / bpm
+fn music_beat_sec(bpm : int) -> float {
+    return 60.0 / to_float(bpm);
+}
+
+// 音符时值 → 拍数（未知名称默认 1 拍）
+fn music_note_beats(note : str) -> float {
+    if (note == "whole") { return 4.0; }
+    if (note == "half") { return 2.0; }
+    if (note == "quarter") { return 1.0; }
+    if (note == "eighth") { return 0.5; }
+    if (note == "sixteenth") { return 0.25; }
+    if (note == "32nd") { return 0.125; }
+    return 1.0;
+}
+
+// 音符时值 → 秒数: 拍数 × 每拍秒数
+fn music_note_dur_sec(bpm : int, note : str) -> float {
+    return music_beat_sec(bpm) * music_note_beats(note);
+}
+
+// 任意拍数 → 秒数
+fn music_dur_sec(bpm : int, beats : float) -> float {
+    return music_beat_sec(bpm) * beats;
+}
+
+// ---------- 音程 ----------
+// 半音数 → 音程名（0-12 内常用，超八度用 mod 12 + "加八度" 后缀）
+fn music_interval_name(semitones : int) -> str {
+    names = ["纯一度", "小二度", "大二度", "小三度", "大三度", "纯四度", "增四度", "纯五度", "小六度", "大六度", "小七度", "大七度", "纯八度"];
+    oct = semitones / 12;
+    rem = semitones % 12;
+    name = "";
+    k = 0;
+    for n in names {
+        if (k == rem) { name = n; }
+        k = k + 1;
+    }
+    i = 1;
+    while (i < oct) {
+        name = name + "加八度";
+        i = i + 1;
+    }
+    return name;
+}
+
+// 两音 MIDI 编号间的音程名
+fn music_interval_between(n1 : int, n2 : int) -> str {
+    d = n1 - n2;
+    if (d < 0) { d = 0 - d; }
+    return music_interval_name(d);
+}
+
+// 音程转位（半音数）：12 - s（如大三度 4 → 小六度 8）
+fn music_invert_interval(semitones : int) -> int {
+    if (semitones == 0) { return 0; }
+    return 12 - semitones;
+}
+
+// ---------- 移调 ----------
+
+// MIDI 编号按半音移调
+fn music_transpose_midi(m : int, semitones : int) -> int {
+    return m + semitones;
+}
+
+// 音名按半音移调（如 "C4" 移 2 → "D4"）
+fn music_transpose(note : str, semitones : int) -> str {
+    return music_midi_to_note(music_transpose_midi(music_note_to_midi(note), semitones));
+}
+
+// 音名按八度移调（如 "C4" 移 1 → "C5"）
+fn music_shift_octave(note : str, octaves : int) -> str {
+    return music_transpose(note, 12 * octaves);
+}
+
+// ---------- 调号与调性 ----------
+// tonic 为调主音音级（0-11，C=0；传 MIDI 编号亦可，内部 mod 12）
+
+// 大调调号：返回升号数（正）或降号数（负）。
+// 原理: 升号调满足 7n ≡ tonic (mod 12)（C=0,G=1,...,C#=7）；
+//       降号调满足 5n ≡ tonic (mod 12)（F=-1,Bb=-2,...,Cb=-7）。升号优先。
+fn music_key_signature(tonic : int) -> int {
+    t = tonic % 12;
+    n = 0;
+    while (n <= 7) {
+        if ((7 * n) % 12 == t) { return n; }
+        n = n + 1;
+    }
+    n = 1;
+    while (n <= 7) {
+        if ((5 * n) % 12 == t) { return 0 - n; }
+        n = n + 1;
+    }
+    return 0;
+}
+
+// 调号字符串，如 C→"", G→"#", F→"b", Eb→"bbb"
+fn music_key_signature_str(tonic : int) -> str {
+    n = music_key_signature(tonic);
+    s = "";
+    i = 0;
+    if (n >= 0) {
+        while (i < n) { s = s + "#"; i = i + 1; }
+    } else {
+        while (i > n) { s = s + "b"; i = i - 1; }
+    }
+    return s;
+}
+
+// 关系小调主音（大调主音下小三度，如 C 大调 → A 小调）
+fn music_relative_minor(tonic : int) -> int {
+    t = tonic % 12;
+    r = t - 3;
+    if (r < 0) { r = r + 12; }
+    return r;
+}
+
+// 关系大调主音（小调主音上小三度，如 A 小调 → C 大调）
+fn music_relative_major(tonic : int) -> int {
+    return (tonic % 12 + 3) % 12;
+}
+
+// 五度圈：按纯五度上行的 12 个调主音音级序列（C G D A E B F# C# G# D# A# F）
+fn music_circle_of_fifths() {
+    r = [];
+    i = 0;
+    while (i < 12) {
+        r = append(r, (7 * i) % 12);
+        i = i + 1;
+    }
+    return r;
+}
+
+// ---------- 和声功能 ----------
+// 顺阶和声：以音阶各音为根音构建三和弦 / 七和弦
+
+// 取音阶列表第 i 个音，跨八度自动 +12
+fn music_scale_note_wrap(sn, i : int) -> int {
+    n = len(sn);
+    note = music_list_get(sn, i % n);
+    if (i >= n) { note = note + 12; }
+    return note;
+}
+
+// 三和弦性质：major / minor / dim / aug（t 为 [根, 三, 五] 三音列表）
+fn music_triad_quality(t) -> str {
+    root = music_list_get(t, 0);
+    t3 = (music_list_get(t, 1) - root) % 12;
+    t5 = (music_list_get(t, 2) - root) % 12;
+    if (t3 == 4 && t5 == 7) { return "major"; }
+    if (t3 == 3 && t5 == 7) { return "minor"; }
+    if (t3 == 3 && t5 == 6) { return "dim"; }
+    if (t3 == 4 && t5 == 8) { return "aug"; }
+    return "";
+}
+
+// 七和弦性质：maj7 / min7 / dom7 / dim7 / m7b5 / mmaj7（s 为 [根,三,五,七]）
+fn music_seventh_quality(s) -> str {
+    root = music_list_get(s, 0);
+    t3 = (music_list_get(s, 1) - root) % 12;
+    t5 = (music_list_get(s, 2) - root) % 12;
+    t7 = (music_list_get(s, 3) - root) % 12;
+    if (t3 == 4 && t5 == 7 && t7 == 11) { return "maj7"; }
+    if (t3 == 3 && t5 == 7 && t7 == 10) { return "min7"; }
+    if (t3 == 4 && t5 == 7 && t7 == 10) { return "dom7"; }
+    if (t3 == 3 && t5 == 6 && t7 == 9) { return "dim7"; }
+    if (t3 == 3 && t5 == 6 && t7 == 10) { return "m7b5"; }
+    if (t3 == 3 && t5 == 7 && t7 == 11) { return "mmaj7"; }
+    return "";
+}
+
+// 调内顺阶三和弦（列表的列表，每项 [根, 三, 五]）
+fn music_diatonic_triads(root : int, scale : str) {
+    sn = music_scale(root, scale);
+    r = [];
+    i = 0;
+    while (i < len(sn)) {
+        r = append(r, [music_scale_note_wrap(sn, i), music_scale_note_wrap(sn, i + 2), music_scale_note_wrap(sn, i + 4)]);
+        i = i + 1;
+    }
+    return r;
+}
+
+// 调内顺阶七和弦（列表的列表，每项 [根, 三, 五, 七]）
+fn music_diatonic_sevenths(root : int, scale : str) {
+    sn = music_scale(root, scale);
+    r = [];
+    i = 0;
+    while (i < len(sn)) {
+        r = append(r, [music_scale_note_wrap(sn, i), music_scale_note_wrap(sn, i + 2), music_scale_note_wrap(sn, i + 4), music_scale_note_wrap(sn, i + 6)]);
+        i = i + 1;
+    }
+    return r;
+}
+
+// 调内顺阶三和弦标记（如 C 大调: C4, D4m, E4m, F4, G4, A4m, B4dim）
+fn music_harmonize(root : int, scale : str) {
+    triads = music_diatonic_triads(root, scale);
+    r = [];
+    for t in triads {
+        q = music_triad_quality(t);
+        name = music_midi_to_note(music_list_get(t, 0));
+        if (q == "minor") { name = name + "m"; }
+        if (q == "dim") { name = name + "dim"; }
+        if (q == "aug") { name = name + "aug"; }
+        r = append(r, name);
+    }
+    return r;
+}
+
+// ---------- 音分与纯律比率 ----------
+// 音分: 12 平均律半音 = 100 音分，一个八度 = 1200 音分。
+// 无 log 内置，音分值用 2^(1/1200)≈1.0005777895065548 逐次乘逼近（整数音分）。
+// 纯律（Just Intonation）: 频率按整数比取，比平均律更"自然"（如纯五度 3:2 ≈ 702 音分）。
+
+// 频率比 → 音分（近似整数）：f1/f2 = 2^(cents/1200)
+// 防御上限 2400 步（两个八度）防极端输入死循环
+fn music_ratio_to_cents(f1 : float, f2 : float) -> float {
+    r = f1 / f2;
+    cents = 0.0;
+    c = 0;
+    step = 1.0005777895065548;
+    // 比值 ≥ 1：逐次除 2^(1/1200) 数出音分数
+    while (r >= step && c <= 2400) {
+        r = r / step;
+        cents = cents + 1.0;
+        c = c + 1;
+    }
+    // 比值 < 1：逐次乘 2^(1/1200)，音分取负
+    while (r < 1.0 && c <= 4800) {
+        r = r * step;
+        cents = cents - 1.0;
+        c = c + 1;
+    }
+    return cents;
+}
+
+// 频率 → 音分（相对参考频率 ref，默认 A4=440Hz）
+fn music_freq_to_cents(freq : float, ref : float) -> float {
+    return music_ratio_to_cents(freq, ref);
+}
+
+// 纯律（自然音程）频率比表
+fn music_just_ratio(name : str) -> float {
+    if (name == "unison") { return 1.0; }
+    if (name == "minor_second") { return 16.0 / 15.0; }
+    if (name == "major_second") { return 9.0 / 8.0; }
+    if (name == "minor_third") { return 6.0 / 5.0; }
+    if (name == "major_third") { return 5.0 / 4.0; }
+    if (name == "perfect_fourth") { return 4.0 / 3.0; }
+    if (name == "tritone") { return 45.0 / 32.0; }
+    if (name == "perfect_fifth") { return 3.0 / 2.0; }
+    if (name == "minor_sixth") { return 8.0 / 5.0; }
+    if (name == "major_sixth") { return 5.0 / 3.0; }
+    if (name == "minor_seventh") { return 16.0 / 9.0; }
+    if (name == "major_seventh") { return 15.0 / 8.0; }
+    if (name == "octave") { return 2.0; }
+    return 1.0;
+}
+
+// 纯律音程名 → 音分值（如 perfect_fifth → 约 702 音分）
+fn music_just_cents(name : str) -> float {
+    r = music_just_ratio(name);
+    return music_ratio_to_cents(r, 1.0);
+}
+
+// 纯律音程名列表
+fn music_just_names() {
+    return ["unison", "minor_second", "major_second", "minor_third", "major_third", "perfect_fourth", "tritone", "perfect_fifth", "minor_sixth", "major_sixth", "minor_seventh", "major_seventh", "octave"];
+}
+
+
+
+

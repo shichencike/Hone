@@ -2,7 +2,7 @@
 // 纯 std::net 实现，Windows / Linux / Termux 跨平台一致，无 C 依赖。
 //   server.listen(port)     -> int   启动后台监听线程，返回实际端口（port=0 自动分配）
 //   server.poll()           -> str   取出排队请求，返回 JSON 数组 [{id,method,path,body}, ...]
-//   server.respond(id, body)-> bool  发送响应体（HTTP 200），成功返回 true
+//   server.respond(id, body[, status])-> bool  发送响应体（默认 HTTP 200，可指定状态码如 404/500），成功返回 true
 // 事件模型：后台线程只做 TCP 收发与请求排队；Hone 脚本在主线程轮询（poll）并响应
 // （respond），与解释器单线程模型完全兼容——Hone 函数只在脚本侧被调用，无跨线程状态。
 
@@ -14,7 +14,7 @@ use std::sync::mpsc::SyncSender;
 use std::sync::{mpsc, Mutex};
 use std::time::Duration;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 use crate::error::codes;
 use crate::error::ZError;
@@ -31,8 +31,8 @@ struct PendingReq {
 
 /// 待处理请求队列（server.poll 取走）。
 static QUEUE: Mutex<VecDeque<PendingReq>> = Mutex::new(VecDeque::new());
-/// id -> 响应通道（server.respond 发送后由后台线程写回浏览器）。
-static RESPONDERS: Lazy<Mutex<HashMap<u64, SyncSender<String>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+/// id -> 响应通道（server.respond 发送 (状态码, 响应体) 后由后台线程写回浏览器）。
+static RESPONDERS: LazyLock<Mutex<HashMap<u64, SyncSender<(u16, String)>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// 请求 id 分配器。
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -100,16 +100,41 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                     ));
                 }
                 None => {
-                    return Err(zerr(codes::ARG_COUNT, "`server.respond` expects 2 arguments (id, body)", span, file, src, None::<&str>));
+                    return Err(zerr(codes::ARG_COUNT, "`server.respond` expects 2-3 arguments (id, body[, status])", span, file, src, None::<&str>));
                 }
             };
             let body = match args.get(1) {
                 Some(v) => as_str(v, 1, span, file, src)?,
                 None => {
-                    return Err(zerr(codes::ARG_COUNT, "`server.respond` expects 2 arguments (id, body)", span, file, src, None::<&str>));
+                    return Err(zerr(codes::ARG_COUNT, "`server.respond` expects 2-3 arguments (id, body[, status])", span, file, src, None::<&str>));
                 }
             };
-            Ok(Value::Bool(respond(id, body)))
+            // 可选第三参数：HTTP 状态码（默认 200）
+            let status = match args.get(2) {
+                None => 200u16,
+                Some(Value::Int(s)) if (100..=599).contains(s) => *s as u16,
+                Some(Value::Int(s)) => {
+                    return Err(zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("`server.respond` expects an HTTP status code in 100..=599, got `{}`", s),
+                        span,
+                        file,
+                        src,
+                        Some("common codes: 200, 404, 500"),
+                    ));
+                }
+                Some(other) => {
+                    return Err(zerr(
+                        codes::TYPE_MISMATCH,
+                        format!("`server.respond` expects an integer status code, got `{}`", other.type_name()),
+                        span,
+                        file,
+                        src,
+                        Some("pass the status code as the 3rd argument, e.g. `server.respond(id, body, 404)`"),
+                    ));
+                }
+            };
+            Ok(Value::Bool(respond(id, status, body)))
         }
         _ => Err(zerr(
             codes::NOT_IMPLEMENTED,
@@ -173,7 +198,7 @@ fn handle_conn(mut stream: TcpStream) {
         }
     };
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    let (tx, rx) = mpsc::sync_channel::<String>(1);
+    let (tx, rx) = mpsc::sync_channel::<(u16, String)>(1);
     RESPONDERS.lock().unwrap().insert(id, tx);
     {
         let mut q = QUEUE.lock().unwrap();
@@ -184,7 +209,7 @@ fn handle_conn(mut stream: TcpStream) {
     }
     // 等待脚本通过 server.respond 发送响应
     let wait = match rx.recv_timeout(RESPOND_TIMEOUT) {
-        Ok(body) => body,
+        Ok((status, body)) => (status, body),
         Err(_) => {
             cleanup(id);
             let _ = write_resp(&mut stream, 504, "text/plain; charset=utf-8", "no response from script");
@@ -192,7 +217,7 @@ fn handle_conn(mut stream: TcpStream) {
         }
     };
     let ctype = content_type(&path);
-    if write_resp(&mut stream, 200, &ctype, &wait).is_err() {
+    if write_resp(&mut stream, wait.0, &ctype, &wait.1).is_err() {
         cleanup(id); // 浏览器已断开，移除响应通道
     }
 }
@@ -276,9 +301,24 @@ fn content_type(path: &str) -> String {
 fn write_resp(stream: &mut TcpStream, status: u16, ctype: &str, body: &str) -> std::io::Result<()> {
     let reason = match status {
         200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        301 => "Moved Permanently",
+        302 => "Found",
+        304 => "Not Modified",
         400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        501 => "Not Implemented",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
         504 => "Gateway Timeout",
-        _ => "OK",
+        _ => "Status",
     };
     let head = format!(
         "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
@@ -337,11 +377,11 @@ fn json_escape(s: &str) -> String {
 }
 
 /// 发送响应体到指定请求的后台线程（非阻塞，成功后该 id 立即失效）。
-fn respond(id: i64, body: &str) -> bool {
+fn respond(id: i64, status: u16, body: &str) -> bool {
     let mut resp = RESPONDERS.lock().unwrap();
     match resp.remove(&(id as u64)) {
         Some(tx) => {
-            let _ = tx.send(body.to_string());
+            let _ = tx.send((status, body.to_string()));
             true
         }
         None => false,

@@ -1,0 +1,64 @@
+// test_process_lib.hn - hone_lib/process.hn 进程检测库调用测试
+// 运行: hone examples/test_process_lib.hn
+import "process" from "./hone_lib/process.hn";
+
+print("== process ==");
+os = proc_os();
+print("os: " + os);
+
+// 当前 hone 解释器进程必然存在（本机运行 hone.exe）
+print("hone.exe exists: " + to_str(proc_exists("hone.exe")));
+
+// 枚举全部进程
+pl = proc_list();
+print("total processes: " + to_str(len(pl)));
+if (len(pl) > 0) {
+    for pr in pl {
+        print("first: pid=" + to_str(pr.pid) + " name=" + pr.name + " mem=" + to_str(pr.mem) + "KB");
+        break;
+    }
+}
+
+// 按名称模糊查找（不区分大小写）
+found = proc_find("HONE");
+print("find HONE (case-insensitive): " + to_str(len(found)));
+
+// 按 PID 反查
+pids = proc_pids("hone.exe");
+if (len(pids) > 0) {
+    pid = 0;
+    for q in pids { pid = q; break; }
+    info = proc_by_pid(pid);
+    print("by_pid(" + to_str(pid) + "): name=" + info.name);
+}
+
+// 进程名去重列表
+names = proc_names();
+print("unique names: " + to_str(len(names)));
+
+// 结束进程测试（Windows）：spawn 一个长驻 cmd.exe，按 PID 对比找出新进程再击杀。
+// 说明：本测试环境里 start /b ping 的后台进程对 tasklist 不可见，而长驻 cmd.exe 可见，
+// 故用「spawn 前后 PID 集合差集」定位自己启动的进程，避免误杀其它 cmd.exe。
+if (os == "windows") {
+    before = proc_pids("cmd.exe");
+    sys.run("start /b cmd /c ping -n 60 127.0.0.1 > nul");
+    time.sleep(2);
+    after = proc_pids("cmd.exe");
+    target = 0;
+    for q in after {
+        if (!contains(before, q)) { target = q; }
+    }
+    print("spawned cmd pid: " + to_str(target));
+    ok = proc_kill(target);
+    print("proc_kill ok: " + to_str(ok));
+    time.sleep(1);
+    back = proc_by_pid(target);
+    print("still exists: " + to_str(has_key(back, "pid")));
+    // proc_kill_by_name 安全路径：不存在的名字返回 0
+    n = proc_kill_by_name("no_such_proc_xyz.exe");
+    print("kill_by_name(nonexistent): " + to_str(n));
+} else {
+    print("skip kill test on non-windows");
+}
+
+print("done");

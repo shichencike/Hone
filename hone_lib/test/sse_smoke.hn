@@ -1,0 +1,51 @@
+// sse_smoke.hn - http.sse_* 流式内置函数冒烟测试（配合 hone_lib/test/mock_sse.py）
+// 运行: python hone_lib/test/mock_sse.py 8897  &  hone examples/../hone_lib/test/sse_smoke.hn
+// 验证: 打开 SSE 连接、逐事件读取 data、[DONE] 结束、句柄关闭
+import "ai" from "./hone_lib/ai.hn";
+
+print("== SSE 流式冒烟测试 ==");
+
+// 1. 流式：逐块读取（模拟 AI 逐字输出）
+url = "http://127.0.0.1:8897/v1/chat/completions";
+body = json_stringify({
+    "model": "mock",
+    "messages": [{"role": "user", "content": "你好，Hone"}],
+    "stream": true,
+});
+hdrs = {"Content-Type": "application/json", "Authorization": "Bearer mock-key"};
+
+h = http.sse_open(url, {"method": "POST", "headers": hdrs, "body": body, "timeout": 30});
+print("句柄: " + to_str(h));
+full = "";
+count = 0;
+while (true) {
+    ev = http.sse_next(h);
+    if (ev == "") { break; }
+    count = count + 1;
+    try {
+        j = json_parse(ev);
+        c = ai_choice_delta(j);  // 复用库内的 delta 提取
+        if (len(c) > 0) { full = full + c; }
+    } catch e2 { print("skip: " + to_str(e2.message)); }
+}
+closed = http.sse_close(h);
+print("事件数: " + to_str(count));
+print("拼接结果: " + full);
+print("close 返回: " + to_str(closed));
+
+// 2. 非流式（对照：http.request 一次性取全文）
+r = http.request(url, {"method": "POST", "headers": hdrs, "body": json_stringify({
+    "model": "mock",
+    "messages": [{"role": "user", "content": "你好，Hone"}],
+}), "timeout": 30});
+print("非流式: " + to_str(r));
+
+// 3. 已关闭句柄再读取应报错（H200）
+try {
+    ev = http.sse_next(h);
+    print("意外成功: " + ev);
+} catch e {
+    print("已关闭句柄读取报错（符合预期）: " + to_str(e.code));
+}
+
+print("== SSE 冒烟测试通过 ==");

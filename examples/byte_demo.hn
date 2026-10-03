@@ -1,0 +1,70 @@
+// byte_demo.hn - byte / bytes 字节类型演示
+// byte：8 位无符号值（0b1010001 字面量或 byte(int) 显式转换），与 int 严格隔离
+// bytes：字节序列（b"abc" 字面量），支持 len / 索引 / 切片 / + 拼接 / == / 迭代
+// 注意：byte/bytes 为解释器特性，VM / AOT / DLL 构建报 H999（用 hone run 运行）
+
+// 1. byte 字面量与转换
+b = 0b1010001;
+print(type_of(b));          // byte
+print(b);                   // 0b10100001
+print(b == byte(81));       // true
+print(byte(65) < byte(66)); // true
+print(to_int(byte(65)));    // 65
+print(char(byte(90)));      // Z
+
+// byte 越界报错（取消注释可看 H002）：
+// byte(256)
+
+// 2. bytes 字面量与内置函数
+s = b"abc";
+print(type_of(s));   // bytes
+print(len(s));       // 3
+print(s);            // b"abc"
+print(s[0]);         // 0b11000001
+print(is_bytes(s));  // true
+print(is_byte(s[1]));// true
+
+// 3. 拼接与切片
+t = b"ab" + b"cd";
+print(len(t));   // 4
+print(t == b"abcd"); // true
+u = s[1:3];
+print(u);        // b"bc"
+v = s[1:];
+print(v);        // b"bc"
+w = s[:2];
+print(w);        // b"ab"
+
+// 4. hex / unhex / to_bytes / to_str
+h = hex(s);
+print(h);                // 616263
+back = unhex(h);
+print(back == s);        // true
+cn = to_bytes("你好", "utf-8");
+print(len(cn));          // 6（每个汉字 3 字节）
+print(to_str(cn));       // 你好
+l1 = to_bytes("é", "latin-1");
+print(len(l1));          // 1
+nums = to_bytes([72, 105]);
+print(nums == b"Hi");    // true
+
+// 5. 只读变量与 readonly 参数
+readonly int x = 5;
+print(x);                        // 5
+fn inc(readonly int y) {
+    return y + 1;
+}
+print(inc(10));                  // 11
+
+// 6. struct 只读字段
+struct Point {
+    readonly x: int,
+    y: int,
+};
+p = Point(1, 2);
+print(p.x); // 1
+p.y = 9;    // 普通字段可写
+print(p.y); // 9
+// p.x = 3; // 取消注释可看 H002（只读字段不可赋值）
+
+print("BYTE OK");

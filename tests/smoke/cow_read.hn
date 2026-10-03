@@ -1,0 +1,104 @@
+// COW 透明读点冒烟：index / field / slice / for-in / 推导式 / == / throw / 算术 / 函数实参绑定
+
+// 1. 索引读
+cow x = [10, 20, 30];
+cow y = [100, 200];
+assert(x[1] == 20);
+y[0] = 999;              // 写路径：y 独占，不影响 x（若共享 x[0] 会被改成 999）
+assert(x[0] == 10);
+
+// 2. 字段读（cow dict）
+cow d = {"a": 1, "b": 2};
+assert(d.a == 1);
+assert(d.b == 2);
+cow d2 = {"a": 1, "b": 2};
+d2.a = 3;                // 写路径隔离：改 d2 不影响 d
+assert(d.a == 1);
+assert(d2.a == 3);
+
+// 3. 切片读
+cow s0 = [1, 2, 3, 4];
+assert(len(s0[1:3]) == 2);
+cow bs = [1, 2, 3, 4];   // 普通 list 切片
+assert(len(bs[0:2]) == 2);
+
+// 4. for-in 迭代（cow list / cow dict）
+sum = 0;
+for i in x { sum = sum + i; }
+assert(sum == 60);
+cnt = 0;
+for k, v in d { cnt = cnt + v; }
+assert(cnt == 3);
+
+// 5. 推导式
+cow sq = [i * i for i in x];
+assert(sq == [100, 400, 900]);
+cow dc = {k: v * 10 for k, v in d};
+assert(dc.a == 10);
+
+// 6. == / != 结构相等
+cow e1 = [1, 2, 3];
+cow e2 = [1, 2, 3];
+assert(e1 == e2);
+assert(e1 != x);
+cow f1 = {"k": 1};
+cow f2 = {"k": 1};
+assert(f1 == f2);
+
+// 7. throw（cow str）
+cow msg = "boom";
+try {
+    throw msg;
+    assert(false);
+} catch e {
+    assert(e.message == "boom");
+}
+
+// 8. 算术：cow str 拼接
+cow p = "ab";
+cow q = "cd";
+assert(p + q == "abcd");
+
+// 9. 函数实参绑定：cow 形参共享 / 普通形参边界隔离
+fn take(cow z) {
+    assert(z == [7, 8]);
+    z[0] = 1;            // 共享写者隔离：改 z 不影响调用方
+    return z[0];
+}
+fn take_plain(z) {
+    z[0] = 1;            // 普通值语义：深拷贝，不影响调用方
+    return z[0];
+}
+orig = [7, 8];
+assert(take(orig) == 1);
+assert(orig == [7, 8]);
+orig2 = [7, 8];
+assert(take_plain(orig2) == 1);
+assert(orig2 == [7, 8]);
+
+// 10. type_of 透明
+assert(type_of(x) == "list");
+assert(type_of(d) == "dict");
+cow t = "hello";
+assert(type_of(t) == "str");
+
+// 11. builtins on cow values（透明）
+cow cl = [1, 2, 3];
+assert(len(cl) == 3);
+assert(append(cl, 4) == [1, 2, 3, 4]);
+assert(contains(cl, 2) == true);
+assert(contains(cl, 9) == false);
+assert(index_of(cl, 3) == 2);
+cl2 = clone(cl);
+assert(cl2 == [1, 2, 3]);
+cow cd = {"x": 1, "y": 2};
+assert(len(cd) == 2);
+assert(has_key(cd, "x") == true);
+assert(has_key(cd, "z") == false);
+assert(keys(cd) == ["x", "y"]);
+assert(values(cd) == [1, 2]);
+cow cs = "helo";
+assert(len(cs) == 4);
+assert(contains(cs, "lo") == true);
+
+print("COW READ OK");

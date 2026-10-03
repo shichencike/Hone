@@ -1,0 +1,42 @@
+// break_demo.hn - break 语句测试（合法用例）
+// 运行: hone examples/break_demo.hn
+
+// 1. while 循环中 break
+fn test_while_break() -> int {
+    i = 0;
+    while (i < 10) {
+        if (i == 3) { break; }
+        i = i + 1;
+    }
+    return i;   // 3
+}
+
+// 2. for 循环中 break
+fn test_for_break() -> int {
+    s = 0;
+    for x in [1, 2, 3, 4, 5, 6] {
+        if (x > 4) { break; }
+        s = s + x;
+    }
+    return s;   // 1+2+3+4 = 10
+}
+
+// 3. 嵌套循环：break 只跳出最近一层
+fn test_nested_break() -> int {
+    found = 0;
+    i = 0;
+    while (i < 5) {
+        j = 0;
+        while (j < 5) {
+            if (j == 2) { break; }   // 只跳出内层
+            j = j + 1;
+        }
+        found = found + j;           // 内层 j 停在 2
+        i = i + 1;
+    }
+    return found;   // 5 * 2 = 10
+}
+
+print("while break: " + to_str(test_while_break()));   // 3
+print("for break: " + to_str(test_for_break()));       // 10
+print("nested break: " + to_str(test_nested_break())); // 10

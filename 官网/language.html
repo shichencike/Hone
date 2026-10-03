@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hone 语言参考 - 权威语法规范</title>
+<meta name="description" content="Hone 语言参考：语法、数据类型、运算符、控制流（含 goto 标签与 macro 宏，H105/H106 编译期校验）、函数、集合、class、枚举、运算符重载、异步、内置函数、错误码 H001–H999 的精确规范。">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="style.css">
+<script>
+/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
+function toggleTheme(){
+  var h = document.documentElement;
+  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
+  h.setAttribute("data-theme", cur);
+  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
+}
+(function(){
+  var t = "dark";
+  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+</head>
+<body>
+<header>
+  <span class="logo"><span class="mark">⚡</span> Hone</span>
+  <nav>
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="language.html" class="active">语言</a>
+    <a href="tutorial.html">教程</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
+  </nav>
+  <span class="ver">v0.7.12</span>
+  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
+</header>
+
+<main>
+  <h2><span class="hash">#</span>Hone 语言参考</h2>
+  <p>本页是 Hone 语言的<strong>权威参考手册</strong>：对语言自身的语法与语义做精确、最小化的规范说明——语法结构、类型系统、运算符、控制流及其编译期安全约束、函数、集合、class、枚举、运算符重载、异步、内置函数、错误码。每个条目均可在源码与 <code class="inline">hone explain &lt;错误码&gt;</code> 中核对。</p>
+  <p class="note">📘 本页与 <a href="docs.html">docs.html（综合使用手册）</a> 互补：集成（import / hone.json 清单）、工具链（hone run/build/repl/...）、GUI·进程·定时·图片·桌宠库、进阶用法与常见坑，仍在 docs.html 中。</p>
+
+  <input type="text" id="search" class="search-box" placeholder="搜索参考…（如 goto、macro、运算符、list）" oninput="searchDocs(this.value)">
+  <div id="search-count" class="search-count"></div>
+
+  <div class="toc">
+    <ol>
+      <li><a href="#syntax">基础语法</a></li>
+      <li><a href="#vars">数据类型与变量</a></li>
+      <li><a href="#operators">运算符</a></li>
+      <li><a href="#control">控制流（标签 / goto / 宏）</a></li>
+      <li><a href="#fn">函数</a></li>
+      <li><a href="#collections">集合与字符串</a></li>
+      <li><a href="#lang-ext">结构体 · 模式匹配 · 管道</a></li>
+      <li><a href="#class">class 类</a></li>
+      <li><a href="#lang-new">多返回值 · 解构赋值 · 推导式 · 可选链</a></li>
+      <li><a href="#enum">枚举（enum）与 match 变体模式</a></li>
+      <li><a href="#overload">运算符重载（__op 特殊函数）</a></li>
+      <li><a href="#async">异步函数（async fn + await）</a></li>
+      <li><a href="#type-inst">type 实例类 与 with 上下文</a></li>
+      <li><a href="#builtins">内置函数参考</a></li>
+      <li><a href="#errors">错误处理 / 错误码 H001–H999</a></li>
+    </ol>
+  </div>
+
+<section id="syntax" data-page-node-id="UUOepykxogbLrFyo0HiaHe">
+    <h2 data-page-node-id="2EwtvY0qEYJp8lweXkJ9Cb"><span class="hash" data-page-node-id="VADqc18tyFo8Wx26koeUQl">#</span>2. 基础语法</h2>
+    <table data-page-node-id="dKEdMNRCqViD9GRTVhPMWA">
+      <tr data-page-node-id="3R0fkFvEr0cQZf8ItRxzjh"><th data-page-node-id="cKto4CDbHWNzSCTbD6iF5Y">项目</th><th data-page-node-id="EBMBhFuBZLzuKWw6uAIngg">约定</th></tr>
+      <tr data-page-node-id="lDk3HEhhJ4DXuZfYN7VFhI"><td data-page-node-id="d7WWRY5LxA56qVcKMa2zXX">文件扩展名</td><td data-page-node-id="x0ySjKHBZzUX0Wo1elD3yy"><code data-page-node-id="D7cANiwxmX7mTNeFAQaInu">.hn</code></td></tr>
+      <tr data-page-node-id="SBM0nBB9LKG6BZGSjE3GGs"><td data-page-node-id="1NQH2uNpJ75B3E5ygPctd5">语句结束符</td><td data-page-node-id="Rp8GediNZOt4pfyZcQd0SZ"><code data-page-node-id="n40SWEB9uqXcaPtB10zVbH">;</code> 分号</td></tr>
+      <tr data-page-node-id="Y7PFum5FtdEIe4pcLgxTtA"><td data-page-node-id="qG82cU0N9crDKLDeqvVkJL">代码块</td><td data-page-node-id="mQAZ1RtOa2bbU8P0VARKBA"><code data-page-node-id="tzOSKchbc9vOzlnNLOgyDq">{ }</code> 大括号</td></tr>
+      <tr data-page-node-id="XzhMB2qoWFayi2b7DGfZoW"><td data-page-node-id="DPizb9YsJaXWB4cjRB09za">缩进</td><td data-page-node-id="5Zap8clPpBz6LVC3PgiSNf">强制 Tab（<code data-page-node-id="B0PBfKHEgLIuPT6KLZahah">hone fmt</code> 统一）</td></tr>
+      <tr data-page-node-id="WyXiMddbosoEyfArUBlsYZ"><td data-page-node-id="uq6DfAPAHLdgr2xCDuxf3u">注释</td><td data-page-node-id="uXTNYLGeL2J5mL4CQerLV8"><code data-page-node-id="6b1IzDBqmA6evOnWfNMooa">// 单行</code> 与 <code data-page-node-id="WxCk90ko92h59BkxaQZ0FT">/* 多行 */</code></td></tr>
+      <tr data-page-node-id="C2rAW5Kg0cEUpBzksJmksi"><td data-page-node-id="k1BoEu9sGooZ1eGmaUQkeE">命名空间</td><td data-page-node-id="E9oK4UJPh2Jj1e2oMZbfrT">点号访问：<code data-page-node-id="B00KPvxZXzItrVGfOGUF9f">time.now()</code>、<code data-page-node-id="StgKSbCtPwNmCx4FpEvgVF">sys.msgbox()</code></td></tr>
+      <tr data-page-node-id="U8xI4GCP5S1Sn1g9Sd0nVh"><td data-page-node-id="gFlnNFWW6wDie6mA9pf84k">临时函数</td><td data-page-node-id="lEi8c59jI0ANXxfac3dWbp"><code data-page-node-id="IpzNbIoG2nWJeHdQJoZsaI">tmp fn name() { ... }</code> 编译自动忽略</td></tr>
+      <tr data-page-node-id="tJDQGdSC7s74usodNIu1BH"><td data-page-node-id="7opVDPrYJ1n8UvLocVbnj3">调试输出</td><td data-page-node-id="j1nUHB3AcdxjPgzGLtDE3m"><code data-page-node-id="xKAGQjrANQeGfsjDt573T0">debug_print(expr);</code> 仅 debug 模式生效</td></tr>
+    </table>
+  </section>
+<section id="vars" data-page-node-id="Wj5VXv5HAbgDzYB6jiIcQ9">
+    <h2 data-page-node-id="bwFJvdbJRNtLMeGP0F1dVc"><span class="hash" data-page-node-id="8ifPL6I6FxqyUucADT7aBE">#</span>3. 数据类型与变量</h2>
+    <p data-page-node-id="X6rbD2GlhpwweApocA37xM">静态强类型：类型一经推导或显式声明即锁定，禁止隐式转换。</p>
+<pre data-page-node-id="vi0CAPRcoESZSwR9iIAX4h"><code data-page-node-id="wgg93fbfai6AObuxNqFazi">x = <span class="n" data-page-node-id="WjgC9eGyML8bK3o27HemHk">10</span>;              <span class="c" data-page-node-id="VP51UTdAb5KTky0zsX9uH5">// 自动推导为 int</span>
+f = <span class="n" data-page-node-id="z8J2UxHtMXYLXEY4Y27vaT">3.14</span>;            <span class="c" data-page-node-id="6kyIjcZDfi3xkQfCZPgU4c">// 自动推导为 float</span>
+y : <span class="k" data-page-node-id="WmrGy6Ob5k0Gl0TovIHVUf">int</span> = <span class="n" data-page-node-id="Zy8T2ynylf1EdC0BX9T0KH">20</span>;    <span class="c" data-page-node-id="ratjyPSYMBEtc0zK8fYya5">// 显式类型（Rust/TS 风格）</span>
+<span class="k" data-page-node-id="OR25NFhS8qIcKAPgKT7vl2">int</span> z = <span class="n" data-page-node-id="eBfH4xWyBKIt4Am0vRs7vR">30</span>;      <span class="c" data-page-node-id="ZcZA0KRfzvr1BL6VWhbiFR">// 显式类型（C 风格）</span>
+x = <span class="s" data-page-node-id="KU2sIQknc7xWML3xmDtddH">"Hone"</span>;          <span class="c" data-page-node-id="DEfwzBwEXgrIFYKh6e3MNt">// error[H001]: 期望 int，得到 str</span>
+ch = <span class="s" data-page-node-id="SkrvDorKRag069H2nUEtYQ">'a'</span>;            <span class="c" data-page-node-id="HUkUtYF9w3nnqgUFR5a4fC">// char：单引号字面量（须恰好一个字符）</span>
+<span class="k" data-page-node-id="eKDDVN7IuJG6iewkbAxzNC">char</span> w = <span class="s" data-page-node-id="gbmzocNkrl0Jm1uyM9NYa8">'中'</span>;   <span class="c" data-page-node-id="VV3TedAVFEtmwxEm9wd5M7">// 显式 char 声明；按码点比较：'a' &lt; 'b'</span>
+readonly int pi = 3;        <span class="c">// 只读变量：初始化后禁止再赋值</span>
+x : readonly int = 5;       <span class="c">// 类型位置 readonly（与上一行等价）</span>
+bv = 0b1010001;             <span class="c">// byte：8 位字节值</span>
+bs = b"abc";                <span class="c">// bytes：字节序列</span></code></pre>
+    <table data-page-node-id="iIExvlVAhKY84X6UEgBbxd">
+      <tr data-page-node-id="VCAVWJ6lleo9Fgy2MmyxRL"><th data-page-node-id="irBPob3Ucx0XMXlGFy8p09">类型</th><th data-page-node-id="jsRHFYStPvPWzGcgJw9DRY">说明</th><th data-page-node-id="mvgTVCMSQ7MhHpATK0ylgC">字面量示例</th></tr>
+      <tr data-page-node-id="bSfMG5ZfBJhwfCDGuxT7r2"><td data-page-node-id="4OMlzCNd9zTA7C3UtfM8Kc"><code data-page-node-id="rz1gcRIihFJxn4ADSop7Nt">int</code></td><td data-page-node-id="QIL5QaqNqRAgcHlZE9AEFI">64 位有符号整数</td><td data-page-node-id="Zk8SwD0JP2lknsDy8tXCbq"><code data-page-node-id="NsTrvmJySBNQIaKoQ10wS0">0, 42, -1</code></td></tr>
+      <tr data-page-node-id="0A7lc1xmndKN1UUf9u2ymp"><td data-page-node-id="J5y3gdJbSoyj4BKfMYpEpM"><code data-page-node-id="gFu34EN9mqQ8Ut0CD0rmKN">float</code></td><td data-page-node-id="lDDv9nbVKpZ8CpezGFsXyW">64 位双精度（IEEE 754）</td><td data-page-node-id="tUnqRRpw1YiO2djHeUTfDA"><code data-page-node-id="rvbVMpY7puGOEqnc9StVYu">3.14, .2, 2.0</code></td></tr>
+      <tr data-page-node-id="bYoCqB5EojwquCLx1ci6kX"><td data-page-node-id="epx29op3WssDjmCzlpemVF"><code data-page-node-id="lppSyPMdreshgCdtI4SqHg">bool</code></td><td data-page-node-id="PFjSSBjFNG1poc1bPMs8RY">布尔值</td><td data-page-node-id="WqZ9wBKb2V0eFcSime3RP6"><code data-page-node-id="TojuuPdoevInBFXGeJ3XB1">true, false</code></td></tr>
+      <tr data-page-node-id="7hii1wCXe2WxXOP3HSg97L"><td data-page-node-id="OcFtXsaoNP5GUF05G42WMT"><code data-page-node-id="09sx5NGSUOPOm9cXg1xOTc">str</code></td><td data-page-node-id="qzuLWfWJCBhQqjM0vvxjLk">UTF-8 字符串</td><td data-page-node-id="glzt3FNNWtBivC9A4dR44f"><code data-page-node-id="KQHcHd7vmNCi8KZZfGOxgG">"hello"</code>（支持 \n \t \\ \"）</td></tr>
+      <tr data-page-node-id="gauCSKAEdZ02eIhfSdpxSd"><td data-page-node-id="7FhVPF8Kj1AfEul0GXhAOW"><code data-page-node-id="RvGPft15ufj7SSzE03ZsBV">char</code></td><td data-page-node-id="u4Rm0IFEBAtSTikM3pOPE6">单个 Unicode 字符（按码点比较，无算术运算）</td><td data-page-node-id="OZM0HH9GOwPUogH6AvUQff"><code data-page-node-id="17dWxLeRhFJdSMt6XRFiuH">'a', '\n', '中'</code>（须恰好一个字符）</td></tr>
+      <tr><td><code>byte</code></td><td>8 位无符号字节值（0..=255，与 int 严格隔离、无隐式转换，支持 <code>==</code>/<code>&lt;</code>/<code>&gt;</code> 比较）</td><td><code>0b1010001</code> / <code>byte(81)</code></td></tr>
+      <tr><td><code>bytes</code></td><td>字节序列（支持 len / 索引取 byte / 切片 / <code>+</code> 拼接 / <code>==</code> / for-in 迭代）</td><td><code>b"abc"</code></td></tr>
+      <tr data-page-node-id="dJl5SxLsuhbjv7h3YlhHUa"><td data-page-node-id="UbIX6IDDFrMf3cpJI93C6e"><code data-page-node-id="ufb5CPrFH0QzcswmyI6ils">ptr</code></td><td data-page-node-id="NKx9E36zk5rq2hOAPjoqGe">FFI 不透明指针句柄（void*，用于 load 动态库调用）</td><td data-page-node-id="mWz2Abiedb4tvYNjxDkAB5"><code data-page-node-id="uIW5ant6Q8Nn9LjLQRCoyP">load</code> 返回值 / <code data-page-node-id="pwOKjqIvqCYbhK6Wg7qGiF">0</code> 表示 NULL</td></tr>
+      <tr data-page-node-id="JkoU2q3W449g14GLSF5u7S"><td data-page-node-id="2ncpkOt7QbiuA0miqSv8sw"><code data-page-node-id="4V6Dd4Oi3sI827XsJqs2cS">list</code></td><td data-page-node-id="6KTOKpLUFjzb5CtLqdnKwP">动态列表（元素类型不锁定）</td><td data-page-node-id="UL1362PuEm8MiJF9TLtKpb"><code data-page-node-id="25jBozATGpvdtbGiOesIgP">[1, "a", true]</code></td></tr>
+      <tr data-page-node-id="TKBje6Gp2CjHNlyJKp8Hzk"><td data-page-node-id="qVpYgtzFl4DI7jOtLxm5pN"><code data-page-node-id="2enZTAQlg9UiH1p2dwSaBd">dict</code></td><td data-page-node-id="0POX7z3dxSAU1ncmj9ySSq">动态字典（字符串键 → 任意值）</td><td data-page-node-id="ylAbVE9joYZrKBcIKx26j3"><code data-page-node-id="TlbVn3rSy3xDC4aShuu0mH">{"name": "hone", "ver": 1}</code></td></tr>
+    </table>
+  </section>
+<section id="operators" data-page-node-id="tnbrlLFF1l9BFK8uKScIeL">
+    <h2 data-page-node-id="n9xkYYln1YG34CA4efZEkB"><span class="hash" data-page-node-id="j5VS2aK7TGf4xDBBvZ1g5m">#</span>4. 运算符</h2>
+    <table data-page-node-id="KIFE7Jlszr6B86UIu2DuqG">
+      <tr data-page-node-id="oZl7wpVal9GO6SzWaKTaaP"><th data-page-node-id="f5hGgN08RWq7FLCp1X6bMA">类别</th><th data-page-node-id="vrHyLms85xQKBoXEXxnmQt">运算符</th><th data-page-node-id="pZHBlE102YfGVKCD6E3EC8">说明</th></tr>
+      <tr data-page-node-id="OgOLVlXNwfjR4IxKynMOcD"><td data-page-node-id="v9wrGnS5Q2N2r3YhuPrnul">算术</td><td data-page-node-id="dIzZDoi4l29N2H7nn1kjNx"><code data-page-node-id="M2bViX27HLEDY6nkEARIoZ">+ - * / %</code></td><td data-page-node-id="cefIeNAMbN4niQdvAmZhe6">int 除法为整除，除零报 H009</td></tr>
+      <tr data-page-node-id="VIAFC5BeTG7L8mE7unWGmA"><td data-page-node-id="9wRYXIwEf1886rhGzqag1x">字符串拼接</td><td data-page-node-id="QSca1DfVO6IPx3DH2JhSbn"><code data-page-node-id="2PLjoukGzUpwcDs1jO1THQ">+</code></td><td data-page-node-id="SeGwtJwp8iox59LR8I7S7z"><code data-page-node-id="aXLmPxfYWe3DIO4FBVRkka">"a" + "b"</code> → <code data-page-node-id="cP7pOr3ahWo5ogtUYMALPT">"ab"</code>（仅 str + str）</td></tr>
+      <tr data-page-node-id="bOra7hkxumXK8dBAuC4zC1"><td data-page-node-id="xt7FN1abfqsKI9uXk1qRqX">比较</td><td data-page-node-id="qrJoJcXL8uPxZrkb5sfSJB"><code data-page-node-id="J31tNe32bGVRDTPCUww3S4">== != &lt; &gt; &lt;= &gt;=</code></td><td data-page-node-id="ng38LkBSIxaM0GPIqelLzP">返回 bool，要求两侧同类型</td></tr>
+      <tr data-page-node-id="AK7jK3hnDXqqDXRl2bQZjN"><td data-page-node-id="JXWxlphIpJnQfD3s2L056y">逻辑</td><td data-page-node-id="iujfT9TBJaIaqcwJuyHK5C"><code data-page-node-id="Pk0bgXP7JGkehREGSaVTAO">&amp;&amp; || !</code></td><td data-page-node-id="U3c1tuBJqEQRvv8tTKI8CS">与、或、非；操作数为 bool</td></tr>
+      <tr data-page-node-id="ftZgQ6LegAIzbUpTbrdOwx"><td data-page-node-id="XqVEYWr2q4gKXuJqNZQ7YY">赋值</td><td data-page-node-id="klhCVlMGmhfp1KTTBFd1UF"><code data-page-node-id="YnM52tHf3GrqSt9JotwYNF">=</code></td><td data-page-node-id="nxZWX165vqCjs0lQO2EbAT">变量类型锁定后不可赋其他类型</td></tr>
+      <tr data-page-node-id="iDb1kYfOLoEBkU3iZ6xq7M"><td data-page-node-id="2Q3EymDoE0nodXpXsrp8Dn">复合赋值</td><td data-page-node-id="AHdNAEzECN2AO23mxdxZbu"><code data-page-node-id="m6a5dbKd5JulimmeGSn4k0">+= -= *= /= %=</code></td><td data-page-node-id="rnNZAbHOAiVwv47XfCXDHT">等价于 <code data-page-node-id="Z570UO7DQmbwJuBixb9Y5Q">x = x op y</code>；str 仅支持 <code data-page-node-id="iGIwCTqrnZBY1WpDVqKpBT">+=</code> 拼接</td></tr>
+      <tr data-page-node-id="ULIj4M1Fz2XKIApV2tDTze"><td data-page-node-id="r3nYHH84nJvP5Viozhl9eY">自增/自减</td><td data-page-node-id="YeBJJBL9TVadyIhUtepBFl"><code data-page-node-id="Sf6tyt8UE3UjrZ7BBHmV8N">++ --</code></td><td data-page-node-id="uBGMirf0nAk1e2WqYINik2"><code data-page-node-id="Dt0rgD4oqfDYV9x2sphYsM">i++</code>/<code data-page-node-id="BAUcV8Sz9JaYB0AvHhaLDY">i--</code> 后缀返回旧值，<code data-page-node-id="SbuQYKAbAX7iJkoKtMs1aW">++i</code>/<code data-page-node-id="Nl7p3wb5NjgYLDDfYzYDs4">--i</code> 前缀返回新值（仅数值变量）</td></tr>
+      <tr data-page-node-id="Tg82kCrs9DA4SdxdO5M7BB"><td data-page-node-id="iZojdiuElpRFWgCJsLq294">三元</td><td data-page-node-id="khALZeMDmR1W0LOW3FTxcc"><code data-page-node-id="S5oPZv8GloD1jkCl6e2gHY">? :</code></td><td data-page-node-id="vI7a5WO0am7Z8HMrugVo9z"><code data-page-node-id="HI72sQ0MHUoXEO1sIoTl5V">cond ? a : b</code>，条件必须 bool，右结合可嵌套</td></tr>
+      <tr data-page-node-id="lCbyHug5v3EGMhY4Uka9FA"><td data-page-node-id="MTG9MaBAir6p05Wo2uQpvr">空值合并</td><td data-page-node-id="S6aoCvSJpAcoBc3uRbg2aP"><code data-page-node-id="Rf5XZcxvSJgBIiPrAQMXEX">??</code></td><td data-page-node-id="xkFwNjJklBDzGbn5SmSfDg"><code data-page-node-id="oAQDDQiUA35jBiT2UaAzec">a ?? b</code>：a 为 null 取 b（短路求值；null 来自 void 函数调用等占位值）</td></tr>
+    </table>
+    <p data-page-node-id="oiEpQFUWe2bJiB31YKWsRT">字符串插值优先使用 f-string（见第 7 章），比拼接更简洁。</p>
+    <p data-page-node-id="AUz90eHti0qorZfEnq4blE">自增/自减、三元、空值合并的完整示例见 <code class="inline" data-page-node-id="LDnXuqqOOG5ej2Lgl9529Z">examples/new_syntax_demo.hn</code>。</p>
+  </section>
+<section id="control" data-page-node-id="5lI6EITi2XLkGStaiMx2ck">
+    <h2 data-page-node-id="LDgqgQuxx5o67WJHVAqd7C"><span class="hash" data-page-node-id="ztQeJo1Z1XX0x4HhGUFqVn">#</span>5. 控制流</h2>
+    <p data-page-node-id="sJqzoFJsuucchvGU0o2P7q">条件表达式必须显式返回 bool，禁止隐式转换（<code data-page-node-id="BfqEMdHalzzE2xxmuKZ7oW">if (1)</code> 视为非法）。</p>
+<pre data-page-node-id="9cckBYXg8gT464eixo6M2R"><code data-page-node-id="zY2yOFPUeR0EJviAaQZebP">x = <span class="n" data-page-node-id="sEaHjjTLfyE9Xj9iqTBOS3">7</span>;                  <span class="c" data-page-node-id="jJ9O4jyEAe0R7h8HpNeOOp">// 先定义再判断</span>
+<span class="k" data-page-node-id="dbR2b19oLuJ2f6OfRYmMOL">if</span> (x &gt; <span class="n" data-page-node-id="G5F51UBGYCwcmZBHM09vGj">5</span>) {
+    <span class="f" data-page-node-id="Aha10TkH19tiJ4WUPoWoX6">print</span>(<span class="s" data-page-node-id="u3jHJEdNbE1gTlwNoxvRq7">"大"</span>);
+} <span class="k" data-page-node-id="gLxWvydNyADadaDlysfeF3">else if</span> (x &gt; <span class="n" data-page-node-id="NMYD9qQBFfudNWHSaplHow">0</span>) {
+    <span class="f" data-page-node-id="36mJGEPAdt7hfC7RwAsygw">print</span>(<span class="s" data-page-node-id="ZmqpvfE76UgxQMh03U1TlH">"小"</span>);
+} <span class="k" data-page-node-id="6Z6GvMX23tBTYG9BKjz7qA">else</span> {
+    <span class="f" data-page-node-id="OyLcJ8y5MdCVKiKwLA4Xvn">print</span>(<span class="s" data-page-node-id="jMbhZrhlMrMaWbAKF1dCTD">"非正"</span>);
+}
+
+i = <span class="n" data-page-node-id="tJhvytZl2lq45OlHKcLfgE">0</span>;
+<span class="k" data-page-node-id="tFEK8qkUYUjqqnQNAXPQF1">while</span> (i &lt; <span class="n" data-page-node-id="xw7EkADiQogtIJcJCNyzh9">10</span>) {
+    i = i + <span class="n" data-page-node-id="p271ibOBHLGHxYtNBoRuK8">1</span>;
+}
+
+<span class="c" data-page-node-id="3TNnYao3VuYKmxpsHTxnPD">// for-in：遍历列表（单变量）或字典（键、值双变量）</span>
+nums = [<span class="n" data-page-node-id="d9zaA89HWCkOeKFJeW2Uv9">1</span>, <span class="n" data-page-node-id="u9pvYCX1mwTlMNFADJPM2M">2</span>, <span class="n" data-page-node-id="FPbQAAJBQ1EjD9IJR6pULP">3</span>];
+<span class="k" data-page-node-id="Rij9Nw2gbfZcW6F9iewWC9">for</span> x <span class="k" data-page-node-id="ZkO56penMYCMOS8EX3BOEO">in</span> nums {
+    <span class="f" data-page-node-id="YFzPotvlwZOpBUfpqPEsjg">print</span>(x * x);      <span class="c" data-page-node-id="J6oRHvDug41KBYgYI9gD6J">// 1 4 9</span>
+}
+
+user = {<span class="s" data-page-node-id="IUq6D4k5xziLUfVbRC5d4m">"name"</span>: <span class="s" data-page-node-id="LQPowc7syaZAMxEaEpO14B">"hone"</span>, <span class="s" data-page-node-id="kU4BNvZemJmdCDpcYhy91O">"ver"</span>: <span class="n" data-page-node-id="iGNXBhOTT73YZGOPgR9zHD">1</span>};
+<span class="k" data-page-node-id="VAbHqoagclyZkt7j8hWGSn">for</span> k, v <span class="k" data-page-node-id="jKXvfDZGYbIUYEAzThza7Y">in</span> user {
+    <span class="f" data-page-node-id="n6Bg7HyA07F5AnY6XCueeU">print</span>(k + <span class="s" data-page-node-id="F70KKNB9JCD8CFGqxltEWh">"= "</span> + <span class="f" data-page-node-id="kOALmLqShojgsHmABRubRD">to_str</span>(v));
+}
+
+<span class="c" data-page-node-id="vKY3PApFCA8O9I8G13yZyE">// do-while：先执行循环体再判断条件（至少执行一次）</span>
+j = <span class="n" data-page-node-id="KRoHbAiWhs0EV2taNqXOY6">0</span>;
+<span class="k" data-page-node-id="9Y0BAUFy7spECAHlTuKthR">do</span> {
+    j = j + <span class="n" data-page-node-id="yVcBwOxsHdGydsrDKLQr9o">1</span>;
+} <span class="k" data-page-node-id="RWHLPFXb765eXKDpRsGzOy">while</span> (j &lt; <span class="n" data-page-node-id="HY3kC3CQWSzMNqV0m6T7XM">3</span>);
+
+<span class="c" data-page-node-id="6Tho56FVONXa3aCtDl5aCk">// C 风格 for：init; cond; step 三段均可省略（for (;;) 无限循环，配合 break 退出）</span>
+<span class="k" data-page-node-id="c1fWWsCWvw0r4At3UQzeeX">for</span> (i = <span class="n" data-page-node-id="TibEU29v5HiFFn6i1vOtYf">0</span>; i &lt; <span class="n" data-page-node-id="DLNlRQfkAkYVMP9SFRXHpi">5</span>; i = i + <span class="n" data-page-node-id="UQfC9DUVx1TpYus8PQtWUP">1</span>) {
+    <span class="f" data-page-node-id="sWOQIWUGyKog52NgjbEPYV">print</span>(i);          <span class="c" data-page-node-id="EusUwJNdMMvW7siJxszztC">// 0 1 2 3 4</span>
+}
+
+<span class="c" data-page-node-id="pbyuMMa5LkPbzFjsKQxjlb">// continue：跳过本次循环剩余语句，直接进入下一次迭代</span>
+<span class="k" data-page-node-id="5i4xVTrV5ZWQAGuuzFsOtM">for</span> (i = <span class="n" data-page-node-id="o0SpcYqm492CXqqzaUDSij">1</span>; i &lt;= <span class="n" data-page-node-id="gaiwOdVF3WBithrWqNJeum">5</span>; i = i + <span class="n" data-page-node-id="YlZ0SvAv64YqSbhuA4UIDD">1</span>) {
+    <span class="k" data-page-node-id="yDnR27SgUKqEDyFQlaEcnF">if</span> (i % <span class="n" data-page-node-id="prVzj3lyCDYYFCOBj9u26N">2</span> == <span class="n" data-page-node-id="A0DwqCucDUaIpF1g1q393g">0</span>) { <span class="k" data-page-node-id="uhWzJ5GZctVda3TKOiQMkd">continue</span>; }
+    <span class="f" data-page-node-id="Lx2bm5uJEW9mdMY2CJHuT5">print</span>(i);          <span class="c" data-page-node-id="syantf9qB04RATKFzjoDpe">// 1 3 5（只打印奇数）</span>
+}</code></pre>
+
+    <h3 data-page-node-id="nqsjuydCPE2HZj38HJEqck">标签与 goto（H105）</h3>
+    <p data-page-node-id="Up5LVWjJ5AdEB36jojWeea">Hone 提供编译期安全的 <code class="inline" data-page-node-id="ApX3ZhuSvFjWwaCr9N509c">goto</code>：用 <code class="inline" data-page-node-id="qTzBEgUd99RVkcebGcsoxd">名字:</code> 定义标签（单独占一行、行尾紧跟冒号），用 <code class="inline" data-page-node-id="Q5JBkYAtufC2heYkH8ZBlN">goto 名字;</code> 跳转。常用于手工搭循环、一次性跳出多层嵌套、跳过一段代码。</p>
+<pre data-page-node-id="xgVHXATQN2cVYYVGfndxAR"><code data-page-node-id="15ll6PAfDCNzgMJHW1UWAR">i = <span class="n" data-page-node-id="J3aINdiEqJNOm6d8AWJyft">0</span>;
+again:
+<span class="f" data-page-node-id="vnS0dobgwZDDTYv5DQRkYy">print</span>(i);
+i = i + <span class="n" data-page-node-id="6WaF8hi7dRvEEGLYEXBA03">1</span>;
+<span class="k" data-page-node-id="zp3UXaH7hJMe8mcjid3ERu">if</span> (i &lt; <span class="n" data-page-node-id="Zpo2Ev9tHTKFmkcmMowknQ">3</span>) { <span class="k" data-page-node-id="5mWUVfxZPfnG5yQQgZDowG">goto</span> again; }   <span class="c" data-page-node-id="FvEX9Asf197prcmWmzXJGo">// 回跳：依次打印 0 1 2</span>
+
+<span class="c" data-page-node-id="6HIQ4ON0kSoULjGdx9D9c8">// 向外层标签跳转：一次性跳出嵌套循环（等价于带标签 break）</span>
+<span class="k" data-page-node-id="Wl0Zk9LSncsFSREECuTbxc">for</span> b <span class="k" data-page-node-id="12wadIY6qAP1dNIYdCwvII">in</span> [<span class="n" data-page-node-id="GC8CHqKLkbeP2cYO3jDsiq">2</span>, <span class="n" data-page-node-id="9UczvTBxGtuIbNf120dbvO">4</span>] {
+    <span class="k" data-page-node-id="qmQqPbEs3dJ9GAePn097je">for</span> a <span class="k" data-page-node-id="ZcBhkucampT1gNXBgYDofu">in</span> [<span class="n" data-page-node-id="PKzVr8gCwybyRtQl69b0wF">1</span>, <span class="n" data-page-node-id="FT87DDQr2zaYSZfizhsV7v">2</span>, <span class="n" data-page-node-id="D8CiDYkTJYPAZcQtveDXxa">3</span>] {
+        <span class="k" data-page-node-id="EDWqYajE2ZtHOmohebumwh">if</span> (a == <span class="n" data-page-node-id="moeJZQPEHHDLgidTwsdtls">3</span>) { <span class="k" data-page-node-id="J5uj2tb1X4O4UG9hHCZvmb">goto</span> found; }
+    }
+}
+found:
+<span class="f" data-page-node-id="NUJBYx2Cyq3vsGl6l7vw7x">print</span>(b);   <span class="c" data-page-node-id="BOcJr9NWui1vpzK8JoJGU3">// 2（a==3 时直接跳出两层循环）</span></code></pre>
+    <p data-page-node-id="eV9B1D5iNQfv9iex01AJ7T"><strong data-page-node-id="MgnGFDDqdIQWx7mg8YBcAK">安全规则（全部编译期检查，运行期绝不跳到未定义位置，报错 <code class="inline" data-page-node-id="UUEOx6wQQuHNT41a3GjVnY">error[H105]</code>）</strong>：</p>
+    <ul data-page-node-id="znmt8ccDFJ9UH9POKnJXnH">
+      <li data-page-node-id="RiR5sO5YR2fZwubtVtGvk7">标签只能在同一函数内使用，且同一函数内名字唯一（重复定义报错）；</li>
+      <li data-page-node-id="AfzZz7WnnO7CaZol3fCNiv">只能跳到「从跳转点向外层可见」的标签：标签必须位于跳转点所在语句块或其外层语句块中，因此<strong data-page-node-id="EYHCckOUBiSB9uop7qB7ld">无法跳进 if / 循环等内层语句块</strong>（也就不存在「跳入未初始化作用域」的问题）；</li>
+      <li data-page-node-id="hSwbPgaYoQHICUtczVXbOI"><strong data-page-node-id="BjN4iFqRTGXznZw39K2qi1">禁止向前跳过变量绑定</strong>：若标签在跳转点之后，且两者之间在同一语句块内存在 <code class="inline" data-page-node-id="GsvEMuzB932vF9CW9U9z8h">x = ...</code> / <code class="inline" data-page-node-id="jIVFpZH84bKMj6bxEEAsGo">int x = ...</code> / 解构赋值等绑定语句，则报错（否则跳转后会读到未初始化变量）；</li>
+      <li data-page-node-id="QFUtYdu2JfNBevfRZvL8p4">标签不跨函数：lambda、嵌套 fn 各自独立，外层标签在内层不可见（反之亦然）；</li>
+      <li data-page-node-id="swBm5ZoVgKdpwpCSJUrcBD">标签写法 <code class="inline" data-page-node-id="OdTq6dh53d6TkeMQV4FowX">loop_top:</code> 与类型注解 <code class="inline" data-page-node-id="2RMAgDNz44HeWPrrVRTgje">x : int = 10;</code> 不冲突：冒号后同一行还有内容即按类型注解解析；</li>
+      <li data-page-node-id="gVyBFKseiJCJCQT6djLP7U">AOT 原生编译（<code class="inline" data-page-node-id="tqtHVt3BtO2WDTCxaUCElv">build --exe -c</code>）<strong data-page-node-id="YzT9KDLJXfItoMhM5SMhxo">暂不支持 goto</strong>，报 <code class="inline" data-page-node-id="diAPVlfafQwqxcXYIac8Ef">error[H999]</code>（尚未实现）并提示改用 <code class="inline" data-page-node-id="BHrfx8jCq6ZA44t23ttrFC">hone run</code> / <code class="inline" data-page-node-id="5q8rrhem6EAX5xKIfCwE86">hone run --vm</code>；解释器与字节码 VM 均完整支持。</li>
+    </ul>
+    <p data-page-node-id="2NsV8njn75DVnQAMwInxEP">排查标签 / 跳转报错：<code class="inline" data-page-node-id="EtzUvEe9ce2FgobAa6d78D">hone explain H105</code>。</p>
+
+    <h3 data-page-node-id="5J2oARH0cpRWdMpXGOhGbS">宏 macro（H106）</h3>
+    <p data-page-node-id="CVsILip6SBdzxdWH1Ocpvn">宏是<strong data-page-node-id="fJCGDDrgpUHETrCrfaVRRI">解析期</strong>的代码生成工具：在解析之后、类型检查之前，由预处理阶段（<code class="inline" data-page-node-id="gw3CZwLHvTDl9bNiUBzd3b">src/preproc.rs</code>）做<strong data-page-node-id="eFF6C9PrVR81FCX94YFiLZ">纯 AST 替换</strong>。因此解释器 / 字节码 VM / AOT 三个后端看到的是展开后的同一份代码，<strong data-page-node-id="UeASViyinzEwdrDzAAo12e">运行期不存在宏实体</strong>，行为完全一致。</p>
+    <p data-page-node-id="EqnyxnH3vKliHqvH8YXxle">两种形式，调用写法均与函数一致（<code class="inline" data-page-node-id="Bq5d7pqOFLpkCQhc8dTN8v">NAME(实参)</code>）：</p>
+<pre data-page-node-id="hobFCoTNJf4Xy37jkGB4MN"><code data-page-node-id="W44FsOGWqYbemWSBCHJ1TO"><span class="c" data-page-node-id="T0GXncUxXiQIbCKtv0jQwH">// 表达式宏：用于表达式位置</span>
+<span class="k" data-page-node-id="5PpkF1BuK1MZLR41h2AOO1">macro</span> <span class="f" data-page-node-id="pSQmpKw4FRU22x2mMeOVRG">SQ</span>(x) =&gt; x * x;
+<span class="k" data-page-node-id="ntumInQXiZSa5R5HIltdwr">macro</span> <span class="f" data-page-node-id="3HBtVfbONhOC9zw26I6uNT">CLAMP</span>(v, lo, hi) =&gt; (v &lt; lo) ? lo : ((v &gt; hi) ? hi : v);
+<span class="f" data-page-node-id="EPtuSFmp3Z3jcoUVl2HWXG">print</span>(<span class="f" data-page-node-id="kYJ3sX2UnUY4fBbBhdL5eJ">SQ</span>(<span class="n" data-page-node-id="EHy00GadhPtN6Z5uhRIa6B">3</span>));                   <span class="c" data-page-node-id="e2A24Gk1qM4p3fBEi3j2Zu">// 9</span>
+<span class="f" data-page-node-id="gbg8ulf2kBai6aCTVDIUy7">print</span>(<span class="f" data-page-node-id="DccMuWG6vbMTbronIK8HZX">CLAMP</span>(<span class="n" data-page-node-id="AscNvIeBdEYF8CSrwNEIbo">12</span>, <span class="n" data-page-node-id="UjujsC1u8qHkLvWF6BajZ4">0</span>, <span class="n" data-page-node-id="r1GlB01rmUV0JzNfbET16u">10</span>));         <span class="c" data-page-node-id="G5kWaZGipGoFwfik25ERNz">// 10</span>
+
+<span class="c" data-page-node-id="suFw06CkwDbXqbtNePu28Y">// 语句宏：展开为独立作用域代码块</span>
+<span class="k" data-page-node-id="pxmiwteSQKlfnHG5xxQC45">macro</span> <span class="f" data-page-node-id="tGJrXC5FaDFJL0TrDk8WhD">SAY</span>(msg) { <span class="f" data-page-node-id="0z1VRRewVfAAJAE17HyT1s">print</span>(msg); }
+<span class="k" data-page-node-id="2wChcpbPCTNHurN2gkxFmB">macro</span> <span class="f" data-page-node-id="VZ3QsJR2TxLqIImDKZhqI0">INC</span>(x) { x = x + <span class="n" data-page-node-id="RPr0myn4UnrhcHnWy4jKmQ">1</span>; }      <span class="c" data-page-node-id="ZMBV9sBaYMml33OCiMKaGX">// 形参作赋值目标：实参须是裸变量名</span>
+<span class="f" data-page-node-id="W2HXryo2H1Ofkb3JxunJri">SAY</span>(<span class="s" data-page-node-id="jrE1Q9WzMaR4Ev43rb4rCH">"hi"</span>);
+n = <span class="n" data-page-node-id="BzdBWPntoHmiqI23C0qqLO">0</span>; <span class="f" data-page-node-id="YocOaozAJjegfSM8HQQBFY">INC</span>(n); <span class="f" data-page-node-id="KH1p3h0b7FeRw13HDAVoJ8">print</span>(n);           <span class="c" data-page-node-id="OHeqFZY5twlWGmioA35EEY">// 1</span></code></pre>
+    <p data-page-node-id="K4rawVOm9kKvrVwb8HPl8M"><strong data-page-node-id="nHhM4Qbr8iavFHxz0iKIhA">安全约定（编译期检查，越界用法报 <code class="inline" data-page-node-id="leZnZs6pIOv013sL5WS6R4">error[H106]</code>）</strong>：</p>
+    <ul data-page-node-id="1YOj3plcK44fcAUjQEwHQB">
+      <li data-page-node-id="mwn4skRWrlXXBIrCOo8zpC">宏必须定义在<strong data-page-node-id="ml46onOt5n3W529QajDWpw">程序顶层</strong>（函数 / 代码块 / 类 / 循环内定义宏一律报错）；</li>
+      <li data-page-node-id="FhH10b11AxucriXAYSp0Au"><strong data-page-node-id="rmvuXTCs7x0MmbdoGXcdr9">先定义后使用</strong>：按源码顺序展开；若调用的名字对应更靠后的宏定义，直接报 H106 并指出定义行号（提示把定义上移）；</li>
+      <li data-page-node-id="KFABtBm7tMt5lsL3HqlQTG"><strong data-page-node-id="98CPQD8KBNakcMGjrCZbs3">宏体在定义点展开</strong>：只能引用比它更早定义的宏 ⇒ 引用关系必然无环，<strong data-page-node-id="ay66fSqM7q8dBke2zfZSQV">不存在无限展开</strong>，也不需要展开深度上限；</li>
+      <li data-page-node-id="DbNq66ncBeY2d9dkGbnEGm"><strong data-page-node-id="auqUCDYOP5MJPozPF9lLE5">纯 AST 替换</strong>（非文本替换）：无运算符优先级陷阱、无 token 拼接问题；</li>
+      <li data-page-node-id="jbbaIrR3sO3Fb8KMA14kFR">宏名不能与函数 / async fn / 结构体 / 类 / 枚举重名，宏之间也不能重名；</li>
+      <li data-page-node-id="3CPvUGwqp7st0EHdd1LDGi">实参个数必须与形参个数一致；</li>
+      <li data-page-node-id="p7gLTAZ5TmOXEoyXRSQMiM">表达式宏体内禁用 <code class="inline" data-page-node-id="ScwTsFqkTVyTmsdszEKqSA">++</code> / <code class="inline" data-page-node-id="6piukGxYRf3BVWOKvyQiVI">--</code> 与 lambda（会改变实参的求值作用域）；形参不能作为被调用的函数名（宏是语法替换，不支持高阶）；</li>
+      <li data-page-node-id="NmGYRZAfHyjvC5DZnk8G5b">语句宏展开为<strong data-page-node-id="2mKAX4r06ngXq0ZEP8IngP">独立作用域块</strong>，体内声明的变量不会泄漏到调用处；体内禁止 <code class="inline" data-page-node-id="57i5swyvZH2AJnKVntnMPW">return</code> / <code class="inline" data-page-node-id="7VAKSre0DWRcUCrUhXe7kg">goto</code> / 标签 / 嵌套 macro；<code class="inline" data-page-node-id="7iqlma93AiKpi70DXetP0r">break</code> / <code class="inline" data-page-node-id="mskmaM1li0hR9mV7ZOkool">continue</code> 仅限宏体自身的循环；</li>
+      <li data-page-node-id="jIXYLnNrkxc5ULLLXRBgQr">形参可用作简单赋值目标（<code class="inline" data-page-node-id="bnUnBZTRWX9XVOcoIKkTRk">x = ...</code> / <code class="inline" data-page-node-id="PFx1VrjIRtG0quwpQVPG6c">x += ...</code> / <code class="inline" data-page-node-id="uPJtRC2rgevDvPP8s2OyRy">int x = ...</code>），此时对应实参必须是裸变量名；不能用作循环变量、catch 变量、解构目标或类型名。</li>
+    </ul>
+    <p data-page-node-id="ooPEg1G5RsZrHE2JerEhAn">与函数的分工：需要返回值、递归、一等值（传参 / 存变量）时用 <code class="inline" data-page-node-id="VUgtHyvLHfZv6QDudDa1Pd">fn</code>；只想去掉一层样板写法时用宏。排查宏报错：<code class="inline" data-page-node-id="045y5ZvtwCE1j6lJsrNMmU">hone explain H106</code>。</p>
+
+  </section>
+<section id="fn" data-page-node-id="gZ4jfYCnLYFPrWn0N35411">
+    <h2 data-page-node-id="g3JDLIfRi1cd66ZptJNk3A"><span class="hash" data-page-node-id="BQZtVgC1bCiJjyK23MIl3A">#</span>6. 函数</h2>
+<pre data-page-node-id="w582s8ldtunvfcGHNmwr44"><code data-page-node-id="TGY9BsxZ7tU63e2yoJ9Aa0"><span class="k" data-page-node-id="rnYID2XnpKsdABMLSDIApr">fn</span> <span class="f" data-page-node-id="2LIh6W4YIXkmOnlWrk6L5V">add</span>(a : <span class="k" data-page-node-id="BBfLKDEQuE7DexeME1a8PB">int</span>, b : <span class="k" data-page-node-id="OS4i0zA2H6ZjemJ4wBDQSG">int</span>) -&gt; <span class="k" data-page-node-id="rk2Mb2Fi7lKEbn9dOmtIKT">int</span> {
+    <span class="k" data-page-node-id="Rx05k7U0AqNux52tPQGMrN">return</span> a + b;
+}
+
+<span class="c" data-page-node-id="LrAUL1AgfAyXbhxtCjsux0">// 参数类型可由调用上下文推导（推荐复杂场景显式声明）</span>
+<span class="k" data-page-node-id="rsSQvtQWW1fqa9JNqPrN3N">fn</span> <span class="f" data-page-node-id="KJNajwrhSmtGBBjSuCvC58">greet</span>(name) {
+    <span class="f" data-page-node-id="9naLITOEcIBflKZOCoyHDE">print</span>(<span class="s" data-page-node-id="X6OkwpDNEkAUsmb4SFXxmi">"你好, "</span> + name);
+}</code></pre>
+    <ul data-page-node-id="ZKKiDFyox1avPrTvDEqz1Y">
+      <li data-page-node-id="TkXnndUGz90M6Hd3exTGhJ">函数返回类型由 return 推导，也可用 <code data-page-node-id="6fE4S2GOH4r5Mvt1tWYekb">fn f() -&gt; type</code> 声明</li>
+      <li data-page-node-id="BNcGYjNgEhfV6LLZK5vC8x">无返回值时调用作为表达式得到 null 占位</li>
+      <li data-page-node-id="oyvqTIvwlrD07Cj6dlJfIB">所有函数扁平化存在于全局符号表（不支持 <code data-page-node-id="yXs7BuqHfIfiwPYsABGUiH">::</code> 路径）</li>
+    </ul>
+
+    <h3 data-page-node-id="SXhMrQsCjN4uvjU9wmwK1P">泛型函数</h3>
+    <p data-page-node-id="6fCDSU5wpgyjSkbm0JlkXd">在函数名后、参数列表前用 <code class="inline" data-page-node-id="oUDHWrIWcU0QciCOBgYkhS">[T, U]</code> 声明类型参数，参数与返回类型注解可引用
+      （<code class="inline" data-page-node-id="WDAJ78bHfwwDxO8ADuZDKv">x: T</code>、<code class="inline" data-page-node-id="jWLewQksHqtgFmdAk5kN8G">-&gt; T</code>）。调用时按实参自动推导，同一泛型函数
+      可以不同类型多次调用、互不锁定；<strong data-page-node-id="SJ1NFXU5vBoVTVcfG6epIM">编译期擦除</strong>——运行期与普通函数零差异，无运行时开销、不产生重复代码。</p>
+<pre data-page-node-id="QKGXpJMubphKeArqy730so"><code data-page-node-id="ZHdSO1TE3ycLO5eZd4IuVe"><span class="k" data-page-node-id="ECjiByCBG945MhT3AwAalf">fn</span> <span class="f" data-page-node-id="pZVPltbCU8lJ4rEWCX9TAT">identity</span>[<span class="k" data-page-node-id="RgOMW2BNJpZYkCgyrnZskP">T</span>](x: <span class="k" data-page-node-id="CktuHVGWgJ4hyDCoGd5QYk">T</span>) -&gt; <span class="k" data-page-node-id="NfAxuCDTjSAnDTlKukPuFT">T</span> {
+    <span class="k" data-page-node-id="0BlCBXQnfTcVVo3J6QBjZz">return</span> x;
+}
+<span class="f" data-page-node-id="maOt0NIY5bPnkZ6xxj82iL">print</span>(<span class="f" data-page-node-id="9QJwLzzHWqMvJPxkNq219O">identity</span>(<span class="n" data-page-node-id="QcZTMWdNTeIhctHLc9YKoQ">42</span>));          <span class="c" data-page-node-id="XUg9Rk0dtSyEbO27xExeXd">// 42（T=int）</span>
+<span class="f" data-page-node-id="J28CAhLPKkhOIOtcWVQNlH">print</span>(<span class="f" data-page-node-id="FvmvdRNOqvC9BM2M36Egiw">identity</span>(<span class="s" data-page-node-id="OFCIKMCJN7MojXPhgcB3FX">"hello"</span>));     <span class="c" data-page-node-id="66McyH9ImFiEJGxdzHmtEJ">// hello（T=str）</span>
+
+<span class="k" data-page-node-id="GmISG1oc6HFsDfGQZLks5L">fn</span> <span class="f" data-page-node-id="BW6GodNr9dyXdlKOicShsM">swap</span>[<span class="k" data-page-node-id="T351eGBxTsE9fB0hds9kRC">A</span>, <span class="k" data-page-node-id="zZeJDzLwoPzwrd6lqA9biU">B</span>](a: <span class="k" data-page-node-id="irlbFIBQZOHHPat61W9OHr">A</span>, b: <span class="k" data-page-node-id="XpH1DKa2n0HHlVTYdD2IH6">B</span>) -&gt; <span class="k" data-page-node-id="HvORlaxHHpCMBuBG6N8b44">B</span> {
+    <span class="k" data-page-node-id="Yr4OA68D7rniXziUZSvPrE">return</span> b;
+}
+<span class="f" data-page-node-id="BSEeBSbk7WMkLK1BYFcQCu">print</span>(<span class="f" data-page-node-id="Ou17GWysUip5di7XkEcvPc">swap</span>(<span class="n" data-page-node-id="2tCsOHv8XSLbW4J7VQzfwd">1</span>, <span class="s" data-page-node-id="ILIu7QgGiD9jqknfchRvvR">"two"</span>));        <span class="c" data-page-node-id="xi1W50ABM7jEW7SP4yuFFz">// two（A=int, B=str）</span>
+
+<span class="k" data-page-node-id="hUva6A7IoMwfUPAXe5wyrk">fn</span> <span class="f" data-page-node-id="1dRLXGmECT9UERRBhcub6r">pick</span>[<span class="k" data-page-node-id="RyVXZlMHxX7EHOoP9iZAJj">T</span>](a: <span class="k" data-page-node-id="ZsSWJ75zUJ8PeAE6Gr87ss">T</span>, b: <span class="k" data-page-node-id="CElUnt80z29EmGHgAhryBL">T</span>, want_first: <span class="k" data-page-node-id="ARwyQDnvyApiyx9xfX4jnk">bool</span>) -&gt; <span class="k" data-page-node-id="FjawD8T1SrflZbpQvbMks0">T</span> {
+    <span class="k" data-page-node-id="I4es8z9n7BCDhlmiR6oOQM">if</span> (want_first) {
+        <span class="k" data-page-node-id="jMj8TOzdA3PWEtabd00nQp">return</span> a;
+    }
+    <span class="k" data-page-node-id="Rh8WqjhBySADvBCoHaqCAi">return</span> b;
+}
+<span class="f" data-page-node-id="HrOGXCts8hASzQx79murxg">print</span>(<span class="f" data-page-node-id="wyd4lpWmG8BtetH21vKQSJ">pick</span>(<span class="s" data-page-node-id="nUg2eycbwhK0JDFNO2qxIy">"a"</span>, <span class="s" data-page-node-id="9oWa6bDKgzErbPSGLFb7Yr">"b"</span>, <span class="k" data-page-node-id="OYf6R6BL4be8wEyR9LTocb">true</span>)); <span class="c" data-page-node-id="qpe6VXCBwAtBc1nhkP3fgy">// a（T=str）</span>
+<span class="f" data-page-node-id="s9tl7byBXWTXQlsTiUx6jM">print</span>(<span class="f" data-page-node-id="vnHZpmArX6wkezjs1KG8lz">pick</span>(<span class="n" data-page-node-id="gCtkzwhUIztN9UyBHv5JNs">10</span>, <span class="n" data-page-node-id="3FcJz60oPwBfXYvKDYBufz">20</span>, <span class="k" data-page-node-id="isfQkmHD8acZhXE1sFYQso">false</span>));  <span class="c" data-page-node-id="jznKrXGO3MtGhfko91VgYU">// 20（T=int）</span></code></pre>
+    <p data-page-node-id="e4BrllGenyVmZHpqYrva5r">约束：函数名全局唯一（泛型与普通同名仍报 already defined）；未声明的类型参数报 H002；
+      重复类型参数报 H005；同一类型参数处调用点必须传同型（否则 H001）。
+      类方法同样支持泛型（class 中 <code class="inline" data-page-node-id="lReUrYkAEgbDte9oLnlETq">fn 方法[T](...)</code>）。
+      完整示例见 <code class="inline" data-page-node-id="RVBLQvO0BpkZeZjXwK1hOA">examples/generic_test.hn</code>。</p>
+
+    <h3 data-page-node-id="3KOhpECsRGBmTYwphw9pWA">默认参数</h3>
+    <p data-page-node-id="5BrGpVwFNboBwMNEo3e6Na"><code class="inline" data-page-node-id="qU9I6UHa3575ym39rvJaxk">fn f(a, b = 10)</code>：调用时省略的<strong data-page-node-id="6B2dHXsnOeFIiRiQ8GAcgT">尾部实参</strong>取默认值。
+      必选参数（无默认值）必须位于默认参数之前（否则报错）；默认表达式在<strong data-page-node-id="daIzb6a3H3fOEMDu31xyxg">调用时求值</strong>，
+      可引用其前面的参数（如 <code class="inline" data-page-node-id="CByBqemkBys6SCq2cbuPob">fn f(a, b = a * 2)</code>）。参数个数检查按
+      「必选个数 ~ 总个数」区间；lambda 参数同样支持默认值；<code class="inline" data-page-node-id="50ooxiiNyBFJxWGncIxIld">hone build --dll</code> 暂不支持。</p>
+<pre data-page-node-id="dbYEiWWhCOjGXUFiP1hfr7"><code data-page-node-id="cpvzepJf4eQURrXKQtigK2"><span class="k" data-page-node-id="MMeXLtBtU0lHibFZr74BZG">fn</span> <span class="f" data-page-node-id="O7EHsGFNFBYT02M3DRCuHu">greet</span>(name, greeting = <span class="s" data-page-node-id="MXBwwSiUiVJBkJBo1DDyOy">"Hello"</span>) {
+    <span class="k" data-page-node-id="fzIH2YCuYrh4CjnJkA3ceu">return</span> greeting + <span class="s" data-page-node-id="EFOFbBILxGVKgtQsiCBegx">", "</span> + name + <span class="s" data-page-node-id="VC0laznxNhHwhcAX1eS8ae">"!"</span>;
+}
+<span class="f" data-page-node-id="jIoNIXtgCEtgCp5sWsx7Vc">print</span>(<span class="f" data-page-node-id="UBb8fsrLINcG0daPhSJWiN">greet</span>(<span class="s" data-page-node-id="uC9Ddkbc6EQ5gAJtEEZeWq">"Hone"</span>));           <span class="c" data-page-node-id="Po8poWRlbRmKnlN8dszD3T">// Hello, Hone!</span>
+<span class="f" data-page-node-id="CdXlNb7B5711hKhcJs7Vje">print</span>(<span class="f" data-page-node-id="CNcECUDxoOeoEsoxxT3vWp">greet</span>(<span class="s" data-page-node-id="o1BEa9PntJVFjjEWOqL4D5">"Hone"</span>, <span class="s" data-page-node-id="wbVxhhuHXAAAq7l8KfDDi9">"Hi"</span>));     <span class="c" data-page-node-id="hVioTwNU3X4HxxEFqSomFg">// Hi, Hone!</span>
+
+<span class="k" data-page-node-id="dodT6Lpqay5NWk60Cnx0ya">fn</span> <span class="f" data-page-node-id="Qn26jD2Qj7ogLAGM3FjG1v">repeat_char</span>(ch, times = <span class="n" data-page-node-id="YNjaTXGXXLdYfNCbDZynLy">3</span>, sep = <span class="s" data-page-node-id="pJaF8wHq97RvcIJi5RzYqp">"-"</span>) {
+    s = <span class="s" data-page-node-id="zkyPcyTyhbO3P5eTR99Nt0">""</span>;
+    <span class="k" data-page-node-id="042DRnbLJp6AVqC8BpwnWG">for</span> (i = <span class="n" data-page-node-id="ZHRtxGOQM3frWYUTf5SbOw">0</span>; i &lt; times; i = i + <span class="n" data-page-node-id="ZcS0PEAnscePDToL2uAdYI">1</span>) {
+        s = s + ch;
+        <span class="k" data-page-node-id="KfmYfUEdVY13jAKg7aOpOH">if</span> (i &lt; times - <span class="n" data-page-node-id="6ShQ9RALDuleclQzBMGbhK">1</span>) { s = s + sep; }
+    }
+    <span class="k" data-page-node-id="7hnMZqOjE8FMyFZ0YlMg8R">return</span> s;
+}
+<span class="f" data-page-node-id="iGrn1ecbyGPK9tbCh85bMC">print</span>(<span class="f" data-page-node-id="D2jdTve9nRjlYrRurov6Gi">repeat_char</span>(<span class="s" data-page-node-id="ZDuFJJvgF1i7Ohyy78nWDI">"*"</span>));        <span class="c" data-page-node-id="qh4OERag7sJdPNHVnw64xH">// *-*-*</span>
+<span class="f" data-page-node-id="EqgN0DMyuBTBr33BtenBCU">print</span>(<span class="f" data-page-node-id="0mBEmHznrTJ7GVDCgt505I">repeat_char</span>(<span class="s" data-page-node-id="rxhoL4Tu3W0iIn5jBaa1Yb">"*"</span>, <span class="n" data-page-node-id="A8h6DvJAptUJ7Hr4TBU5pS">2</span>));     <span class="c" data-page-node-id="ptEmtzG6xG4Knd5nMK5Yo5">// *-*</span></code></pre>
+
+    <h3 data-page-node-id="ycN2sd2UkHBsCQ6mVNwCCy">匿名函数（lambda）</h3>
+    <p data-page-node-id="pRc5bQcHeK8IkPw9vjW3b4"><code class="inline" data-page-node-id="ngKiOfYCd1xXHSgmplzTxo">fn(x) { ... }</code> 是一等值：可赋值给变量、作为参数传递（高阶函数）、
+      作为返回值返回（闭包工厂）。<strong data-page-node-id="UBUhhdbtuUbNEYisRCufPW">创建时按值捕获当前作用域可见的变量（闭包）</strong>，
+      调用时经变量名动态解析；无函数名、无泛型、无 <code class="inline" data-page-node-id="xPDNrkHdkDUrerq3EZFn34">-&gt;</code> 返回注解，返回类型动态。
+      <code class="inline" data-page-node-id="fhC5lZLWtnN0Z4buYqaShI">break</code> / <code class="inline" data-page-node-id="t7FQZRJZdqlA23CLNAxrmG">continue</code> / <code class="inline" data-page-node-id="uasYMVlN1ElvUbwzySpcuL">return</code> 只能出现在 lambda 自身函数体内。</p>
+<pre data-page-node-id="GnMqpU1P01VRlaFUogLtie"><code data-page-node-id="4caOsTshCNyo000wvv0wcY">double = <span class="k" data-page-node-id="JW4edKLn1QL3wbuBLVcynZ">fn</span>(x) {
+    <span class="k" data-page-node-id="9auHMC1o04zNVDhrxBGb6B">return</span> x * <span class="n" data-page-node-id="I5GgNTRRToPEvAQCxfRNOP">2</span>;
+};
+<span class="f" data-page-node-id="Ijb30E4KbnR8ENTxuRWfIR">print</span>(double(<span class="n" data-page-node-id="GnggiuoYa4PrtEBEFb6XLY">21</span>));     <span class="c" data-page-node-id="RBty2yklGFQeTv5hOeW5qw">// 42</span>
+
+base = <span class="n" data-page-node-id="UjuHRx2g8dTX5SK2N9Hfdn">10</span>;
+adder = <span class="k" data-page-node-id="os8nWF2ahnXpAs9wbMMzSw">fn</span>(y) {
+    <span class="k" data-page-node-id="lKmQX0AyPgSgQbabeyAN61">return</span> base + y;   <span class="c" data-page-node-id="um6lcCFmgR1V2pNIuT5fTl">// 捕获外围变量 base（按值）</span>
+};
+<span class="f" data-page-node-id="WyF7oCZTHpzNzej3HGxVT6">print</span>(adder(<span class="n" data-page-node-id="eVABFQCD0OmL89Kn8i3xmT">5</span>));       <span class="c" data-page-node-id="AHMNCBo1yktehUv8HOEA3m">// 15</span>
+
+<span class="k" data-page-node-id="EcCCP0S7r72fKFZGEM0lKu">fn</span> <span class="f" data-page-node-id="82dFYQFpG7WXCrb776VHmd">apply</span>(f, v) {
+    <span class="k" data-page-node-id="8iw7lGgnqqz11cpi1KBkXr">return</span> f(v);       <span class="c" data-page-node-id="NkSEpDwShPR2fACWueamIe">// f 为 lambda 参数，动态调用</span>
+}
+<span class="f" data-page-node-id="Rr6APS2Gzdr4DUEN4QCc6A">print</span>(<span class="f" data-page-node-id="o6O24piDQcf0dJhCICtyio">apply</span>(<span class="k" data-page-node-id="4NTC5aBWVOshQrbDZ2CzjH">fn</span>(n: <span class="k" data-page-node-id="eVt3ILD9JgmrA7m9ywoC8e">int</span>) { <span class="k" data-page-node-id="q8QlNeLzUtCEYxGSvHyid3">return</span> n * n; }, <span class="n" data-page-node-id="wSp2qppJtSJuNyCxkpzyyO">6</span>));   <span class="c" data-page-node-id="KfEOJ2AhPCHd9ejUFhlLL0">// 36</span>
+
+<span class="k" data-page-node-id="X3izU4p1upLpCvOOGUkIge">fn</span> <span class="f" data-page-node-id="thRjqdFa0oDZ9FBAXJap7e">make_adder</span>(offset) {
+    <span class="k" data-page-node-id="gIFeSwJ8gT1NL7B2FOe297">return</span> <span class="k" data-page-node-id="c0VvzpFaDwi5UF8Mj25YZb">fn</span>(z) { <span class="k" data-page-node-id="pYGCCnlJ9UR7FAkFR8FBZw">return</span> z + offset; };   <span class="c" data-page-node-id="YX7wufaB8R3gI9T1M0zHAL">// 返回闭包</span>
+}
+add5 = <span class="f" data-page-node-id="Ddd4IEkU5w96uvrUpo5iSW">make_adder</span>(<span class="n" data-page-node-id="oJQ07c78EdcbsPzbvqTKhp">5</span>);
+<span class="f" data-page-node-id="KJW4Jk8PhMGlvgwP2lvas7">print</span>(add5(<span class="n" data-page-node-id="09Hkp0rqjvJdwjGNhEAMyC">10</span>));       <span class="c" data-page-node-id="4ByUDZPoH7FvKntKX4a6E7">// 15</span></code></pre>
+  </section>
+<section id="collections" data-page-node-id="HeheCOoxfeFet8DpDFRAnI">
+    <h2 data-page-node-id="rziSlwzZJQc1qjNb9Bq9xU"><span class="hash" data-page-node-id="TLeVy3gyqeI5kYQMt3dIY5">#</span>7. 集合与字符串</h2>
+    <p data-page-node-id="a8nvrViP9bwQiJuVuAQmNj">列表 <code data-page-node-id="oM6mYvzwWJjxRmUXytAaEx">[a, b, c]</code> 与字典 <code data-page-node-id="Io5OX6EHxo0t2WvHASw192">{"k": v}</code> 为动态集合类型：元素类型不锁定、可混合，
+      变量本身仍遵循类型锁定规则（不能把列表赋给已锁定的标量变量）。</p>
+<pre data-page-node-id="Vje2VV6HCPYLI1wuxTIGpw"><code data-page-node-id="5cc4EWW8kIuu2Mz0k1KKQk">nums = [<span class="n" data-page-node-id="ENceCFnCi4yCAkxzCNPMRT">1</span>, <span class="s" data-page-node-id="Es4O0Xl2CtbXHJ2xlbWEvC">"a"</span>, <span class="k" data-page-node-id="Sqr0rTKGkgNrHoUaXsWHdx">true</span>];          <span class="c" data-page-node-id="3PUySrjx47BDPnqGDjy8qv">// 混合元素列表</span>
+user = {<span class="s" data-page-node-id="K1HLRHQFMggH8FhkQnImf1">"name"</span>: <span class="s" data-page-node-id="mE3kECYQb5dFbzAMVeNhXx">"hone"</span>, <span class="s" data-page-node-id="NELROyGoXgF8cUPTFSYdot">"ver"</span>: <span class="n" data-page-node-id="XuyhbHPVtcfKK7wcEA2kEa">1</span>};   <span class="c" data-page-node-id="onvpYBT4U5sMjxkhdp1jPW">// 字符串键 → 任意值</span>
+
+<span class="f" data-page-node-id="D30rDq9H12ITEkeMO201Z9">print</span>(<span class="f" data-page-node-id="Bg4qI7UY1EoiW1ANnVrPEU">len</span>(nums));               <span class="c" data-page-node-id="HGdZInQabtGzJKCsBboYDd">// 3（元素个数）</span>
+<span class="f" data-page-node-id="MnPTN2ymWnUw9wvNmi01fk">print</span>(<span class="f" data-page-node-id="ZWPWfPyIEfEWxj2BOSSAjF">to_str</span>(user));            <span class="c" data-page-node-id="DQE3NdzSJQSbz6atLlSIya">// {name: hone, ver: 1}</span>
+
+l = <span class="f" data-page-node-id="7zKywRsLF2CTUFEHgRQFCf">append</span>(nums, <span class="s" data-page-node-id="0xhK9vMKty3V5SxgtHSlgw">"x"</span>);          <span class="c" data-page-node-id="7hCkLyudEErMk27FBBbQwh">// [1, a, true, x]（返回新列表）</span>
+<span class="f" data-page-node-id="zzKzl26F464r4k7zJPWRZC">print</span>(<span class="f" data-page-node-id="NoxUKuXFoPaoEjawRkkJoM">contains</span>(l, <span class="s" data-page-node-id="NT2DuauVRvseIHbN6BHetn">"a"</span>));       <span class="c" data-page-node-id="PZyUOaPPe3BSGCpM2o4D6h">// true</span>
+<span class="f" data-page-node-id="KvvnzEo8XDQBkUVrC3qdzM">print</span>(<span class="f" data-page-node-id="kPX7TScPDwLRHx1r5fDgQz">index_of</span>(l, <span class="s" data-page-node-id="xqoAj3Ox3RZqdANuk286Ad">"x"</span>));       <span class="c" data-page-node-id="oO1oTVmdCzuMT05C2Dqsyq">// 3（找不到返回 -1）</span>
+
+<span class="f" data-page-node-id="3DCSlyIBfBYt6JoB7zCUnE">print</span>(<span class="f" data-page-node-id="FOL9ZyJwwi70D1Ry998b1b">has_key</span>(user, <span class="s" data-page-node-id="8W9EvrfUC8kQITT8KRcM4e">"name"</span>));  <span class="c" data-page-node-id="CBxEYrGWdFKwWgWoq1xAyM">// true</span>
+<span class="f" data-page-node-id="8W2glHV2cFzskRrSHcgmXw">print</span>(<span class="f" data-page-node-id="oB3ESqYKvCNXX16LLyEkvf">to_str</span>(<span class="f" data-page-node-id="K2DnruClLgAcHzDg4It2Q2">keys</span>(user)));      <span class="c" data-page-node-id="2sXXzRHStwzKVFRLe2kmIy">// [name, ver]</span>
+<span class="f" data-page-node-id="ZGoFn7top1e9HsOlmL7tce">print</span>(<span class="f" data-page-node-id="z42kT7DURGwaiUeO5Y7Lqt">to_str</span>(<span class="f" data-page-node-id="sKxfYbwRadHJ0kCbkXslwg">values</span>(user)));    <span class="c" data-page-node-id="FXwAoD1NZwKdTpCx0rzXz7">// [hone, 1]</span></code></pre>
+    <p data-page-node-id="PSAdF0qtAoCEpTcDKXrDis"><strong data-page-node-id="6DHuDB4kgDcZkFqJQGEg6V">f-string 字符串插值</strong>：<code data-page-node-id="ojWz8SxbEqcDC8hSrYPVcq">f"..."</code> 内 <code data-page-node-id="YDiD0ebHFEqI0P8gdjBKNk">{expr}</code> 嵌入任意表达式，
+      <code data-page-node-id="Vt3TB3bPHZ48SSvYesKbB0">{{</code> / <code data-page-node-id="YsKZr7ArX2js25WrroCuGZ">}}</code> 转义字面大括号：</p>
+<pre data-page-node-id="LcJ81dMxkKYUOtoXjiumh7"><code data-page-node-id="MG5gT3sw730D9aeDAiOf2Z">name = <span class="s" data-page-node-id="lV0dmeW9RRJwFflc4FjL0B">"hone"</span>;
+<span class="f" data-page-node-id="fdwgmpG6SAcWyUQFC7BkM1">print</span>(<span class="s" data-page-node-id="JZwjYdJIdjun4Xnigj4MAi">f"你好, {name}! sum = {1 + 2}"</span>);   <span class="c" data-page-node-id="4Rvdwq3OgvExTSf71Z2FtP">// 你好, hone! sum = 3</span>
+<span class="f" data-page-node-id="poMPUO0eHjxqgYuSqaQFSA">print</span>(<span class="s" data-page-node-id="LSjQg5DvdNscsJf46M6pjp">f"{{{<span class="n" data-page-node-id="nLZ8ctrpYFOw71b0G8IFeK">1</span> + <span class="n" data-page-node-id="QMdSK5abYZ3i4GWAZrIbWh">1</span>}}}"</span>);                 <span class="c" data-page-node-id="VB8896U63Y0fHFd2IXGDQ1">// 字面大括号 + 表达式</span></code></pre>
+    <p data-page-node-id="kNLcfwgHV3dmmvSo7SaMGB"><strong data-page-node-id="xZEFgahAg1mpuuK2Ep0197">三引号原始字符串</strong>：<code data-page-node-id="4ymhwh61eY0fuhN9jQKnBG">"""..."""</code> 多行字符串，内容<strong data-page-node-id="xn0BSKS1n6keuv4yZ9wZNc">不做转义处理</strong>
+      （<code data-page-node-id="ReKIKAsQi2hUwGXOOw0cvc">\n</code>、<code data-page-node-id="eSCwdC2u6i8znyETRnsDAO">\t</code> 等原样保留），跨行书写、保留换行与缩进；与普通字符串同值
+      （支持 len、拼接、比较等）：</p>
+<pre data-page-node-id="mhA2xsWsCrUw7lGVVlWTXW"><code data-page-node-id="GuDEqOEVb3sQgTZmVbPCcz">text = <span class="s" data-page-node-id="XVoIphXOXM8U1Lg9TMun8A">"""line1
+line2
+    indented"""</span>;
+<span class="f" data-page-node-id="DSbLTHZI02drUoGrUAXMgg">print</span>(text);       <span class="c" data-page-node-id="owRwY8Hw4MPCByo73RYRSh">// line1 换行 line2 换行 "    indented"</span>
+<span class="f" data-page-node-id="1YnfHBK2D9zDk7CNXo61an">print</span>(<span class="f" data-page-node-id="qCsYppS8ZH6obUDtjV7tHO">len</span>(text));  <span class="c" data-page-node-id="wrKgNU44FkNFjg9q0dZAAF">// 24</span></code></pre>
+    <p data-page-node-id="hyhuGLitH5KwlhOfi1wAYG"><strong data-page-node-id="Qj2J4DeDtGGXIjxJJV0c2x">类型判断</strong>：<code data-page-node-id="y3lkMGfNhYLrCPArkR7A5A">is_int</code> <code data-page-node-id="K9Z9w2I8F7VtRVC0pP7XSV">is_float</code> <code data-page-node-id="jqrzkxd50lQj8RsYnv2iVn">is_str</code> <code data-page-node-id="OqtlhhVPeNvGd1poRUY4hE">is_bool</code>
+      <code data-page-node-id="D0eJYuKohVmN6Aa1v62I52">is_list</code> <code data-page-node-id="JcKrGO1lhdLi3T4OXT5drX">is_dict</code> <code data-page-node-id="ytKD9fSTyqvPUF4R9pPFCI">is_null</code>，判断运行期值类型，常用于分支处理混合集合。</p>
+  </section>
+<section id="lang-ext" data-page-node-id="LCwlTLRF9pCtUXgmQ6y02Q">
+    <h2 data-page-node-id="VxUoLa9xpf54NDlo20jnHo"><span class="hash" data-page-node-id="5l0uGrIUqzs9GyU2DOjRAE">#</span>7.5 结构体 · 模式匹配 · 管道</h2>
+    <p data-page-node-id="IChYIhxusPNBljiC2k4Flt"><strong data-page-node-id="EtloTVQnWmsaTk0Z0fdlHx">struct 结构体</strong>：声明确定的数据形态（字段名与类型固定），实例用 dict 表示、字段访问 <code data-page-node-id="iYefDFiAAZkmEwp5zc64NZ">p.字段</code>；
+      构造时按字段顺序传参，检查阶段校验字段个数与类型（H001/H011）：</p>
+<pre data-page-node-id="E4wgFm9wjVhrtZqvDqFKNU"><code data-page-node-id="0KWDvpIRp9s883BbslsSWx"><span class="k" data-page-node-id="hanbB9AxDOoD43GYngflQR">struct</span> <span class="f" data-page-node-id="L51WlRb6yO9xx4CG7RblGF">Point</span> { <span class="k">readonly</span> x: <span class="k" data-page-node-id="IVIq1E6Iccx14hyv5jsh7B">int</span>, y: <span class="k" data-page-node-id="YbfiRFeVeZYD3H0lhHyxjx">float</span> };
+p = <span class="f" data-page-node-id="lO2eEZOYp3XMHygftESMjx">Point</span>(<span class="n" data-page-node-id="VU4NUoz59o6zweZWhcK3xh">3</span>, <span class="n" data-page-node-id="ilBvFCYUrad9mm8uZMG2Nl">2.5</span>);
+<span class="f" data-page-node-id="NWMpJQHjCDupORJUFBe2cK">print</span>(p.x);   <span class="c" data-page-node-id="UpwHnijCjvTGOW24RD41CN">// 3（只读字段，赋值报错）</span>
+p.y = <span class="n">9</span>;                <span class="c">// 普通字段可写</span>
+<span class="f" data-page-node-id="ps4LKjmcIbpsuNZhCKMy26">print</span>(p.y);   <span class="c" data-page-node-id="UFCLEIzYX5tyeLD8naveaR">// 9</span></code></pre>
+    <p><strong>只读字段</strong>：<code>readonly</code> 修饰的字段初始化后禁止再赋值（静态检查 + 运行时兜底）；
+      两种写法等价：<code>readonly f: int</code> 与 <code>f: readonly int</code>。type 实例类（§7.11）同样支持只读字段。</p>
+    <p data-page-node-id="TTXTTct5fAlk7T8OSpg4vf"><strong data-page-node-id="sWMOKly6Lyr0sZVoF7QpJO">match 模式匹配</strong>：多分支表达式的简洁写法，模式支持字面量与 <code data-page-node-id="RLCsZLskT6o59tsQRGqLP4">_</code> 通配符（放最后、只能一次），
+      返回匹配分支的值，全部不匹配时运行时报错（建议补 <code data-page-node-id="XNEJUnPxPBPq2u2HnFjM2I">_</code> 兜底）：</p>
+<pre data-page-node-id="crZeVC7RY9IFS9FS0MNovF"><code data-page-node-id="LFYH6QugufQltJUEWHUZtn">s = <span class="k" data-page-node-id="yDseZZKAGK8ERjiJeCBIBL">match</span> <span class="n" data-page-node-id="hPKk87R1Pez7tJFelNp7uN">2</span> {
+    <span class="n" data-page-node-id="FlCJBAyfLe8Zj3iTArpmhr">1</span> =&gt; <span class="s" data-page-node-id="Omb9KCtU5gCLcArMunEfO7">"one"</span>,
+    <span class="n" data-page-node-id="QEgM9TlrmEHUdZGLtVp3zi">2</span> =&gt; <span class="s" data-page-node-id="rzCYNiXwWf9H5Um6CNARvQ">"two"</span>,
+    _ =&gt; <span class="s" data-page-node-id="w5U1I5CQltDq9AI0ZdNYFc">"other"</span>,
+};
+<span class="f" data-page-node-id="fThKYIjjRYHSX5iEP4ruMr">print</span>(s);   <span class="c" data-page-node-id="gQCADZ90ukQodsjpsEO0mC">// two</span></code></pre>
+    <p data-page-node-id="qvvMBof8krCbH7Zuz0ZGbd"><strong data-page-node-id="WREVLmSl1QCPB7YDojxnsb">管道操作符 <code data-page-node-id="knWd3HGPnEk2PCnuwErpgZ">|&gt;</code></strong>：数据流向更直观。<code data-page-node-id="mEjqLuwLBZt2JC1KPqI82q">x |&gt; f</code> 等价 <code data-page-node-id="jN4mMJ7giJh8jtcbM6ZOqN">f(x)</code>，
+      <code data-page-node-id="N4YUZ5JDWULn9TzbL9Cs4U">x |&gt; f(a, b)</code> 等价 <code data-page-node-id="2wgxsUlVv5xovlzS3ZoWKT">f(x, a, b)</code>，可链式（解析期转换为普通调用）：</p>
+<pre data-page-node-id="YA3YhXugrTotHNOEdMV0qI"><code data-page-node-id="BFXPjDxOlBppYo2BPo3eK8"><span class="f" data-page-node-id="fIttVBWO8Mbk1PQhfSPDX2">print</span>(<span class="s" data-page-node-id="LGtFZrIdqYC5G1aKFERMuv">"hello world"</span> |&gt; <span class="f" data-page-node-id="SS26tIYPXm9jrSo9El0t5k">len</span>);       <span class="c" data-page-node-id="FgHKQ2YCJtsJBLy6kBVTu1">// 11</span>
+<span class="f" data-page-node-id="0iM39zBGe1skC7UV0GCsB4">print</span>([<span class="n" data-page-node-id="Ese5sYwnR8SBBLbwgm8rvV">1</span>, <span class="n" data-page-node-id="y2jfT4ki6tkNm3jHzEyPk5">2</span>, <span class="n" data-page-node-id="4prgxF5f6BmRJNUjJeR7wT">3</span>] |&gt; <span class="f" data-page-node-id="IvUwaOhqeiCCFoORjrcuBB">len</span> |&gt; <span class="f" data-page-node-id="zlMspzx3JdxMDCCGzAaFbW">to_str</span>); <span class="c" data-page-node-id="az4lBfmbRvgr6npLuMaH1O">// "3"</span></code></pre>
+  </section>
+<section id="class" data-page-node-id="5wnCvIf0mwbaYfsbWAtkIZ">
+    <h2 data-page-node-id="uWd8dNpM1bIAWiPMlsUNxw"><span class="hash" data-page-node-id="XF2LxXqftNnlu4AI17C6KM">#</span>7.6 class 类（成员函数不进全局符号表）</h2>
+    <p data-page-node-id="oDjAz5vVfIjuSGHtLlEZZ9"><strong data-page-node-id="bslNRzdcZEQWAXK6nlV8qH">class 类</strong>：将一组相关函数组织成命名空间，通过 <code class="inline" data-page-node-id="7U2gIxduMKSLt251PryzuC">类名.方法(...)</code> 调用
+      （如 <code class="inline" data-page-node-id="XfgejXXWv9C6tYsBjfAOzT">Math.double(21)</code>）。关键特性：<strong data-page-node-id="x9gwy60EJzlzajWdJlef0J">成员函数不进入全局符号表</strong>——
+      不能用裸名调用（<code class="inline" data-page-node-id="vDUx7z2JPot2UnEBM0UsjG">double(21)</code> 报 H002），不污染全局命名空间，
+      同名全局函数可与类方法共存、互不影响；类内方法互相调用也要用限定名
+      （<code class="inline" data-page-node-id="fNT6bXFOFed0yij8Yb6fFq">return Math.fib(n - 1) + Math.fib(n - 2);</code>）。</p>
+<pre data-page-node-id="KZgpsTupzv7b4SwxGPFgAT"><code data-page-node-id="kDLAxNorQEGqsdL9bu8gA1"><span class="k" data-page-node-id="7FA6NkBg16FdCPKQAkBTcF">class</span> <span class="f" data-page-node-id="7Rcuie53HBLcmEKNyjCgNT">Math</span> {
+    <span class="k" data-page-node-id="BHft4FdbIqBO2LYXE2Un5B">fn</span> <span class="f" data-page-node-id="JFYFz6P31SsqW765RjfFsJ">double</span>(x) {
+        <span class="k" data-page-node-id="z9fnbvtzgjHfIlAzCENSx8">return</span> x * <span class="n" data-page-node-id="LddepdXjwEV4EOmk209vgI">2</span>;
+    }
+    <span class="k" data-page-node-id="MNHuuf8x4uid4SdSm5pFEu">fn</span> <span class="f" data-page-node-id="A0CQxMJvp5Xrc2Qcg1ijG4">fib</span>(n) {
+        <span class="k" data-page-node-id="kOqSVkiDr8QTZ53S8Yf0LG">if</span> (n &lt;= <span class="n" data-page-node-id="bQB1xsCi4gqPhhKK4cu1Wk">1</span>) {
+            <span class="k" data-page-node-id="lSNHtwJr3Ts0rxkvg3GbPD">return</span> n;
+        }
+        <span class="k" data-page-node-id="S4lWfZJuWYrnuqpoTPvnra">return</span> <span class="f" data-page-node-id="t6TGfI0cJBBsJ8OuxkuzMy">Math.fib</span>(n - <span class="n" data-page-node-id="Uyy7ydfSNxVr5iKc5lTEcm">1</span>) + <span class="f" data-page-node-id="jmApl3MyZKoAJAbmEIStgt">Math.fib</span>(n - <span class="n" data-page-node-id="KQ4IEsvWdfLCW8Kjxr9eQD">2</span>);
+    }
+    <span class="k" data-page-node-id="rePok4VXd1xn8UaolVouwt">fn</span> <span class="f" data-page-node-id="A49ujMbpZPqcPOAuQHrWxy">greet</span>(name) -&gt; <span class="k" data-page-node-id="g3RjLIgGxfqyBCrAtJmH8r">str</span> {
+        <span class="k" data-page-node-id="4e3xdY1FP6nVRRw7lC9Ruc">return</span> <span class="s" data-page-node-id="OonIB9vetE0UkYkci1ztmG">"Hello, "</span> + name;
+    }
+}
+
+<span class="f" data-page-node-id="UmeVAaBgvWX4PkkOZgrSZ1">print</span>(<span class="f" data-page-node-id="oWkO54Hfq1EquNw0qGFVNQ">Math.double</span>(<span class="n" data-page-node-id="EBsaup5Mmkp7A4bSpBYsya">21</span>));   <span class="c" data-page-node-id="kxEASOLcrcxU4NbsQCydmP">// 42</span>
+<span class="f" data-page-node-id="LJO7G9ljBXQXjes6vOQEyE">print</span>(<span class="f" data-page-node-id="rFjNIjOg0eHLZwz9DUdDu7">Math.fib</span>(<span class="n" data-page-node-id="NUzxfQbwW0JDl7l7HFd6YU">10</span>));      <span class="c" data-page-node-id="qdkzgafiVY2cLe4siI3wmU">// 55</span>
+<span class="f" data-page-node-id="VajG7yR2FlUGlDKwF7O8nZ">print</span>(<span class="f" data-page-node-id="obuMCNvTQIxly4x543Fk9E">Math.greet</span>(<span class="s" data-page-node-id="lSTAyO41P80THdFXo0ulP9">"hone"</span>)); <span class="c" data-page-node-id="lwZQMxCuybSsJh26wcKejM">// Hello, hone</span>
+
+<span class="k" data-page-node-id="myOICpGKCECdtxdR3sK5Ct">fn</span> <span class="f" data-page-node-id="qYkklqMuAxzcZkQBVnDWLy">double</span>(x) {            <span class="c" data-page-node-id="gIz15E0aIDUpEOUhT5T3A9">// 全局同名函数与类方法共存</span>
+    <span class="k" data-page-node-id="4A5PxLlwASuw2mJAuExh4Z">return</span> <span class="s" data-page-node-id="HWFUBJmKkq3WkNOVEGIFnF">"global: "</span> + <span class="f" data-page-node-id="2WjIgWzxhyzA0Awfk4qBzV">to_str</span>(x);
+}
+<span class="f" data-page-node-id="1JQG32iRKcBgXJZEgtvZOV">print</span>(<span class="f" data-page-node-id="d3STmv5K7ZfbgTIGkLTAA8">double</span>(<span class="n" data-page-node-id="H2B253tfzSXlptomQkcEtY">21</span>));        <span class="c" data-page-node-id="oDunCcJf7Z7BIjfn1eo1ls">// global: 21</span>
+<span class="f" data-page-node-id="dqX3aXBxF41bPZS0imXO9V">print</span>(<span class="f" data-page-node-id="c31vzB6xHnokmtBE4dZNVe">Math.double</span>(<span class="n" data-page-node-id="7ByHeDDUnODHSAwISXGqXS">21</span>));   <span class="c" data-page-node-id="DmTqvxDGbOZzHZWoHbJlIf">// 42（类方法不受影响）</span></code></pre>
+    <p data-page-node-id="oUFrowswHFuKE0i9URzUQ1">类方法支持参数、返回值（可写 <code class="inline" data-page-node-id="RYxIClHYg6u6GX30CPTCLJ">-&gt; type</code> 注解）、递归、return，与普通函数能力一致；
+      类名与 struct 名不能重复（报 H005）；结尾分号可选（class 是块结构，与 struct 不同）。
+      完整示例见 <code class="inline" data-page-node-id="8om6WR63yDBXDYg7vjYFf5">examples/class_test.hn</code>。</p>
+  </section>
+<section id="lang-new" data-page-node-id="QGl9byP2OeiEn78nXkTSvr">
+    <h2 data-page-node-id="jgFfZbsYzAL8hCE8RcdDtk"><span class="hash" data-page-node-id="j4871HhagutERxR3VVKlGS">#</span>7.7 多返回值 · 解构赋值 · 推导式 · 可选链</h2>
+    <p data-page-node-id="PBNiIwaX7N0sbdWb7A3zLZ"><strong data-page-node-id="XspRqynNB0cfVpvrZBYVwq">多返回值</strong>：<code class="inline" data-page-node-id="GCad5apIp5IxQzD6Xqo1xd">return a, b, ...;</code> 一个函数可一次返回多个值，
+      运行时打包为列表，由解构赋值接收；不解构时（<code class="inline" data-page-node-id="7RKzp3L02SmB1eEbeCWu5K">x = f();</code>）拿到打包后的列表。
+      仍支持单值 return 与空 return（返回 null）；<code class="inline" data-page-node-id="7kMxoBe0vp4dj786zeFi3Z">hone build --dll</code> 暂不支持：</p>
+<pre data-page-node-id="AsTFDjtq2o1ARGnXf0LJAH"><code data-page-node-id="CJ6707p3PmyHj8dAE46UAe"><span class="k" data-page-node-id="EQyuCNwfyPCC9NPiQb4TZO">fn</span> <span class="f" data-page-node-id="XsE9MP2CVdGjBuNqz64tbd">divmod</span>(a, b) {
+    <span class="k" data-page-node-id="S1u4nByXwXYtw8SW1Z8rZh">return</span> a / b, a % b;
+}
+q, r = <span class="f" data-page-node-id="YXkBOr8OLfOAHtCRJP2omr">divmod</span>(<span class="n" data-page-node-id="ksQDsnltGjP58a7wtgbH17">10</span>, <span class="n" data-page-node-id="DGAOc4Zgx3Ae0U1eO8KfxI">3</span>);
+<span class="f" data-page-node-id="UbJKDB4FStrUYPDkTHRPzG">print</span>(q);   <span class="c" data-page-node-id="YYuhEAotXwLuGdeyjUGnr1">// 3</span>
+<span class="f" data-page-node-id="OU0S0ohCHe3DvrDV3lE4S4">print</span>(r);   <span class="c" data-page-node-id="5vyStGlzUA1CLG0sYui0zH">// 1</span>
+
+<span class="k" data-page-node-id="22dF1BFp9trdflTgED9HtT">fn</span> <span class="f" data-page-node-id="uViyxQ7VFp3oEhCAYzlasz">minmax</span>(a, b) {
+    <span class="k" data-page-node-id="QOHlwlpdABkp11sbzxSVlX">if</span> (a &lt; b) { <span class="k" data-page-node-id="U0JP5VrNAlHFJ5FmSZXV6O">return</span> a, b; }
+    <span class="k" data-page-node-id="kl5YMipbWe1KncQtORZmgz">return</span> b, a;
+}
+lo, hi = <span class="f" data-page-node-id="QTqiabpDKUxkSGmFZaPLdn">minmax</span>(<span class="n" data-page-node-id="1kXo4gcCWKQemRRND9oBPj">7</span>, <span class="n" data-page-node-id="4vX7XutFlpDqo7hnaOLi00">2</span>);
+<span class="f" data-page-node-id="tR7s149T7eLASwLEDvdHzO">print</span>(lo);   <span class="c" data-page-node-id="jsaLvNSf35Ocf6YgSMJBF2">// 2</span>
+<span class="f" data-page-node-id="q40k2eCaBCaUuZ7KAyEiu2">print</span>(hi);   <span class="c" data-page-node-id="LFz3kVewS9Q65LYGG3FZg4">// 7</span>
+
+packed = <span class="f" data-page-node-id="nl7ojyFxKrb0Dm97VwGlnO">divmod</span>(<span class="n" data-page-node-id="aUNu86MmUP6MwisN0cmif0">8</span>, <span class="n" data-page-node-id="GJN1zV2utHbERwnpL1HB4V">3</span>);
+<span class="f" data-page-node-id="El6EjCSuzlAUFEd9qffEQ0">print</span>(packed);   <span class="c" data-page-node-id="zJnoZyuenXXkrE664mKKE9">// [2, 2]（不解构时拿到打包列表）</span></code></pre>
+    <p data-page-node-id="2cpinjQQpp7ldPDCNxeWYI"><strong data-page-node-id="WoFFcOstAOhpGYhUCnlFox">解构赋值</strong>：列表解构 <code class="inline" data-page-node-id="kfvdyGMlvZkiTWRVvJ82aI">a, b = [1, 2]</code> 按位置依次绑定变量
+      （元素不足报错、多余元素忽略，典型用途 <code class="inline" data-page-node-id="R2z9K65lIsowcsBbNB8ijF">a, b = [b, a];</code> 交换）；
+      字典解构 <code class="inline" data-page-node-id="dKx75uCHChctyjkN4h5nn1">{a, b} = dict</code> 按键取出同名变量，改名形式
+      <code class="inline" data-page-node-id="v6VrAqIBQfJcgyCotnHyId">{a: x, b: y} = dict</code>（等价 <code class="inline" data-page-node-id="i2E1Ia8Dka2qCfbIVQpIJX">x = dict["a"]</code>），键缺失报错：</p>
+<pre data-page-node-id="RsKcGhG76EHIKx7mTS5k7C"><code data-page-node-id="HgCkcxL9edBAaiQJfG7Bty">a, b = [<span class="n" data-page-node-id="oePbFPlTBfHQDHGdwUeZnM">1</span>, <span class="n" data-page-node-id="lnU4fVAYbYsT1cSW95L1dS">2</span>];          <span class="c" data-page-node-id="HKpks1LvyrGjdCopZ1jUma">// a=1, b=2</span>
+first, second = [<span class="n" data-page-node-id="yGFcGRZrfLjsjLd9vDSF0w">9</span>, <span class="n" data-page-node-id="5d21GHgFF0jBXBOfUXyoAY">8</span>, <span class="n" data-page-node-id="wayRgEu5fDwOOIUatNvFyO">7</span>];  <span class="c" data-page-node-id="Qg3aowqZUbxYUMDLlUC8Nj">// 多余元素忽略：first=9, second=8</span>
+
+user = {<span class="s" data-page-node-id="wq6ZNXCSZOMFU7PDAKTGYn">"name"</span>: <span class="s" data-page-node-id="gOH8INl19mf6G0ng1Md0QN">"hone"</span>, <span class="s" data-page-node-id="Q3hZqiIT8u2JaxjGsiBNny">"age"</span>: <span class="n" data-page-node-id="kUQLJZCtqgEPzjBUweiErT">7</span>};
+{name, age} = user;           <span class="c" data-page-node-id="FQch3Wm8KC6jqRNRERSAxc">// name="hone", age=7</span>
+{name: n, age: a} = user;     <span class="c" data-page-node-id="IoGwOBEQo81BfFrkzGFx6l">// 改名：n="hone", a=7</span>
+
+q, r = <span class="f" data-page-node-id="Lc0AE9OBXGm6tjh9gVuOUw">divmod</span>(<span class="n" data-page-node-id="0vi8rlV2zmQezdRc9Tdlpy">17</span>, <span class="n" data-page-node-id="lJWRL2wiRO86X72V1SZyb0">5</span>);     <span class="c" data-page-node-id="GqibpoyGKrDFT5JTIkA2iY">// 与多返回值配合：q=3, r=2</span></code></pre>
+    <p data-page-node-id="XJoTmTAROyHKiwbQIBDiUz"><strong data-page-node-id="TBCDzuDw0J7bgRwyC1ZJZp">列表/字典推导式</strong>：<code class="inline" data-page-node-id="13xaZjIlkYbH4DY6ZN7nD9">[表达式 for 变量 in 集合 (if 条件)]</code> 与
+      <code class="inline" data-page-node-id="cpIHXRTJeqwZM3BaDa5CEF">{键: 值 for 变量 in 集合 (if 条件)}</code>，一行生成集合。
+      集合为列表时单变量绑定元素，为字典时双变量（k、v 分别为键、值）；
+      字典推导式的键必须求值为 <code class="inline" data-page-node-id="cEFGeKnFoKUUEGGLIGvsrt">str</code>（动态键用 <code class="inline" data-page-node-id="nPNuhqC16xkP39J8J2Q4yP">to_str</code> 转换）：</p>
+<pre data-page-node-id="arKnS9PbDM2hwZj1kaymsS"><code data-page-node-id="CL1WTxVCOyLXbv3F18zguZ">nums = [<span class="n" data-page-node-id="7ollOiZAdfxAl46IIxTFpN">1</span>, <span class="n" data-page-node-id="V86MNICacSYjt4Uml6RQdH">2</span>, <span class="n" data-page-node-id="gbPkzwhXP78FjLNzsz7Wva">3</span>, <span class="n" data-page-node-id="rfdEhVO5kBQBfiAruda1PH">4</span>, <span class="n" data-page-node-id="4d3tUg57fMylzlCTpwepRP">5</span>];
+dbl = [x * <span class="n" data-page-node-id="tyzOcsGYm6m6AzZieK6blk">2</span> <span class="k" data-page-node-id="VOo0KH6Ir0eICFppCs4OWF">for</span> x <span class="k" data-page-node-id="yBT8rFNfKLtFFnMKuHSWgC">in</span> nums];              <span class="c" data-page-node-id="GZ9me4hJCdaaFQGplmmdUt">// [2, 4, 6, 8, 10]</span>
+evens = [x <span class="k" data-page-node-id="96dLLDTgaC87AZ4MhvkqA6">for</span> x <span class="k" data-page-node-id="BKIiagC9ZL4q9FdkXSd80N">in</span> nums <span class="k" data-page-node-id="yeYlbzmLW49sAfIAPuzCpA">if</span> x % <span class="n" data-page-node-id="6g2Eo2uAZ4FAymZFcCEiJZ">2</span> == <span class="n" data-page-node-id="tiilbS0gsmc2A9zF4AozYH">0</span>];  <span class="c" data-page-node-id="mjcNgAwAIT7l7VAoACeEuZ">// [2, 4]</span>
+
+grades = {<span class="s" data-page-node-id="bTRaVVcBudrGnUFdXynkqC">"alice"</span>: <span class="n" data-page-node-id="181pMf5kYK7Zsx8zidcSuJ">90</span>, <span class="s" data-page-node-id="ijydPUk9zWcqIt5WL7K5pA">"bob"</span>: <span class="n" data-page-node-id="gEglbei0qXqubgBCnk7mTD">85</span>};
+passed = [k <span class="k" data-page-node-id="lfYf0BS3k9xQIOswRQS6kQ">for</span> k, v <span class="k" data-page-node-id="b5uXiac98xCnb5gDMgY7Vy">in</span> grades <span class="k" data-page-node-id="ZvJG2PhwQmimWBrevNkDRd">if</span> v &gt;= <span class="n" data-page-node-id="VrlXt9AugFWc7uCXrEiAXM">90</span>];   <span class="c" data-page-node-id="9eaqaFpgaErVKyNDCSyNQ1">// ["alice"]</span>
+rev = {<span class="f" data-page-node-id="HtS2Hs9PDrBY9gXZkSvy7D">to_str</span>(v): k <span class="k" data-page-node-id="mN4fh5g173Yu5CU2BQhl6n">for</span> k, v <span class="k" data-page-node-id="ebebXZq31DplHBq11GdhMT">in</span> grades};      <span class="c" data-page-node-id="pA28DgptTvuMF8XFCqgcPF">// {"90": "alice", "85": "bob"}</span></code></pre>
+    <p data-page-node-id="915yLgNFI82bwK5pTQMXuR"><strong data-page-node-id="U8GWXNB3dyQUFcIPZC4CZE">可选链 <code class="inline" data-page-node-id="MqbsXRa9BVZ3NocPFVJBiU">?.</code></strong>：<code class="inline" data-page-node-id="q36n6cMuVAmlCvog4JBtEs">a?.b</code> 在 a 为 null 时
+      短路返回 null，否则等价普通字段访问；可链式 <code class="inline" data-page-node-id="RiAgY4csaT84RkdyBanKgH">a?.b?.c</code>，可与空值合并配合
+      <code class="inline" data-page-node-id="N1eYw88FaSmniyNKq8PyRq">a?.b ?? "默认值"</code>。混合链 <code class="inline" data-page-node-id="xuQqPcjBYDWOcLCDG7vBHE">a?.b.c</code> 中
+      <code class="inline" data-page-node-id="89kF8Wy5PICu0EopDnttkW">?.</code> 只短路其后一个字段，继续的普通字段访问在 null 上仍报错（与 JS 一致）。
+      obj 非 null 但字段不存在时同样报错；Hone 无 null 字面量，null 来自 void 函数调用等占位值；
+      <code class="inline" data-page-node-id="Bu4pQVgYEVZiUErIdNLB6D">hone build --dll</code> 暂不支持：</p>
+<pre data-page-node-id="uCJrr19DA8T1ukLceH3hOn"><code data-page-node-id="YZ5lV1sxNvnZHxno5z3Qbf"><span class="k" data-page-node-id="i3z28S99v0h7I59AF6UjsE">fn</span> <span class="f" data-page-node-id="50t1hErH83sZCuILvrUH0J">get_user</span>() {
+    <span class="k" data-page-node-id="tLHtLECoM6E7R8hAMINjQd">return</span> {<span class="s" data-page-node-id="mTr9ae7LDhdFjE6aKvI0Rm">"name"</span>: <span class="s" data-page-node-id="oOImt97s1ihi3XL21t44Bs">"hone"</span>, <span class="s" data-page-node-id="1fC99L6TOzL58Od9Ow8ojv">"age"</span>: <span class="n" data-page-node-id="TZhmhauCKFivfK84KSEsUm">7</span>};
+}
+<span class="f" data-page-node-id="YvPptppCK0EKzyZ7QYVI0c">print</span>(<span class="f" data-page-node-id="CLb9X8yKHzBx8MStDA0Iui">get_user</span>()?.name);   <span class="c" data-page-node-id="JiaPCmpfeORoo2JkftLOuA">// hone</span>
+
+<span class="k" data-page-node-id="nmwarUg1Xj4IlhfWHEiFVv">fn</span> <span class="f" data-page-node-id="mnj7aodTYTK8pAaF3QH59U">void_fn</span>() {
+}
+v = <span class="f" data-page-node-id="vIAA1xjMMx1bm6cDne6f3E">void_fn</span>();
+<span class="f" data-page-node-id="DESQRG531K3vaBTdLiRlKr">print</span>(v?.name);             <span class="c" data-page-node-id="BliJONpBqw2O6uuv72t48c">// null（短路）</span>
+<span class="f" data-page-node-id="NBHSUQg6lUiBK6MguR0Aoa">print</span>(v?.a?.b);             <span class="c" data-page-node-id="5ctDWJG0CiAEzN1wYBXZpN">// null（链式短路）</span>
+<span class="f" data-page-node-id="GJFsZoCj6ersSnCN5pjIEJ">print</span>(v?.name ?? <span class="s" data-page-node-id="bEblyQcZ9kT1WnCgUgEQCn">"匿名"</span>);  <span class="c" data-page-node-id="D4xgF0KOq2dOVGweKzMHVB">// 匿名（与空值合并配合）</span></code></pre>
+  </section>
+<section id="enum" data-page-node-id="E7k777YZTLk0G5k5sDdeLO">
+    <h2 data-page-node-id="am3nmr2iISOUnM5gl7NpjC"><span class="hash" data-page-node-id="8be7lEc4rtkhw3dzOH5azO">#</span>7.8 枚举（enum）与 match 变体模式</h2>
+    <p data-page-node-id="gJNoGEu1YJMM9jNUMEVHsC"><strong data-page-node-id="Tr9d4hMwKELO8xFmKuHYtu">enum</strong>：<code class="inline" data-page-node-id="X6l758xzuUkssHKn0mrgjY">enum 名称 { 变体, 变体(类型, ...), ... };</code>
+      简单变体无载荷、带载荷变体携带多个类型化字段（int/float/bool/str）。变体访问
+      <code class="inline" data-page-node-id="kYyFN5wEsmZVmizZMJdMu7">Color.Red</code>（无载荷）或构造 <code class="inline" data-page-node-id="tqXW8QltBHIwNB605WxflS">Shape.Circle(1.5)</code>
+      （带载荷，按载荷顺序传参，检查阶段校验个数与类型）。<code class="inline" data-page-node-id="5tur2lDGkDm8OUjMfQmaCu">==</code>/<code class="inline" data-page-node-id="9Fc2MzH9RKmWaR44dS8BSk">!=</code>
+      比较类型 + 变体 + 载荷（不同枚举互不相等）。枚举名全局唯一（与 struct/class 重名报错），
+      变体名在枚举内唯一。值显示为 <code class="inline" data-page-node-id="1oNjq6VjQj7NHFv8K0BZ9N">Color.Red</code> / <code class="inline" data-page-node-id="akdsnDuwkUfI00mfhN4wH9">Shape.Circle(1.5)</code>。</p>
+    <p data-page-node-id="nTDX17dgvFjWOXjobxclDQ"><strong data-page-node-id="cx8NCVEFHCvckIfatEUdHK">match 变体模式</strong>：<code class="inline" data-page-node-id="WTZL7pIqMBzDdB1UHXE66e">Color.Red</code>（无载荷）或
+      <code class="inline" data-page-node-id="AjwrAKv6ayVh1zh2DZpeu7">Shape.Circle(r)</code>（载荷绑定到分支体变量，<code class="inline" data-page-node-id="AZq0DANwiGBQy5NUoAYhYx">_</code> 忽略某项），
+      与字面量 / <code class="inline" data-page-node-id="h5vOlv9EpIf0XeAvUhqnoC">_</code> 通配符模式共存；绑定变量仅本分支内可见：</p>
+<pre data-page-node-id="PPwtE2Oupm46I8ZabyorDP"><code data-page-node-id="uGLywR0Bhn8CZphyvNb6g2"><span class="k" data-page-node-id="MTnlm9WHLAm5gTRfdkJyoa">enum</span> <span class="t" data-page-node-id="K0HXH0jRXYWjhcBPvcMNHe">Shape</span> { Circle(<span class="k" data-page-node-id="ShqtdjBEOlCwbINhCSqjHk">float</span>), Rect(<span class="k" data-page-node-id="GUSY3txg1GNEkMxWm7pg8E">float</span>, <span class="k" data-page-node-id="zSsU6KgydmQLOPCZJe1DQR">float</span>) };
+area = <span class="k" data-page-node-id="DAHUhGgfgVlWL0yEzSRwli">match</span> <span class="f" data-page-node-id="XP8uZoc6NQHlZ8dU4EKK4T">Shape</span>.Circle(<span class="n" data-page-node-id="19IeNRIgh3EbUfEFdwFW2u">2.0</span>) {
+    <span class="f" data-page-node-id="1lsTXEFf8h1DMJmTsTDus4">Shape</span>.Circle(r) =&gt; <span class="n" data-page-node-id="9y9ML7v5AzEmjmixCOecGO">3.14159</span> * r * r,
+    <span class="f" data-page-node-id="fYoAuwjLfbSdh31QTBedFx">Shape</span>.Rect(w, h) =&gt; w * h,
+    _ =&gt; <span class="n" data-page-node-id="tm5oF3pFI3OKBA3llxGYxR">0</span>,
+};
+<span class="f" data-page-node-id="TvrIBOo1TcNSJFmrjl10FI">print</span>(area);   <span class="c" data-page-node-id="Fk1MuJW9LpYhVWzWSkJn5X">// 12.56636…</span></code></pre>
+    <p data-page-node-id="FgkQPUPQ16desRznH9xJgf">全链路支持解析 / 静态检查 / 解释器 / AOT 原生编译 / fmt / LSP；示例
+      <code class="inline" data-page-node-id="uEacZGP8TBbWPbJbrcRMHS">examples/enum_demo.hn</code>。</p>
+  </section>
+<section id="overload" data-page-node-id="6mBjqVLGzOJrdjM2EaOyAA">
+    <h2 data-page-node-id="NrTbKiyJBNqnjGCstKG5g4"><span class="hash" data-page-node-id="m7ZKFZrQu734byETne2cWb">#</span>7.9 运算符重载（__op 特殊函数）</h2>
+    <p data-page-node-id="XJ83IgZg6gkD1BR4B7MqmC">顶层定义特殊函数 <code class="inline" data-page-node-id="YPGaNPc0jDzrCbUyvlJXza">fn __op(参数) { ... }</code>，仅在内建运算不支持的
+      操作数组合时被调用；内置类型（int/float/str/list/dict/enum 等）的固有行为完全不受影响。
+      覆盖二元 <code class="inline" data-page-node-id="6N5IuAdECapwyi42Zaz8Ql">+ - * / % == != &lt; &lt;= &gt; &gt;=</code>
+      （<code class="inline" data-page-node-id="dyR9xLsg9NmntRk9bOK7aF">__add/__sub/__mul/__div/__mod/__eq/__ne/__lt/__le/__gt/__ge</code>）、
+      一元 <code class="inline" data-page-node-id="ZZeTf7dIPyypvxscf47BYq">-x</code>/<code class="inline" data-page-node-id="TBEeafAADDAvm0qo4o4aIx">!x</code>
+      （<code class="inline" data-page-node-id="EMw8J9AfgJ117pRhJRLh6J">__neg/__not</code>）、内置 <code class="inline" data-page-node-id="O5Tt75bfbR5mh5YsXeeJtz">len(x)</code>/
+      <code class="inline" data-page-node-id="vpb65HE4ELdgGZhZhgYMDM">x[i]</code>（<code class="inline" data-page-node-id="vTGxj3hWhRKNftq09hRmGX">__len/__index</code>）。
+      重载函数与普通函数一样遵循返回类型锁定；定义了重载后涉及动态值的运算静态检查放宽
+      （交给运行时判定）。AOT 原生编译支持二元/一元重载（生成「内建组合 → 内建运算，否则 →
+      __op 调用」分派链）；示例 <code class="inline" data-page-node-id="S0yMNtFRdrwKX3BS4XnPFT">examples/overload_demo.hn</code>：</p>
+<pre data-page-node-id="kh8pWhvUhDVgnahO9K2DMN"><code data-page-node-id="TNIxXSezfjM9uUdJOnRJUP"><span class="k" data-page-node-id="RElj07zaAgpSeY986TBNQe">fn</span> <span class="f" data-page-node-id="bGgmPBOiltVP2AH6UXz3G6">__add</span>(a, b) {
+    <span class="k" data-page-node-id="bzHiMbYldoZLvEuf3Rp9K0">if</span> (<span class="f" data-page-node-id="Pg9aRjzUTCElr6Tqcx9z6x">type_of</span>(a) == <span class="s" data-page-node-id="LX79P986MPzkPQj3FBbStI">"dict"</span> &amp;&amp; <span class="f" data-page-node-id="e7fsRPQwbrXxXwwaJu8Rni">type_of</span>(b) == <span class="s" data-page-node-id="vJydNNWEDfnGnuEwDpSKZS">"dict"</span>) {
+        <span class="k" data-page-node-id="ETpCiHoY1Ph0CaBm0nFoAH">return</span> <span class="f" data-page-node-id="iyDiCDhZZTqpk2o3CE1Vw4">mk_complex</span>(<span class="f" data-page-node-id="y3Mdev0gdIHUSgaxpEPP7k">c_re</span>(a) + <span class="f" data-page-node-id="IaWoWAEv4QOD8tWEKaFDL9">c_re</span>(b), <span class="f" data-page-node-id="0GiKAsKouoCHcSWZzDWRpW">c_im</span>(a) + <span class="f" data-page-node-id="MeoyF0uOpmwkDPouvxiukq">c_im</span>(b));
+    }
+    <span class="k" data-page-node-id="gjHO94RQ4IY26rY8CHNpmC">return</span> {<span class="s" data-page-node-id="IptY40Y3TlFUDUEUL1TbBE">"re"</span>: <span class="n" data-page-node-id="u0vwGnQlAJ4P2lXvaSKyCO">0</span>, <span class="s" data-page-node-id="BQFm8ukwGmp2xdVl7rb9R5">"im"</span>: <span class="n" data-page-node-id="ZDhjp0U3oarKwSO9vrPFvd">0</span>};
+}
+zs = z1 + z2;        <span class="c" data-page-node-id="DfjGNPhUjGWYASCy4xPuWK">// dict + dict 内建不支持 → __add</span>
+<span class="f" data-page-node-id="DwSlVbhDLzJawd8WQhwqti">print</span>(<span class="f" data-page-node-id="ySd5bwyAATs4bDZs3PW1is">to_str</span>(zs));  <span class="c" data-page-node-id="t4iGEHCoHkmId4E3YOWOsk">// {re: 4, im: 6}</span></code></pre>
+  </section>
+<section id="async" data-page-node-id="NwQzTBNyGZF1ZR5rV2yZWt">
+    <h2 data-page-node-id="VDVqsS0XZJDtWZ17NJrvbb"><span class="hash" data-page-node-id="ImrLvDPsst1CFiGwBMQteR">#</span>7.10 异步函数（async fn + await）</h2>
+    <p data-page-node-id="AGuQ5jXfAgLAP1rHj3aZzz"><code class="inline" data-page-node-id="4Pm9YjY9jSlFPEE5d5nQdS">async fn 名称(参数) { ... }</code> 定义异步函数（与 fn 同构）。
+      调用时在后台线程执行并立即返回 future（不阻塞调用方）；<code class="inline" data-page-node-id="vqtmynPcwXzP4Kw7lrfmPp">await 表达式</code>
+      阻塞等待 future 完成并返回其结果。错误传播：async 函数体内 throw / 运行时错误存入 future，
+      await 时原样抛出（可 try/catch 捕获）。与 <code class="inline" data-page-node-id="jMD9etFT1PKVpnvTDVx5mV">go</code> 互补：
+      go 发后不理、async/await 结构化并发（多个 async 并行启动、依次 await，总耗时约等于最慢者）。
+      AOT 与 <code class="inline" data-page-node-id="UTKe4Az9ZBzNLNvB3fHeok">hone build --dll</code> 对 async/await 报「暂不支持」；
+      示例 <code class="inline" data-page-node-id="RnD8GUkWskU4UPVkVBiGCI">examples/async_demo.hn</code>：</p>
+<pre data-page-node-id="31D8wpO9nqmTDpVEMhiPXw"><code data-page-node-id="dxP01MiI3IqjsgWoOLHFV7"><span class="k" data-page-node-id="rwqZ2GkdKgOd0ntkQk2usn">async</span> <span class="k" data-page-node-id="47Os2jxfHdZOmkgSALcGDl">fn</span> <span class="f" data-page-node-id="DBnKISXA6TWr5v2fZ0dCI5">compute</span>(n) {
+    <span class="k" data-page-node-id="kOU0jflrvPjkvcRiBTfCFZ">return</span> n * <span class="n" data-page-node-id="GKTmFnxz1j4X3hTZBv7Rtb">2</span>;
+}
+f = <span class="f" data-page-node-id="4UK51pHs319Woq7uQ4epqy">compute</span>(<span class="n" data-page-node-id="xVSWqTQK1qn8gjIRRi8yeB">21</span>);      <span class="c" data-page-node-id="PM3gzDQbHy675pcGYwR1dg">// 立即返回 future（不阻塞）</span>
+<span class="f" data-page-node-id="GalySGcPj9LIdsuVrATlj6">print</span>(<span class="k" data-page-node-id="13kSiRqjd0F45Qk8K43ozu">await</span> f);    <span class="c" data-page-node-id="QInDFBW57LAMyFYA0Db1Kl">// 42（阻塞等待结果）</span></code></pre>
+  </section>
+<section id="type-inst">
+    <h2><span class="hash">#</span>7.11 type 实例类 与 with 上下文管理器</h2>
+    <p><strong>type 实例类</strong>：带方法、继承与构造器的实例类（与 struct「纯数据 dict」互补）：
+      字段 + <code>fn</code> 方法，<strong>所有方法（含 <code>init</code>/<code>__enter__</code>/<code>__exit__</code>）必须把
+      <code>self</code> 作为显式首参</strong>，调用 <code>obj.method(...)</code> 时 self 自动填充实例。
+      字段为引用语义：方法体内 <code>self.f = x</code> 的写入对调用方实例立即可见：</p>
+<pre><code><span class="k">type</span> <span class="f">Shape</span> {
+    name: <span class="k">str</span>, sides: <span class="k">int</span>, area: <span class="k">int</span>,
+    <span class="k">fn</span> <span class="f">desc</span>(self) {
+        <span class="k">return</span> <span class="s">"shape "</span> + self.name;
+    }
+};
+sq = <span class="k">new</span> <span class="f">Shape</span>(<span class="s">"square"</span>, <span class="n">4</span>, <span class="n">16</span>);     <span class="c">// 无 init：实参按继承链字段顺序（父在前）绑定</span>
+<span class="f">print</span>(sq.desc());                     <span class="c">// shape square</span>
+sq.area = <span class="n">25</span>;                         <span class="c">// 字段可写</span></code></pre>
+    <p><strong>init 构造器</strong>（self 首参，可覆盖父类）：有 init 时 <code>new Type(...)</code> 的实参绑定 init
+      的参数（去掉 self）：</p>
+<pre><code><span class="k">type</span> <span class="f">Square</span> <span class="k">extends</span> <span class="f">Shape</span> {
+    side: <span class="k">int</span>,
+    <span class="k">fn</span> <span class="f">init</span>(self, side: <span class="k">int</span>) {
+        self.name = <span class="s">"square"</span>;
+        self.sides = <span class="n">4</span>;
+        self.side = side;
+        self.area = side * side;
+    }
+    <span class="k">fn</span> <span class="f">perimeter</span>(self) {
+        <span class="k">return</span> self.side * <span class="n">4</span>;
+    }
+};
+s = <span class="k">new</span> <span class="f">Square</span>(<span class="n">5</span>);
+<span class="f">print</span>(s.desc());        <span class="c">// shape square（继承方法）</span>
+<span class="f">print</span>(s.perimeter());   <span class="c">// 20（子类方法）</span></code></pre>
+    <p><strong>with 上下文管理器</strong>：<code>with expr [as r] { ... }</code> 进入时调 <code>__enter__()</code>
+      （返回值绑定 <code>r</code>，仅块内可见），退出时（<strong>含报错路径</strong>）必调 <code>__exit__()</code>，错误不被吞。
+      与 try/catch 正交：块内 throw 会先执行 <code>__exit__</code> 再向外传播：</p>
+<pre><code><span class="k">type</span> <span class="f">Guard</span> {
+    active: <span class="k">int</span>,
+    <span class="k">fn</span> <span class="f">__enter__</span>(self) { self.active = <span class="n">1</span>; <span class="k">return</span> self; }
+    <span class="k">fn</span> <span class="f">__exit__</span>(self)  { self.active = <span class="n">0</span>; }
+};
+g = <span class="k">new</span> <span class="f">Guard</span>();
+<span class="k">with</span> g <span class="k">as</span> r {
+    <span class="f">print</span>(r.active);   <span class="c">// 1（块内资源已激活）</span>
+}
+<span class="f">print</span>(g.active);       <span class="c">// 0（块结束自动清理；报错路径同样执行 __exit__）</span></code></pre>
+    <p>只读字段（两种写法等价：<code>readonly f: int</code> / <code>f: readonly int</code>）同样适用于 type 实例类。
+      示例 <code class="inline">examples/with_type_demo.hn</code>；type 实例 / with / 字段赋值为解释器特性，
+      AOT / VM / DLL 构建报 H999（用 <code class="inline">hone run</code> 运行）。</p>
+  </section>
+<section id="builtins" data-page-node-id="CnLYrvifExov4BnVrS1ksI">
+    <h2 data-page-node-id="KHytXnt8pKFB5v3QnwRe1q"><span class="hash" data-page-node-id="XDMrV8Uiz2W4jdG1D5KDYG">#</span>8. 内置函数参考</h2>
+    <p data-page-node-id="S8SCNCX94ZLxY2X0W6K4pA">全部开箱即用，无需导入：</p>
+    <table data-page-node-id="s8yUwQM96hrndxOZrknub5">
+      <tr data-page-node-id="HwpUEdobH66CuaDkRKORu1"><th data-page-node-id="GU0G7rAqWzmplLOp5wloGt">类别</th><th data-page-node-id="TKWI5uEMoTcXBImDEkEDbX">函数</th></tr>
+      <tr data-page-node-id="WqRcZa5YLm9Li4AxcL0eM9"><td data-page-node-id="WwPND8wwuttWwE7tptMsFg">基础</td><td data-page-node-id="yDazm14fq7fKEAHtDbCv0z"><code data-page-node-id="xiN41DBlWOf9ntGIuwL7cd">print</code> <code data-page-node-id="atuC9BCNlccUXBIsNNKHF7">len</code> <code data-page-node-id="FUHzvklGrXff1GNouibmyE">type_of</code> <code data-page-node-id="FvJdh83OEf2LsL1TksPzqC">read_file</code> <code data-page-node-id="gqThlcyCOyFTvZhK7v0TV3">write_file</code> <code data-page-node-id="93AP54shKbLHOOSCZHYI6x">file_exists</code> <code data-page-node-id="GO99n8mTCPg82nbQ7G7fWN">read_bytes</code>（读二进制 → 字节列表）<code data-page-node-id="CrqkgtgiYmvS8tOCtJdWnH">write_bytes</code>（写二进制字节列表）</td></tr>
+      <tr data-page-node-id="pDFE7IlqWwgLTTvwEPvsER"><td data-page-node-id="mvVqbPaJwW4L4N7tIvK9Pf">标准输入</td><td data-page-node-id="BGOvhCVYLuSAASV3Xi14Gw"><code data-page-node-id="Sk78XsFMQmjoBNb49Vv4Hn">input(prompt?)</code> 读取一行返回 str（EOF 报 H306）<code data-page-node-id="QgB8bD7a1tq7gBhP70emGU">read_int(prompt?)</code>（格式错报 H006）<code data-page-node-id="Rv656yEIMAzL7NtZYmrb66">read_float(prompt?)</code>（格式错报 H007）</td></tr>
+      <tr data-page-node-id="nM5Y4KOKtyEoBVjdgsnxeF"><td data-page-node-id="6yHs0S3gehYPHDvWFWcRHL">集合</td><td data-page-node-id="0P3zJF0Y4EgMQM3tr9coa6"><code data-page-node-id="dTIYzR061BEHY9DaHOerg3">append</code> <code data-page-node-id="p39JhLjFSIdUXy4lvSccSF">clone</code> <code data-page-node-id="mmSvDe9XTMFfneZ0whUsAH">copy</code>（深度拷贝）<code data-page-node-id="pIughsoWAbm7k5Du8KxJzP">contains</code> <code data-page-node-id="xryYowaLCpdMUmGTEsvQdU">index_of</code> <code data-page-node-id="kUxA9T4wfJowXKObzEC5bX">keys</code> <code data-page-node-id="swDYuCWRoSNgC8b7bJqZan">values</code> <code data-page-node-id="VhDHSU8d3qVBmMAIvn5EED">has_key</code></td></tr>
+      <tr data-page-node-id="YQMxCMv9HBJrEllDUotYMA"><td data-page-node-id="1AVcNEAfTuG1r5CvW2NREg">类型判断</td><td data-page-node-id="ZIKNSMNCTOm3QHEl1T5SJw"><code data-page-node-id="rr9JcdKaUzPsYh5j5R4Uj1">is_int</code> <code data-page-node-id="oxvbhuryvb64N8ua1vCl5U">is_float</code> <code data-page-node-id="oPJHdbHXvKMPD1VLcJGJNG">is_str</code> <code data-page-node-id="KJJ2sK2NniNGzCvNDGFCZj">is_bool</code> <code data-page-node-id="NjSha7AUOzBgokAw0EloFJ">is_list</code> <code data-page-node-id="ko4FU2pfFculIi5dBEfXmD">is_dict</code> <code data-page-node-id="pm8AXyjmMDns3G9zH3pI6k">is_null</code> <code>is_byte</code> <code>is_bytes</code></td></tr>
+      <tr data-page-node-id="C0TRbjUqvBtFGD1XdiJLwe"><td data-page-node-id="6j9NtXvbECTkmTXrQPXGWZ">断言 / 测试</td><td data-page-node-id="rzlhB5PcvIGSrFL2LVvsiL"><code data-page-node-id="i2kKelkIjh7kJ9XxA7AmuF">assert</code>（条件为 false 抛 H700，配合 <code data-page-node-id="ldyJEn9reaxbbEOGlGLyXI">hone test</code>）<code data-page-node-id="co6EPWiS1Tg9cgPcl915Jg">assert_eq</code>（实际≠期望抛 H700，相等语义与 <code data-page-node-id="RJ8bbz7KvoDGHr9y3tN0Sr">==</code> 一致）</td></tr>
+      <tr data-page-node-id="fTO6Sqyg3WlHehe3h5K4kc"><td data-page-node-id="od18b6KOfTMKN8h9vkJcgF">字符串</td><td data-page-node-id="V8O9pmd0adbLla40DeZYOd"><code data-page-node-id="Ls7F4uVBGA22RmOtRHJUxS">str_contains</code> <code data-page-node-id="YUlzAOozdpfhSW3zsYTbEH">str_replace</code> <code data-page-node-id="anB8jqqpuLcZJHDWstUHsz">str_trim</code></td></tr>
+      <tr data-page-node-id="8P7qxk1CpW42WVhPHmzLHq"><td data-page-node-id="4K6osaURingh7YPjYejzum">字符</td><td data-page-node-id="i5nsAFNF0jsvB9izWCwHAe"><code data-page-node-id="4O5gvLEwX2Gs1seuvKKWZu">ord</code>（字符 → 码点）<code data-page-node-id="7Ds5T5w8Ndg0wCawYeAUn7">char</code>（码点 → 字符，越界报错）<code data-page-node-id="C8f0jzmDmJYLwYh8yUHQP5">char_at</code>（按 Unicode 字符取串中字符，返回 char）<code data-page-node-id="XPHi1ZlSwC4nHbzcDVByYJ">char_upper</code> <code data-page-node-id="nMVA8S3EZlOKoW8vsMHcdv">char_lower</code>（大小写转换）<code data-page-node-id="SL0AsO4TCSDEZm5J5XXw4P">char_is_digit</code> <code data-page-node-id="FqT5ylLsnd0CVSMfY5qNIW">char_is_alpha</code> <code data-page-node-id="kwky5WitmuDGdutCHQsb8a">char_is_space</code>（字符分类）</td></tr>
+      <tr><td>字节</td><td><code>byte(x)</code>（int → byte 显式转换，越界报错；byte → byte 原样）<code>to_bytes(s, enc?)</code>（str → bytes，默认 utf-8、支持 latin-1；int 列表 → bytes）<code>hex(b)</code>（bytes → 十六进制 str）<code>unhex(s)</code>（十六进制 str → bytes）</td></tr>
+      <tr data-page-node-id="FAEH5nuGRrKyfaKqejRRDz"><td data-page-node-id="KPIKVwxjO5wSECz0BfEOoR">数学</td><td data-page-node-id="eHFtAOxZwIN78nuiScwnmt"><code data-page-node-id="DAYtRtaD0JPCka0uLbP8Yc">abs</code> <code data-page-node-id="EYxt0TbaExYwPiWLZPjMmW">max</code> <code data-page-node-id="UyUqrG04TfMQRdrjxxVzh7">min</code></td></tr>
+      <tr data-page-node-id="BisRFEM1WkyZpiSAmeY9io"><td data-page-node-id="jYR7WHG2VkT70zGBtwoz9b">类型转换</td><td data-page-node-id="ezqddHpFafjmhD6NZj5ddW"><code data-page-node-id="gGTlPENnQX7u2cPltl3NSS">to_str</code>（含 char → 单字符字符串）<code data-page-node-id="yPZ5FbR7kwCQtd2TU6CCCS">to_int</code> <code data-page-node-id="tk8pFjllzYW7MCV2jNbHCN">to_float</code>；char ↔ int 用 <code data-page-node-id="Dt9RyjgJUahnUzCFsDAgrl">ord</code> / <code data-page-node-id="R0aH1eIvagrqiqb1Eawkkl">char</code></td></tr>
+      <tr data-page-node-id="MBMlCyLWkqjnmKQL6ueANC"><td data-page-node-id="tBGuJ5iBDvvxTcDZqsTK6D">时间</td><td data-page-node-id="4WSDRF3uUY24V8oJOEtidp"><code data-page-node-id="5rm84CdpRftSAwZVMF9aBU">time.now</code> <code data-page-node-id="ETb9ZduhlI1D50FJKJ86zC">time.sleep</code> <code data-page-node-id="O48GXRCfxz8uWf0Hh5ZDEQ">time.format</code>（占位符 YYYY/MM/DD/HH/mm/SS/WW 星期）<code data-page-node-id="90UfK04H5EXH0OmdBscQxY">time.parse</code> <code data-page-node-id="I7lflCvNaGVoSOmAee2MwA">time.add</code>（时间戳算术）<code data-page-node-id="8hNZwOOTJCZNLOLW410yNA">time.diff</code>（时间差）<code data-page-node-id="ByxOzrSbrj36zpTPdJCbLX">time.weekday</code>（ISO 星期 1-7）</td></tr>
+      <tr data-page-node-id="l8nIYdXgEeFqna2xDaEQ4N"><td data-page-node-id="DhIXmWDT0FAUAXtfHqP8ZS">随机</td><td data-page-node-id="2pIxfhKfIIWDJEhPxz9fLT"><code data-page-node-id="EltVVsRy4FfyFCBzZYRBhQ">random.int</code> <code data-page-node-id="DL4aJFjDCHM30in5w5VDGt">random.float</code></td></tr>
+      <tr data-page-node-id="RmWUEzKEBTF668ykOJheg0"><td data-page-node-id="CPTYWyzNuTnpSWQ4n2oi18">UUID</td><td data-page-node-id="3o2uEwChjbu7FD91sMdNhg"><code data-page-node-id="fzpcdryiZIMxxriffEleGl">uuid.new</code>（UUID v4）</td></tr>
+      <tr data-page-node-id="Y7zpGbzQRmorRPmLme14HR"><td data-page-node-id="YUVFLzPvsvDrg8jEpC9yap">网络 / JSON</td><td data-page-node-id="uIkJzf9B3ivDFWJjlh5OLu"><code data-page-node-id="ClcBM1TEVA0Cr2eHIvGico">http_get</code> <code data-page-node-id="FdETIxYnb593ZBzB1cj34i">http_post</code> <code data-page-node-id="FZSoyn8TtlF305wouh5Gfh">http.request</code>（通用请求：method/headers/body/timeout，可自定义 User-Agent）<code data-page-node-id="6kSk7GHNA78SAMub9zzCYZ">json_parse</code> <code data-page-node-id="lfnrOjFdO3RWKwOSFsSCeG">json_stringify</code></td></tr>
+      <tr data-page-node-id="xBQfarViD3RxGXfDCTEHQb"><td data-page-node-id="vP2HksFnwLtmeWYCt0ObED">邮件 / WebSocket</td><td data-page-node-id="b2BAEm8iAQbTfgaAg9kcDk"><code data-page-node-id="0pBb9MwmgrWDNDzloh620j">smtp.send</code>（SMTP 发邮件，支持 STARTTLS / 隐式 TLS / AUTH LOGIN）<code data-page-node-id="YjhB6dhvk5I9UetX9IB5UM">ws.request</code>（WebSocket 请求-响应，支持 wss://）</td></tr>
+      <tr data-page-node-id="1aJ3xv5zKaOsWvNWP4wjTF"><td data-page-node-id="cLyG4h2p8gKmMXn2YqZIUM">本地服务器</td><td data-page-node-id="ZtoO6R9BjLgnvVMVNOxx3C"><code data-page-node-id="FRz8pCQJjsbf1uywyKKDBa">server.listen</code> <code data-page-node-id="t1TDQ6SMwZokgtMlCGETmX">server.poll</code> <code data-page-node-id="MwZk2HUkkdXtJwIDxh4kKR">server.respond</code>（纯 std::net 实现，跨平台一致；respond 可指定状态码如 404/500）</td></tr>
+      <tr data-page-node-id="Dcr8ApG7V4SsVkPQ89K2Fn"><td data-page-node-id="70RxPoigTKhWR0MHAEjKdM">系统（跨平台）</td><td data-page-node-id="7BKEUXdBoHu7ituHWrEDfY"><code data-page-node-id="haWLVspHUjFODbR80xTDbQ">sys.run</code> <code data-page-node-id="8390i5QBTz5tPKrBsmj91M">sys.get_env</code> <code data-page-node-id="2xIsBwcQOGuPZzroCT9hAE">glob.match</code>（glob 匹配）<code data-page-node-id="TrqyQOCCMgrvbWYLUtsqCS">glob.list</code>（递归列出）<code data-page-node-id="Kww5D9kJVmAMd9vJmFM5fI">temp.dir</code> <code data-page-node-id="hWsXxKYSHbbcALnF19Mxu3">temp.file</code> <code data-page-node-id="1qvMsCnMv6kYXkRxMy5cGC">temp.remove</code>（临时文件/目录）</td></tr>
+      <tr data-page-node-id="jVAmNTq8mPMr2EWGscxcGT"><td data-page-node-id="vsFbBZDDy39ixAehSszNiC">系统（Windows API）</td><td data-page-node-id="uo6101NKg8yXFSaClLEJFo"><code data-page-node-id="H1uF8XtnXUN3TRxGC1deAK">sys.msgbox</code> <code data-page-node-id="lx5DruhjwXJgu1WrDWeG76">sys.beep</code> <code data-page-node-id="gV2X8n9YPguSfA0fjHqhJT">sys.clipboard_set</code> <code data-page-node-id="fdOODvAUHimqkkjtnyRr6d">sys.get_screen_size</code> <code data-page-node-id="nO38laTKRR57FFa2IDkSDh">sys.reg_read</code> <code data-page-node-id="U3EgD3kwZrUsKniHiLTav3">sys.reg_write</code></td></tr>
+      <tr data-page-node-id="bpKcwCzsf7d07neARBDyCB"><td data-page-node-id="cYPvCU2eBpBc4VeQRxMyGV">日志（彩色）</td><td data-page-node-id="rLvmDU2XfMubJiXYFmvG3w"><code data-page-node-id="ykHkFoZ9obNcRpjZbXpMrM">log.info</code> <code data-page-node-id="9GUOCmpfvfvkZjUGsjLhvO">log.warn</code> <code data-page-node-id="ogMe65peFAknOzf8f9vq48">log.error</code> <code data-page-node-id="SPPGWcYP7zUO1Cd24mR6RT">log.debug</code></td></tr>
+      <tr data-page-node-id="RbBDD1S2IfnGsvHGu8GJDV"><td data-page-node-id="gxE5zftvAlndRg5NwGYCdp">路径</td><td data-page-node-id="E77fYC007S7w84SSNlJL16"><code data-page-node-id="XHWeNWzMkDnd2xra3z7plM">path.join</code> <code data-page-node-id="VuQ6KPfMY0GWmVvxU7ANE3">path.dirname</code> <code data-page-node-id="HBMjsMIfGHJ2VTyd9U6YaN">path.basename</code></td></tr>
+      <tr data-page-node-id="ACODBXFxxG2Y2PQbz9bZl2"><td data-page-node-id="PolzX8zKsvkHuOqfj2MJBV">命令行参数</td><td data-page-node-id="qgcMexX7DjlCLFdbHAW0cG"><code data-page-node-id="FoP2FnHrnlRY57OJp541hP">args.get</code>（支持类型转换与默认值：<code data-page-node-id="6G5MqEXfaHSoO5letEmbi7">args.get("port", int, 8080)</code>）<code data-page-node-id="8mMxeYz6eq1VPCBCU61dWh">args.has</code></td></tr>
+      <tr data-page-node-id="uSSp3MUHnVesoZViE11EoO"><td data-page-node-id="ZtrsD3Gp3ZGEyTaizfg29P">环境变量</td><td data-page-node-id="QustRthFCnltZUOFgkUjYf"><code data-page-node-id="1EN67JM2XvzNVjP34KEK83">env.get</code> <code data-page-node-id="XJrGA2IeJBdGCl8CjJKX86">env.set</code></td></tr>
+      <tr data-page-node-id="cBJsm065kjKK51BzIypeQZ"><td data-page-node-id="Hzn4zSGPePc7z24TX5IeB4">键值存储</td><td data-page-node-id="DeooDWCUtE2qKcGuHCZGlQ"><code data-page-node-id="qXHkBTEvZ9FDHIJ3ICgCGo">db.set</code> <code data-page-node-id="9R6UC3R49sHKSAfPHdZE5U">db.get</code></td></tr>
+      <tr data-page-node-id="SLqpjVeapIq4PZh5EDu1qT"><td data-page-node-id="E85ZRbzQSr82X1Q3q8GhJ8">正则</td><td data-page-node-id="DZAAIfG9a7GBWrkIxV7Cah"><code data-page-node-id="qGJYPWHbyREUHd5UHm3tV1">regex.match</code> <code data-page-node-id="oFZPLJO37lnz8d6uZTU3xs">regex.replace</code> <code data-page-node-id="dWoTp3ewJtKoUY6eRZNiu4">regex.find</code>（全部匹配）<code data-page-node-id="pRk2wkietDCAKGLkGbJn0k">regex.groups</code>（捕获组）<code data-page-node-id="PMR1GW8TQKstPvhINwJXx8">regex.split</code></td></tr>
+      <tr data-page-node-id="cNssH12RPCSYsR0P3cGCle"><td data-page-node-id="pnLCVNCv8PPXdCBjdhJlLU">文本对比</td><td data-page-node-id="TwRDPShGXXu6jCXBLYzgRw"><code data-page-node-id="8cxv7qsgFoBMi6r8WYVmXg">diff.lines</code>（逐行操作）<code data-page-node-id="IEyHuV66rjZACXCKmbVPc9">diff.unified</code>（unified diff 文本）</td></tr>
+      <tr data-page-node-id="XoZ92gor20YoNS81yHdUTH"><td data-page-node-id="Kqijc4kiKZV9JV1pYsElPN">数据处理</td><td data-page-node-id="E3MX8PPcoI2HpHL5XOqRZ4"><code data-page-node-id="A0ZCygzXqM7ccelX7di9YY">csv.parse</code> <code data-page-node-id="XQdkWUdWG65U5o4aA7FpYT">csv.parse_dict</code> <code data-page-node-id="KI5lNSmgIkWfwKgiWvDfGs">csv.stringify</code> <code data-page-node-id="AOpbgTcDpJYFFwv7RPG5Yz">yaml.parse</code> <code data-page-node-id="YgbqSMuPRk2RWwTrzxRVdA">yaml.stringify</code></td></tr>
+      <tr data-page-node-id="yYhGfT83omqIYDB6wYHBSq"><td data-page-node-id="5RBPwmKewVmEq05sDBJsHw">统计与矩阵</td><td data-page-node-id="yhFGvn4xy6q137r1vHLI4Y"><code data-page-node-id="SLC7A6V4katLFMV02Og5ww">stat.sum</code> <code data-page-node-id="ogdQsG5sBgFKaPySBwjgKq">stat.mean</code> <code data-page-node-id="IRnajgzeOzAEJVjxdwTkc9">stat.median</code> <code data-page-node-id="15P4o497TG3aTCS21kOT0v">stat.variance</code> <code data-page-node-id="bE2BZIyodXXjN3Hl5BanjI">stat.stddev</code> <code data-page-node-id="69x3QiDw7SXsYxA0UpsBQ8">stat.min</code> <code data-page-node-id="m4lNB8KUZsBEyfLfRK5NYB">stat.max</code> <code data-page-node-id="dfU5DYVPlRlAMGUisbMs80">matrix.identity</code> <code data-page-node-id="F8i8SH5o8ngYfZFliLwGgs">matrix.transpose</code> <code data-page-node-id="BANIbXdGyxzJ9UXAN2oKFt">matrix.add</code> <code data-page-node-id="5oLxxYOCr8RkHGg74x9Hsr">matrix.mul</code> <code data-page-node-id="w9Bto6tH8GInanVup1BYgK">matrix.scale</code></td></tr>
+      <tr data-page-node-id="qoao6fbeYFIwnikPA4c6Ki"><td data-page-node-id="vhpeFE079NiMoeXC5oB9my">绘图</td><td data-page-node-id="hyKylzRl8dmHTYWltzDjre"><code data-page-node-id="bmI52BHqHJPTh1Ph6uxB9k">plot.bar</code>（SVG 柱状图）<code data-page-node-id="Zr2FevIDEpAJ7hTeFqr4aB">plot.line</code>（SVG 折线图，返回 SVG 文本可保存为 .svg）</td></tr>
+      <tr data-page-node-id="ehBaX7wCntKcNkXpXXJ3z3"><td data-page-node-id="dgziH3KbV17BZPULzf1Lwv">加密与哈希</td><td data-page-node-id="oVTrOXIrVobWZnsS0U1GaN"><code data-page-node-id="0oLc5SchrJ1lYAgL1JwGf3">crypto.md5</code> <code data-page-node-id="WMDJ2ILEnFoEQ2XJ8R50zh">crypto.sha1</code> <code data-page-node-id="gI3FQxLXE550yyG5rMYi42">crypto.sha256</code> <code data-page-node-id="wHHVvGanpOebo7jBBIsNJF">crypto.hmac_sha256</code> <code data-page-node-id="UTwOSXA2WueBLfMF5u4Cds">crypto.base64_encode</code> <code data-page-node-id="B0aSxtCSdq1cEZp4K3yNpV">crypto.base64_decode</code></td></tr>
+      <tr data-page-node-id="81pjeYGSmzumw8d5OBHflp"><td data-page-node-id="jY5FIosxsOiknW2kFE6DXM">压缩与归档</td><td data-page-node-id="bJRPOxW26Q0hq8IIgu0lkG"><code data-page-node-id="lgcls6mJTKGs2nKpuapXh8">archive.zip_list</code> <code data-page-node-id="CDvS0rdw9FKRux4DhS4jjQ">archive.zip_read</code> <code data-page-node-id="reONrQBn8wQ9LdGDggSxZg">archive.zip_extract</code> <code data-page-node-id="c7MffBLDszMmoEUUNplB1s">archive.zip_create</code>（tar.gz 同款 tgz_* 四函数）<code data-page-node-id="65Is27W9jHgKNsEJkhRPGV">zlib.compress</code> <code data-page-node-id="7xF4GmVyPeWf0LckbG27k0">zlib.decompress</code> <code data-page-node-id="zTTX1TIfOB8LW8eSp6DbNy">zlib.gzip</code> <code data-page-node-id="k1CQmuPqoHDyDj0AcgXldK">zlib.gunzip</code>（结果 base64 编码）</td></tr>
+      <tr data-page-node-id="H30TVR5JCQk2pSIr19k8x3"><td data-page-node-id="36uYxMG0Gd4lawijdZncVb">数据库</td><td data-page-node-id="PHfTItVe7ai8uK6COVJTU7"><code data-page-node-id="ehJzrE39TwSmLzPP0Y8QFl">sqlite.open</code> <code data-page-node-id="uehO4DXw1wvYDTDg1wyUnv">sqlite.close</code> <code data-page-node-id="eWiXtHWOrw2mNfhmtk1vwK">sqlite.exec</code> <code data-page-node-id="co07qCf0BnnmR1EJHqCxYJ">sqlite.query</code> <code data-page-node-id="FFlCLIiWP6UfmnnreyBCRp">sqlite.query_one</code> <code data-page-node-id="geKCdNbCCQB62YfuhDsmRx">sqlite.escape</code> <code data-page-node-id="y1kvdpEzqHFcjzYEzqbV90">sqlite.last_insert_id</code> <code data-page-node-id="EXcFNvIFMS1R645Ah577Nh">sqlite.changes</code>（运行时加载系统 libsqlite3）</td></tr>
+      <tr data-page-node-id="IhlhcyctHyNLIgqNPPIv4H"><td data-page-node-id="N79p6HBpezB0mQpWSKPxeU">指针类</td><td data-page-node-id="Z41jKLqM01OPEKYHWgOCtT"><code data-page-node-id="9DhoDrQYKuewLJgdLfVjcM">ptr.alloc</code> <code data-page-node-id="AXJ0Ww6P48BuIKN1HdcLCb">ptr.free</code> <code data-page-node-id="gHOBsgbbtMkEEEA4681dpL">ptr.is_null</code> <code data-page-node-id="kFUiGRv1HcHpHmqOMdbHp8">ptr.is_valid</code> <code data-page-node-id="WZfaglJtogyAYF522GRD0u">ptr.size</code> <code data-page-node-id="vETtoqGyBA6WRTIMhK39ch">ptr.read_int/float/byte</code> <code data-page-node-id="zYzlkNL90SMCCII4CqNZRe">ptr.write_int/float/byte</code>（分配表跟踪防野指针，H304/H305）</td></tr>
+      <tr data-page-node-id="3rHgO6tq2zggU5Axge6eNJ"><td data-page-node-id="SUJx70vRpG8lFsvDtvTTlS">插件系统</td><td data-page-node-id="3S0xDoG9Zqr1FNYCa0jitG"><code data-page-node-id="vQ1Ei9AMBFGIxKzNFS0Jwh">plugin.load</code> <code data-page-node-id="4CyNI4poxdOe7ETcPUih4W">plugin.has</code> <code data-page-node-id="HvyqNFGsVnSV31WlXg6WFf">plugin.list</code> <code data-page-node-id="5iSSsCJH2nw7J6qNMJ0qOZ">plugin.unload</code>（运行期动态注册，调用走 C ABI 通道）</td></tr>
+    </table>
+    <h3 data-page-node-id="QbTC6QD2nyYkvc1nMoun0N">TLS 根证书回退（https / wss / smtp）</h3>
+    <p data-page-node-id="VQgitjWQItPRDGgej2aiml">所有 TLS 连接（<code class="inline" data-page-node-id="YRSMtZydQOFhKx6lsF3P0z">http_get</code> <code class="inline" data-page-node-id="hYjbbITwAETmPPuTwzBoJV">http_post</code>
+      <code class="inline" data-page-node-id="a3ag6YRCU01zZxoLHmoxsN">http.request</code>、<code class="inline" data-page-node-id="CHru2WaRbkJaZNGJ5oq7SN">ws.request</code> 的 wss://、
+      <code class="inline" data-page-node-id="OHOdyS8ATC3RabXenABOzF">smtp.send</code>）优先使用内置 Mozilla 根证书（webpki-roots）；
+      证书校验失败时自动重连，回退到<strong data-page-node-id="gTSWrLHpSHTJbiwsOsadLi">系统根证书</strong>
+      （Windows ROOT 证书库 / LinuxTermux 系统 CA bundle），防止内置根证书过期导致连接失败。
+      私有 CA 场景可经 <code class="inline" data-page-node-id="R8PaG8e6X10FFcjFnSdGEi">HONE_CA_BUNDLE</code> 环境变量（缺省
+      <code class="inline" data-page-node-id="AhMWnFud7tBd6R6WhMQ5ii">~/.hn/ca.pem</code>）信任 PEM 文件中的<strong data-page-node-id="PH6lDlFC2mq5ckFSykiKLQ">根证书与中间证书</strong>；
+      中间证书会注入链构建，服务器即使不随链发送中间证书也能完成验证。</p>
+    <h3 data-page-node-id="e62yg62AsKuPcYSkkm2vwL">输入默认值（EOF 降级）</h3>
+    <p data-page-node-id="A1fPnsI4oKA5F9jd75CfC7"><code class="inline" data-page-node-id="4q3mdQ8U8HXwLbFlhTrTaX">input</code> / <code class="inline" data-page-node-id="UTZh9EA7bBux2qMQleQuNw">read_int</code> / <code class="inline" data-page-node-id="VWigB9dnm0pBLKAtQtF5uI">read_float</code>
+      在 EOF（管道关闭 / Ctrl+Z / Ctrl+D）时抛 <code class="inline" data-page-node-id="byNyaS68EQpQax9NHnHdBo">error[H306]</code>，
+      <code class="inline" data-page-node-id="5msDIlpDiH72Cm9B1kd8Jj">read_int</code> / <code class="inline" data-page-node-id="L1Hk7IWJ9Tk46yAx9sDG9U">read_float</code> 格式非法时抛
+      <code class="inline" data-page-node-id="lHkFPXjJ7wMDylGHritrmV">error[H006]</code> / <code class="inline" data-page-node-id="XO0kimdca1o1qFLAaTFICF">error[H007]</code>。
+      它们<strong data-page-node-id="vlzjJd6B5rh0ReF66rXwHh">不返回 null</strong>，因此不能直接用 <code class="inline" data-page-node-id="DNi1XJZLVQ0MCETpG4ASw7">??</code> 空值合并兜底；
+      给输入设默认值的标准做法是用 try-catch 包装：</p>
+<pre data-page-node-id="v69j02LDHeuFY8IQ0go3Px"><code data-page-node-id="qUv6nIEuLfy8fupRSNuIqs"><span class="k" data-page-node-id="NZYubtChWvOQ4PsyOcygst">fn</span> <span class="f" data-page-node-id="5CfsQa5Sd56dmstWvEsHZv">ask</span>(prompt, fallback) {
+    <span class="k" data-page-node-id="OJuzhlJOYpbSQoaLRwFywX">try</span> {
+        <span class="k" data-page-node-id="eK7ia01TQd9M4vP3kVt1iK">return</span> <span class="f" data-page-node-id="RTU9fj5Ps9Dj019Qo3REdC">input</span>(prompt);
+    } <span class="k" data-page-node-id="SABXIcPArvkMi02SkoSQMW">catch</span> e {
+        <span class="k" data-page-node-id="3rcPBQ8O7YIczttVSoZ4S0">return</span> fallback;   <span class="c" data-page-node-id="LFUH9DFMz8YFJAemWFjD6J">// H306 EOF → 返回默认值</span>
+    }
+}
+name = <span class="f" data-page-node-id="A3p1Cl772aZff7UlB5EgIz">ask</span>(<span class="s" data-page-node-id="WIA5bL0dcIfGYFYgQr7QrU">"姓名: "</span>, <span class="s" data-page-node-id="LfyKJVnxDJVJbThwhkgJou">"匿名"</span>);
+<span class="f" data-page-node-id="yCmsd3XQxEoXhFsmwCOV3P">print</span>(<span class="s" data-page-node-id="o2bKoWxU8ci7vxzdWDV2JO">"你好, "</span> + name + <span class="s" data-page-node-id="4JDqBhUGyJ3DxQmCD51chP">"!"</span>);
+
+<span class="c" data-page-node-id="6zpzMwHmjWS4qezvlncEax">// 数字输入同理：一个 catch 同时兜住格式错误 H006/H007 与 EOF H306</span>
+<span class="k" data-page-node-id="hTmBT7eLiHycKSgegNYzGH">fn</span> <span class="f" data-page-node-id="gNSskYiK57zD4LacTDGgg4">ask_int</span>(prompt, fallback) {
+    <span class="k" data-page-node-id="5WsSsCM26MKkuZfeIKXRB9">try</span> {
+        <span class="k" data-page-node-id="xiBQQu7bJHrqBiz2AuSxWb">return</span> <span class="f" data-page-node-id="A58VmFw6BFLRLzhrCtYgXn">read_int</span>(prompt);
+    } <span class="k" data-page-node-id="iYMSK8H7DnQYqllDRXOZ9y">catch</span> e {
+        <span class="k" data-page-node-id="Zr3baE4FjZVqBhqW2zeecD">return</span> fallback;   <span class="c" data-page-node-id="LH3QRNEf4PxRqbN0GXC6E0">// H006 格式错 / H306 EOF → 返回默认值</span>
+    }
+}
+age = <span class="f" data-page-node-id="7Lcgd142iudopYflqNMHBD">ask_int</span>(<span class="s" data-page-node-id="qZGBVlqolHBBB7EWb0QprN">"年龄: "</span>, <span class="n" data-page-node-id="RC1I4i4ZFpPq3xuJLMHaKS">0</span>);
+<span class="f" data-page-node-id="9qehXJkxJSRLZcz3eFHxjT">print</span>(<span class="s" data-page-node-id="oi0AtZCoH8u9YmBekO0jpk">"明年你 "</span> + <span class="f" data-page-node-id="5Pn4gNDuKvokBJd22xD7FZ">to_str</span>(age + <span class="n" data-page-node-id="RMGDAzA73jAc2kccy6td3e">1</span>) + <span class="s" data-page-node-id="2XXjbC7DygQew2u79viUpL">" 岁"</span>);</code></pre>
+    <p data-page-node-id="PfI5sDSI9H62BqRaTNfufM">注意：<code class="inline" data-page-node-id="tWhRvBokoCtND2AWFngPHo">??</code> 空值合并只对 null 值生效（如 void 函数调用占位值）；
+      input 在 EOF 是抛错误而不是返回 null，必须用 try-catch 捕获后降级。</p>
+  </section>
+<section id="errors" data-page-node-id="A24AJbtIAi7kaLrkIEs942">
+    <h2 data-page-node-id="tZOjEyUTvC9ljgSengJDJL"><span class="hash" data-page-node-id="mfGYmdxx53MEoAYorgY7pz">#</span>11. 错误处理</h2>
+    <p data-page-node-id="pi1FkK2LP5ngH0qRIlo2aH">错误统一为 <code data-page-node-id="rsSCC7SmP6GS1wS3iFhnMC">error[Hxxx]</code> 格式：编译期静态检查报错，运行期可恢复错误用 try-catch 捕获。</p>
+<pre data-page-node-id="OEBfmGSJv0GDL1CNfBZFc2"><code data-page-node-id="diSasz750FLhAOsBiWO9C3">error[H001]: type mismatch: variable `x` is locked to `int`, got `str`
+  --&gt; err.hn:3:1
+3 | x = <span class="s" data-page-node-id="qYFf10PtrCERYGK9NGJZ0c">"Hone"</span>;
+  | ^
+help: Hone types are locked after inference; no implicit conversion is allowed</code></pre>
+    <table data-page-node-id="9qXXG2kVQCcvB0qlx8cK2c">
+      <tr data-page-node-id="CUb1Q5mBQ5X614JTfbipJo"><th data-page-node-id="84sYBAV0gsf4eZJcvRBK2X">错误码</th><th data-page-node-id="iLMTJbB7E9D8vPV5AXQVfa">含义</th></tr>
+      <tr data-page-node-id="UEG5FJmq2GCzxEpFpsajSC"><td data-page-node-id="EnICkJg06yCaDAFlE4TkIf">H001 ~ H012</td><td data-page-node-id="ihNndp6SbquPf72Wa0Ktcr">类型 / 语法 / 推导 / 运行期基础错误（含泛型同一类型参数处实参不一致、类方法裸名调用、类型参数重复声明等，见下）</td></tr>
+      <tr data-page-node-id="Jf7DRUkaubmkEm41H2Cd7l"><td data-page-node-id="V6DcHkm0tjy4zfSxDAR6a0">H101 ~ H104</td><td data-page-node-id="7HBqGTPXjU6pMvMUQSdjoE">词法语法细分：非法字符 / 未闭合字符串 / 未闭合注释 / 缺少分号</td></tr>
+      <tr data-page-node-id="y4nQaxsaN84xkYBHRfkpUo"><td data-page-node-id="E8DW4LM9shfAPAfwzQ6Hs6">H105 / H106</td><td data-page-node-id="n9QfdAK809wQahJ9wGebiq">控制流标签与宏：H105 标签/跳转错误（未定义标签、标签重复、跨函数跳转、跳进内层语句块、向前跳过变量绑定）；H106 宏定义/展开错误（非顶层定义、重复定义、与函数/类/枚举重名、实参个数不符、语句宏用于表达式位置、宏体含 return/goto/lambda 等越界用法）</td></tr>
+      <tr data-page-node-id="0NMsTqNYYwJtFiNBpkDbNk"><td data-page-node-id="dLqMoJMqD4epyXq0ZGz0pu">H200 ~ H204</td><td data-page-node-id="hovwqzZG36tiIKFAFiBDSD">网络：请求失败 / 超时 / 连接拒绝 / DNS 失败 / 非 2xx 响应（http_get / http_post / http.request / smtp.send / ws.request）</td></tr>
+      <tr data-page-node-id="E6sAVctQx97lvndHmr4Ixi"><td data-page-node-id="eMePOuk417EltQlk1S0JMz">H300 ~ H303</td><td data-page-node-id="rFDVqg5CqI07XaSfidsDcI">系统 / DLL：系统调用 / 库加载失败（含 sqlite 库缺失）/ 参数校验 / 权限不足</td></tr>
+      <tr data-page-node-id="dBHYH1oje1qCiX5gg6tzkN"><td data-page-node-id="sBltutbGv4PX86nTrAOHzY">H304 ~ H305</td><td data-page-node-id="tMvakSEy9Rk67v770nAoKf">指针：野指针（未分配/已释放/重复释放/空指针）/ 越界访问（ptr 类）</td></tr>
+      <tr data-page-node-id="CGSbDZGOVyhEHPtRsdrajG"><td data-page-node-id="yBw0FZKWn2nbZNqzDFjjl2">H306</td><td data-page-node-id="xVVlPd8uyipRcyoD5EWNMN">标准输入：读取失败 / EOF（input / read_int / read_float）</td></tr>
+      <tr data-page-node-id="ud20pWFM3APQXjEdcjlgPb"><td data-page-node-id="PIc6Ar3ZCRApBW5FRTDei9">H401 ~ H404</td><td data-page-node-id="n5k2R0Zat7frZFkdeSlKXE">文件：不存在 / 权限不足 / 被占用锁定 / 通用 NOT_FOUND</td></tr>
+      <tr data-page-node-id="U04rCsPTGY7gWsBZj8x4IR"><td data-page-node-id="G75Iv5ONbEbUoNiYCTG0P2">H600</td><td data-page-node-id="dtXWk05K0dqeHFenYFoyvc">throw 主动抛出的用户错误</td></tr>
+      <tr data-page-node-id="LZ9c5pqcUrTp00EogERHf9"><td data-page-node-id="3H0AIBOsUIb7mtgI4AMVP8">H700</td><td data-page-node-id="iRPyypEMRz5BZQ8qtp1cor">assert 断言失败（测试框架）</td></tr>
+      <tr data-page-node-id="f7zm2wU9Un0pbeQ7yemcXG"><td data-page-node-id="ZCbqtZGvWMXqpXaicBVthA">H999</td><td data-page-node-id="LjVbW7igrFkcBNJ2NxiydL">尚未实现</td></tr>
+    </table>
+    <p data-page-node-id="vWtQ5nd2tbDIVghn0uHUWC"><strong data-page-node-id="zPRsKo0v079d9ydRVbNm1h">class / 泛型 / 新模块相关报错</strong>：</p>
+    <ul data-page-node-id="8zcEbwi7zyPKYptcq7ecED">
+      <li data-page-node-id="dSE5TcxnziwkOfqmghawUT"><code data-page-node-id="PkpOeLdQsE2A9JtXzON8bA">H001</code> 泛型：同一类型参数处实参类型不一致（如 <code class="inline" data-page-node-id="hJDxrf2TF3bauQsdnQGEN9">pick[T](a: T, b: T)</code> 两次实参需同型）</li>
+      <li data-page-node-id="XsEVhtsmg1rcgFjLfrRcT8"><code data-page-node-id="MfXI2qSIugDBUHvTH9W1Dt">H002</code> 类方法裸名调用（成员函数不进全局符号表，必须 <code class="inline" data-page-node-id="BYvwLKdc0FB72rKkW7PrsC">类.方法(...)</code>）；泛型注解引用未声明的类型参数</li>
+      <li data-page-node-id="xVBZPZmHjm9bq1wzmEQip9"><code data-page-node-id="OrtXKZtEwHbnaxwlk8lIDN">H005</code> 类型参数重复声明（<code class="inline" data-page-node-id="FYmGdUNg4h3HajztPFmcGv">fn dup[T, T]</code>）、类名与 struct 名重复、类成员非 <code class="inline" data-page-node-id="DgPv7WlOu7v5lwf9cPLo89">fn</code> 定义</li>
+      <li data-page-node-id="ljRIw8eHQQMITg0cfli2iB"><code data-page-node-id="PdaZG2i0PfDYot88338ukC">H011</code> struct 构造 / 类方法调用的参数个数不符</li>
+      <li data-page-node-id="SkkG6BmWoK76r5mOMLg0Yu"><code data-page-node-id="c9LcuEo7pHr5emGC9o7rSD">H301</code> sqlite 库缺失：Linux 安装 libsqlite3，Windows 将 sqlite3.dll 放到 hone.exe 旁边</li>
+    </ul>
+    <p data-page-node-id="RExbEgnZqUpAJNFzMFxB1g">完整解释与修复建议：<code class="inline" data-page-node-id="1LWqi3CARsCDY5AAGoq0NL">hone explain H201</code>。</p>
+    <p data-page-node-id="WwweJWfuP4EN3YbhZmJFSq"><strong data-page-node-id="EtfWuRu8XYdGBcABxngeSh">try-catch 恢复</strong>：捕获可恢复错误（ZError 通道）；panic 类崩溃不进入捕获。
+      配合 <code class="inline" data-page-node-id="4gC1x6cBdHiYTxzrFqH5SI">--restart</code> / <code class="inline" data-page-node-id="IyTYm9NhidPKzxVvQV4rY2">--resume</code> 实现无人值守运行。</p>
+<pre data-page-node-id="jolSbNEk2kZ33Glnb8VRHw"><code data-page-node-id="SSgK9WsyBr0l6LLSBcEOKj"><span class="k" data-page-node-id="pO8ccx0ZtBqEAo300fIP14">try</span> {
+    resp = <span class="f" data-page-node-id="7nNcUtYq3PqofYXjHC7tB1">http_get</span>(<span class="s" data-page-node-id="DjO6TxFMD8AXbudF9GzRcN">"https://example.com/data"</span>);
+} <span class="k" data-page-node-id="11BVOcJOB8f6B95hIqYNze">catch</span> e {
+    <span class="f" data-page-node-id="nwkdVPQrpsAx5Pju6jyRwj">print</span>(e.code + <span class="s" data-page-node-id="EKq0F5WsFCHiVhTkZBrqBN">": "</span> + e.message);  <span class="c" data-page-node-id="iCzpAQjz0eXqeqtbpbusp8">// 字段: code/message/file/line/col/context</span>
+    resp = <span class="f" data-page-node-id="fgTygMdIekTLNyQQVfkH36">db.get</span>(<span class="s" data-page-node-id="jGkcXN6bx50GjRfUPeRA5p">"cached"</span>);        <span class="c" data-page-node-id="TQzeb0syRGs1y8yK4JPpyK">// 降级回退</span>
+}
+
+<span class="k" data-page-node-id="r3aJ4LC6tZyowVGARjJ1Np">throw</span> <span class="s" data-page-node-id="oTvX6DyQHnDANxJtZFf1jT">"用户错误"</span>;   <span class="c" data-page-node-id="WBrrsZbcy0bX5BHLUBYJrU">// 主动抛出 → error[H600]</span>
+<span class="k" data-page-node-id="GECvywB6NarJONuBDeYVut">throw</span> e;             <span class="c" data-page-node-id="SeGCUkQp4Zsa946qMY1P59">// 重抛已捕获的 error 值</span></code></pre>
+    <table data-page-node-id="ABN25FfQisnBH25geA5GaV">
+      <tr data-page-node-id="r4ZwvBg2bolofmJXRrcUIX"><th data-page-node-id="WkdM60kh4zZ3bHdd3s2llM">机制</th><th data-page-node-id="9txuqzxH3UXG0x80vvMj46">说明</th></tr>
+      <tr data-page-node-id="bJv45JDEvC6Z4fKR2Me6Au"><td data-page-node-id="JE7y0pNIhJnNV4IFCArL5H"><code data-page-node-id="DnJNRGOevCCNsF0RrkQ0NW">--restart[=N]</code></td><td data-page-node-id="yDzNG9JFaLgP0Ig1ellKAA">脚本失败自动重拉（默认最多 3 次）；<code data-page-node-id="75mgWArCLcDLD6vXYHqcSJ">--backoff=a,b,c</code> 重启间隔递增（默认 1,3,10 秒）；<code data-page-node-id="O14Nn2cViBnJ0rZB9ndQ7c">--restart-on=H200,H401</code> 只对白名单错误码重启，确定性错误直接退出</td></tr>
+      <tr data-page-node-id="AQbUrQQUT3Ogq8j7XV5AVS"><td data-page-node-id="ECUE2oiGQPHX8ZTJ6zoL7U"><code data-page-node-id="IQwHA4POyZbN64SQA42OWw">--resume</code></td><td data-page-node-id="kUQbI5sgn8ND7eqJFDg7EN">恢复上次 db 检查点；<code data-page-node-id="Ue47x3LtU4iG7bqpFFzBhE">db.set</code> 自动落盘 <code data-page-node-id="87e8UTf2nqdhD5VLmra1yj">~/.hone/state/</code>，崩溃不丢检查点，脚本内容变更后检查点自动失效</td></tr>
+      <tr data-page-node-id="uPyFClmFlK7jCXOWplu75e"><td data-page-node-id="WU0QeFPEeV6tH72QlWbzHy">错误对象字段</td><td data-page-node-id="z73fcOKOSuLLUv1T1mL5rY"><code data-page-node-id="FHoDDdFnRkbX3IgiioFqr0">e.code</code> / <code data-page-node-id="29HNaGGJnQBFQtjjYiYWDf">e.message</code> / <code data-page-node-id="Qg7KBllFgvB9ORU7ZjGp0r">e.file</code> / <code data-page-node-id="8EfQVXFap3g5crXmOerVL7">e.context</code>（str）；<code data-page-node-id="pf6nZUTyqavBtcflVeucHz">e.line</code> / <code data-page-node-id="f0qCvBJvoQ6bOlVo2HxuWH">e.col</code>（int）</td></tr>
+    </table>
+    <p data-page-node-id="rrSJEbb62uLee28DPuTDYr">注意：Hone 为块作用域，try/catch 块内赋值的变量在块外不可见，跨块共享的变量需在块前声明。示例见 <code class="inline" data-page-node-id="TgazMCkhHKbhSq2Y1k0tlZ">examples/try_catch.hn</code>、<code class="inline" data-page-node-id="XwMnVHHc2TKEccfjivDryj">examples/restart_demo.hn</code>、<code class="inline" data-page-node-id="a7HdkF0wDcR2pw2fzPpk9f">examples/resume_demo.hn</code>。</p>
+  </section>
+</main>
+<script>
+// 参考手册即时搜索：按关键词过滤章节（匹配标题/正文/代码）
+function searchDocs(q) {
+  q = (q || "").trim().toLowerCase();
+  var secs = document.querySelectorAll("section");
+  var count = 0;
+  for (var i = 0; i < secs.length; i++) {
+    var s = secs[i];
+    var show = q === "" || s.textContent.toLowerCase().indexOf(q) !== -1;
+    s.style.display = show ? "" : "none";
+    if (show) count++;
+  }
+  document.getElementById("search-count").textContent =
+    q === "" ? "" : "匹配 " + count + " / " + secs.length + " 章";
+}
+</script>
+<footer>
+  <div class="links">
+    <a href="index.html">首页</a>
+    <a href="docs.html">文档</a>
+    <a href="language.html">语言</a>
+    <a href="tutorial.html">教程</a>
+    <a href="examples.html">示例</a>
+    <a href="stdlib.html">标准库</a>
+    <a href="install.html">安装</a>
+    <a href="download.html">下载</a>
+    <a href="perf.html">性能</a>
+    <a href="changelog.html">更新日志</a>
+    <a href="faq.html">FAQ</a>
+    <a href="about.html">关于</a>
+    <a href="https://github.com/shichencike/Hone">GitHub</a>
+  </div>
+  Hone v0.7.12 · MIT License · 🗡️ Hone – 为效率而生，为乐趣而造
+</footer>
+</body>
+</html>

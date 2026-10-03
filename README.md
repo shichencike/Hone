@@ -2,8 +2,8 @@
 
 轻量级、跨平台、可嵌入的脚本语言。用 Rust 实现，单文件可执行程序，开箱即用。
 
-> 设计规范：`hone.md`（v1.1）
-> 当前版本：v0.1.0 —— 核心执行器（阶段 1 + 阶段 2 + 阶段 3 + 阶段 5）
+> 设计规范：`hone.md`（v1.3）
+> 当前版本：v0.7.12（with 上下文、type 实例类、byte/bytes 字节类型、readonly、切片，详见 CHANGELOG）
 
 ## 构建
 
@@ -11,6 +11,48 @@
 cargo build --release
 # 产物：target/release/hone（Windows 下为 hone.exe）
 ```
+
+> **验证前务必重新构建。** `cargo check` 不产出可执行文件；
+> `target/` 下的旧二进制会静默沿用，导致「改了代码但行为没变」的误判。
+
+回归测试（`tests/`）统一使用 `target/debug/hone.exe`，**需先 `cargo build`**：
+
+```bash
+cargo build                    # 生成 debug 二进制，回归脚本依赖它
+python tests/regress3.py       # 解释器 vs VM 逐字节
+python tests/regress_err.py    # 错误诊断逐字符对齐
+python tests/regress_ir.py     # 文本 IR 往返
+```
+
+## 性能
+
+解释器为 AST 树遍历实现，2026-08-14 深度优化后的代表性基准（Windows x86_64，release 构建）：
+
+| 基准 | 优化前 | 优化后 |
+|------|--------|--------|
+| 递归 fib(26) | ~3.4s | ~1.6s |
+| 纯循环 2000 万次 | 71s | 42s |
+| 字符串拼接 20 万次 | 90s | 20s |
+
+关键手段：函数定义 `Arc` 共享（免每次调用的 AST 深拷贝）、循环作用域复用 +
+原地赋值更新（免每轮迭代的堆分配）、字符串拼接预分配容量（免 O(n²) 整串复制）。
+二进制体积约 3.7MB（strip + fat LTO + opt-level z）。基准脚本见 `bench/` 目录。
+
+### AOT 原生编译（`hone build --exe -c`）
+
+相对解释器有**接近一个数量级**的稳定加速（MinGW-w64 gcc 16.2.0，预热后取多轮最快值）：
+
+| 基准 | AOT | 解释器 | 加速比 |
+|------|-----|--------|--------|
+| 递归 fib(26) | 267 ms | 2530 ms | 9.5× |
+| 循环累加 200 万次 | 514 ms | 6203 ms | 12.1× |
+
+产物体积约 58.6 KB，零运行时依赖。作为对照，等价的 `rustc -O` 跑 2000 万次循环约 274 ms，
+AOT 版约 2962 ms——**慢约 10 倍**：AOT 生成的 C 对每次整数运算都做装箱
+（`hn_int()`）、深拷贝（`hn_copy()`）与释放，gcc 无法优化成寄存器运算。
+这是「列表/字典值语义 + 统一装箱 `HnValue`」的必然代价，调高优化级别无效。
+AOT 的真实定位是「比解释器快一个数量级、几十 KB、零依赖」的分发方案，
+不是「接近 C 的性能」。
 
 ## 用法
 
@@ -22,13 +64,18 @@ hone run --restart[=N] <script.hn> # 崩溃自动重启（N 为最大重启次�
                          可配合 --backoff=a,b,c 递增等待间隔，--restart-on=Hxxx 限定可重启错误码
 hone run --resume <script.hn> # 恢复上次 db 检查点并启用自动落盘（脚本变更后自动失效）
 hone fmt [-w] <file.hn>   # 代码格式化（Tab 缩进/运算符空格/大括号；-w 覆盖写，支持多文件）
+hone check <file.hn|目录> [--json] # 仅静态检查（解析+类型检查，不执行）；目录递归扫全部 .hn，--json 输出诊断 JSON，退出码 0/1
 hone build --dll <file.hn> # 打包 C ABI 动态库（int/float/bool/str 类型映射，需系统 C 编译器）
 hone build --exe <file.hn> # 将脚本与解释器打包为自释放独立可执行文件（[-o <out>] [--icon <ico>]）
+hone build --exe -c <file.hn> # AOT 原生编译：脚本 → C 中间文件 → gcc/clang → 原生可执行文件（--keep-c 保留中间 .c）
 hone explain <code>       # 查询错误码含义（如 hone explain H201）
-hone get <module> <url>   # 下载模块依赖并缓存到 ~/.hn/cache/
+hone get                  # 读取当前目录 hone.json 清单，批量下载全部模块（类似 package.json / Cargo.toml）
+hone get <module> <url>   # 下载模块依赖并缓存到 ~/.hn/cache/，并写入/更新 hone.json 清单
 hone get <script.hn>      # 预下载脚本中所有 import 声明的模块
-hone upgrade [-w] <file.hn> # 按映射表自动迁移旧版本语法（-w 覆盖写）
-hone lsp                  # 启动语言服务器（补全/诊断，LSP over stdio）
+hone lsp                  # 启动语言服务器（诊断/补全/hover/定义/references/rename/签名帮助/折叠/大纲/格式化/语义高亮，LSP over stdio）
+hone watch <script.hn>    # 监控脚本文件变更自动重跑（[--interval=N] 毫秒，默认 500，Ctrl+C 退出）
+hone repl                 # 交互式解释器（Python 式：表达式回显/多行续行/.vars 查看变量）
+hone prof <file.hn>       # 剖析模式运行脚本，输出函数级热点报告（总耗时/调用次数/平均耗时）
 hone poop <file.hn>       # 屎山检测——分析 if 嵌套深度和圈复杂度
 hone --help               # 帮助
 hone --version            # 版本
@@ -45,9 +92,28 @@ b = true;          // bool
 y : int = 20;      // 显式类型（Rust/TS 风格）
 int z = 30;        // 显式类型（C 风格）
 
+// cow 写时复制：集合共享只读缓冲，写者首次写时深拷贝隔离（仅解释器）
+cow xs = [1, 2, 3];
+cow ys = xs;          // 共享（O(1)，无拷贝）
+ys[0] = 99;           // 写时复制：ys 隔离，xs 不变
+assert(xs[0] == 1);
+
 // 控制流：条件必须是 bool
 if (x > 5) { print("大"); } else { print("小"); }
 while (i < 10) { i = i + 1; }
+
+// goto / 标签：手工循环、跳出多层嵌套（编译期校验，见 examples/goto_demo.hn）
+i = 0;
+again:
+print(i);
+i = i + 1;
+if (i < 3) { goto again; }
+
+// macro：表达式宏 / 语句宏（解析后做 AST 替换，各后端行为一致）
+macro SQ(n) => n * n;              // 表达式宏：SQ(3) → 3 * 3
+macro SAY(msg) { print(msg); }     // 语句宏：展开为独立作用域块
+print(SQ(3));                      // 9
+SAY("hi");
 
 // 集合：列表与字典字面量（动态元素类型，可混合）
 nums = [1, 2, 3];
@@ -111,11 +177,94 @@ tmp fn helper() { print("debug"); }
 
 // 调试输出（仅 hone debug 模式生效）
 debug_print("当前 x = " + to_str(x));
+
+// class 类：成员函数不进全局符号表，经 类.方法(...) 调用
+class Math {
+    fn double(x) { return x * 2; }
+    fn fib(n) {
+        if (n <= 1) { return n; }
+        return Math.fib(n - 1) + Math.fib(n - 2);
+    }
+}
+print(Math.double(21));   // 42
+print(Math.fib(10));      // 55
+
+// enum 枚举：简单变体 + 带载荷变体，match 变体模式匹配
+enum Color { Red, Green, Blue };
+enum Shape { Circle(float), Rect(float, float) };
+c = Color.Red;
+print(c);                         // Color.Red
+print(c == Color.Red);            // true
+s = Shape.Circle(1.5);
+area = match s {
+    Shape.Circle(r) => 3.14159 * r * r,   // r 绑定载荷
+    Shape.Rect(w, h) => w * h,
+    _ => 0,
+};
+print(area);                      // 7.06858…
+
+// async fn + await：异步函数后台线程执行，调用返回 future，await 阻塞等待结果
+async fn compute(n) { return n * 2; }
+f = compute(21);                  // 立即返回 future（不阻塞）
+print(await f);                   // 42（阻塞等待结果）
+
+// 泛型：fn name[T, U](...) 声明类型参数，调用时按实参推导（编译期擦除，运行期零成本）
+fn identity[T](x: T) -> T { return x; }
+print(identity(42));          // 42（T=int）
+print(identity("hello"));     // hello（T=str）
+
+fn pick[T](a: T, b: T, want_first: bool) -> T {
+    if (want_first) { return a; }
+    return b;
+}
+print(pick(10, 20, false));   // 20（T=int）
+
+// C 风格 for / do-while / continue
+for (i = 0; i < 5; i = i + 1) { print(i); }   // 0 1 2 3 4
+j = 0;
+do { j = j + 1; } while (j < 3);              // 至少执行一次
+for (i = 1; i <= 5; i = i + 1) {
+    if (i % 2 == 0) { continue; }             // 跳过偶数
+    print(i);                                 // 1 3 5
+}
+
+// 复合赋值（str 仅支持 +=）与自增/自减
+x = 10; x += 5; x -= 3; x *= 2; x /= 4; x %= 4;  // x = 2
+i = 0; i++; print(i);  // 1（后缀返回旧值）
+print(++i);            // 2（前缀返回新值）
+
+// 三元表达式（右结合可嵌套）与空值合并（a 为 null 取 b）
+label = x >= 0 ? "pos" : "neg";
+fn void_fn() {}
+v = void_fn();
+print(v ?? "default");   // default（void 调用返回 null）
+
+// 函数默认参数：省略尾部实参取默认值，默认表达式可引用前面参数
+fn greet(name, greeting = "Hello") { return greeting + ", " + name + "!"; }
+print(greet("Hone"));          // Hello, Hone!
+print(greet("Hone", "Hi"));    // Hi, Hone!
+
+// 匿名函数（lambda）：一等值，按值捕获外围变量（闭包），经变量名动态调用
+double = fn(x) { return x * 2; };
+print(double(21));             // 42
+base = 10;
+adder = fn(y) { return base + y; };
+print(adder(5));               // 15（捕获 base）
+fn apply(f, v) { return f(v); }
+print(apply(fn(n: int) { return n * n; }, 6));   // 36
+
+// 三引号原始字符串：多行、不做转义处理、保留换行与缩进
+text = """line1
+line2
+    indented""";
+print(len(text));              // 24
 ```
 
 ## 内置功能
 
 - 基础：`print` `len` `type_of` `read_file` `write_file` `file_exists`
+- 标准输入：`input(prompt?)` 读取一行返回 str（EOF 报 H306）、`read_int(prompt?)` 读取并解析为 int（格式错报 H006）、
+  `read_float(prompt?)` 读取并解析为 float（格式错报 H007）
 - 集合：`append(list, x)` `contains(list, x)` `index_of(list, x)`（找不到返回 -1）、
   `keys(dict)` `values(dict)` `has_key(dict, k)`；`to_str` 输出 `[a, b]` / `{k: v}`
 - 类型判断：`is_int` `is_float` `is_str` `is_bool` `is_list` `is_dict` `is_null`
@@ -172,13 +321,21 @@ print(lm.lib_fact(5));
 // use：命名空间导入（内置函数已全局可用，声明保留）
 use std_io;
 
-// alias：函数别名
+// alias：函数别名（原名支持点号路径，别名可叠加、可指向内置函数）
 alias greet as hi;
 hi("Hone");
+
+alias random.int as rint;   // 点号路径原名（模块/内置函数）
+print(rint(1, 100));
+
+alias print as p;           // 内置函数别名
+p("via alias");
 ```
 
 - `import` 底层基于 TCP（复用 `http_get`），模块解析后其函数合并进全局符号表，顶层语句在独立作用域执行
-- `hone get` 可预先下载模块（`hone get <module> <url>`）或扫描脚本内所有 `import` 声明批量预下载
+- `hone get` 可预先下载模块：`hone get <module> <url>`（并写入 hone.json 清单）、
+  `hone get <script.hn>`（扫描脚本内所有 `import` 声明批量预下载）、
+  `hone get`（读取当前目录 hone.json 清单批量下载全部模块）
 - `load` 依赖 `libloading`（纯 Rust，无 C 编译）；被调用库需导出 `#[no_mangle] pub extern "C" fn` 形式的
   int64 函数；已加载的库不跨 `go` 线程（懒加载路径与别名可克隆）
 - `load` 签名块（typed FFI）：`load "lib" as m { fn f(a: int, b: str) -> ptr; ... }` 显式声明
@@ -224,6 +381,84 @@ gui_run("Hone GUI 演示", widgets);
 - `on_event` 返回值按 JSON 协议解释：`{"update": [[元素id, 新文本], ...]}` 更新元素文本、`{"alert": "消息"}` 弹窗提示、其他文本显示在页面底部状态栏
 - 底层 `server.*` API（见 `examples/server_demo.hn`）：`server.listen(port)` 启动后台监听线程（0=自动分配，返回实际端口）、`server.poll()` 取出排队请求（返回 JSON 数组）、`server.respond(id, body)` 发送响应体；后台线程只做 TCP 收发与排队，脚本在主线程轮询响应，与解释器单线程模型兼容；进程内自测：`hone examples/server_selftest.hn`
 
+## 图片库（hone_lib/img.hn）
+
+纯 Hone 编写的图片标准库，像素网格 + 绘图/滤镜/变换 + PPM P3 / SVG 读写。
+运行示例：`hone examples/test_img_lib.hn`（生成 `examples/img_test.ppm` 与 `examples/img_test.svg`）。
+
+```hn
+import "img" from "./hone_lib/img.hn";
+
+// 图像 = {"w": 宽, "h": 高, "rows": [[[r,g,b],...],...]}
+im = img_new(64, 64, 255, 255, 255);        // 白色画布
+im = img_rect(im, 8, 8, 40, 40, 255, 0, 0); // 红色实心矩形
+im = img_circle(im, 32, 32, 16, 0, 0, 255); // 蓝色实心圆
+im = img_grayscale(im);                     // 灰度滤镜
+img_save_ppm(im, "out.ppm");                // 保存 PPM P3
+img_save_svg(im, "out.svg", 4);             // 保存 SVG（每像素放大 4 倍）
+```
+
+- 创建/绘图：`img_new` / `img_fill` / `img_rect` / `img_line` / `img_circle` / `img_gradient_h` / `img_gradient_v` / `img_checker` / `img_noise`
+- 滤镜：`img_grayscale` / `img_invert` / `img_brightness` / `img_contrast` / `img_threshold`
+- 变换：`img_flip_h` / `img_flip_v` / `img_rotate90` / `img_crop` / `img_scale`
+- 读写：`img_to_ppm` / `img_save_ppm` / `img_from_ppm` / `img_load_ppm` / `img_to_svg` / `img_save_svg`
+- 说明：Hone 的 str 无法承载二进制，故不支持 PNG/BMP 等二进制格式，采用文本格式 PPM P3（GIMP/ImageMagick 可查看）与 SVG（浏览器直接打开）；列表为值类型、索引赋值整体拷贝，绘图/滤镜适合 ≤128×128 的小图
+
+## 桌宠库（hone_lib/pet.hn）
+
+Windows 桌面宠物标准库（仅支持 Windows）：Hone 驱动状态机 + PowerShell 透明置顶窗渲染。
+内置像素猫（idle 眨眼 / walk 走路 / sleep 睡觉 / happy 开心 / surprise 惊讶 8 帧动画），
+说话气泡、点击/拖拽交互、右键菜单（换装/静音/跟随鼠标/隐藏台词/退出）、全屏游荡、
+自动入睡、整点报时、CPU/内存播报。运行示例：`hone examples/pet_demo.hn`（Ctrl+C 或右键菜单退出）。
+
+```hn
+import "pet" from "./hone_lib/pet.hn";
+
+cfg = {"pal": 0, "scale": 2, "speed": 3, "sleep_after": 90};
+pet_run(cfg);                    // 阻塞运行（推荐）
+
+// 非阻塞：st = pet_init(cfg); while (st.quit == false) { st = pet_tick(st); time.sleep(st.cfg.tick); }
+```
+
+- 动画状态：`idle`（眨眼）/ `walk`（左右方向镜像）/ `sleep`（闭眼 + 头顶 Z）/ `happy`（跳起）/ `surprise`（惊讶）
+- 交互：单击开心回应、双击惊讶、按住拖拽移动、右键菜单（换装/静音/跟随鼠标/隐藏显示台词/退出）
+- 行为：空闲自动全屏游荡、无操作自动入睡、随机台词气泡、整点报时、定时播报 CPU/内存（wmic）
+- 配置：`pal` 调色板（0 橘猫/1 黑猫/2 白猫）、`scale` 显示缩放、`speed` 移动速度、`tick` 帧间隔（默认 0.125 = 8fps）、
+  `wander` 游荡间隔秒、`bubble` 随机台词间隔秒、`sleep_after` 入睡阈值秒、`mute` 静音、`hourly` 整点报时、
+  `res_report` 资源播报间隔秒、`lines_file` 自定义台词 JSON、`frames_dir` 外部 PPM 帧目录、`start_x/start_y` 初始位置
+- 性能：帧构建用 `ptr.alloc` 缓冲 + 24×24 内联整数判定 + 2× 最近邻放大到 48×48，8 帧约 2s（对比推导式 rows 约 10s）
+- 说明：Hone 无原生窗口 API，窗口渲染/鼠标事件由运行时生成的 `pet_window.ps1`（WinForms 透明置顶窗）承担，
+  Hone 与窗口间以文件轮询通信（state.json / events.json）；与 gui.hn 同类，非纯 Hone 实现（详见库头注释）
+
+## 原生图形界面库（hone_lib/guipro.hn）
+
+原生窗口 + 原生控件标准库（gui.hn 的升级版）：Windows 用 Win32 标准控件（user32/gdi32，零新增依赖、不增体积），
+Linux 运行时动态加载 GTK3（缺失时 X11 降级弹窗）。Rust 内置 `guipro.*` 原语 + Hone 层统一 API：
+窗口 / button / label / input / select / checkbox / radio 控件、VBox 布局、闭包事件分发、定时器、消息框。
+运行示例：`hone examples/guipro_demo.hn`（20 秒后自动关闭演示）。
+
+```hn
+import "guipro" from "./hone_lib/guipro.hn";
+
+win = guipro_window("示例", 420, 320);
+b1  = guipro_button(win, "点我", 10, 10, 100, 32);
+out = guipro_label(win, "尚未点击", 10, 52, 200, 24);
+handlers = [];
+handlers = guipro_on(handlers, win, b1, "click", fn(id, value) {
+    guipro_set_text(win, out, "点击了按钮 #" + to_str(id));
+});
+guipro_run(handlers);   // 阻塞主循环，窗口关闭后返回
+```
+
+- 控件：`guipro_button/label/input/select/checkbox/radio(win, ..., x, y, w, h)` 绝对定位；
+  `guipro_vbox(win, specs, x, y, gap)` 纵向布局（返回控件 id 列表，顺序对应 specs）
+- 事件：`guipro_on(handlers, win, id, evt, fn)` 注册 click/change 回调（fn(id, value)），
+  `guipro_on_win(handlers, win, "close", fn)` 窗口级事件，`guipro_timer(handlers, ms, fn)` 定时器；
+  注册表函数式传递（Hone 函数内不能改全局变量），`guipro_run(handlers)` 阻塞分发
+- 事件模型：Rust 层只推事件队列（poll 返回 JSON），闭包分发在 Hone 层主循环完成——
+  `builtins::call` 无解释器上下文，闭包无法从 Rust 直接回调
+- 平台：Windows（Win32 原生控件）/ Linux（GTK3 动态加载；无 GTK3 时 msgbox 降级 zenity/xmessage）
+
 ## 错误报告格式
 
 ```
@@ -251,6 +486,7 @@ help: Hone types are locked after inference; no implicit conversion is allowed
 | H600 | 用户主动抛出（throw） |
 | H200 | 网络请求失败 |
 | H300 | 系统调用失败 |
+| H306 | 标准输入读取失败/EOF |
 | H404 | 文件或库不存在 |
 | H999 | 尚未实现 |
 
@@ -262,6 +498,8 @@ help: Hone types are locked after inference; no implicit conversion is allowed
 | 词法/语法 | H102 | 字符串未闭合 |
 | 词法/语法 | H103 | 注释未闭合 |
 | 词法/语法 | H104 | 语句缺少分号 |
+| 标签/跳转 | H105 | 未定义标签、标签重复、跨函数跳转、跳进内层语句块、向前跳过变量声明 |
+| 宏 | H106 | 宏非顶层定义、重复定义、与函数/类/枚举重名、实参个数不符、越界用法 |
 | 网络 | H201 | 连接/请求超时 |
 | 网络 | H202 | 连接被拒绝 |
 | 网络 | H203 | DNS 解析失败 |
@@ -269,6 +507,7 @@ help: Hone types are locked after inference; no implicit conversion is allowed
 | 系统/DLL | H301 | DLL 加载失败 |
 | 系统/DLL | H302 | DLL 参数校验失败 |
 | 系统/DLL | H303 | 权限不足 |
+| 系统/DLL | H306 | 标准输入读取失败/EOF（input / read_int / read_float） |
 | 文件 | H401 | 文件不存在 |
 | 文件 | H402 | 文件权限不足 |
 | 文件 | H403 | 文件被占用/锁定 |
@@ -289,19 +528,33 @@ help: Hone types are locked after inference; no implicit conversion is allowed
   str → const char*（支持数值/布尔/字符串运算、strcmp 比较、str 拼接与返回值 static 缓冲 2048B）；
   导出函数建议显式标注参数与返回类型（无调用点时无法推导）；
   需要系统 C 编译器（gcc/clang，可用 `CC` 环境变量指定），找不到时保留生成的 `.c` 源码并提示手动编译
-- `import` / `load` / `load lazy` / `use` / `alias` / `hone get` / `hone upgrade` / `hone lsp` 已实现
-  （upgrade 按映射表迁移旧语法；lsp 提供诊断/补全/hover，冒烟测试见 `tests/lsp_smoke.py`）
+- `import` / `load` / `load lazy` / `use` / `alias` / `hone get` / `hone lsp` 已实现
+  （lsp 提供诊断/补全/hover/跳转定义·类型定义/references/rename/签名帮助/折叠/
+  文档·全局符号/格式化/语义高亮，冒烟测试见 `tests/lsp_smoke.py`；
+  旧语法迁移工具 `hone upgrade` 已于 v0.7 移除）
 - `import "mod" from "url" as alias;` 支持以别名导入模块，函数名前缀自动替换
 - `try/catch/throw` 错误处理：捕获可恢复错误；catch 绑定的 `error` 类型变量含
   `code`/`message`/`file`/`line`/`col`/`context` 字段；`throw str` 构造 H600 用户错误，
   `throw error` 重抛
+- `goto` / 标签（H105）与 `macro`（H106）已实现：`goto` 在解释器与字节码 VM 下均支持
+  （AOT 原生编译暂不支持 `goto`，会给出 H999 提示）；宏在解析后的预处理阶段做纯 AST 展开，
+  三个后端行为完全一致。安全规则（同函数唯一 / 不跳进内层块 / 不跳过声明 / 宏体无环且不越界）
+  见 `hone.md` 1.4.1、1.4.2，示例见 `examples/goto_demo.hn`、`examples/macro_demo.hn`
 - `hone run --restart=N` / `--backoff=a,b,c` / `--restart-on=Hxxx` 自动重启策略
   （重启仅对可重入错误生效；默认最多 3 次，间隔 1/3/10 秒）
 - `hone run --resume` 检查点恢复（`db` 自动落盘，脚本变更后自动失效）
 - `hone build --exe` 将解释器与脚本打包为自释放独立可执行文件（`[-o <out>] [--icon <ico>]`）
+- `hone build --exe -c` AOT 原生编译：脚本 → C 中间文件 → 系统 C 编译器 → 原生可执行文件
+  （`-Os` + 函数节 + 链接期死代码消除，常见脚本约 50~70 KB；默认删除 .c，`--keep-c` 保留；
+  需系统 C 编译器，可用 `CC` 环境变量指定）
 - `hone explain <code>` 查询错误码含义与修复建议
 - `tmp fn` 临时函数在编译时自动忽略，仅开发阶段使用
 - `debug_print(expr)` 调试输出仅在 `hone debug` 模式生效，普通模式自动跳过
+- 新语法（v0.6.3）：`continue`、C 风格 `for (init; cond; step)`、`do-while`、
+  复合赋值 `+= -= *= /= %=`（str 仅支持 `+=`）、自增/自减 `++ --`、
+  三元 `cond ? a : b`、空值合并 `a ?? b`、匿名函数 lambda（一等值/闭包，经变量名动态调用）、
+  函数默认参数（尾部省略、默认表达式可引用前面参数）、三引号原始字符串 `"""..."""`；
+  lambda 与默认参数暂不支持 `hone build --dll`（报错提示改用解释模式）
 
 ## 路线图
 
@@ -310,7 +563,7 @@ help: Hone types are locked after inference; no implicit conversion is allowed
   `sys` 模块 Windows API ✅、`hone build --dll`（int 子集）✅
 - 🚧 阶段 3（基本完成）：`import` 远程模块 ✅、`load lazy` 懒加载 ✅、
   `use` / `alias` ✅、可视化编辑器 ✅（editor/index.html）、`hone get` ✅、
-  `hone upgrade` ✅、`hone lsp` ✅
+  `hone lsp` ✅（`hone upgrade` 已移除）
 - ✅ 阶段 4：官网 ✅（已部署至 https://hone.xo.je，源文件在 `官网/` 目录）、
   `--dll` float/str/bool 类型映射 ✅、GitHub 首次提交 ✅；推广待做
 - 🚧 阶段 5（新增）：内置函数扩展（log/path/args/env/db/regex/crypto）✅、

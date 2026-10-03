@@ -1,0 +1,12 @@
+struct P { x: int, y: int };
+p = P(1, 2);
+print("display: " + to_str(p));
+print("len: " + to_str(len(p)));
+n = 0;
+for k in p {
+    n = n + 1;
+}
+print("forin count: " + to_str(n));
+print("has_key x: " + to_str(has_key(p, "x")));
+print("field x: " + to_str(p.x));
+print("type: " + type_of(p));
