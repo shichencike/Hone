@@ -9,6 +9,13 @@ license = "MIT"
 name = "hone"
 path = "src/main.rs"
 
+# 原生编译后端（natgen）的运行时库：std-only 独立 crate。
+# 双轨使用：(1) workspace 成员供开发 / `cargo test -p honeruntime`；
+# (2) 经 include_str! 嵌入 hone 二进制，natgen 时写出临时目录参与产物构建（干净构建机自足）。
+[workspace]
+members = ["runtime"]
+exclude = ["tests/hone_lib"]
+
 [profile.release]
 # 实测（2026-08-14）：fat LTO + 单 codegen unit 在本机最快（3m53s）且体积最小（3.7MB）；
 # thin LTO 的两种组合（cgu=1 / cgu=16）反而更慢（4m47s+）且更大（4.0MB+），故保留原配置。
@@ -37,6 +44,11 @@ rustls-rustcrypto = "0.0.2-alpha"
 # 证书链构建（自定义验证器注入中间证书用；与 rustls 同版本树）
 rustls-webpki = "0.103"
 webpki-roots = "0.26"
+cranelift-codegen = "0.136.2"
+cranelift-frontend = "0.136.2"
+cranelift-module = "0.136.2"
+cranelift-object = "0.136.2"
+target-lexicon = "0.13.5"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winuser", "winbase", "winreg", "synchapi", "errhandlingapi", "winnt", "wincrypt", "libloaderapi", "wingdi", "windef", "minwindef", "commctrl", "shellapi", "commdlg", "objbase", "shobjidl"] }
