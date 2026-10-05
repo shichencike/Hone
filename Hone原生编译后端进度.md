@@ -48,7 +48,10 @@
   - `Hnv::display` 对齐 `interp::Value::display` 的 M0 子集（int/float/bool/char/str/null；float 用 std Display 天然一致）。
 - **退出标准**：`examples/hello.hn` + float/bool/char/null 打印脚本，nat 产物与 interp / VM 逐字节一致；fib 仍对齐；debug 构建下出口断言无 box 泄漏（rc 归零）。
 - **涉及文件**：`runtime/src/lib.rs`、`src/natgen.rs`、`src/main.rs`（wrapper 生成）。
-- **实现进度**：`runtime` 值模型已落地并通过 6 项单测——Hnv 24B 三寄存器、HnBox 引用计数 retain/drop 平衡（出口 rc 归零、HEAP_LIVE 无泄漏）、错误码用胖指针还原（`&'static str` 无 NUL 结尾，不能用 CStr）、strtab 建箱/取值往返、算术/比较/显示逐字对齐 VM 的 M0 子集（int/float 溢出 H010、除零 H009、类型不匹配 H001、char 比较、display 全标量）。**natgen 24B 槽 lowering（槽 8B→24B、LoadK 构造 Hnv、Call→rt_binop/rt_print、cond 取 Hnv truthy）进行中**——它是 T3 地基（rt_binop 收发 Hnv）。
+- **实现进度（2026-10-05）**：
+  - **ABI 关键决策**：设计 §4.3 原设想「Hnv{t,a,b}=24B 内联寄存器」，但 rustc windows-gnu 反汇编实测：24 字节（>16B）的 `repr(C)` 结构体在 Windows x64 走**隐藏 sret 指针**（返回值写进调用方缓冲区、参数经指针），与 cranelift 多结果函数 RAX/RDX/RCX 返回**不匹配**。故 T2 起改**句柄式值模型**：寄存器（cranelift i64 SSA 值）持 u64 句柄指向堆上 `HnCell{rc,t,a,b,pkind,payload}`，跨 object↔rustc 只传 i64（T1 已验证的干净 SysV 寄存器 ABI）。这是「24B 内联」不可行后的唯一 ABI 安全路径。
+  - **runtime 已落地，7 项单测全过**：句柄 retain/drop 引用计数（HEAP_LIVE 基线差值断言出口归零、无泄漏）、错误码胖指针还原（`&'static str` 无 NUL 结尾不能用 CStr）、strtab 建箱/取值往返、算术/比较/一元/显示逐字对齐 VM 的 M0 子集（int/float 溢出 H010、除零 H009、类型不匹配 H001、char 比较、display 全标量）。FFI 全 u64 进出：`rt_i64/rt_f64/rt_bool/rt_char/rt_null/rt_str`（建句柄）、`rt_retain/rt_drop`、`rt_binop`（消费实参镜像 VM clone）、`rt_unop`、`rt_print`（借用）、`rt_truthy/rt_is_err`、`hn_entry`。
+  - **natgen 24B lowering 重建中**：T1 版 `src/natgen.rs` 因误操作丢失（从未提交），正在按句柄式模型重建（内存帧槽：每 VM 寄存器一个 8B 句柄槽，递归经 cranelift 栈帧独立）。fib.hn 真实形态已确认：递归函数 + if/return + 字符串拼接（无 while 循环）。
 
 ### T3 运算与比较（rt_binop / rt_cmp / rt_unop）⬜
 
