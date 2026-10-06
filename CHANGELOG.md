@@ -3,6 +3,54 @@
 ## [Unreleased]
 
 ### 新增
+- **原生编译后端（`hone build --exe --native` / `hone natgen`）**：第四条执行路径——用
+  Cranelift 把 VM 字节码直接 lower 为机器码，再经生成式 wrapper + rustc 链接成原生可执行文件
+  - 与既有 AOT（`build --exe -c`，C 中间文件 + gcc/clang）并列；`-c` 与 `--native` 互斥（H005 显式报错）
+  - 值模型：句柄式（寄存器持 u64 句柄指向堆上 `HnCell`，跨 object ↔ rustc 只传 i64，规避 Windows x64
+    隐藏 sret 指针 ABI）；引用计数 retain/release，槽写释放旧值
+  - 调用模型：统一 `rt_call` 名分发（用户函数 / lambda / 内置表），lambda 按值捕获；错误经 ERR 句柄
+    跨帧传播 + 静态 catch 映射（无 setjmp），Throw/ThrowStr 归一 H600
+  - 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码逐字节一致，含完整错误渲染
+    （`--> 文件:行:列` / 行号行 / caret / help）；回归脚本 `tests/regress4.py`（fib / hello / err_divzero 全绿）
+  - 当前支持范围（M0 子集）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda / 捕获（值语义）、
+    try-catch / throw / 错误字段访问、内置子集（print/len/to_str/to_int/to_float/is_*/type_of/abs/max/min/
+    assert/assert_eq/read_file）；子集外指令编译期报 H990「未实现」（M1/M2 逐步放开）
+  - 依赖本机 rustc（M3 起改预编译工具链移除）；runtime 源码内嵌进 hone 二进制，干净机器自足
+  - 顺手修复：VM lambda 捕获实参寄存器绑定 bug（原按 `ncap+i` 偏移，捕获/参数寄存器不从 0 起排时
+    实参填错位，`base + x` 报 int+null）；AOT Windows CRLF 行尾问题（C 运行时文本模式 `\n`→CRLF 与
+    Rust 侧 LF 不一致，`hn_init_line_endings()` 切二进制模式）
+  - 设计 / 进度：`Hone原生编译后端设计.md`、`Hone原生编译后端进度.md`
+
+## [v0.7.12] - 2026-09-25
+
+### 新增
+- **with 上下文管理器**：`with expr as r { ... }`，进入时调 `__enter__()`
+  （返回值绑定 `r`，仅块内可见），退出时（**含报错路径**）必调 `__exit__()`，错误不被吞
+  - 与 try/catch 正交：块内 throw 会先执行 `__exit__` 再向外传播
+  - 示例 `examples/with_type_demo.hn`
+- **type 实例类**：`type 名称 [extends 父类] { 字段: 类型, ...; fn 方法(self, ...) { ... } };`
+  - 所有方法（含 `init`/`__enter__`/`__exit__`）必须把 `self` 作为**显式首参**，调用自动填充实例
+  - 构造 `new Type(实参...)`：实参绑定 `init` 的参数（去掉 self）；无 `init` 时按
+    **继承链字段顺序**（父类在前）绑定
+  - 字段引用语义：方法体内 `self.f = x` 的写入对调用方实例立即可见
+  - `extends` 继承字段与方法；`readonly` 字段两种写法等价：`readonly f: int` / `f: readonly int`
+  - 与 `struct`（纯数据 dict，位置构造）互补：type 提供方法、继承与构造器
+  - 示例 `examples/with_type_demo.hn`
+- **byte / bytes 字节类型**
+  - `byte`：8 位无符号值，字面量 `0b1010001` 或 `byte(int)` 显式转换（越界报错）；
+    与 int 严格隔离（无隐式转换），`to_int(b)` / `char(b)` 回转
+  - `bytes`：字节序列，字面量 `b"abc"`；支持 `len` / 索引（取 byte）/ 切片 / `+` 拼接 /
+    `==` / 迭代；`hex(b)` / `unhex(s)` / `to_bytes(str, enc?)`（默认 utf-8，支持 latin-1）/
+    `to_str(bytes, enc?)` / `to_bytes([int...])`
+  - 新增谓词 `is_byte` / `is_bytes`；`type_of` 返回 `byte` / `bytes`
+  - JSON 序列化对 byte/bytes/type 实例明确报错（提示先转 str/hex 或组 dict）
+  - 示例 `examples/byte_demo.hn`
+- **readonly 只读修饰**
+  - 只读变量 `readonly int x = 5;`（两种写法等价：`x : readonly int = 5;`）
+  - 只读参数 `fn f(readonly int y) { ... }`
+  - struct 只读字段、type 只读字段（静态拦截 + 运行时兜底）
+- **切片**：`a[i:j]`（list / bytes；任一端点可省略：`a[i:]` / `a[:j]`），
+  与 `a[i]` 索引同位置可链式（str 暂不支持切片，按码点用 `char_at` 逐字符取）
 - **LSP 文本能力补全**（`hone lsp`，LSP over stdio）：在既有的诊断 / 补全 / hover /
   跳转定义 / 语义高亮基础上，新增 8 项标准文本能力，均无新增依赖
   - **references**（`textDocument/references`）：跨**所有已打开文档**查找符号引用，
@@ -45,37 +93,8 @@
   - 仅解释器支持：VM（`--vm`）/ AOT（`build --exe -c`）/ DLL（`build --dll`）
     遇 `cow` 声明或形参报 H999（"cow works in interpreted mode only"）
   - 冒烟测试 `tests/smoke/cow_read.hn`
-
-## [v0.7.12] - 2026-09-25
-
-### 新增
-- **with 上下文管理器**：`with expr as r { ... }`，进入时调 `__enter__()`
-  （返回值绑定 `r`，仅块内可见），退出时（**含报错路径**）必调 `__exit__()`，错误不被吞
-  - 与 try/catch 正交：块内 throw 会先执行 `__exit__` 再向外传播
-  - 示例 `examples/with_type_demo.hn`
-- **type 实例类**：`type 名称 [extends 父类] { 字段: 类型, ...; fn 方法(self, ...) { ... } };`
-  - 所有方法（含 `init`/`__enter__`/`__exit__`）必须把 `self` 作为**显式首参**，调用自动填充实例
-  - 构造 `new Type(实参...)`：实参绑定 `init` 的参数（去掉 self）；无 `init` 时按
-    **继承链字段顺序**（父类在前）绑定
-  - 字段引用语义：方法体内 `self.f = x` 的写入对调用方实例立即可见
-  - `extends` 继承字段与方法；`readonly` 字段两种写法等价：`readonly f: int` / `f: readonly int`
-  - 与 `struct`（纯数据 dict，位置构造）互补：type 提供方法、继承与构造器
-  - 示例 `examples/with_type_demo.hn`
-- **byte / bytes 字节类型**
-  - `byte`：8 位无符号值，字面量 `0b1010001` 或 `byte(int)` 显式转换（越界报错）；
-    与 int 严格隔离（无隐式转换），`to_int(b)` / `char(b)` 回转
-  - `bytes`：字节序列，字面量 `b"abc"`；支持 `len` / 索引（取 byte）/ 切片 / `+` 拼接 /
-    `==` / 迭代；`hex(b)` / `unhex(s)` / `to_bytes(str, enc?)`（默认 utf-8，支持 latin-1）/
-    `to_str(bytes, enc?)` / `to_bytes([int...])`
-  - 新增谓词 `is_byte` / `is_bytes`；`type_of` 返回 `byte` / `bytes`
-  - JSON 序列化对 byte/bytes/type 实例明确报错（提示先转 str/hex 或组 dict）
-  - 示例 `examples/byte_demo.hn`
-- **readonly 只读修饰**
-  - 只读变量 `readonly int x = 5;`（两种写法等价：`x : readonly int = 5;`）
-  - 只读参数 `fn f(readonly int y) { ... }`
-  - struct 只读字段、type 只读字段（静态拦截 + 运行时兜底）
-- **切片**：`a[i:j]`（list / bytes；任一端点可省略：`a[i:]` / `a[:j]`），
-  与 `a[i]` 索引同位置可链式（str 暂不支持切片，按码点用 `char_at` 逐字符取）
+- **cow 语言参考**：语言规格 `hone.md` 补充 cow 写时复制容器规范
+  （声明形式 / `cow readonly` 只读叠加 / `cow` 形参 / `type_of` 透明性 / 各引擎 H999 限制）
 
 ### 变更
 - 字段赋值 `obj.f = v`：`+`/`-`/`*`/`/`/`%` 复合赋值在 AST 层展开为

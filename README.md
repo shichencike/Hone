@@ -54,6 +54,20 @@ AOT 版约 2962 ms——**慢约 10 倍**：AOT 生成的 C 对每次整数运�
 AOT 的真实定位是「比解释器快一个数量级、几十 KB、零依赖」的分发方案，
 不是「接近 C 的性能」。
 
+### 原生编译后端（`hone build --exe --native`）
+
+与 AOT（经 C 中间文件）并列的第二条原生路径：Cranelift 把 VM 字节码直接 lower 为机器码，
+再经生成式 wrapper + rustc 链接成原生可执行文件。`hone natgen` 是等价别名（保留 `--obj` 调试中间物）。
+
+- 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码**逐字节一致**，
+  含完整错误渲染（`--> 文件:行:列` / 行号行 / caret / help）；回归见 `tests/regress4.py`
+- 值模型：句柄式（寄存器持 u64 句柄指向堆上 `HnCell`）+ 引用计数；lambda 按值捕获，
+  错误经 ERR 句柄跨帧传播 + 静态 catch 映射（无 setjmp）
+- 当前支持范围（M0 子集）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda / 捕获、
+  try-catch / throw / 错误字段访问、内置子集（print/len/to_str/to_int/to_float/is_*/type_of/abs/max/min/
+  assert/assert_eq/read_file）；子集外指令编译期报 H990「未实现」（M1/M2 逐步放开）
+- 依赖本机 rustc（M3 起改为随 hone 分发的预编译工具链）；与 `-c` 互斥（H005 显式报错）
+
 ## 用法
 
 ```bash
@@ -68,6 +82,7 @@ hone check <file.hn|目录> [--json] # 仅静态检查（解析+类型检查，�
 hone build --dll <file.hn> # 打包 C ABI 动态库（int/float/bool/str 类型映射，需系统 C 编译器）
 hone build --exe <file.hn> # 将脚本与解释器打包为自释放独立可执行文件（[-o <out>] [--icon <ico>]）
 hone build --exe -c <file.hn> # AOT 原生编译：脚本 → C 中间文件 → gcc/clang → 原生可执行文件（--keep-c 保留中间 .c）
+hone build --exe --native <file.hn> # 原生编译后端：脚本 → Cranelift 机器码 → rustc 链接 → 原生可执行文件（需本机 Rust 工具链；hone natgen 为等价别名）
 hone explain <code>       # 查询错误码含义（如 hone explain H201）
 hone get                  # 读取当前目录 hone.json 清单，批量下载全部模块（类似 package.json / Cargo.toml）
 hone get <module> <url>   # 下载模块依赖并缓存到 ~/.hn/cache/，并写入/更新 hone.json 清单

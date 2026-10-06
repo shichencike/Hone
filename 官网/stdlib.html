@@ -5,50 +5,50 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 标准库文档</title>
 <meta name="description" content="Hone 标准库：纯 Hone 编写的 math / collections / str / gui / music / spider / process / sched / img / ai / pet / guipro 模块，本地路径导入即可使用。">
-<meta name="theme-color" content="#0d1117">
+<meta name="theme-color" content="#0b0e14">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
-<script>
-/* 主题初始化：读取 localStorage 避免闪烁（默认深色）；切换函数供 header 按钮调用 */
-function toggleTheme(){
-  var h = document.documentElement;
-  var cur = h.getAttribute("data-theme") === "light" ? "dark" : "light";
-  h.setAttribute("data-theme", cur);
-  try { localStorage.setItem("hone-theme", cur); } catch(e) {}
-}
-(function(){
-  var t = "dark";
-  try { t = localStorage.getItem("hone-theme") || "dark"; } catch(e) {}
-  document.documentElement.setAttribute("data-theme", t);
-})();
-</script>
 </head>
 <body>
 <header>
-  <span class="logo"><span class="mark">⚡</span> Hone</span>
-  <nav>
-    <a href="index.html">首页</a>
-    <a href="docs.html">文档</a>
-    <a href="language.html">语言</a>
-    <a href="tutorial.html">教程</a>
-    <a href="examples.html">示例</a>
-    <a href="stdlib.html" class="active">标准库</a>
-    <a href="install.html">安装</a>
-    <a href="download.html">下载</a>
-    <a href="perf.html">性能</a>
-  </nav>
-  <span class="ver">v0.7.12</span>
-  <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">☀️</span><span class="ti-dark">🌙</span></button>
+  <button class="menu-btn" onclick="toggleNav()" aria-label="菜单">&#9776;</button>
+  <span class="logo"><span class="mark">&#9889;</span> Hone</span>
+  <span class="spacer"></span>
+  <span class="right">
+    <span class="ver">v0.7.12</span>
+    <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">&#9728;</span><span class="ti-dark">&#127769;</span></button>
+  </span>
 </header>
 
-<main>
-  <p class="desc">Hone 标准库：纯 Hone 编写的模块（<code class="inline">hone_lib/</code>），本地路径导入即可使用。GUI 模块（<code class="inline">gui</code>）依赖 v0.3.0 新增的 <code class="inline">server.*</code> 内置函数。</p>
-
-  <input type="text" id="search" class="search-box" placeholder="搜索标准库…（如 math_gcd、gui_run）" oninput="searchDocs(this.value)">
-  <div id="search-count" class="search-count"></div>
-
-  <div class="toc">
-    <ol>
+<aside class="sidebar" id="sidebar">
+  <nav>
+    <div class="nav-group">
+      <div class="nav-title">入门</div>
+      <a href="index.html">首页</a>
+      <a href="install.html">安装</a>
+      <a href="download.html">下载</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">学习</div>
+      <a href="tutorial.html">教程</a>
+      <a href="examples.html">示例</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">参考</div>
+      <a href="docs.html">文档</a>
+      <a href="language.html">语言参考</a>
+      <a href="stdlib.html" class="active">标准库</a>
+      <a href="perf.html">性能</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">项目</div>
+      <a href="changelog.html">更新日志</a>
+      <a href="faq.html">FAQ</a>
+      <a href="about.html">关于</a>
+    </div>
+    <div class="page-toc">
+      <div class="nav-title">本页目录</div>
+      <ol>
       <li><a href="#intro">概述与导入</a></li>
       <li><a href="#math">math 数学模块</a></li>
       <li><a href="#collections">collections 集合模块</a></li>
@@ -65,7 +65,19 @@ function toggleTheme(){
       <li><a href="#guipro">guipro 原生图形界面模块</a></li>
       <li><a href="#demo">组合示例</a></li>
     </ol>
-  </div>
+    </div>
+  </nav>
+</aside>
+<div class="sidebar-backdrop" id="navBackdrop"></div>
+
+<main>
+
+  <p class="desc">Hone 标准库：纯 Hone 编写的模块（<code class="inline">hone_lib/</code>），本地路径导入即可使用。GUI 模块（<code class="inline">gui</code>）依赖 v0.3.0 新增的 <code class="inline">server.*</code> 内置函数。</p>
+
+  <input type="text" id="search" class="search-box" placeholder="搜索标准库…（如 math_gcd、gui_run）" oninput="searchDocs(this.value)">
+  <div id="search-count" class="search-count"></div>
+
+  
 
   <section id="intro">
     <h2><span class="hash">#</span>1. 概述与导入</h2>
@@ -535,8 +547,15 @@ scores = [<span class="n">3</span>, <span class="n">1</span>, <span class="n">4<
 <span class="f">print</span>(<span class="f">math_clamp</span>(<span class="f">coll_max</span>(scores), <span class="n">0</span>, <span class="n">3</span>));  <span class="c">// 3</span>
 <span class="f">print</span>(<span class="f">str_join</span>(<span class="f">coll_unique</span>(scores), <span class="s">"-"</span>));  <span class="c">// 3-1-4-5</span></code></pre>
   </section>
+
 </main>
 
+<footer>
+  Hone v0.7.12 &middot; MIT License &middot; <span class="sword">&#128481;</span> Hone &ndash; 为效率而生，为乐趣而造
+  &middot; <a href="https://github.com/shichencike/Hone">GitHub</a>
+</footer>
+
+<script src="site.js"></script>
 <script>
 // 标准库即时搜索：按关键词过滤章节（匹配标题/正文/代码）
 function searchDocs(q) {
@@ -553,24 +572,5 @@ function searchDocs(q) {
     q === "" ? "" : "匹配 " + count + " / " + secs.length + " 章";
 }
 </script>
-
-<footer>
-  <div class="links">
-    <a href="index.html">首页</a>
-    <a href="docs.html">文档</a>
-    <a href="language.html">语言</a>
-    <a href="tutorial.html">教程</a>
-    <a href="examples.html">示例</a>
-    <a href="stdlib.html">标准库</a>
-    <a href="install.html">安装</a>
-    <a href="download.html">下载</a>
-    <a href="perf.html">性能</a>
-    <a href="changelog.html">更新日志</a>
-    <a href="faq.html">FAQ</a>
-    <a href="about.html">关于</a>
-    <a href="https://github.com/shichencike/Hone">GitHub</a>
-  </div>
-  Hone v0.7.12 · MIT License · <span class="sword">🗡️</span> Hone – 为效率而生，为乐趣而造
-</footer>
 </body>
 </html>

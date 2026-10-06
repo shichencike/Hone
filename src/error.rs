@@ -127,6 +127,7 @@ pub mod codes {
     pub const SYSCALL: &str = "H300"; // 系统调用失败
     pub const NETWORK: &str = "H200"; // 网络请求失败（通用）
     pub const NOT_FOUND: &str = "H404"; // 文件或库不存在（通用）
+    pub const INTERNAL: &str = "H990"; // 内部管线错误（原生编译 / codegen 失败）
     pub const NOT_IMPLEMENTED: &str = "H999"; // 尚未实现
     pub const CHECK_FAILED: &str = "H900"; // hone check 静态检查失败（汇总错误，具体定位见单条诊断）
 
@@ -198,6 +199,7 @@ pub fn explain(code: &str) -> Option<&'static str> {
         "H404" => "文件或库不存在（通用）：NOT_FOUND。\n  修复：检查路径与模块缓存（~/.hone/cache/）。",
         "H600" => "用户主动抛出的错误（throw）。\n  修复：查看 throw 携带的 message 说明，或由调用方 try-catch 处理。",
         "H700" => "assert 断言失败（测试框架）。\n  修复：检查断言条件与期望值；断言失败即测试用例不通过。",
+        "H990" => "内部管线错误：原生编译（natgen / codegen）过程中出现内部故障。\n  修复：这不是脚本问题，请携带完整报错提交 issue。",
         "H999" => "尚未实现的功能。\n  修复：该特性仍在规划中，请改用其他方式或等待新版本。",
         _ => return None,
     })

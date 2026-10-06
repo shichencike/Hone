@@ -30,8 +30,8 @@
 // rt_str(i) -> u64               字符串表第 i 项 → 句柄（retain 表项，表基引用永存）
 // rt_retain(h) -> u64            加引用，返回 h
 // rt_drop(h)                     减引用（归零释放）
-// rt_binop(op,x,y) -> u64        消费 x/y，返回结果句柄；op 编码见下
-// rt_unop(op,x) -> u64           消费 x（5=neg 6=not）
+// rt_binop(op,x,y,ci,pc) -> u64  消费 x/y，返回结果句柄；op 编码见下（T4：ci/pc = 出错指令位置）
+// rt_unop(op,x,ci,pc) -> u64     消费 x（5=neg 6=not）（T4：ci/pc = 出错指令位置）
 // rt_print(h)                    打印 display（借用，不 drop）
 // rt_truthy(h) -> u64            真值 0/1（借用）；rt_is_err(h) -> u64 同理
 // rt_binop op: 0=add 1=sub 2=mul 3=div 4=mod 7=eq 8=ne 9=lt 10=le 11=gt 12=ge
@@ -77,10 +77,19 @@ impl Hnv {
     pub fn null() -> Hnv {
         Hnv { t: T_NULL, a: 0, b: 0 }
     }
-    /// 真值：与 vm.rs is_truthy 的 M0 子集一致（null/false 为假，余真）。
+    /// 标量真值（无句柄上下文时用）：与 vm.rs is_truthy 的 M0 标量子集一致。
+    /// 注意：T_STR 是否为空需读句柄（a/b），故 rt_truthy 一律走 handle 版 truthy_handle。
     #[inline]
     pub fn is_truthy(&self) -> bool {
-        !matches!(self.t, T_BOOL_FALSE | T_NULL)
+        match self.t {
+            T_BOOL_TRUE => true,
+            T_BOOL_FALSE => false,
+            T_NULL => false,
+            T_INT => self.a != 0,
+            T_FLOAT => f64::from_bits(self.a) != 0.0,
+            T_STR => self.b != 0,
+            _ => true,
+        }
     }
 }
 
@@ -88,6 +97,13 @@ impl Hnv {
 const P_NONE: u64 = 0; // 标量
 const P_STR: u64 = 1;  // payload=容量，a=字节指针，b=长度
 const P_ERR: u64 = 2;  // payload=*mut HnErr
+const P_FN: u64 = 3;   // payload=*mut HnFnBox（T5：lambda 值，a=chunk 索引）
+
+/// lambda 值（T5）：chunk 索引 + 捕获句柄数组（每项 retain 引用，按值捕获语义）。
+struct HnFnBox {
+    ci: u32,
+    caps: Vec<u64>,
+}
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -136,6 +152,13 @@ fn cell_release(h: u64) {
                     }
                 }
                 P_ERR => drop(Box::from_raw(c.payload as *mut HnErr)),
+                P_FN => {
+                    // 释放捕获句柄引用（逐项 cell_release）后 drop box。
+                    let b = Box::from_raw(c.payload as *mut HnFnBox);
+                    for &h in &b.caps {
+                        cell_release(h);
+                    }
+                }
                 _ => {}
             }
             drop(Box::from_raw(p));
@@ -248,15 +271,59 @@ pub extern "C" fn rt_str(i: u64) -> u64 {
     rt_retain(h)
 }
 
+// ── 程序静态表（T4：错误渲染的行/列来源） ──
+// file/src 为原始脚本路径与全文；span 表按 chunk 存 (line,col,len) 三元组
+// （u32×3），与 Chunk.spans 一一对应（emit/emit_label 均 push）。
+// rt_unwind 按 (ci,pc) 查 span → 在 src 里取该行文本 → 复刻 ZError::Display。
+static PROG: std::sync::Mutex<(String, String, Vec<Vec<[u32; 3]>>)> =
+    std::sync::Mutex::new((String::new(), String::new(), Vec::new()));
+
+/// 程序静态表初始化：file/src 全文 + 每 chunk 的 span 三元组数组。
+/// spans_ptrs[i] 指向长度为 spans_lens[i]×3 的 u32 数组（line,col,len 交错）。
+#[no_mangle]
+pub extern "C" fn hn_rt_prog_init(
+    file: *const u8,
+    file_len: usize,
+    src: *const u8,
+    src_len: usize,
+    spans_ptrs: *const *const u32,
+    spans_lens: *const usize,
+    nchunks: usize,
+) {
+    let f = unsafe { std::slice::from_raw_parts(file, file_len) };
+    let s = unsafe { std::slice::from_raw_parts(src, src_len) };
+    let mut tables = Vec::with_capacity(nchunks);
+    for i in 0..nchunks {
+        let n = unsafe { spans_lens.add(i).read() };
+        let base = unsafe { *spans_ptrs.add(i) };
+        let triples = unsafe { std::slice::from_raw_parts(base, n * 3) }
+            .chunks_exact(3)
+            .map(|t| [t[0], t[1], t[2]])
+            .collect();
+        tables.push(triples);
+    }
+    *PROG.lock().unwrap() = (
+        String::from_utf8_lossy(f).into_owned(),
+        String::from_utf8_lossy(s).into_owned(),
+        tables,
+    );
+}
+
 // ── 错误（M0 骨架：T4 补 span 表 / help / caret 逐字节渲染） ──
 
 // 纯运行时内部类型（不跨 FFI），msg 用 Vec 自持内存，由 Box<HnErr> 统一释放。
 // code 存 &str 胖指针（ptr+len 各 u64）：&'static str 字节不一定 NUL 结尾，
 // 不能按 C 串读，须用 from_utf8_unchecked 带长度还原。
+// ci/pc = 出错指令所在 chunk 索引与指令序（rt_unwind 查 span 表渲染行/列/caret）。
+// help：显式 help 文本（镜像 VM 侧 mk_err_with 显式 help 的调用点，如库未加载）；
+// None 时渲染阶段回退 hn_help_for 推导（与 VM 的 vm_help_for 一致）。
 struct HnErr {
     code_p: u64,
     code_l: u64,
     msg: Vec<u8>,
+    ci: u32,
+    pc: u32,
+    help: Option<String>,
 }
 
 fn err_code_str(e: &HnErr) -> &'static str {
@@ -265,46 +332,138 @@ fn err_code_str(e: &HnErr) -> &'static str {
             e.code_p as *const u8,
             e.code_l as usize,
         ));
-        // code 仅由运行时内部 err_new 传入 &'static str 字面量，此转换安全。
+        // code 仅由运行时内部错误构造传入 &'static str 字面量，此转换安全。
         &*(s as *const str)
     }
 }
 
-/// 建错误句柄（rc=1，调用方获得所有权）。
-fn err_new(code: &'static str, msg: String) -> u64 {
-    let e = Box::into_raw(Box::new(HnErr {
-        code_p: code.as_ptr() as u64,
-        code_l: code.len() as u64,
-        msg: msg.into_bytes(),
-    }));
-    let c = Box::into_raw(Box::new(HnCell {
-        rc: 1,
-        t: T_ERR,
-        a: 0,
-        b: 0,
-        pkind: P_ERR,
-        payload: e as u64,
-    }));
-    leak_check_inc();
-    c as u64
+/// 镜像 vm.rs vm_help_for：按错误码 + 消息子串给出 help 文本（None = 无 help 行）。
+fn hn_help_for(code: &str, msg: &str) -> Option<String> {
+    let m = |s: &str| msg.contains(s);
+    let h = match code {
+        "H009" => "check the divisor before dividing".to_string(),
+        "H010" => "the result does not fit in a 64-bit signed integer".to_string(),
+        "H001" => {
+            if m("cannot apply `") {
+                "Hone has no implicit type conversion".to_string()
+            } else if m("cannot compare `") {
+                "comparison operators work on `int` / `float` / `char`".to_string()
+            } else {
+                return None;
+            }
+        }
+        "H006" => "`to_int` on a string requires digits only (optional leading `-`)".to_string(),
+        "H007" => "`to_float` on a string requires digits only (optional decimal point)".to_string(),
+        "H404" => "check the path and module cache (~/.hone/cache/)".to_string(),
+        "H002" => {
+            if m("undefined function") {
+                "check the spelling".to_string()
+            } else if m("dict has no key") {
+                "check the key name, or the dict value being destructured".to_string()
+            } else if m("unknown field") {
+                "check the field name, or the struct definition".to_string()
+            } else if m("unknown error field") {
+                "error fields: code, message, file, line, col, context".to_string()
+            } else {
+                return None;
+            }
+        }
+        _ => return None,
+    };
+    Some(h)
 }
 
+/// 完整错误渲染（T4）：逐字节镜像 error.rs ZError::Display + runner 的 eprintln 尾换行。
+/// span 按 (ci,pc) 查 PROG 静态表；line==0 时走 plain 分支（无定位行）。
 fn err_render(h: u64) -> String {
     unsafe {
         let c = *(h as *const HnCell);
         let e = &*(c.payload as *const HnErr);
-        format!(
-            "error[{}]: {}",
-            err_code_str(e),
-            String::from_utf8_lossy(&e.msg)
-        )
+        let code = err_code_str(e);
+        let msg = String::from_utf8_lossy(&e.msg).into_owned();
+        let (file, src, _tables) = PROG.lock().unwrap().clone();
+        let span = _tables
+            .get(e.ci as usize)
+            .and_then(|t| t.get(e.pc as usize))
+            .map(|t| (t[0] as usize, t[1] as usize, t[2] as usize));
+        // help 优先用错误自带（镜像 VM 显式 help 的调用点），否则回退 hn_help_for 推导。
+        let help = e.help.clone().or_else(|| hn_help_for(code, &msg));
+        render_error_with_help(code, &msg, &file, &src, span, help.as_deref())
     }
 }
 
-/// M0 错误出口：stderr 打印后退出（T4 → 完整渲染 + T6 跨帧协议）。
+/// render_error 的可选 help 显式版：help 显式传入时不再走 hn_help_for 推导。
+fn render_error_with_help(
+    code: &str,
+    msg: &str,
+    file: &str,
+    src: &str,
+    span: Option<(usize, usize, usize)>,
+    help: Option<&str>,
+) -> String {
+    let mut out = String::new();
+    match span {
+        None => {
+            out.push_str(&format!("error[{}]: {}\n", code, msg));
+            if let Some(h) = help {
+                out.push_str(&format!("help: {}\n", h));
+            }
+        }
+        Some((line, col, len)) => {
+            // line 0 = 无定位（plain 分支，与 ZError::Display 一致）。
+            if line == 0 {
+                out.push_str(&format!("error[{}]: {}\n", code, msg));
+                if let Some(h) = help {
+                    out.push_str(&format!("help: {}\n", h));
+                }
+                return out;
+            }
+            let line_text = src.lines().nth(line.saturating_sub(1)).unwrap_or("").to_string();
+            // Tab 展开为 4 空格，保持 caret 对齐（与 ZError::Display 一致）。
+            let mut shown = String::new();
+            let mut caret_col = 0usize;
+            let chars: Vec<char> = line_text.chars().collect();
+            for (i, ch) in chars.iter().enumerate() {
+                if i < col.saturating_sub(1) {
+                    if *ch == '\t' {
+                        shown.push_str("    ");
+                        caret_col += 4;
+                    } else {
+                        shown.push(*ch);
+                        caret_col += 1;
+                    }
+                } else {
+                    shown.push(*ch);
+                }
+            }
+            let line_no = format!("{}", line);
+            let pad = line_no.len();
+            let caret_len = len.max(1).min(chars.len().saturating_sub(col.saturating_sub(1)).max(1));
+            out.push_str(&format!("error[{}]: {}\n", code, msg));
+            out.push_str(&format!("  --> {}:{}:{}\n", file, line, col));
+            out.push_str(&format!("{:>pad$} | {}\n", line_no, shown, pad = pad));
+            out.push_str(&format!(
+                "{} | {}{}\n",
+                " ".repeat(pad),
+                " ".repeat(caret_col),
+                "^".repeat(caret_len)
+            ));
+            if let Some(h) = help {
+                out.push_str(&format!("help: {}\n", h));
+            }
+        }
+    }
+    out
+}
+
+/// 错误出口（T4）：完整渲染 → stderr → exit(1)。
+/// 用 eprintln! 而非 eprint!：镜像 main.rs 的 `eprintln!("{}", e)`——
+/// ZError::Display 内部各行已含 `\n`，eprintln! 再追加一个，最终 stderr 以
+/// 空行（两个 `\n`）结尾；nat 产物必须与 interp / VM 输出逐字节一致。
 #[no_mangle]
 pub extern "C" fn rt_unwind(err: u64) -> ! {
-    eprintln!("{}", err_render(err));
+    let s = err_render(err);
+    eprintln!("{}", s);
     std::process::exit(1);
 }
 
@@ -352,10 +511,53 @@ pub fn handle_display(h: u64) -> String {
     hnv_display(c.hnv())
 }
 
-// 算术（镜像 vm.rs v_add/v_sub/v_mul/v_div/v_mod；T3 补 str 拼接与全类型）。
-// 纯 Hnv 运算，产出 Hnv（由调用方决定建句柄 / 释放输入）。
-fn arith_inner(op: u64, x: Hnv, y: Hnv) -> Hnv {
+/// str+str 拼接（镜像 v_add 的 Str 臂）：合并字节建新句柄（rc=1）。
+fn str_concat(xh: u64, yh: u64) -> u64 {
+    let cx = cell(xh);
+    let cy = cell(yh);
+    let bx = unsafe { std::slice::from_raw_parts(cx.a as *const u8, cx.b as usize) };
+    let by = unsafe { std::slice::from_raw_parts(cy.a as *const u8, cy.b as usize) };
+    let mut out: Vec<u8> = Vec::with_capacity(bx.len() + by.len());
+    out.extend_from_slice(bx);
+    out.extend_from_slice(by);
+    make_cell_str(out)
+}
+
+/// str 相等（镜像 v_eq 的 Str 臂）。Hone 字符串恒为合法 UTF-8（字面量 / 拼接产物），
+/// 码点序列相等 ⇔ 字节序列相等，故直接比字节（免 lossy 转换，且 wrapper 侧裸 rustc
+/// 下 std::str::from_utf8_lossy 路径解析不稳定，绕开）。
+fn str_eq(xh: u64, yh: u64) -> bool {
+    let cx = cell(xh);
+    let cy = cell(yh);
+    let bx = unsafe { std::slice::from_raw_parts(cx.a as *const u8, cx.b as usize) };
+    let by = unsafe { std::slice::from_raw_parts(cy.a as *const u8, cy.b as usize) };
+    bx == by
+}
+
+fn arith_sym(op: u64) -> &'static str {
+    match op {
+        0 => "+",
+        1 => "-",
+        2 => "*",
+        3 => "/",
+        _ => "%",
+    }
+}
+
+// 算术（镜像 vm.rs v_add/v_sub/v_mul/v_div/v_mod：int/float 全组合 + str+str 拼接）。
+// 纯 Hnv 运算，产出 Hnv（由调用方决定建句柄 / 释放输入）。ci/pc = 出错指令位置。
+fn arith_inner(op: u64, x: Hnv, y: Hnv, ci: u32, pc: u32) -> Hnv {
     match (x.t, y.t) {
+        // str+str：Add 在 rt_binop 句柄路径拦截（str_concat）；sub/mul/div/mod 镜像
+        // v_* catchall 文案（checker 编译期已静态拒绝，防御性保留）。
+        (T_STR, T_STR) => {
+            return err_h(
+                "H001",
+                &format!("cannot apply `{}` to `str` and `str`", arith_sym(op)),
+                ci,
+                pc,
+            )
+        }
         (T_INT, T_INT) => {
             let (a, b) = (x.a as i64, y.a as i64);
             let res = match op {
@@ -364,13 +566,13 @@ fn arith_inner(op: u64, x: Hnv, y: Hnv) -> Hnv {
                 2 => a.checked_mul(b),
                 3 => {
                     if b == 0 {
-                        return err_h("H009", "division by zero");
+                        return err_h("H009", "division by zero", ci, pc);
                     }
                     a.checked_div(b)
                 }
                 4 => {
                     if b == 0 {
-                        return err_h("H009", "division by zero");
+                        return err_h("H009", "division by zero", ci, pc);
                     }
                     a.checked_rem(b)
                 }
@@ -378,7 +580,7 @@ fn arith_inner(op: u64, x: Hnv, y: Hnv) -> Hnv {
             };
             match res {
                 Some(v) => Hnv::int(v),
-                None => err_h("H010", "integer overflow"),
+                None => err_h("H010", "integer overflow", ci, pc),
             }
         }
         (T_FLOAT, T_FLOAT) => {
@@ -389,13 +591,13 @@ fn arith_inner(op: u64, x: Hnv, y: Hnv) -> Hnv {
                 2 => a * b,
                 3 => {
                     if b == 0.0 {
-                        return err_h("H009", "division by zero");
+                        return err_h("H009", "division by zero", ci, pc);
                     }
                     a / b
                 }
                 4 => {
                     if b == 0.0 {
-                        return err_h("H009", "division by zero");
+                        return err_h("H009", "division by zero", ci, pc);
                     }
                     a % b
                 }
@@ -403,74 +605,89 @@ fn arith_inner(op: u64, x: Hnv, y: Hnv) -> Hnv {
             };
             Hnv::float(res)
         }
-        // int×float 混合：除/取余镜像 v_div/v_mod 的组合；加/减/乘 M0 未覆盖
-        // （T3 与 VM 对齐：v_add 无混合臂 → 应为 H001，故 M0 统一报 H001）。
-        (T_INT, T_FLOAT) | (T_FLOAT, T_INT) if op == 3 || op == 4 => {
+        // int×float 混合（镜像 v_sub/v_mul/v_div 的混合臂；v_add/v_mod 无混合臂 →
+        // 落入 catchall H001。checker 静态拒绝，此为防御性对齐）：
+        // sub/mul/div → float 结果；div 除零检查镜像 v_div（Float 侧判 0.0，Int 侧判 0）。
+        (T_INT, T_FLOAT) | (T_FLOAT, T_INT) if op == 1 || op == 2 || op == 3 => {
             let (a, b) = if x.t == T_INT {
                 (x.a as i64 as f64, f64::from_bits(y.a))
             } else {
                 (f64::from_bits(x.a), y.a as i64 as f64)
             };
-            if b == 0.0 {
-                return err_h("H009", "division by zero");
+            if op == 3 {
+                // v_div 混合臂：b 为 0（float 侧 b==0.0 / int 侧 b==0）→ H009。
+                if b == 0.0 {
+                    return err_h("H009", "division by zero", ci, pc);
+                }
+                Hnv::float(a / b)
+            } else if op == 1 {
+                Hnv::float(a - b)
+            } else {
+                Hnv::float(a * b)
             }
-            let res = if op == 3 { a / b } else { a % b };
-            Hnv::float(res)
         }
-        _ => {
-            let sym = match op {
-                0 => "+",
-                1 => "-",
-                2 => "*",
-                3 => "/",
-                _ => "%",
-            };
-            err_h(
-                "H001",
-                &format!("cannot apply `{}` to `{}` and `{}`", sym, type_name(x.t), type_name(y.t)),
-            )
-        }
+        _ => err_h(
+            "H001",
+            &format!("cannot apply `{}` to `{}` and `{}`", arith_sym(op), type_name(x.t), type_name(y.t)),
+            ci,
+            pc,
+        ),
     }
 }
 
-fn neg_h(x: Hnv) -> Hnv {
+fn neg_h(x: Hnv, ci: u32, pc: u32) -> Hnv {
     match x.t {
         T_INT => match (x.a as i64).checked_neg() {
             Some(v) => Hnv::int(v),
-            None => err_h("H010", "integer overflow"),
+            None => err_h("H010", "integer overflow", ci, pc),
         },
         T_FLOAT => Hnv::float(-f64::from_bits(x.a)),
-        other => err_h("H001", &format!("unary `-` requires a number, got `{}`", type_name(other))),
+        other => err_h(
+            "H001",
+            &format!("unary `-` requires a number, got `{}`", type_name(other)),
+            ci,
+            pc,
+        ),
     }
 }
 
-fn not_h(x: Hnv) -> Hnv {
+fn not_h(x: Hnv, ci: u32, pc: u32) -> Hnv {
     match x.t {
         T_BOOL_TRUE => Hnv::bool_(false),
         T_BOOL_FALSE => Hnv::bool_(true),
-        other => err_h("H001", &format!("`!` requires a `bool`, got `{}`", type_name(other))),
+        other => err_h(
+            "H001",
+            &format!("`!` requires a `bool`, got `{}`", type_name(other)),
+            ci,
+            pc,
+        ),
     }
 }
 
-fn cmpv_inner(op: u64, x: Hnv, y: Hnv) -> Hnv {
+fn cmpv_inner(op: u64, x: Hnv, y: Hnv, ci: u32, pc: u32) -> Hnv {
     match op {
         7 | 8 => {
             let eq = match (x.t, y.t) {
                 (T_INT, T_INT) => x.a == y.a,
                 (T_FLOAT, T_FLOAT) => x.a == y.a,
-                (T_BOOL_TRUE, T_BOOL_TRUE) | (T_BOOL_FALSE, T_BOOL_FALSE) => true,
                 (T_CHAR, T_CHAR) => x.a == y.a,
                 (T_NULL, T_NULL) => true,
-                (T_STR, T_STR) => unreachable!(), // 比较需句柄，句柄路径单独处理
+                // bool 恒可等（镜像 vm.rs v_eq：Bool==Bool → Ok(x==y)，含异值 → false）。
+                (T_BOOL_TRUE, T_BOOL_TRUE) | (T_BOOL_FALSE, T_BOOL_FALSE) => true,
+                (T_BOOL_TRUE, T_BOOL_FALSE) | (T_BOOL_FALSE, T_BOOL_TRUE) => false,
+                (T_STR, T_STR) => unreachable!(), // ==/!= 在 rt_binop 句柄路径拦截（str_eq）
                 _ => {
                     return err_h(
                         "H001",
                         &format!("cannot compare `{}` with `{}`", type_name(x.t), type_name(y.t)),
+                        ci,
+                        pc,
                     )
                 }
             };
             Hnv::bool_(if op == 7 { eq } else { !eq })
         }
+        // 镜像 vm.rs v_cmp：仅 int-int / float-float / char-char；str 无 < 臂（→ H001）。
         9 | 10 | 11 | 12 => {
             let c = match (x.t, y.t) {
                 (T_INT, T_INT) => (x.a as i64).cmp(&(y.a as i64)),
@@ -483,13 +700,15 @@ fn cmpv_inner(op: u64, x: Hnv, y: Hnv) -> Hnv {
                     let (a, b) = (f64::from_bits(x.a), f64::from_bits(y.a));
                     match a.partial_cmp(&b) {
                         Some(c) => c,
-                        None => return err_h("H001", "cannot compare NaN values"),
+                        None => return err_h("H001", "cannot compare NaN values", ci, pc),
                     }
                 }
                 _ => {
                     return err_h(
                         "H001",
                         &format!("cannot compare `{}` with `{}`", type_name(x.t), type_name(y.t)),
+                        ci,
+                        pc,
                     )
                 }
             };
@@ -506,13 +725,732 @@ fn cmpv_inner(op: u64, x: Hnv, y: Hnv) -> Hnv {
 }
 
 // 内部错误构造（返回 Hnv，a 携带 HnErr 指针，由 make_cell 移入 payload）。
-fn err_h(code: &'static str, msg: &str) -> Hnv {
+// ci/pc = 出错指令位置（rt_unwind 查 span 表渲染）。
+fn err_h(code: &'static str, msg: &str, ci: u32, pc: u32) -> Hnv {
+    err_h_help(code, msg, ci, pc, None)
+}
+
+/// 带显式 help 的错误构造（镜像 VM 侧 mk_err_with 的显式 help 调用点，如库未加载 H404）。
+fn err_h_help(code: &'static str, msg: &str, ci: u32, pc: u32, help: Option<String>) -> Hnv {
     let e = Box::into_raw(Box::new(HnErr {
         code_p: code.as_ptr() as u64,
         code_l: code.len() as u64,
         msg: msg.as_bytes().to_vec(),
+        ci,
+        pc,
+        help,
     }));
     Hnv { t: T_ERR, a: e as u64, b: 0 }
+}
+
+/// (ci,pc) 定位行文本（去尾空白）——catch e 里 `e.context` 字段取值，与 VM mk_err_with /
+/// 解释器 ErrorObj 的 context 填充一致（src.lines().nth(line-1).trim_end()）。
+fn err_context(ci: u32, pc: u32) -> String {
+    let (file, src, tables) = PROG.lock().unwrap().clone();
+    let _ = file;
+    let (line, _col, _len) = tables
+        .get(ci as usize)
+        .and_then(|t| t.get(pc as usize))
+        .map(|t| (t[0] as usize, t[1] as usize, t[2] as usize))
+        .unwrap_or((0, 0, 0));
+    src.lines()
+        .nth(line.saturating_sub(1))
+        .unwrap_or("")
+        .trim_end()
+        .to_string()
+}
+
+/// 用 (ci,pc) 定位构造错误句柄（镜像 VM mk_err 的 context 填充）。
+/// code 恒为错误码字面量（&'static str，如 "H600"），指向静态内存、永不释放；
+/// msg 为运行期文案（String，自持内存经 into_bytes）。code 若用 String 局部变量，
+/// 函数返回即释放、code_p 悬空——err_code_str 按 (code_p,code_l) 还原 &str 依赖静态内存。
+fn err_h_ctx(code: &'static str, msg: String, ci: u32, pc: u32) -> u64 {
+    let e = Box::into_raw(Box::new(HnErr {
+        code_p: code.as_ptr() as u64,
+        code_l: code.len() as u64,
+        msg: msg.into_bytes(),
+        ci,
+        pc,
+        help: None,
+    }));
+    make_cell(Hnv { t: T_ERR, a: e as u64, b: 0 })
+}
+
+/// throw 归一（镜像 VM Instr::Throw / 解释器 Stmt::Throw）：
+/// str→H600（定位取 throw 指令）；error 重抛同文件保留原始定位；其余→H001。
+/// 返回值句柄由 lowering 消费（移入 catch 槽 / 经 err_ret 返回）。
+#[no_mangle]
+pub extern "C" fn rt_throw(v: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let c = cell(v);
+    match c.t {
+        T_STR => {
+            let m = String::from_utf8_lossy(str_bytes(v)).into_owned();
+            cell_release(v);
+            err_h_ctx("H600", m, ci, pc)
+        }
+        T_ERR => {
+            // 重抛：同文件保留原始 (ci,pc) 定位；len 归一为 1（镜像 VM rethrow span len=1）。
+            // 单模块产物 file 恒等于 PROG.file，无跨文件退化分支。code 由 (code_p,code_l)
+            // 还原为 &'static str（不借用 e），msg 为自持 String——unsafe 块内取出后复用。
+            let (code, msg, e_ci, e_pc) = unsafe {
+                let e = &*(c.payload as *const HnErr);
+                (
+                    err_code_str(e),
+                    String::from_utf8_lossy(&e.msg).into_owned(),
+                    e.ci,
+                    e.pc,
+                )
+            };
+            cell_release(v);
+            err_h_ctx(code, msg, e_ci, e_pc)
+        }
+        other => {
+            cell_release(v);
+            make_cell(err_h(
+                "H001",
+                &format!("`throw` accepts a `str` or `error`, got `{}`", type_name(other)),
+                ci,
+                pc,
+            ))
+        }
+    }
+}
+
+/// ThrowStr 归一（镜像 VM Instr::ThrowStr）：字面字符串→H600。
+/// 注：VM ThrowStr 的 ErrorObj.context 恒空串，与「按 (ci,pc) 推导出该行」可能不同；
+/// 该指令仅在 match 无匹配分支时产生（M2），T6 阶段无运行期用例，context 字段差异留待 M2 对齐。
+#[no_mangle]
+pub extern "C" fn rt_throwstr(sidx: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let m = strtab_name(sidx as u32);
+    err_h_ctx("H600", m, ci, pc)
+}
+
+/// 错误对象字段访问（镜像 vm.rs v_field 的 Error 臂 / 解释器）。
+/// M0 值模型无 dict/struct，非 error 值统一按 v_field 的 `other` 臂报 H001。
+/// 消费 obj 引用（rc-1）后返回新句柄（调用方持有所有权）。
+#[no_mangle]
+pub extern "C" fn rt_field(obj: u64, fsidx: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let field = strtab_name(fsidx as u32);
+    let c = cell(obj);
+    if c.t != T_ERR {
+        cell_release(obj);
+        return make_cell(err_h(
+            "H001",
+            &format!("field access `.{}` requires an `error` value, got `{}`", field, type_name(c.t)),
+            ci,
+            pc,
+        ));
+    }
+    // code 由 (code_p,code_l) 还原为 &'static str（不借用 e），msg/位置为自持值——
+    // unsafe 块内取出后复用（镜像 err_render 的 raw 解引用需 unsafe 块）。
+    let (code, msg, e_ci, e_pc) = unsafe {
+        let e = &*(c.payload as *const HnErr);
+        (
+            err_code_str(e).to_string(),
+            String::from_utf8_lossy(&e.msg).into_owned(),
+            e.ci,
+            e.pc,
+        )
+    };
+    let (file, _src, tables) = PROG.lock().unwrap().clone();
+    let (line, col, _len) = tables
+        .get(e_ci as usize)
+        .and_then(|t| t.get(e_pc as usize))
+        .map(|t| (t[0] as usize, t[1] as usize, t[2] as usize))
+        .unwrap_or((0, 0, 0));
+    let ctx = err_context(e_ci, e_pc);
+    cell_release(obj);
+    match field.as_str() {
+        "code" => make_cell_str(code.into_bytes()),
+        "message" => make_cell_str(msg.into_bytes()),
+        "file" => make_cell_str(file.into_bytes()),
+        "line" => make_cell(Hnv::int(line as i64)),
+        "col" => make_cell(Hnv::int(col as i64)),
+        "context" => make_cell_str(ctx.into_bytes()),
+        other => make_cell(err_h(
+            "H002",
+            &format!("unknown error field `{}`", other),
+            ci,
+            pc,
+        )),
+    }
+}
+
+// ── 函数注册表与调用分发（T5：rt_call 名分发 + lambda） ──
+// 注册表经 wrapper 提供（M3 移入 object rodata，G3.5）：
+//   FUNCS：全局函数表 (strtab_idx, ci, nparams)，与 vm.rs func_map 对应；
+//   LOCALS：每 chunk 的局部变量表 (strtab_idx, reg)，rt_call 查「当前帧局部变量」
+//     （lambda 闭包 / 函数名字符串，镜像 Vm::do_call 第一步）；
+//   CHUNK_NPARAMS：每 chunk 形参数（lambda 参数校验用）；
+//   FN_PTRS：每 chunk 生成的统一签名函数指针（object 导出，wrapper 声明并聚合）。
+// chunk 统一签名：extern "C" fn(argptr, nargs, capsptr, ncap) -> u64
+//   ——用户函数：capsptr=0/ncap=0；lambda：capsptr 指向捕获句柄数组。
+
+type FnPtr = unsafe extern "C" fn(u64, u64, u64, u64) -> u64;
+
+static FUNCS: std::sync::Mutex<Vec<(u32, u32, u32)>> = std::sync::Mutex::new(Vec::new());
+static LOCALS: std::sync::Mutex<Vec<Vec<(u32, u32)>>> = std::sync::Mutex::new(Vec::new());
+static CHUNK_NPARAMS: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+static FN_PTRS: std::sync::Mutex<Vec<FnPtr>> = std::sync::Mutex::new(Vec::new());
+
+/// 全局函数表：funcs[i] = (strtab_idx, ci, nparams)。
+#[no_mangle]
+pub extern "C" fn hn_rt_funcs_init(funcs: *const u32, n: usize) {
+    let mut t = FUNCS.lock().unwrap();
+    t.clear();
+    for i in 0..n {
+        let f = unsafe { *funcs.add(i * 3) };
+        let c = unsafe { *funcs.add(i * 3 + 1) };
+        let p = unsafe { *funcs.add(i * 3 + 2) };
+        t.push((f, c, p));
+    }
+}
+
+/// 每 chunk 形参数：nparams[i] = chunk i 的参数个数。
+#[no_mangle]
+pub extern "C" fn hn_rt_chunk_nparams(nparams: *const u32, n: usize) {
+    let mut t = CHUNK_NPARAMS.lock().unwrap();
+    t.clear();
+    for i in 0..n {
+        t.push(unsafe { *nparams.add(i) });
+    }
+}
+
+/// 每 chunk 局部变量表：locs[i] = (strtab_idx, reg) 交错数组；counts[i] = chunk i 的条目数。
+#[no_mangle]
+pub extern "C" fn hn_rt_locals_init(locs: *const u32, counts: *const u32, nchunks: usize) {
+    let mut t = LOCALS.lock().unwrap();
+    t.clear();
+    let mut off = 0usize;
+    for i in 0..nchunks {
+        let cnt = unsafe { *counts.add(i) } as usize;
+        let mut v = Vec::with_capacity(cnt);
+        for j in 0..cnt {
+            let s = unsafe { *locs.add((off + j) * 2) };
+            let r = unsafe { *locs.add((off + j) * 2 + 1) };
+            v.push((s, r));
+        }
+        t.push(v);
+        off += cnt;
+    }
+}
+
+/// chunk 函数指针表：ptrs[i] = chunk i 的统一签名入口（fn ptr 转 usize 传递）。
+#[no_mangle]
+pub extern "C" fn hn_rt_fn_ptrs_init(ptrs: *const usize, n: usize) {
+    let mut t = FN_PTRS.lock().unwrap();
+    t.clear();
+    for i in 0..n {
+        let p = unsafe { *ptrs.add(i) };
+        // fn 指针与 usize 同宽：transmute 往返（wrapper 侧 fn as usize 传入）。
+        let f: FnPtr = unsafe { std::mem::transmute(p) };
+        t.push(f);
+    }
+}
+
+/// 字符串表第 sidx 项的名字（UTF-8 字节）。
+fn strtab_name(sidx: u32) -> String {
+    let t = STRTAB.lock().unwrap();
+    let h = t[sidx as usize];
+    drop(t);
+    String::from_utf8_lossy(str_bytes(h)).into_owned()
+}
+
+/// 全局函数表按名查找 → (ci, nparams)。
+fn func_lookup(name: &str) -> Option<(u32, u32)> {
+    let t = FUNCS.lock().unwrap();
+    for &(s, c, p) in t.iter() {
+        if strtab_name_eq(s, name) {
+            return Some((c, p));
+        }
+    }
+    None
+}
+
+/// strtab 第 sidx 项与 name 字节相等（免建 String）。
+fn strtab_name_eq(sidx: u32, name: &str) -> bool {
+    let t = STRTAB.lock().unwrap();
+    let h = t[sidx as usize];
+    drop(t);
+    str_bytes(h) == name.as_bytes()
+}
+
+/// 读实参数组的第 i 个句柄（借用）。
+#[inline]
+fn arg_at(argptr: u64, i: usize) -> u64 {
+    unsafe { *(argptr as *const u64).add(i) }
+}
+
+/// 释放实参数组（rt_call 的消费路径：builtin/错误/参数校验失败）。
+#[inline]
+fn drop_args(argptr: u64, n: u64) {
+    for i in 0..n as usize {
+        cell_release(arg_at(argptr, i));
+    }
+}
+
+/// 建 lambda 值句柄（rc=1）：捕获句柄逐项 retain（按值捕获，镜像 VM MakeLambda 的 clone）。
+#[no_mangle]
+pub extern "C" fn rt_makelambda(ci: u64, caps_ptr: u64, ncap: u64) -> u64 {
+    let mut caps: Vec<u64> = Vec::with_capacity(ncap as usize);
+    for i in 0..ncap as usize {
+        let h = unsafe { *(caps_ptr as *const u64).add(i) };
+        caps.push(rt_retain(h));
+    }
+    let b = Box::into_raw(Box::new(HnFnBox {
+        ci: ci as u32,
+        caps,
+    }));
+    let c = Box::into_raw(Box::new(HnCell {
+        rc: 1,
+        t: T_FN,
+        a: ci,
+        b: 0,
+        pkind: P_FN,
+        payload: b as u64,
+    }));
+    leak_check_inc();
+    c as u64
+}
+
+/// 调 chunk 索引（用户函数）：实参所有权转移给 callee 帧（成功路径不 drop）。
+/// 参数数不匹配 → H011（镜像 Vm::call_chunk：plain 无定位，line=0）。
+fn call_chunk_idx(fci: u32, nparams: u32, argptr: u64, nargs: u64, name: &str) -> u64 {
+    if nargs != nparams as u64 {
+        drop_args(argptr, nargs);
+        return make_cell(err_h(
+            "H011",
+            &format!("函数 `{}` 期望 {} 个参数，收到 {}", name, nparams, nargs),
+            0,
+            0,
+        ));
+    }
+    let fptr = FN_PTRS.lock().unwrap()[fci as usize];
+    unsafe { fptr(argptr, nargs, 0, 0) }
+}
+
+/// 调 lambda 值：捕获 retain 出一份独立引用给 callee 帧（callee 返回时释放，
+/// lambda 值本身仍持有——镜像 Vm::call_lambda 的 clone 填帧）。实参所有权转移。
+/// 参数数不匹配 → H011（带调用点 span，镜像 call_lambda）。
+fn call_fn_h(h: u64, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
+    let c = cell(h);
+    let b = unsafe { &*(c.payload as *const HnFnBox) };
+    let fci = b.ci;
+    let nparams = CHUNK_NPARAMS.lock().unwrap()[fci as usize];
+    if nargs != nparams as u64 {
+        drop_args(argptr, nargs);
+        return make_cell(err_h(
+            "H011",
+            &format!("lambda 期望 {} 个参数，收到 {}", nparams, nargs),
+            ci,
+            pc,
+        ));
+    }
+    // 捕获引用转移给 callee：retain 出独立引用后传数组；callee 返回时释放。
+    let mut caps: Vec<u64> = Vec::with_capacity(b.caps.len());
+    for &ch in &b.caps {
+        caps.push(rt_retain(ch));
+    }
+    let fptr = FN_PTRS.lock().unwrap()[fci as usize];
+    unsafe { fptr(argptr, nargs, caps.as_ptr() as u64, caps.len() as u64) }
+}
+
+/// 全局名分发（无局部变量优先路径）：点号名 / 用户函数 / 内置 / H002。
+fn call_global(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
+    // 点号名：用户函数表查（M0 无 import，点号用户函数不存在）→ 库未加载 H404。
+    if name.contains('.') {
+        if let Some((fci, np)) = func_lookup(name) {
+            return call_chunk_idx(fci, np, argptr, nargs, name);
+        }
+        let lib = &name[..name.rfind('.').unwrap_or(name.len())];
+        drop_args(argptr, nargs);
+        return make_cell(err_h_help(
+            "H404",
+            &format!("library `{}` is not loaded", lib),
+            ci,
+            pc,
+            Some(format!(
+                "add `load \"path/to/lib\" as {};` or `plugin.load(path, \"{}\")` before calling",
+                lib, lib
+            )),
+        ));
+    }
+    if let Some((fci, np)) = func_lookup(name) {
+        return call_chunk_idx(fci, np, argptr, nargs, name);
+    }
+    if is_m0_builtin(name) {
+        return call_builtin(name, argptr, nargs, ci, pc);
+    }
+    drop_args(argptr, nargs);
+    make_cell(err_h("H002", &format!("undefined function `{}`", name), ci, pc))
+}
+
+/// 带局部变量优先的名分发（镜像 Vm::do_call）：
+/// func_reg 句柄 v（借用）为 lambda → call_fn_h；为 str → 字符串内容再分发；否则全局名分发。
+/// sidx = 调用点函数名在 strtab 的索引（func ∉ 当前 chunk locals 时直接走全局分发）。
+#[no_mangle]
+pub extern "C" fn rt_callv(v: u64, sidx: u64, argptr: u64, nargs: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let vt = cell(v).t;
+    if vt == T_FN {
+        return call_fn_h(v, argptr, nargs, ci, pc);
+    }
+    if vt == T_STR {
+        let name = String::from_utf8_lossy(str_bytes(v)).into_owned();
+        return call_global(&name, argptr, nargs, ci, pc);
+    }
+    let name = strtab_name(sidx as u32);
+    call_global(&name, argptr, nargs, ci, pc)
+}
+
+/// 纯全局名分发（func ∉ 当前 chunk locals 的 Call 用；免去 locals 检查）。
+#[no_mangle]
+pub extern "C" fn rt_call(sidx: u64, argptr: u64, nargs: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let name = strtab_name(sidx as u32);
+    call_global(&name, argptr, nargs, ci, pc)
+}
+
+/// M0 内置表（镜像 builtins.rs 的 M0 可达子集）。
+fn is_m0_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "print"
+            | "len"
+            | "to_str"
+            | "to_int"
+            | "to_float"
+            | "is_int"
+            | "is_float"
+            | "is_bool"
+            | "is_str"
+            | "type_of"
+            | "abs"
+            | "max"
+            | "min"
+            | "assert"
+            | "assert_eq"
+            | "read_file"
+    )
+}
+
+/// 内置参数错误（镜像 builtins.rs arg_err 文案）：H011 + help "check the function signature"。
+fn b_arg_err(name: &str, want: u64, got: u64, ci: u32, pc: u32) -> Hnv {
+    err_h_help(
+        "H011",
+        &format!("wrong number of arguments: `{}` expects {}, got {}", name, want, got),
+        ci,
+        pc,
+        Some("check the function signature".to_string()),
+    )
+}
+
+/// M0 标量等值（镜像 vm.rs v_eq 的 M0 可等集合；str 走句柄字节比较）。
+fn values_eq_handle(a: u64, b: u64, ci: u32, pc: u32) -> Hnv {
+    let ca = cell(a);
+    let cb = cell(b);
+    if ca.t == T_STR && cb.t == T_STR {
+        return Hnv::bool_(str_eq(a, b));
+    }
+    cmpv_inner(7, ca.hnv(), cb.hnv(), ci, pc)
+}
+
+/// 内置函数分发：参数借用（末尾统一 drop_args），返回结果句柄。
+fn call_builtin(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
+    let a0 = || arg_at(argptr, 0);
+    let a1 = || arg_at(argptr, 1);
+    let a2 = || arg_at(argptr, 2);
+    let r: Hnv = match name {
+        "print" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                rt_print(a0());
+                Hnv::null()
+            }
+        }
+        "len" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                let c = cell(a0());
+                if c.t == T_STR {
+                    Hnv::int(c.b as i64)
+                } else {
+                    err_h(
+                        "H001",
+                        &format!("`len` expects a string, list, dict, or bytes, got `{}`", type_name(c.t)),
+                        ci,
+                        pc,
+                    )
+                }
+            }
+        }
+        "to_str" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                let s = handle_display(a0());
+                drop_args(argptr, nargs);
+                return make_cell_str(s.into_bytes());
+            }
+        }
+        "read_file" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                let p = String::from_utf8_lossy(str_bytes(a0())).into_owned();
+                drop_args(argptr, nargs);
+                // return 提前退出（镜像 to_str）：两臂均返 u64 句柄，不匹配 `let r: Hnv`。
+                return match std::fs::read_to_string(&p) {
+                    Ok(s) => make_cell_str(s.into_bytes()),
+                    Err(e) => {
+                        // 细分文件错误（镜像 builtins.rs read_file）：不存在 / 权限 / 锁定 / 其他。
+                        let code = match e.kind() {
+                            std::io::ErrorKind::NotFound => "H401",
+                            std::io::ErrorKind::PermissionDenied => "H402",
+                            std::io::ErrorKind::WouldBlock
+                            | std::io::ErrorKind::ResourceBusy
+                            | std::io::ErrorKind::Interrupted => "H403",
+                            _ => "H404",
+                        };
+                        make_cell(err_h(
+                            code,
+                            &format!("cannot read file `{}`: {}", p, e),
+                            ci,
+                            pc,
+                        ))
+                    }
+                };
+            }
+        }
+        "to_int" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                let c = cell(a0());
+                match c.t {
+                    T_INT => Hnv::int(c.a as i64),
+                    T_FLOAT => {
+                        let f = f64::from_bits(c.a);
+                        if f.is_finite() {
+                            Hnv::int(f.trunc() as i64)
+                        } else {
+                            err_h("H001", "cannot convert NaN/infinity to `int`", ci, pc)
+                        }
+                    }
+                    T_STR => {
+                        let s = String::from_utf8_lossy(str_bytes(a0())).into_owned();
+                        let t = s.trim();
+                        let digits = t.strip_prefix('-').unwrap_or(t);
+                        if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
+                            err_h(
+                                "H006",
+                                &format!("cannot convert `{}` to `int`: not a pure digit string", s),
+                                ci,
+                                pc,
+                            )
+                        } else {
+                            match t.parse::<i64>() {
+                                Ok(v) => Hnv::int(v),
+                                Err(_) => err_h(
+                                    "H006",
+                                    &format!("cannot convert `{}` to `int`: out of range", s),
+                                    ci,
+                                    pc,
+                                ),
+                            }
+                        }
+                    }
+                    other => err_h(
+                        "H001",
+                        &format!("cannot convert `{}` to `int`", type_name(other)),
+                        ci,
+                        pc,
+                    ),
+                }
+            }
+        }
+        "to_float" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                let c = cell(a0());
+                match c.t {
+                    T_INT => Hnv::float(c.a as i64 as f64),
+                    T_FLOAT => Hnv::float(f64::from_bits(c.a)),
+                    T_STR => {
+                        let s = String::from_utf8_lossy(str_bytes(a0())).into_owned();
+                        match s.trim().parse::<f64>() {
+                            Ok(f) => Hnv::float(f),
+                            Err(_) => err_h(
+                                "H007",
+                                &format!("cannot convert `{}` to `float`: invalid format", s),
+                                ci,
+                                pc,
+                            ),
+                        }
+                    }
+                    other => err_h(
+                        "H001",
+                        &format!("cannot convert `{}` to `float`", type_name(other)),
+                        ci,
+                        pc,
+                    ),
+                }
+            }
+        }
+        "is_int" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                Hnv::bool_(cell(a0()).t == T_INT)
+            }
+        }
+        "is_float" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                Hnv::bool_(cell(a0()).t == T_FLOAT)
+            }
+        }
+        "is_bool" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                let t = cell(a0()).t;
+                Hnv::bool_(t == T_BOOL_TRUE || t == T_BOOL_FALSE)
+            }
+        }
+        "is_str" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                Hnv::bool_(cell(a0()).t == T_STR)
+            }
+        }
+        "type_of" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                let s = type_name(cell(a0()).t).to_string();
+                drop_args(argptr, nargs);
+                return make_cell_str(s.into_bytes());
+            }
+        }
+        "abs" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                let c = cell(a0());
+                match c.t {
+                    T_INT => match (c.a as i64).checked_abs() {
+                        Some(v) => Hnv::int(v),
+                        None => err_h("H010", "`abs` overflow on i64::MIN", ci, pc),
+                    },
+                    T_FLOAT => Hnv::float(f64::from_bits(c.a).abs()),
+                    other => err_h(
+                        "H001",
+                        &format!("`abs` expects a number, got `{}`", type_name(other)),
+                        ci,
+                        pc,
+                    ),
+                }
+            }
+        }
+        "max" | "min" => {
+            if nargs != 2 {
+                b_arg_err(name, 2, nargs, ci, pc)
+            } else {
+                let (ca, cb) = (cell(a0()), cell(a1()));
+                let is_max = name == "max";
+                match (ca.t, cb.t) {
+                    (T_INT, T_INT) => {
+                        let (x, y) = (ca.a as i64, cb.a as i64);
+                        Hnv::int(if is_max { x.max(y) } else { x.min(y) })
+                    }
+                    (T_FLOAT, T_FLOAT) => {
+                        let (x, y) = (f64::from_bits(ca.a), f64::from_bits(cb.a));
+                        Hnv::float(if is_max { x.max(y) } else { x.min(y) })
+                    }
+                    _ => err_h_help(
+                        "H001",
+                        &format!(
+                            "`{}` requires two operands of the same type, got `{}` and `{}`",
+                            name,
+                            type_name(ca.t),
+                            type_name(cb.t)
+                        ),
+                        ci,
+                        pc,
+                        Some("Hone has no implicit type conversion".to_string()),
+                    ),
+                }
+            }
+        }
+        "assert" => {
+            if nargs < 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                let c = cell(a0());
+                if c.t == T_BOOL_TRUE {
+                    Hnv::null()
+                } else if c.t == T_BOOL_FALSE {
+                    let msg = if nargs >= 2 {
+                        let c2 = cell(a1());
+                        if c2.t == T_STR {
+                            String::from_utf8_lossy(str_bytes(a1())).into_owned()
+                        } else {
+                            "assertion failed".to_string()
+                        }
+                    } else {
+                        "assertion failed".to_string()
+                    };
+                    err_h("H700", &msg, ci, pc)
+                } else {
+                    err_h(
+                        "H001",
+                        &format!("`assert` expects a `bool` condition, got `{}`", type_name(c.t)),
+                        ci,
+                        pc,
+                    )
+                }
+            }
+        }
+        "assert_eq" => {
+            if nargs < 2 {
+                b_arg_err(name, 2, nargs, ci, pc)
+            } else {
+                let e = values_eq_handle(a0(), a1(), ci, pc);
+                if e.t == T_ERR {
+                    // 等值运算本身出错（比较类型不匹配）：释放实参后返回错误。
+                    drop_args(argptr, nargs);
+                    return make_cell(e);
+                }
+                if e.t == T_BOOL_TRUE {
+                    Hnv::null()
+                } else {
+                    let msg = if nargs >= 3 {
+                        let c3 = cell(a2());
+                        if c3.t == T_STR {
+                            String::from_utf8_lossy(str_bytes(a2())).into_owned()
+                        } else {
+                            format!("assertion failed: {} != {}", handle_display(a0()), handle_display(a1()))
+                        }
+                    } else {
+                        format!("assertion failed: {} != {}", handle_display(a0()), handle_display(a1()))
+                    };
+                    err_h("H700", &msg, ci, pc)
+                }
+            }
+        }
+        _ => err_h("H999", &format!("builtin `{}` not implemented in natgen", name), ci, pc),
+    };
+    drop_args(argptr, nargs);
+    make_cell(r)
 }
 
 // ── FFI 入口（全 u64 进出） ──
@@ -543,29 +1481,45 @@ pub extern "C" fn rt_null() -> u64 {
 }
 
 /// 运算/比较分发（op 编码见文件头）。消费 x/y（drop），返回结果句柄。
+/// ci/pc = 当前指令位置（错误时渲染行/列）。
 #[no_mangle]
-pub extern "C" fn rt_binop(op: u64, x: u64, y: u64) -> u64 {
-    // 先取出 Hnv 再释放输入（镜像 VM clone 后 v_* 消费克隆）
+pub extern "C" fn rt_binop(op: u64, x: u64, y: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    // 先取 tag：str 路径需句柄（字节在堆上），不能走 Hnv 快照。
     let cx = cell(x);
     let cy = cell(y);
     let r = match op {
-        0..=4 => arith_inner(op, cx.hnv(), cy.hnv()),
-        7..=12 => cmpv_inner(op, cx.hnv(), cy.hnv()),
-        _ => err_h("H001", "bad rt_binop op"),
+        // str+str 拼接（v_add 的 Str 臂）：合并字节建新句柄，输入照常释放。
+        0 if cx.t == T_STR && cy.t == T_STR => str_concat(x, y),
+        // str ==/!=（v_eq 的 Str 臂）：借用字节比较，结果 bool 建新句柄。
+        7 | 8 if cx.t == T_STR && cy.t == T_STR => {
+            let eq = str_eq(x, y);
+            make_cell(Hnv::bool_(if op == 7 { eq } else { !eq }))
+        }
+        _ => {
+            let h = match op {
+                0..=4 => arith_inner(op, cx.hnv(), cy.hnv(), ci, pc),
+                7..=12 => cmpv_inner(op, cx.hnv(), cy.hnv(), ci, pc),
+                _ => err_h("H001", "bad rt_binop op", ci, pc),
+            };
+            make_cell(h)
+        }
     };
     cell_release(x);
     cell_release(y);
-    make_cell(r)
+    r
 }
 
 /// 一元运算分发（5=neg 6=not）。消费 x（drop），返回结果句柄。
+/// ci/pc = 当前指令位置（错误时渲染行/列）。
 #[no_mangle]
-pub extern "C" fn rt_unop(op: u64, x: u64) -> u64 {
+pub extern "C" fn rt_unop(op: u64, x: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
     let cx = cell(x);
     let r = match op {
-        5 => neg_h(cx.hnv()),
-        6 => not_h(cx.hnv()),
-        _ => err_h("H001", "bad rt_unop op"),
+        5 => neg_h(cx.hnv(), ci, pc),
+        6 => not_h(cx.hnv(), ci, pc),
+        _ => err_h("H001", "bad rt_unop op", ci, pc),
     };
     cell_release(x);
     make_cell(r)
@@ -579,8 +1533,17 @@ pub extern "C" fn rt_print(h: u64) {
 
 #[no_mangle]
 pub extern "C" fn rt_truthy(h: u64) -> u64 {
+    // 句柄版真值：完整镜像 vm.rs is_truthy（含 T_STR 空串为假，需句柄读长度）。
     let c = cell(h);
-    u64::from(c.hnv().is_truthy())
+    match c.t {
+        T_BOOL_TRUE => 1,
+        T_BOOL_FALSE => 0,
+        T_NULL => 0,
+        T_INT => u64::from(c.a != 0),
+        T_FLOAT => u64::from(f64::from_bits(c.a) != 0.0),
+        T_STR => u64::from(c.b != 0),
+        _ => 1,
+    }
 }
 
 #[no_mangle]
@@ -589,25 +1552,33 @@ pub extern "C" fn rt_is_err(h: u64) -> u64 {
 }
 
 /// 产物入口：ERR → rt_unwind；否则 drop 后退出码 0（与 hone run 一致）。
+/// main chunk 为统一签名（argptr, nargs, capsptr, ncap），顶层无参无捕获 → 全 0。
 #[no_mangle]
 pub extern "C" fn hn_entry() -> i32 {
-    let r = unsafe { __hn_main() };
+    let r = unsafe { __hn_main(0, 0, 0, 0) };
     if cell(r).t == T_ERR {
         rt_unwind(r);
     }
     cell_release(r);
+    // debug 构建出口泄漏断言（T2 退出标准）：运行期新建 cell 的 rc 应全部归零
+    // （strtab 基引用不计入 HEAP_LIVE，常量视为 rodata 常驻）。
+    #[cfg(debug_assertions)]
+    {
+        let n = HEAP_LIVE.load(std::sync::atomic::Ordering::Relaxed);
+        debug_assert!(n == 0, "natgen leak: {} 个运行期 cell 在出口仍存活", n);
+    }
     0
 }
 
 // 测试构建下 object 不存在：不声明 extern，改由下方测试桩定义同名符号。
 #[cfg(not(test))]
 extern "C" {
-    fn __hn_main() -> u64;
+    fn __hn_main(argptr: u64, nargs: u64, capsptr: u64, ncap: u64) -> u64;
 }
 
 #[cfg(test)]
 #[no_mangle]
-pub extern "C" fn __hn_main() -> u64 {
+pub extern "C" fn __hn_main(_argptr: u64, _nargs: u64, _capsptr: u64, _ncap: u64) -> u64 {
     rt_null()
 }
 
@@ -631,7 +1602,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn truthy_full_semantics() {
+        let _g = locked();
+        let base = heap_live();
+        // 对齐 vm.rs is_truthy：int 0 / float 0.0 / 空串 / false / null 为假，余真。
+        let cases: Vec<(u64, u64)> = vec![
+            (rt_i64(0), 0),
+            (rt_i64(5), 1),
+            (rt_i64((-1i64) as u64), 1),
+            (rt_f64(0.0f64.to_bits()), 0),
+            (rt_f64(0.5f64.to_bits()), 1),
+            (rt_bool(0), 0),
+            (rt_bool(1), 1),
+            (rt_null(), 0),
+            (rt_char('a' as u32 as u64), 1),
+        ];
+        for (h, want) in cases {
+            assert_eq!(rt_truthy(h), want);
+            rt_drop(h);
+        }
+        // 空串 / 非空串（走 strtab 建箱）
+        hn_rt_strtab_init(
+            ["".as_ptr(), "x".as_ptr()].as_ptr(),
+            [0usize, 1usize].as_ptr(),
+            2,
+        );
+        let empty = rt_str(0);
+        let nonempty = rt_str(1);
+        assert_eq!(rt_truthy(empty), 0);
+        assert_eq!(rt_truthy(nonempty), 1);
+        rt_drop(empty);
+        rt_drop(nonempty);
+        assert_eq!(heap_live(), base);
+    }
+
+    #[test]
     fn entry_returns_zero() {
+        // 持有 TEST_LOCK：hn_entry 内的 debug 出口泄漏断言要求 HEAP_LIVE==0，
+        // 必须与其他建/销 cell 的测试串行，避免并行污染断言。
+        let _g = locked();
         assert_eq!(hn_entry(), 0);
     }
 
@@ -641,9 +1650,13 @@ mod tests {
         let base = heap_live();
         let a = rt_i64(i64::MAX as u64);
         let b = rt_i64(1);
-        let r = rt_binop(0, a, b);
+        let r = rt_binop(0, a, b, 0, 0);
         assert_eq!(cell(r).t, T_ERR);
-        assert_eq!(err_render(r), "error[H010]: integer overflow");
+        // plain 渲染（PROG 未初始化 → 无定位）：error 行 + help 行，均以 \n 结尾。
+        assert_eq!(
+            err_render(r),
+            "error[H010]: integer overflow\nhelp: the result does not fit in a 64-bit signed integer\n"
+        );
         cell_release(r);
         assert_eq!(heap_live(), base);
     }
@@ -654,8 +1667,11 @@ mod tests {
         let base = heap_live();
         let a = rt_i64(1);
         let b = rt_i64(0);
-        let r = rt_binop(3, a, b);
-        assert_eq!(err_render(r), "error[H009]: division by zero");
+        let r = rt_binop(3, a, b, 0, 0);
+        assert_eq!(
+            err_render(r),
+            "error[H009]: division by zero\nhelp: check the divisor before dividing\n"
+        );
         cell_release(r);
         assert_eq!(heap_live(), base);
     }
@@ -666,8 +1682,11 @@ mod tests {
         let base = heap_live();
         let a = rt_bool(1);
         let b = rt_i64(1);
-        let r = rt_binop(0, a, b);
-        assert_eq!(err_render(r), "error[H001]: cannot apply `+` to `bool` and `int`");
+        let r = rt_binop(0, a, b, 0, 0);
+        assert_eq!(
+            err_render(r),
+            "error[H001]: cannot apply `+` to `bool` and `int`\nhelp: Hone has no implicit type conversion\n"
+        );
         cell_release(r);
         assert_eq!(heap_live(), base);
     }
@@ -676,17 +1695,17 @@ mod tests {
     fn binop_basic() {
         let _g = locked();
         let base = heap_live();
-        let r = rt_binop(0, rt_i64(2), rt_i64(3));
+        let r = rt_binop(0, rt_i64(2), rt_i64(3), 0, 0);
         assert_eq!(cell(r).t, T_INT);
         assert_eq!(cell(r).a as i64, 5);
         cell_release(r);
-        let r = rt_binop(2, rt_i64(4), rt_i64(5));
+        let r = rt_binop(2, rt_i64(4), rt_i64(5), 0, 0);
         assert_eq!(cell(r).a as i64, 20);
         cell_release(r);
-        let r = rt_unop(5, rt_i64(7));
+        let r = rt_unop(5, rt_i64(7), 0, 0);
         assert_eq!(cell(r).a as i64, -7);
         cell_release(r);
-        let r = rt_unop(6, rt_bool(1));
+        let r = rt_unop(6, rt_bool(1), 0, 0);
         assert_eq!(cell(r).t, T_BOOL_FALSE);
         cell_release(r);
         assert_eq!(heap_live(), base);
@@ -715,6 +1734,46 @@ mod tests {
     }
 
     #[test]
+    fn str_concat_and_eq() {
+        // T3：str+str 拼接（op 0）与 str ==/!=（op 7/8）句柄路径。
+        // STRTAB 是进程全局：测试自行初始化，不依赖其他测试的表内容。
+        let _g = locked();
+        hn_rt_strtab_init(
+            ["hello".as_ptr(), "世界".as_ptr()].as_ptr(),
+            [5usize, 6usize].as_ptr(),
+            2,
+        );
+        let base = heap_live();
+        let r = rt_binop(0, rt_str(0), rt_str(1), 0, 0);
+        assert_eq!(handle_display(r), "hello世界");
+        cell_release(r);
+        // 等值 → true；异值 → false；!= 取反（结果句柄逐个释放）。
+        let r = rt_binop(7, rt_str(0), rt_str(0), 0, 0);
+        assert_eq!(cell(r).t, T_BOOL_TRUE);
+        cell_release(r);
+        let r = rt_binop(7, rt_str(0), rt_str(1), 0, 0);
+        assert_eq!(cell(r).t, T_BOOL_FALSE);
+        cell_release(r);
+        let r = rt_binop(8, rt_str(0), rt_str(1), 0, 0);
+        assert_eq!(cell(r).t, T_BOOL_TRUE);
+        cell_release(r);
+        // 空串拼接："" + "x" = "x"（重新初始化表）
+        hn_rt_strtab_init(
+            ["".as_ptr(), "x".as_ptr()].as_ptr(),
+            [0usize, 1usize].as_ptr(),
+            2,
+        );
+        let r = rt_binop(0, rt_str(0), rt_str(1), 0, 0);
+        assert_eq!(handle_display(r), "x");
+        cell_release(r);
+        // str < str → H001（v_cmp 无 str 臂）
+        let r = rt_binop(9, rt_str(0), rt_str(1), 0, 0);
+        assert_eq!(cell(r).t, T_ERR);
+        cell_release(r);
+        assert_eq!(heap_live(), base);
+    }
+
+    #[test]
     fn strtab_roundtrip_and_no_leak() {
         let _g = locked();
         let base = heap_live();
@@ -731,6 +1790,64 @@ mod tests {
         rt_drop(a);
         rt_drop(b);
         // 表基引用常驻不计入 HEAP_LIVE；运行期 cell 净增归零
+        assert_eq!(heap_live(), base);
+    }
+
+    #[test]
+    fn error_render_with_span_caret() {
+        // T4：hn_rt_prog_init 装载 file/src/span 表后，按 (ci,pc) 查 span 渲染，
+        // 与 error.rs ZError::Display 的定位分支逐字节一致（--> 行/行号行/caret 行/help 行）。
+        let _g = locked();
+        let src = "x = 1 / 0;\n";
+        let sp0: [u32; 3] = [1, 7, 1]; // line=1, col=7（`/` 位置）, len=1
+        let ptrs: [*const u32; 1] = [sp0.as_ptr()];
+        let lens: [usize; 1] = [3];
+        hn_rt_prog_init(
+            b"probe.hn".as_ptr(),
+            b"probe.hn".len(),
+            src.as_ptr(),
+            src.len(),
+            ptrs.as_ptr(),
+            lens.as_ptr(),
+            1,
+        );
+        let base = heap_live();
+        // ci=0, pc=0 → span [1,7,1]；除零错误渲染带定位。
+        let r = rt_binop(3, rt_i64(1), rt_i64(0), 0, 0);
+        assert_eq!(
+            err_render(r),
+            "error[H009]: division by zero\n  --> probe.hn:1:7\n1 | x = 1 / 0;\n  |       ^\nhelp: check the divisor before dividing\n"
+        );
+        cell_release(r);
+        assert_eq!(heap_live(), base);
+    }
+
+    #[test]
+    fn error_render_tab_caret_align() {
+        // T4：源码行含 Tab（缩进）时 caret 按 Tab→4 空格展开对齐（镜像 ZError::Display）。
+        let _g = locked();
+        let src = "fn f() {\n\tx = 1 / 0;\n}\n";
+        let sp0: [u32; 3] = [2, 8, 1]; // 第 2 行，`/` 在第 8 列
+        let ptrs: [*const u32; 1] = [sp0.as_ptr()];
+        let lens: [usize; 1] = [3];
+        hn_rt_prog_init(
+            b"tab.hn".as_ptr(),
+            b"tab.hn".len(),
+            src.as_ptr(),
+            src.len(),
+            ptrs.as_ptr(),
+            lens.as_ptr(),
+            1,
+        );
+        let base = heap_live();
+        let r = rt_binop(3, rt_i64(1), rt_i64(0), 0, 0);
+        let s = err_render(r);
+        // Tab 展开：`\tx = 1 / 0;` → 显示 `    x = 1 / 0;`，caret 前导 10 空格（4 + 6）。
+        assert_eq!(
+            s,
+            "error[H009]: division by zero\n  --> tab.hn:2:8\n2 |     x = 1 / 0;\n  |           ^\nhelp: check the divisor before dividing\n"
+        );
+        cell_release(r);
         assert_eq!(heap_live(), base);
     }
 }

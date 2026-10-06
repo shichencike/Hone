@@ -40,5 +40,29 @@ __pycache__/
 .t_slice.hn
 .t_slice2.hn
 
+# 原生编译后端（natgen）会话探针与中间产物（临时，可重新生成）
+[.]p[0-9]*.hn
+[.]q[0-9]*.hn
+[.]t[0-9]*.hn
+[.]t6_*.hn
+[.]t6*.out
+[.]t6*.err
+[.]probe*.hn
+*.nat.o
+*.nat.exe
+
+# Cranelift/链接 spike 实验目录与原型（M0 期间临时验证，natgen.rs 为正式实现）
+spike_link/
+spike_link2/
+spike_nat/
+spike_diag.ps1
+src/bin/
+
+# 官网旧外壳备份（可再生成）
+官网_bak_*/
+
+# Loomy 会话附件（临时）
+.loomy-attachments/
+
 # 功能需求草稿（设计规范文档，同 ka.md）
 增加with，字节类型，只读类型,仔细问我.md

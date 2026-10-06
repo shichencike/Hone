@@ -23,7 +23,12 @@ mod header;
 mod interp;
 mod lexer;
 mod lsp;
+mod natgen;
 mod netmod;
+
+// 原生后端运行时（runtime/src/lib.rs，std-only 单文件）：嵌入二进制，
+// natgen 时写出临时目录参与产物链接（干净构建机无需本仓库）。
+pub(crate) const NAT_RUNTIME_SRC: &str = include_str!("../runtime/src/lib.rs");
 mod parser;
 mod pluginmod;
 mod plotmod;
@@ -198,6 +203,7 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
         "fmt" => cmd_fmt(&args[1..]),
         "doc" => cmd_doc(&args[1..]),
         "check" => cmd_check(&args[1..]),
+        "natgen" => cmd_natgen(&args[1..]),
         "test" => cmd_test(&args[1..]),
         "watch" => cmd_watch(&args[1..]),
         "bind" => cmd_bind(&args[1..]),
@@ -481,9 +487,11 @@ fn print_help() {
     println!("  hone fmt [-w|-c] <file.hn>  代码格式化（Tab 缩进/运算符空格/大括号；-w 覆盖写，-c 只检查差异）");
     println!("  hone doc <file.hn>        从 fn/class 定义与上方 `//` 注释生成 Markdown API 文档");
     println!("  hone check <file.hn|目录> [--json] 仅静态检查（解析+类型检查，不执行）；目录递归扫全部 .hn，--json 输出诊断 JSON 数组，退出码 0/1 表达成败");
+    println!("  hone natgen <file.hn>  原生编译（build --exe --native 别名）：脚本 → Cranelift object → 链接原生可执行 [-o <out>] [--obj <o>]");
     println!("  hone build --dll <file.hn> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
     println!("  hone build --exe <file.hn> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
     println!("  hone build --exe -c <file.hn> AOT 编译为原生可执行文件（脚本→C 中间文件→gcc/clang；默认删 .c，--keep-c 保留）");
+    println!("  hone build --exe --native <file.hn> 原生编译为可执行文件（Cranelift→object→内嵌运行时，需 rustc；[-o <out>]）");
     println!("  hone build --script <file.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）");
     println!("  hone get                   读取当前目录 hone.json 清单，批量下载全部模块");
     println!("  hone get <module> <url>  下载模块依赖并缓存到 ~/.hone/cache/，并写入 hone.json 清单");
@@ -656,10 +664,12 @@ fn cmd_build_script(args: &[String]) -> Result<(), ZError> {
 }
 
 /// hone build --exe <script.hn> [-o <out>] [--icon <ico>] [--version]
-/// [-c] [--keep-c]
+/// [-c] [--keep-c] [--native]
 /// 默认：将当前 hone 运行时与脚本打包为单个自释放可执行文件（见 bundle.rs 格式）。
 /// -c：AOT 模式——脚本编译为 C 中间文件，再用 C 编译器生成原生可执行文件；
 ///     生成前先做语法/类型检查；默认删除中间 .c，--keep-c 保留。
+/// --native：原生编译模式（natgen 管线别名入口，T7）——脚本经 Cranelift 编译为
+///     object 并与内嵌运行时链接成原生可执行（不依赖 C 编译器，需本机 rustc）。
 fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("hone build --exe (Hone v{})", VERSION);
@@ -670,10 +680,12 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     let mut path: Option<String> = None;
     let mut aot_mode = false;
     let mut keep_c = false;
+    let mut native_mode = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "-c" => aot_mode = true,
+            "--native" => native_mode = true,
             "--keep-c" => keep_c = true,
             "-o" => {
                 i += 1;
@@ -689,7 +701,7 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
                 return Err(ZError::plain(
                     codes::SYNTAX,
                     format!("unknown build option `{}`", s),
-                    Some("options: `-c`, `--keep-c`, `-o <out>`, `--icon <ico>`, `--version`"),
+                    Some("options: `-c`, `--keep-c`, `--native`, `-o <out>`, `--icon <ico>`, `--version`"),
                 ));
             }
             s => {
@@ -699,7 +711,7 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
                     return Err(ZError::plain(
                         codes::SYNTAX,
                         "too many arguments",
-                        Some("usage: `hone build --exe <script.hn> [-c] [-o <out>]`"),
+                        Some("usage: `hone build --exe <script.hn> [-c|--native] [-o <out>]`"),
                     ));
                 }
             }
@@ -716,8 +728,18 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     if let Some(ic) = &icon {
         eprintln!("[build] warning: `--icon` is not supported in this build, ignoring `{}`", ic);
     }
+    if aot_mode && native_mode {
+        return Err(ZError::plain(
+            codes::SYNTAX,
+            "`-c`（AOT C 后端）与 `--native`（原生编译）互斥",
+            Some("二选一：`hone build --exe -c <script.hn>` 或 `hone build --exe --native <script.hn>`"),
+        ));
+    }
     if aot_mode {
         return cmd_build_exe_aot(&path, out, keep_c);
+    }
+    if native_mode {
+        return build_native(&path, out, None, "build");
     }
 
     // 以当前 hone 可执行文件作为内嵌运行时
@@ -1497,6 +1519,360 @@ fn cmd_doc(args: &[String]) -> Result<(), ZError> {
 /// hone check <file.hn|目录> [--json]：仅静态检查（解析 + 类型检查），不执行代码。
 /// 单文件：通过输出 `check OK: <file>`；失败输出诊断（stderr），退出码非 0。
 /// 目录：递归扫描全部 .hn（跳过隐藏目录与构建目录），逐个检查（单文件失败不中断），
+/// 把字符串转为 Rust 源码字面量（wrapper 静态表用；非 ASCII 原样保留，控制字符 \u{} 转义）。
+fn rust_str_lit(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            c if c.is_control() => {
+                out.push_str(&format!("\\u{{{:x}}}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// M0 原生管线：脚本 → VM 字节码（整数子集）→ Cranelift object（x86_64 COFF，含
+/// __hn_main 入口）→ 与 Rust native 运行时链接成原生 exe。
+/// 用法: hone natgen <file.hn> [-o <out>] [--obj <obj>]
+fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
+    let mut out: Option<String> = None;
+    let mut obj: Option<String> = None;
+    let mut path: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-o" => {
+                out = Some(args.get(i + 1).cloned().ok_or_else(|| {
+                    ZError::plain(
+                        codes::SYNTAX,
+                        "missing value for -o: `hone natgen <file.hn> -o <out>`",
+                        None::<String>,
+                    )
+                })?);
+                i += 2;
+            }
+            "--obj" => {
+                obj = Some(args.get(i + 1).cloned().ok_or_else(|| {
+                    ZError::plain(
+                        codes::SYNTAX,
+                        "missing value for --obj: `hone natgen <file.hn> --obj <o>`",
+                        None::<String>,
+                    )
+                })?);
+                i += 2;
+            }
+            a if a.starts_with('-') => {
+                return Err(ZError::plain(
+                    codes::SYNTAX,
+                    format!("unknown natgen option `{a}`"),
+                    Some("usage: hone natgen <file.hn> [-o <out>] [--obj <o>]"),
+                ));
+            }
+            a => {
+                path = Some(a.to_string());
+                i += 1;
+            }
+        }
+    }
+    let path = path.ok_or_else(|| {
+        ZError::plain(
+            codes::SYNTAX,
+            "missing script path: `hone natgen <file.hn>`",
+            Some("usage: hone natgen <file.hn> [-o <out>] [--obj <o>]"),
+        )
+    })?;
+    // T7：管线与 `hone build --exe --native` 共用（build_native）；natgen 保留为别名。
+    build_native(&path, out, obj, "natgen")
+}
+
+/// 共享原生编译管线（T7）：`hone natgen` 与 `hone build --exe --native` 共用入口。
+/// 阶段：解析+类型检查 → VM 字节码 → Cranelift object（x86_64 COFF，含 `__hn_main`
+/// 与各用户函数）→ 生成式 wrapper + rustc 链接原生 exe。
+/// `label`：阶段输出前缀（"natgen" / "build"）；out/obj 为 None 时取默认名。
+fn build_native(
+    path: &str,
+    out: Option<String>,
+    obj: Option<String>,
+    label: &str,
+) -> Result<(), ZError> {
+    let src = std::fs::read_to_string(path).map_err(|e| {
+        ZError::plain(
+            codes::FILE_NOT_FOUND,
+            format!("cannot read `{}`: {}", path, e),
+            Some("check the path"),
+        )
+    })?;
+    eprintln!("[1/4] {} 解析 + 类型检查: {}", label, path);
+    let program = parser::Parser::parse(path, &src)?;
+    let _checked = checker::Checker::check(&program, path, &src)?;
+    let vm_mod = vm::compile_module(&program)?;
+    // 字符串静态表（T5 起）去重全集，编入生成式 wrapper（object 经 rt_str 按索引取句柄；
+    // M3 移入 object rodata，见 G3.5）。收集源：
+    //   1. 全部 chunk 的 Const::Str（字符串字面量）；
+    //   2. Call 指令函数名（rt_call 名分发用）；
+    //   3. 每 chunk 的 locals 名 + func_map 函数名（注册表 / 局部变量优先分发用）。
+    let mut strtab: Vec<String> = Vec::new();
+    let mut strtab_idx: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut push_str = |s: &str| -> usize {
+        if let Some(&i) = strtab_idx.get(s) {
+            i
+        } else {
+            let i = strtab.len();
+            strtab.push(s.to_string());
+            strtab_idx.insert(s.to_string(), i);
+            i
+        }
+    };
+    for c in &vm_mod.chunks {
+        for k in &c.consts {
+            if let vm::Const::Str(s) = k {
+                push_str(s);
+            }
+        }
+        for ins in &c.code {
+            if let vm::Instr::Call(_, func, _, _) = ins {
+                push_str(func);
+            }
+            // T6：Field 字段名 / ThrowStr 文案进 strtab（rt_field / rt_throwstr 名分发用）。
+            if let vm::Instr::Field(_, _, field) = ins {
+                push_str(field);
+            }
+            if let vm::Instr::ThrowStr(s) = ins {
+                push_str(s);
+            }
+        }
+        for name in c.locals.keys() {
+            push_str(name);
+        }
+    }
+    for name in vm_mod.func_map.keys() {
+        push_str(name);
+    }
+    drop(push_str);
+    // 程序静态表（T4）：每 chunk 的 span 表（line,col,len）与 chunk.code 一一对应，
+    // 编入生成式 wrapper 经 hn_rt_prog_init 传入 runtime，rt_unwind 按 (ci,pc) 查表
+    // 渲染错误定位（行/列/caret/help，与 interp / VM 逐字节一致）。
+    let span_tables: Vec<Vec<crate::lexer::Span>> =
+        vm_mod.chunks.iter().map(|c| c.spans.clone()).collect();
+    let base = std::path::Path::new(&path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+    let obj = obj.unwrap_or_else(|| format!("{}.nat.o", base));
+    let out = out.unwrap_or_else(|| {
+        if cfg!(windows) {
+            format!("{}.exe", base)
+        } else {
+            base
+        }
+    });
+    eprintln!("[2/4] {} 生成 object: {}（Cranelift，句柄式值模型 lowering）", label, obj);
+    natgen::gen_object(&vm_mod, &strtab, std::path::Path::new(&obj))?;
+    eprintln!("[3/4] {} 链接原生 exe: {}（rustc + 内嵌运行时）", label, out);
+    // 链接管线（干净构建机自足，无需本仓库）：
+    //   临时目录/
+    //     rt.rs    内嵌运行时（NAT_RUNTIME_SRC，含 rt_* 与 hn_entry 入口）
+    //     main.rs  生成式 wrapper：include! rt.rs + 字符串表 + main 调 hn_entry
+    //   rustc main.rs -C link-arg=obj.o → exe
+    // object 提供 __hn_main（脚本 main chunk）与各用户函数；rustc 负责 CRT。
+    let tmpdir = std::env::temp_dir().join(format!("hone_natgen_{}", std::process::id()));
+    std::fs::create_dir_all(&tmpdir)
+        .map_err(|e| ZError::plain(codes::INTERNAL, format!("创建临时构建目录: {e}"), None::<String>))?;
+    let rt_rs = tmpdir.join("rt.rs");
+    std::fs::write(&rt_rs, NAT_RUNTIME_SRC)
+        .map_err(|e| ZError::plain(codes::INTERNAL, format!("写运行时源: {e}"), None::<String>))?;
+    let main_rs = tmpdir.join("main.rs");
+    let mut wrapper = String::new();
+    wrapper.push_str("// 生成式 wrapper（hone natgen / build --exe --native）：内嵌运行时 + 字符串表 + 程序静态表 + 入口。\n");
+    wrapper.push_str("include!(\"rt.rs\");\n\n");
+    wrapper.push_str(&format!(
+        "static NAT_STRS: [&str; {}] = [",
+        strtab.len()
+    ));
+    for (i, s) in strtab.iter().enumerate() {
+        if i > 0 {
+            wrapper.push_str(", ");
+        }
+        wrapper.push_str(&rust_str_lit(s));
+    }
+    wrapper.push_str("];\n\n");
+    // 程序静态表（T4）：脚本路径 + 源码全文 + 每 chunk 的 span 三元组 (line,col,len)。
+    // runtime hn_rt_prog_init 按 (ci,pc) 查表渲染错误定位（与 ZError::Display 对齐）。
+    wrapper.push_str(&format!("static NAT_FILE: &str = {};\n", rust_str_lit(&path)));
+    wrapper.push_str(&format!("static NAT_SRC: &str = {};\n", rust_str_lit(&src)));
+    for (ci, spans) in span_tables.iter().enumerate() {
+        let items: Vec<String> = spans
+            .iter()
+            .flat_map(|s| vec![s.line as u32, s.col as u32, s.len as u32])
+            .map(|v| v.to_string())
+            .collect();
+        wrapper.push_str(&format!(
+            "static NAT_SPAN{ci}: [u32; {}] = [{}];\n",
+            items.len(),
+            items.join(",")
+        ));
+    }
+    wrapper.push_str(&format!(
+        "static NAT_SPANS: [&[u32]; {}] = [{}];\n",
+        span_tables.len(),
+        (0..span_tables.len())
+            .map(|ci| format!("&NAT_SPAN{ci}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ));
+    // 函数注册表（T5）：chunk 函数 extern 声明 + 函数指针表 + 全局函数表 +
+    // 每 chunk 形参数 + 局部变量表（rt_call 名分发 / lambda 调用用）。
+    let main_ci = vm_mod.func_map.get("main").copied().unwrap_or(0);
+    let mut fns_decl = String::new();
+    let mut fns_ptrs: Vec<String> = Vec::new();
+    for ci in 0..vm_mod.chunks.len() {
+        if ci == main_ci {
+            // main chunk `__hn_main` 已在 runtime（rt.rs）extern 声明，wrapper 不再重复声明。
+            fns_ptrs.push("__hn_main".to_string());
+            continue;
+        }
+        let nm = format!("hn_f{ci}");
+        fns_decl.push_str(&format!(
+            "    fn {nm}(argptr: u64, nargs: u64, capsptr: u64, ncap: u64) -> u64;\n"
+        ));
+        fns_ptrs.push(nm);
+    }
+    wrapper.push_str("extern \"C\" {\n");
+    wrapper.push_str(&fns_decl);
+    wrapper.push_str("}\n");
+    wrapper.push_str(&format!(
+        "static NAT_FN_PTRS: [unsafe extern \"C\" fn(u64, u64, u64, u64) -> u64; {}] = [{}];\n",
+        fns_ptrs.len(),
+        fns_ptrs.join(", ")
+    ));
+    // 全局函数表：func_map 条目（按 ci 排序保证确定性）→ (strtab_idx, ci, nparams)。
+    let mut func_entries: Vec<(usize, usize)> = vm_mod
+        .func_map
+        .iter()
+        .map(|(k, &v)| (strtab_idx[k], v))
+        .collect();
+    func_entries.sort_by_key(|&(_, ci)| ci);
+    let funcs_items: Vec<String> = func_entries
+        .iter()
+        .flat_map(|&(s, ci)| vec![s as u32, ci as u32, vm_mod.chunks[ci].params.len() as u32])
+        .map(|v| v.to_string())
+        .collect();
+    wrapper.push_str(&format!(
+        "static NAT_FUNCS: [u32; {}] = [{}];\n",
+        funcs_items.len(),
+        funcs_items.join(",")
+    ));
+    let nparams_items: Vec<String> = vm_mod
+        .chunks
+        .iter()
+        .map(|c| c.params.len().to_string())
+        .collect();
+    wrapper.push_str(&format!(
+        "static NAT_CHUNK_NPARAMS: [u32; {}] = [{}];\n",
+        nparams_items.len(),
+        nparams_items.join(",")
+    ));
+    // 局部变量表：每 chunk (strtab_idx, reg) 扁平数组 + 每 chunk 条目数。
+    let mut loc_items: Vec<String> = Vec::new();
+    let mut loc_counts: Vec<String> = Vec::new();
+    for c in &vm_mod.chunks {
+        let mut pairs: Vec<(usize, usize)> = c.locals.iter().map(|(k, &r)| (strtab_idx[k], r)).collect();
+        pairs.sort_by_key(|&(s, _)| s);
+        loc_counts.push(pairs.len().to_string());
+        for (s, r) in pairs {
+            loc_items.push(s.to_string());
+            loc_items.push(r.to_string());
+        }
+    }
+    wrapper.push_str(&format!(
+        "static NAT_LOCS: [u32; {}] = [{}];\n",
+        loc_items.len(),
+        loc_items.join(",")
+    ));
+    wrapper.push_str(&format!(
+        "static NAT_LOC_COUNTS: [u32; {}] = [{}];\n",
+        loc_counts.len(),
+        loc_counts.join(",")
+    ));
+    wrapper.push_str("#[allow(non_camel_case_types)]\n");
+    wrapper.push_str("fn main() {\n");
+    wrapper.push_str("    let ptrs: Vec<*const u8> = NAT_STRS.iter().map(|s| s.as_ptr()).collect();\n");
+    wrapper.push_str("    let lens: Vec<usize> = NAT_STRS.iter().map(|s| s.len()).collect();\n");
+    wrapper.push_str(&format!(
+        "    hn_rt_strtab_init(ptrs.as_ptr(), lens.as_ptr(), {});\n",
+        strtab.len()
+    ));
+    wrapper.push_str("    let fptr = NAT_FILE.as_ptr();\n");
+    wrapper.push_str("    let flen = NAT_FILE.len();\n");
+    wrapper.push_str("    let sptr = NAT_SRC.as_ptr();\n");
+    wrapper.push_str("    let slen = NAT_SRC.len();\n");
+    wrapper.push_str("    let spp: Vec<*const u32> = NAT_SPANS.iter().map(|s| s.as_ptr()).collect();\n");
+    wrapper.push_str("    let sln: Vec<usize> = NAT_SPANS.iter().map(|s| s.len()).collect();\n");
+    wrapper.push_str(&format!(
+        "    hn_rt_prog_init(fptr, flen, sptr, slen, spp.as_ptr(), sln.as_ptr(), {});\n",
+        span_tables.len()
+    ));
+    wrapper.push_str("    let fps: Vec<usize> = NAT_FN_PTRS.iter().map(|f| *f as usize).collect();\n");
+    wrapper.push_str(&format!(
+        "    hn_rt_fn_ptrs_init(fps.as_ptr(), fps.len());\n"
+    ));
+    wrapper.push_str(&format!(
+        "    hn_rt_funcs_init(NAT_FUNCS.as_ptr(), NAT_FUNCS.len() / 3);\n"
+    ));
+    wrapper.push_str(&format!(
+        "    hn_rt_chunk_nparams(NAT_CHUNK_NPARAMS.as_ptr(), NAT_CHUNK_NPARAMS.len());\n"
+    ));
+    wrapper.push_str(&format!(
+        "    hn_rt_locals_init(NAT_LOCS.as_ptr(), NAT_LOC_COUNTS.as_ptr(), NAT_LOC_COUNTS.len());\n"
+    ));
+    wrapper.push_str("    std::process::exit(hn_entry() as i32);\n");
+    wrapper.push_str("    // hn_entry：ERR → rt_unwind（渲染 → stderr → exit(1)）；否则退出码 0。\n");
+    wrapper.push_str("}\n");
+    std::fs::write(&main_rs, wrapper)
+        .map_err(|e| ZError::plain(codes::INTERNAL, format!("写 wrapper: {e}"), None::<String>))?;
+    let out_s = out.to_string();
+    let obj_s = obj.to_string();
+    let p = std::process::Command::new("rustc")
+        .args(["--edition", "2021", "-O", "-o", &out_s, main_rs.to_str().unwrap()])
+        .arg("-C")
+        .arg(format!("link-arg={}", obj_s))
+        .output()
+        .map_err(|e| {
+            ZError::plain(
+                codes::INTERNAL,
+                format!("rustc 启动失败: {e}"),
+                Some("需要本机 rustc 工具链"),
+            )
+        })?;
+    let _ = std::fs::remove_dir_all(&tmpdir);
+    if !p.status.success() {
+        let err = String::from_utf8_lossy(&p.stderr);
+        return Err(ZError::plain(
+            codes::INTERNAL,
+            format!("链接失败:\n{err}"),
+            Some("检查 rustc 工具链与 object 目标三元组一致性"),
+        ));
+    }
+    if !std::path::Path::new(&out).is_file() {
+        return Err(ZError::plain(
+            codes::INTERNAL,
+            "rustc 报告成功但产物不存在",
+            None::<String>,
+        ));
+    }
+    eprintln!("[4/4] {} 完成: {}", label, out);
+    Ok(())
+}
+
 /// 末尾输出汇总；有失败即退出码非 0。
 /// --json：stdout 输出诊断 JSON 数组（每失败文件一项，全通过为 []），文本信息走 stderr，
 /// 便于 CI / 编辑器集成（`hone check src/ --json | jq`）。

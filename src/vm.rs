@@ -128,7 +128,12 @@ struct Compiler {
     spans: Vec<Span>,
     consts: Vec<Const>,
     labels: HashMap<String, usize>,
-    pending: Vec<(usize, String)>,
+    /// (跳转指令 pc, 目标标签, 跳转点 try 深度)；resolve 时回填目标并按深度差补弹 TryPop。
+    pending: Vec<(usize, String, usize)>,
+    /// 线性流中活跃的 TryBegin 数（Try 体编译期间 +1，TryPop 后 -1）。
+    try_depth: usize,
+    /// 各标签所在位置的 try 深度（补弹数 = 跳转点深度 − 目标深度）。
+    label_try_depth: HashMap<String, usize>,
     scopes: Vec<(HashMap<String, usize>, usize)>,
     var_next: usize,
     tmp_next: usize,
@@ -155,6 +160,8 @@ impl Compiler {
             consts: Vec::new(),
             labels: HashMap::new(),
             pending: Vec::new(),
+            try_depth: 0,
+            label_try_depth: HashMap::new(),
             scopes: Vec::new(),
             var_next: 0,
             tmp_next: 0,
@@ -181,6 +188,7 @@ impl Compiler {
 
     fn emit_label(&mut self, name: &str) {
         self.labels.insert(name.to_string(), self.code.len());
+        self.label_try_depth.insert(name.to_string(), self.try_depth);
         self.code.push(Instr::Label(name.to_string()));
         self.spans.push(self.cur_span.clone());
     }
@@ -194,17 +202,17 @@ impl Compiler {
     fn jmp(&mut self, lab: &str) {
         let i = self.code.len();
         self.emit(Instr::Jmp(0));
-        self.pending.push((i, lab.to_string()));
+        self.pending.push((i, lab.to_string(), self.try_depth));
     }
     fn jif(&mut self, r: usize, lab: &str) {
         let i = self.code.len();
         self.emit(Instr::JmpIfFalse(r, 0));
-        self.pending.push((i, lab.to_string()));
+        self.pending.push((i, lab.to_string(), self.try_depth));
     }
     fn jit(&mut self, r: usize, lab: &str) {
         let i = self.code.len();
         self.emit(Instr::JmpIfTrue(r, 0));
-        self.pending.push((i, lab.to_string()));
+        self.pending.push((i, lab.to_string(), self.try_depth));
     }
 
     fn enter(&mut self) {
@@ -277,15 +285,71 @@ impl Compiler {
 
     fn resolve(&mut self) {
         let pending = std::mem::take(&mut self.pending);
-        for (idx, lab) in pending {
-            let t = *self.labels.get(&lab).expect("undefined label in resolve");
-            self.code[idx] = match &self.code[idx] {
-                Instr::Jmp(_) => Instr::Jmp(t),
-                Instr::JmpIfFalse(r, _) => Instr::JmpIfFalse(*r, t),
-                Instr::JmpIfTrue(r, _) => Instr::JmpIfTrue(*r, t),
-                Instr::TryBegin(_, c) => Instr::TryBegin(t, *c),
+        // pending 按发射顺序（pc 升序）。向前跳出（break/continue/goto 越过线性流
+        // 中的 TryPop）需按 try 深度差补弹，否则 stale 条目残留、误捕跳出后逃逸的
+        // 异常（死循环 / 跨帧误捕）。插入会前移其后所有指令/标签，分两遍：先按原
+        // 坐标算出补弹数，再统一回填（目标与标签同步前移）。
+        // 无条件跳转：TryPop 插在跳转之前（必经路径）。条件跳转：仅分支 taken 路径
+        // 需要弹（fallthrough 仍在 try 内，不能弹）——走尾部蹦床
+        //（Ltmp: TryPop×n; Jmp 目标）。
+        let n_pops: Vec<usize> = pending
+            .iter()
+            .map(|(_, lab, depth)| {
+                let target_depth = *self.label_try_depth.get(lab).unwrap_or(&0);
+                depth.saturating_sub(target_depth)
+            })
+            .collect();
+        // 原坐标位置 p 的最终前移量 = 所有「插入点位于 p 之前」的补弹之和，
+        // 即满足 idx_j < p 的全部 n_j。
+        let shift_of = |p: usize| -> usize {
+            pending
+                .iter()
+                .zip(n_pops.iter())
+                .filter(|(e, _)| e.0 < p)
+                .map(|(_, n)| *n)
+                .sum()
+        };
+        let mut tramps: Vec<(usize, usize)> = Vec::new(); // (补弹数, 目标 pc)
+        let mut tramp_tail = self.code.len();
+        for ((idx, lab, _depth), n) in pending.iter().zip(n_pops.iter()) {
+            let pos = idx + shift_of(*idx);
+            let t = *self.labels.get(lab).expect("undefined label in resolve") + shift_of(*self.labels.get(lab).unwrap());
+            match &self.code[pos] {
+                Instr::TryBegin(_, c) => self.code[pos] = Instr::TryBegin(t, *c),
+                Instr::Jmp(_) => {
+                    self.code[pos] = Instr::Jmp(t);
+                    for _ in 0..*n {
+                        self.code.insert(pos, Instr::TryPop);
+                        self.spans.insert(pos, self.cur_span.clone());
+                    }
+                }
+                Instr::JmpIfFalse(r, _) if *n > 0 => {
+                    self.code[pos] = Instr::JmpIfFalse(*r, tramp_tail);
+                    tramps.push((*n, t));
+                    tramp_tail += n + 2;
+                }
+                Instr::JmpIfFalse(r, _) => self.code[pos] = Instr::JmpIfFalse(*r, t),
+                Instr::JmpIfTrue(r, _) if *n > 0 => {
+                    self.code[pos] = Instr::JmpIfTrue(*r, tramp_tail);
+                    tramps.push((*n, t));
+                    tramp_tail += n + 2;
+                }
+                Instr::JmpIfTrue(r, _) => self.code[pos] = Instr::JmpIfTrue(*r, t),
                 _ => unreachable!("pending jump on non-jump instr"),
-            };
+            }
+        }
+        for (k, (n, t)) in tramps.iter().enumerate() {
+            self.code.push(Instr::Label(format!("$tramp${}", k)));
+            self.spans.push(self.cur_span.clone());
+            for _ in 0..*n {
+                self.code.push(Instr::TryPop);
+                self.spans.push(self.cur_span.clone());
+            }
+            self.code.push(Instr::Jmp(*t));
+            self.spans.push(self.cur_span.clone());
+        }
+        for lp in self.labels.values_mut() {
+            *lp += shift_of(*lp);
         }
     }
 
@@ -311,6 +375,8 @@ impl Compiler {
         self.tmp_next = 0;
         self.max_reg = 0;
         self.loop_labels.clear();
+        self.try_depth = 0;
+        self.label_try_depth.clear();
         idx
     }
 
@@ -786,7 +852,10 @@ impl Compiler {
                 let lafter = self.new_label("Lafter");
                 let i = self.code.len();
                 self.emit(Instr::TryBegin(0, try_reg));
-                self.pending.push((i, lhandler.clone()));
+                // TryBegin 的 pending 条目记录「handler 标签深度」——它指向的
+                // handler 位于 Try 块外部，与 try 本身建立时同深。
+                self.pending.push((i, lhandler.clone(), self.try_depth));
+                self.try_depth += 1;
                 self.enter();
                 for s2 in body {
                     self.compile_stmt(s2);
@@ -794,6 +863,7 @@ impl Compiler {
                 }
                 self.exit();
                 self.emit(Instr::TryPop);
+                self.try_depth -= 1;
                 self.jmp(&lafter);
                 self.emit_label(&lhandler);
                 self.enter();
@@ -1196,6 +1266,8 @@ impl Compiler {
                 let saved_consts = std::mem::take(&mut self.consts);
                 let saved_labels = std::mem::take(&mut self.labels);
                 let saved_pending = std::mem::take(&mut self.pending);
+                let saved_try_depth = self.try_depth;
+                let saved_label_try_depth = std::mem::take(&mut self.label_try_depth);
                 let saved_scopes = std::mem::take(&mut self.scopes);
                 let saved_cur_locals = std::mem::take(&mut self.cur_locals);
                 let saved_var_next = self.var_next;
@@ -1230,6 +1302,8 @@ impl Compiler {
                 self.consts = saved_consts;
                 self.labels = saved_labels;
                 self.pending = saved_pending;
+                self.try_depth = saved_try_depth;
+                self.label_try_depth = saved_label_try_depth;
                 self.scopes = saved_scopes;
                 self.cur_locals = saved_cur_locals;
                 self.var_next = saved_var_next;
@@ -1438,14 +1512,17 @@ struct Frame {
     chunk: usize,
     pc: usize,
     regs: Vec<Value>,
+    /// 本帧内建立的活跃 try 条目（内层在末尾）。随帧弹出而销毁，
+    /// 因此跨帧 throw 天然向调用方传播——不会残留 callee 的 stale 条目
+    /// 遮蔽 caller 的有效 try（stale 条目会误捕 break/continue 越过
+    /// TryPop 后逃逸出的异常，导致死循环/跨帧误捕）。
+    try_stack: Vec<TryFrame>,
 }
 
+#[derive(Clone)]
 struct TryFrame {
     handler: usize,
     catch_reg: usize,
-    /// 建立该 try 的帧下标。跨帧 throw 时只有建立帧才能处理，
-    /// 否则必须向上层帧传播（让 call_chunk 弹出本帧后由建立帧的 exec 循环捕获）。
-    frame: usize,
 }
 
 pub struct Vm {
@@ -1459,7 +1536,6 @@ pub struct Vm {
     src: String,
     debug: bool,
     frames: Vec<Frame>,
-    try_stack: Vec<TryFrame>,
 }
 
 impl Vm {
@@ -1485,7 +1561,6 @@ impl Vm {
             src: src.to_string(),
             debug,
             frames: Vec::new(),
-            try_stack: Vec::new(),
         }
     }
 
@@ -1530,6 +1605,7 @@ impl Vm {
             chunk: main_idx,
             pc: 0,
             regs: vec![Value::Null; nregs],
+            try_stack: Vec::new(),
         });
         let res = self.exec();
         self.frames.pop();
@@ -1556,21 +1632,19 @@ impl Vm {
         }
     }
 
-    /// 尝试用栈顶 try 处理一个被抛出的异常。
-    /// 仅当该 try 由「当前顶层帧」建立时才在本帧内捕获（设置 catch 寄存器并跳转到 handler）；
-    /// 若 try 由更低层帧建立（异常来自被调用函数），则必须向上传播——
-    /// 返回 false 让调用方 exec 循环把本帧弹出后由建立帧捕获，从而避免跳转到错误的 chunk。
+    /// 尝试用本帧栈顶 try 处理一个被抛出的异常（设置 catch 寄存器并跳转到 handler）。
+    /// try 条目随帧弹出而销毁：被调用函数内的 try 不可能捕获本帧的异常，
+    /// 本帧无活跃 try 时返回 false，由 exec 循环把本帧弹出后由调用方的 try 捕获。
     fn try_catch(&mut self, thrown: &Value) -> bool {
         let top = self.frames.len() - 1;
-        if let Some(tf) = self.try_stack.last() {
-            if tf.frame == top {
-                let tf = self.try_stack.pop().unwrap();
-                self.frames[top].regs[tf.catch_reg] = thrown.clone();
-                self.frames[top].pc = tf.handler;
-                return true;
-            }
+        if let Some(tf) = self.frames[top].try_stack.last().cloned() {
+            self.frames[top].try_stack.pop();
+            self.frames[top].regs[tf.catch_reg] = thrown.clone();
+            self.frames[top].pc = tf.handler;
+            true
+        } else {
+            false
         }
-        false
     }
 
     fn exec(&mut self) -> Result<Value, Value> {
@@ -2007,15 +2081,52 @@ impl Vm {
                 self.spawn_go(&callee, args);
             }
             Instr::TryBegin(handler, catch_reg) => {
-                let frame = self.frames.len() - 1;
-                self.try_stack.push(TryFrame { handler, catch_reg, frame });
+                self.frames[fi].try_stack.push(TryFrame { handler, catch_reg });
             }
             Instr::TryPop => {
-                self.try_stack.pop();
+                self.frames[fi].try_stack.pop();
             }
             Instr::Throw(reg) => {
                 let v = self.frames[fi].regs[reg].clone();
-                return Err(normalize_throw(v));
+                // 与解释器 Stmt::Throw 逐字一致：str → H600（定位取 throw 语句 span）；
+                // error 重抛同文件保留原始定位、跨文件退化并附原始位置；其余类型 H001。
+                match v {
+                    Value::Str(s) => {
+                        return Err(self.mk_err(codes::THROW, s, span));
+                    }
+                    Value::Error(e) => {
+                        if e.file == self.file {
+                            return Err(self.mk_err_with(
+                                e.code,
+                                e.message.clone(),
+                                &Span {
+                                    line: e.line,
+                                    col: e.col,
+                                    len: 1,
+                                },
+                                None,
+                            ));
+                        } else {
+                            return Err(Value::Error(ErrorObj {
+                                code: e.code,
+                                message: format!("{} (at {}:{}:{})", e.message, e.file, e.line, e.col),
+                                file: String::new(),
+                                line: 0,
+                                col: 0,
+                                len: 0,
+                                context: String::new(),
+                                help: None,
+                            }));
+                        }
+                    }
+                    other => {
+                        return Err(self.mk_err(
+                            codes::TYPE_MISMATCH,
+                            format!("`throw` accepts a `str` or `error`, got `{}`", other.type_name()),
+                            span,
+                        ));
+                    }
+                }
             }
             Instr::ThrowStr(s) => {
                 return Err(Value::Error(ErrorObj {
@@ -2187,7 +2298,7 @@ impl Vm {
                 regs[i] = a.clone();
             }
         }
-        self.frames.push(Frame { chunk: ci, pc: 0, regs });
+        self.frames.push(Frame { chunk: ci, pc: 0, regs, try_stack: Vec::new() });
         let res = self.exec();
         self.frames.pop();
         res
@@ -2214,7 +2325,6 @@ impl Vm {
             }
         };
         let chunk = &self.chunks[ci];
-        let ncap = chunk.captured_regs.len();
         let expected = chunk.params.len();
         if args.len() != expected {
             return Err(Value::Error(ErrorObj {
@@ -2235,13 +2345,19 @@ impl Vm {
                 regs[*r] = v.clone();
             }
         }
+        // 实参绑定到 lambda chunk 实际声明的参数寄存器：lambda chunk 编译期继承外层
+        // var_next，捕获/参数寄存器不从 0 起排（如捕获 base@r1、参数 x@r2），不能用
+        // ncap+i 偏移假设；用 locals 表（参数名 → 寄存器号）精确定位（与捕获填装一致）。
         for (i, a) in args.iter().enumerate() {
-            let r = ncap + i;
-            if r < nregs {
-                regs[r] = a.clone();
+            if i < expected {
+                if let Some(&r) = chunk.locals.get(&chunk.params[i]) {
+                    if r < nregs {
+                        regs[r] = a.clone();
+                    }
+                }
             }
         }
-        self.frames.push(Frame { chunk: ci, pc: 0, regs });
+        self.frames.push(Frame { chunk: ci, pc: 0, regs, try_stack: Vec::new() });
         let res = self.exec();
         self.frames.pop();
         res
@@ -2394,32 +2510,6 @@ fn vm_help_for(code: &'static str, msg: &str) -> Option<String> {
         _ => return None,
     };
     Some(h)
-}
-
-fn normalize_throw(v: Value) -> Value {
-    match v {
-        Value::Error(_) => v,
-        Value::Str(s) => Value::Error(ErrorObj {
-            code: codes::THROW,
-            message: s,
-            file: String::new(),
-            line: 0,
-            col: 0,
-            len: 0,
-            context: String::new(),
-            help: None,
-        }),
-        other => Value::Error(ErrorObj {
-            code: codes::THROW,
-            message: value_to_str(&other),
-            file: String::new(),
-            line: 0,
-            col: 0,
-            len: 0,
-            context: String::new(),
-            help: None,
-        }),
-    }
 }
 
 fn value_to_str(v: &Value) -> String {

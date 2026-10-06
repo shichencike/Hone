@@ -740,6 +740,8 @@ hone watch <script.hn> 监控脚本文件变更自动重跑（跨平台轮询 mt
 hone build --dll <script.hn> 将脚本打包成 C ABI 动态库（DLL / SO / DYLIB）
 hone build --exe <script.hn> 打包独立可执行文件（解释器 + 脚本自释放，[-o <out>] [--icon <ico>]）
 hone build --exe -c <script.hn> AOT 编译原生可执行文件（脚本 → C 中间文件 → gcc/clang → 原生 exe；默认删除 .c，--keep-c 保留）
+hone build --exe --native <script.hn> 原生编译可执行文件（脚本 → Cranelift 机器码 → rustc 链接；需本机 Rust 工具链，见 4.7）
+hone natgen <script.hn> build --exe --native 的别名（[-o <out>] [--obj] 保留中间 object）
 hone build --script <script.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）
 hone bind <header.h> 从 C 头文件生成 typed load 签名块（FFI 自动绑定）
 hone debug <script.hn> 断点调试模式（支持 breakpoint 关键字）
@@ -1379,7 +1381,40 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   · **热循环性能**：生成的 C 对每次整数运算都做装箱 + 深拷贝 + 释放（见下），
     故纯计算密集代码比等价 Rust/C 慢约一个数量级；对 I/O、脚本编排类负载影响可忽略
 
-4.7 AOT 性能实测
+4.7 原生编译后端（hone build --exe --native）
+
+· 与 AOT（-c，经 C 中间文件）并列的第二条原生后端：`hone build --exe --native <script.hn>`
+  直接用 Cranelift 把 VM 字节码 lower 为机器码（object），再经生成式 wrapper + rustc 链接成原生可执行文件
+· 命令形态：`hone natgen` 是 `build --exe --native` 的等价别名（额外保留 `--obj` 输出中间 object 供调试）
+· 管线：解析 + 类型检查 → VM 字节码 → Cranelift object（每 chunk 一个函数，main 为 `__hn_main`）→
+  rustc 一次链接（runtime 源码内嵌进 hone 二进制，干净机器自足）
+· 值模型：句柄式——寄存器持 u64 句柄指向堆上 `HnCell{rc,t,a,b,pkind,payload}`（跨 object ↔ rustc 只传 i64，
+  规避 Windows x64 对 >16B 结构体的隐藏 sret 指针 ABI）；引用计数 retain/release，槽写释放旧值；
+  str/err/fn 装箱，标量内联
+· 调用模型：统一走 `rt_call` 名分发（用户函数 / lambda / 内置表），lambda 按值捕获；错误经 ERR 句柄跨帧传播，
+  每个 fallible 指令后静态查「最近活跃 catch」映射跳 handler（无 setjmp），Throw/ThrowStr 归一 H600
+· 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码**逐字节一致**（含完整错误渲染
+  `--> 文件名:行:列` / 行号行 / caret / help / 结尾空行），回归脚本 `tests/regress4.py`（M0 用例集：fib / hello / err_divzero）
+· 当前支持范围（M0 子集）：
+  · 标量全类型：int / float / bool / char / str / null 常量、算术 / 比较 / 一元运算、str 拼接与 ==/!=
+  · 控制流：if-else / while / 标签跳转（Label+Jmp 覆盖 goto）
+  · 函数与 lambda：递归、向前引用、lambda 直调与作参、捕获（值语义）、闭包嵌套
+  · try-catch / throw：跨帧捕获、嵌套重抛、错误对象字段（e.code/.message/.file/.line/.col）
+  · 内置子集：print / len / to_str / to_int / to_float / is_int / is_float / is_bool / is_str / type_of /
+    abs / max / min / assert / assert_eq / read_file（assert 失败 H700 文案对齐）
+  · 错误码对齐 VM：H001 / H002 / H006 / H007 / H009 / H010 / H011 / H401–H404 / H600 / H700
+· 当前限制（M1/M2 逐步放开）：
+  · M0 子集外指令（list / dict / 迭代 / 推导式 / struct / enum / match / 运算符重载 / async / import / 切片 /
+    byte / bytes 等）在**编译期**报 H990（internal）「指令未实现」——编译期即拒绝，不产出错误二进制
+  · 依赖本机 rustc（rustc 与 Rust std 的链接期依赖）；M3 起改为随 hone 分发的预编译工具链，移除 rustc 依赖
+  · `cow` 声明 / 形参与 VM 一致按引擎边界处理（解释器特性，见 1.3）
+· 与 AOT（-c）的分工：AOT 走 C 中间文件 + gcc/clang，体积几十 KB、零运行时依赖，但错误渲染为简化一行；
+  native 走 Cranelift 机器码 + rustc，错误渲染与双引擎逐字节一致，语义对齐是它的首要目标。
+  二者互斥：`-c` 与 `--native` 同用报 H005 显式错误
+· 验证基线：`bench/fib15.hn`（610）经 `hone natgen bench/fib15.hn -o bench/fib15.exe` 复现；
+  改代码后先 `cargo build`（target/ 旧二进制会静默沿用），再跑 `python tests/regress4.py`
+
+4.8 AOT 性能实测
 
 · 环境：MinGW-w64 gcc 16.2.0（`CC` 指向 `gcc.exe`），Windows x86_64；预热后取多轮最快值
 · 产物体积：约 58.6 KB
