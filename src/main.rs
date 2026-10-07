@@ -1806,6 +1806,26 @@ fn build_native(
         nparams_items.len(),
         nparams_items.join(",")
     ));
+    // G2.4：每 chunk 形参**名**表（strtab 索引扁平数组 + 每 chunk 条目数）——
+    // 缺参报错要指名道姓（镜像解释器「missing argument `c` of `f`」）。
+    let mut param_name_items: Vec<String> = Vec::new();
+    let mut param_name_counts: Vec<String> = Vec::new();
+    for c in &vm_mod.chunks {
+        param_name_counts.push(c.params.len().to_string());
+        for p in &c.params {
+            param_name_items.push(strtab_idx.get(p).copied().unwrap_or(0).to_string());
+        }
+    }
+    wrapper.push_str(&format!(
+        "static NAT_PARAM_NAMES: [u32; {}] = [{}];\n",
+        param_name_items.len(),
+        param_name_items.join(",")
+    ));
+    wrapper.push_str(&format!(
+        "static NAT_PARAM_NAME_COUNTS: [u32; {}] = [{}];\n",
+        param_name_counts.len(),
+        param_name_counts.join(",")
+    ));
     // 局部变量表：每 chunk (strtab_idx, reg) 扁平数组 + 每 chunk 条目数。
     let mut loc_items: Vec<String> = Vec::new();
     let mut loc_counts: Vec<String> = Vec::new();
@@ -1914,6 +1934,10 @@ fn build_native(
     ));
     wrapper.push_str(&format!(
         "    hn_rt_chunk_nparams(NAT_CHUNK_NPARAMS.as_ptr(), NAT_CHUNK_NPARAMS.len());\n"
+    ));
+    // G2.4：形参名表（缺参报错指名道姓，镜像解释器文案）。
+    wrapper.push_str(&format!(
+        "    hn_rt_param_names(NAT_PARAM_NAMES.as_ptr(), NAT_PARAM_NAME_COUNTS.as_ptr(), NAT_PARAM_NAME_COUNTS.len());\n"
     ));
     wrapper.push_str(&format!(
         "    hn_rt_locals_init(NAT_LOCS.as_ptr(), NAT_LOC_COUNTS.as_ptr(), NAT_LOC_COUNTS.len());\n"

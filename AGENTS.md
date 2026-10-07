@@ -11,7 +11,7 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   - `python tests/regress4.py` — 三引擎正常路径逐字节对齐（需本机 rustc）
   - `python tests/regress_ir.py` — 文本 IR 往返
   - `python tests/tools/audit_err.py` — 开发期扫雷：55 例错误文案 + help 行 nat-vs-interp 批量比对（慢，不入常规回归）
-  - `python tests/tools/probe_align.py` — 开发期扫雷：50 例 match / 条件 / 逻辑 / 解构形态的 interp-vs-VM 逐字节比对；`--nat` 追加第三引擎（每例单独 build，慢）。动态类型值（enum/struct）下的条件与逻辑分叉靠它扫出。
+  - `python tests/tools/probe_align.py` — 开发期扫雷：82 例 match / 条件 / 逻辑 / 解构 / 重载 形态的 interp-vs-VM 逐字节比对；`--nat` 追加第三引擎（每例单独 build，慢）。动态类型值（enum/struct）下的条件与逻辑分叉、以及重载回退边界靠它扫出。
 - CI（.github/workflows/ci.yml）只做 `cargo build/test --locked` + hello/fib smoke；无 rustfmt/clippy 配置，格式化用语言自带 `hone fmt`（作用于 .hn，非 Rust）。
 
 ## 架构
@@ -23,6 +23,11 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   - 指令带**字符串操作数**（Call 名 / Field 名 / Raise 三段文本 / ThrowStr 文案 / enum 构造名等）才需 `main.rs` strtab 收集；纯数值操作数指令（如 `CondCheck` / `IsBoolVal`）不需要。
   - `Instr::Raise` 的**错误码**另有两处白名单，漏改会让 nat 静默渲染成 H990 或 IR 往返失败：`runtime/src/lib.rs` 的 `rt_raise` 码表、`vm.rs` `parse_instr` 的 `RAISE` 码表。
   - runtime 侧「解释器显式无 help」的分支必须用 `err_h_explicit_no_help`（哨兵 `Some("")`），否则渲染层 `hn_help_for` 会凭空补一行 help。
+- 运算符重载（G2.4）：`__op` 回退链**全部在 runtime**（`rt_binop` / `rt_unop` / `rt_index` /
+  `call_builtin` 的 `len` 臂），字节码与 natgen 无需改动。触发条件表以 `vm.rs` exec 臂为准
+  （算术：非数字/str 组合 + H001；比较：非数字对、错误码不限；一元：H001）。
+- 参数个数校验三引擎统一到解释器文案（`expects at most N arguments, got M` /
+  ``missing argument `c` of `f` `` + 定位 + help）——**不要**改回中文硬编码消息。
 - 条件与逻辑语义（改 `vm.rs` 编译臂时注意，解释器为准）：`if`/`while`/`do-while`/`for`/三元/推导式 `if` 过滤六处条件站点**运行期严格 bool**（`Instr::CondCheck`），`&&`/`||` 短路求值且右侧操作数严格 bool（`Instr::IsBoolVal` 判「恰为该布尔值」，不是 truthy）。
 
 ## 项目特有约定

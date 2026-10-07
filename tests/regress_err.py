@@ -97,6 +97,13 @@ CASES = {
     "enum_destruct": 'enum E { A(int) }\ne = E.A(1);\na, b = e;\n',
     # （enum 解构 `x, y = e`：G2.3 已修 VM 解构 other 臂文案（改 type_name），三引擎一致，
     #  故可固化——ds_notiter_run 覆盖同类非容器解构。）
+    # G2.4 运算符重载错误路径：重载参数个数不匹配 / 重载体内报错 / native 错误不回退。
+    # （这些路径只能经重载动态到达——普通调用的参数个数由 checker 静态拦。）
+    "ov_arity_many": 'fn __add(a) { return "x"; }\nd = {"a": 1};\nprint(to_str(d + 1));\n',
+    "ov_arity_missing": 'fn __add(a, b, c) { return to_str(c); }\nd = {"a": 1};\nprint(d + 1);\n',
+    "ov_body_error": 'fn __add(a, b) { return 1 / 0; }\nd = {"a": 1};\nprint(to_str(d + 1));\n',
+    "ov_native_div0": 'fn __div(a, b) { return "d"; }\nprint(1 / 0);\n',
+    "lambda_arity": 'g = fn(a, b) { return a; };\nprint(to_str(g(1, 2, 3)));\n',
     "throw_num": 'throw 5;\n',
     # try/catch 上下文
     "try_catch_ctx": (

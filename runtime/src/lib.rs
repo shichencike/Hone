@@ -1223,6 +1223,9 @@ type FnPtr = unsafe extern "C" fn(u64, u64, u64, u64) -> u64;
 static FUNCS: std::sync::Mutex<Vec<(u32, u32, u32)>> = std::sync::Mutex::new(Vec::new());
 static LOCALS: std::sync::Mutex<Vec<Vec<(u32, u32)>>> = std::sync::Mutex::new(Vec::new());
 static CHUNK_NPARAMS: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+// G2.4：每 chunk 形参**名**（strtab 索引序列）——缺参报错要指名道姓（镜像解释器
+// 「missing argument `c` of `f`」）。CHUNK_NPARAMS 只有个数，这里补名字。
+static CHUNK_PARAM_NAMES: std::sync::Mutex<Vec<Vec<u32>>> = std::sync::Mutex::new(Vec::new());
 static FN_PTRS: std::sync::Mutex<Vec<FnPtr>> = std::sync::Mutex::new(Vec::new());
 // G2.1：struct 定义表 structs[i] = (strtab_idx, 字段数)，字段名按定义序存
 // STRUCT_FIELDS[i]（strtab 索引）。与 vm.rs struct_defs 对应（构造时字段名序列
@@ -1278,6 +1281,67 @@ pub extern "C" fn hn_rt_chunk_nparams(nparams: *const u32, n: usize) {
     t.clear();
     for i in 0..n {
         t.push(unsafe { *nparams.add(i) });
+    }
+}
+
+/// G2.4：每 chunk 形参名（strtab 索引）：names 为按 chunk 顺序拼接的扁平数组，
+/// counts[i] = chunk i 的形参个数（与 CHUNK_NPARAMS 同序）。
+#[no_mangle]
+pub extern "C" fn hn_rt_param_names(names: *const u32, counts: *const u32, nchunks: usize) {
+    let mut t = CHUNK_PARAM_NAMES.lock().unwrap();
+    t.clear();
+    let mut off = 0usize;
+    for i in 0..nchunks {
+        let cnt = unsafe { *counts.add(i) } as usize;
+        let mut v = Vec::with_capacity(cnt);
+        for _ in 0..cnt {
+            v.push(unsafe { *names.add(off) });
+            off += 1;
+        }
+        t.push(v);
+    }
+}
+
+/// chunk i 的第 j 个形参名（缺失时返回空串——调用方只在报错文案里用它）。
+fn param_name(ci: u32, j: usize) -> String {
+    let t = CHUNK_PARAM_NAMES.lock().unwrap();
+    match t.get(ci as usize).and_then(|v| v.get(j)) {
+        Some(&sidx) => strtab_name(sidx),
+        None => String::new(),
+    }
+}
+
+/// 参数个数校验错误（镜像解释器 call_fn / call_lambda 的两类文案 + 定位 + help）。
+/// `want` 形参总数、`got` 实参数（少参时首个未填充形参即第 got 个）、`name` 函数名
+/// （lambda 传 "lambda"）；`fci` 是被调 chunk（取形参名用），`ci/pc` 是调用点定位。
+fn arg_count_err(name: &str, want: usize, got: usize, fci: u32, ci: u32, pc: u32) -> Hnv {
+    if got > want {
+        // 解释器文案：函数名带反引号（`` `f` expects at most …``），lambda 不带。
+        let help = if name == "lambda" {
+            "pass exactly the declared number of arguments"
+        } else {
+            "check the number of arguments passed"
+        };
+        let msg = if name == "lambda" {
+            format!("lambda expects at most {} arguments, got {}", want, got)
+        } else {
+            format!("`{}` expects at most {} arguments, got {}", name, want, got)
+        };
+        err_h_help("H011", &msg, ci, pc, Some(help.to_string()))
+    } else {
+        let pname = param_name(fci, got);
+        let msg = if name == "lambda" {
+            format!("missing argument `{}`", pname)
+        } else {
+            format!("missing argument `{}` of `{}`", pname, name)
+        };
+        err_h_help(
+            "H011",
+            &msg,
+            ci,
+            pc,
+            Some("pass the required argument, or give the parameter a default value".to_string()),
+        )
     }
 }
 
@@ -1405,15 +1469,20 @@ pub extern "C" fn rt_makelambda(ci: u64, caps_ptr: u64, ncap: u64) -> u64 {
 
 /// 调 chunk 索引（用户函数）：实参所有权转移给 callee 帧（成功路径不 drop）。
 /// 参数数不匹配 → H011（镜像 Vm::call_chunk：plain 无定位，line=0）。
-fn call_chunk_idx(fci: u32, nparams: u32, argptr: u64, nargs: u64, name: &str) -> u64 {
+fn call_chunk_idx(
+    fci: u32,
+    nparams: u32,
+    argptr: u64,
+    nargs: u64,
+    name: &str,
+    ci: u32,
+    pc: u32,
+) -> u64 {
     if nargs != nparams as u64 {
         drop_args(argptr, nargs);
-        return make_cell(err_h(
-            "H011",
-            &format!("函数 `{}` 期望 {} 个参数，收到 {}", name, nparams, nargs),
-            0,
-            0,
-        ));
+        // G2.4：消息 / 定位 / help 对齐解释器（原先中文硬编码、无定位无 help，
+        // 经运算符重载路径可达）。
+        return make_cell(arg_count_err(name, nparams as usize, nargs as usize, fci, ci, pc));
     }
     let fptr = FN_PTRS.lock().unwrap()[fci as usize];
     unsafe { fptr(argptr, nargs, 0, 0) }
@@ -1429,9 +1498,12 @@ fn call_fn_h(h: u64, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
     let nparams = CHUNK_NPARAMS.lock().unwrap()[fci as usize];
     if nargs != nparams as u64 {
         drop_args(argptr, nargs);
-        return make_cell(err_h(
-            "H011",
-            &format!("lambda 期望 {} 个参数，收到 {}", nparams, nargs),
+        // G2.4：消息 / 定位 / help 对齐解释器 call_lambda。
+        return make_cell(arg_count_err(
+            "lambda",
+            nparams as usize,
+            nargs as usize,
+            fci,
             ci,
             pc,
         ));
@@ -1462,7 +1534,7 @@ fn call_global(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
             }
         }
         if let Some((fci, np)) = func_lookup(name) {
-            return call_chunk_idx(fci, np, argptr, nargs, name);
+            return call_chunk_idx(fci, np, argptr, nargs, name, ci, pc);
         }
         let lib = &name[..name.rfind('.').unwrap_or(name.len())];
         drop_args(argptr, nargs);
@@ -1478,7 +1550,7 @@ fn call_global(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
         ));
     }
     if let Some((fci, np)) = func_lookup(name) {
-        return call_chunk_idx(fci, np, argptr, nargs, name);
+        return call_chunk_idx(fci, np, argptr, nargs, name, ci, pc);
     }
     // G2.1：struct 构造（VM do_call 序：func_map 之后、内置之前）。
     if let Some((si, nfields)) = struct_lookup(name) {
@@ -1668,16 +1740,24 @@ fn call_builtin(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
                                 .count() as i64,
                         )
                     }
-                    _ => err_h_help(
-                        "H001",
-                        &format!(
-                            "`len` expects a string, list, dict, or bytes, got `{}`",
-                            type_name(c.t)
-                        ),
-                        ci,
-                        pc,
-                        Some("`len` returns the byte length of a string/bytes, or the element count of a list/dict".to_string()),
-                    ),
+                    _ => {
+                        // G2.4 运算符重载：定义了 __len 时，内建 len 不支持该类型 → 回退
+                        // （镜像 interp / VM：内建失败且 H001 才回退；a0 为借用，先 retain）。
+                        if let Some(v) = call_overload_borrowed("__len", &[a0()], ci, pc) {
+                            drop_args(argptr, nargs);
+                            return v;
+                        }
+                        err_h_help(
+                            "H001",
+                            &format!(
+                                "`len` expects a string, list, dict, or bytes, got `{}`",
+                                type_name(c.t)
+                            ),
+                            ci,
+                            pc,
+                            Some("`len` returns the byte length of a string/bytes, or the element count of a list/dict".to_string()),
+                        )
+                    }
                 }
             }
         }
@@ -2112,6 +2192,8 @@ pub extern "C" fn rt_null() -> u64 {
 #[no_mangle]
 pub extern "C" fn rt_binop(op: u64, x: u64, y: u64, ci: u64, pc: u64) -> u64 {
     let (ci, pc) = (ci as u32, pc as u32);
+    // G2.4：重载回退要读操作数类型——cell 释放后不可读，先取 tag 快照。
+    let (tx, ty) = (cell(x).t, cell(y).t);
     // 先取 tag：str 路径需句柄（字节在堆上），不能走 Hnv 快照。
     let cx = cell(x);
     let cy = cell(y);
@@ -2137,6 +2219,13 @@ pub extern "C" fn rt_binop(op: u64, x: u64, y: u64, ci: u64, pc: u64) -> u64 {
             make_cell(h)
         }
     };
+    // G2.4 运算符重载：内建失败且命中回退条件 → 实参引用转交 __op（不再释放 x/y）。
+    if let Some(name) = binop_overload(op, tx, ty, handle_err_code(r)) {
+        if let Some(v) = call_overload(name, &[x, y], ci, pc) {
+            cell_release(r); // 丢弃内建产生的错误句柄
+            return v;
+        }
+    }
     cell_release(x);
     cell_release(y);
     r
@@ -2148,13 +2237,90 @@ pub extern "C" fn rt_binop(op: u64, x: u64, y: u64, ci: u64, pc: u64) -> u64 {
 pub extern "C" fn rt_unop(op: u64, x: u64, ci: u64, pc: u64) -> u64 {
     let (ci, pc) = (ci as u32, pc as u32);
     let cx = cell(x);
-    let r = match op {
+    let h = match op {
         5 => neg_h(cx.hnv(), ci, pc),
         6 => not_h(cx.hnv(), ci, pc),
         _ => err_h("H001", "bad rt_unop op", ci, pc),
     };
+    let r = make_cell(h);
+    // G2.4 运算符重载：非 bool 的 -x / !x → __neg / __not（仅 H001 回退，镜像 VM exec 臂）。
+    if handle_err_code(r) == Some("H001") {
+        let name = match op {
+            5 => "__neg",
+            6 => "__not",
+            _ => "",
+        };
+        if !name.is_empty() {
+            if let Some(v) = call_overload(name, &[x], ci, pc) {
+                cell_release(r);
+                return v;
+            }
+        }
+    }
     cell_release(x);
-    make_cell(r)
+    r
+}
+
+/// 结果句柄的错误码（非错误句柄 → None）。
+fn handle_err_code(h: u64) -> Option<&'static str> {
+    let c = cell(h);
+    if c.t != T_ERR {
+        return None;
+    }
+    let e = unsafe { &*(c.payload as *const HnErr) };
+    Some(err_code_str(e))
+}
+
+#[inline]
+fn t_is_num(t: u64) -> bool {
+    t == T_INT || t == T_FLOAT
+}
+
+/// 二元运算的重载回退判定（op 0..=4 / 7..=12），返回 `__op` 名；None = 不回退。
+/// 条件逐条镜像 vm.rs exec 臂（interp eval_binary 同）：算术需「非 num/str 组合 + H001」
+/// （除零 / 溢出等 native 错误不回退）；eq/ne 任何内建错误都回退；大小比较需「非 num 对」
+/// （任何错误码都回退）。
+fn binop_overload(op: u64, tx: u64, ty: u64, code: Option<&str>) -> Option<&'static str> {
+    match op {
+        0..=4 => {
+            let native = (t_is_num(tx) && t_is_num(ty)) || (tx == T_STR && ty == T_STR);
+            if !native && code == Some("H001") {
+                Some(["__add", "__sub", "__mul", "__div", "__mod"][op as usize])
+            } else {
+                None
+            }
+        }
+        7 => code.map(|_| "__eq"),
+        8 => code.map(|_| "__ne"),
+        9..=12 => {
+            let native = (tx == T_INT && ty == T_INT) || (tx == T_FLOAT && ty == T_FLOAT);
+            if native {
+                None
+            } else {
+                Some(["__lt", "__le", "__gt", "__ge"][(op - 9) as usize])
+            }
+        }
+        _ => None,
+    }
+}
+
+/// 运算符重载调用（G2.4）：未定义 `name` → None（调用方保留原错误）。
+/// **所有权**：`args` 里的引用全部转交被调帧（镜像 VM `overload(name, vec![x, y])` 的 clone
+/// 语义——此处的入参本身已是 rt_binop/rt_unop 持有的独占引用）。
+fn call_overload(name: &str, args: &[u64], ci: u32, pc: u32) -> Option<u64> {
+    if func_lookup(name).is_none() {
+        return None;
+    }
+    Some(call_global(name, args.as_ptr() as u64, args.len() as u64, ci, pc))
+}
+
+/// 借用型调用点的重载包装：先 retain 再转交（被调帧接管引用，调用方槽仍持原引用）。
+fn call_overload_borrowed(name: &str, args: &[u64], ci: u32, pc: u32) -> Option<u64> {
+    if func_lookup(name).is_none() {
+        return None;
+    }
+    let owned: Vec<u64> = args.iter().map(|&a| rt_retain(a)).collect();
+    Some(call_global(name, owned.as_ptr() as u64, owned.len() as u64, ci, pc))
 }
 
 /// 打印 display（借用 h，不 drop）。
@@ -2238,10 +2404,25 @@ pub extern "C" fn rt_newdict(ptr: u64, n: u64, _ci: u64, _pc: u64) -> u64 {
 
 /// 索引读取（Index lowering，镜像 v_index）：list 按 int（越界 H001）、str 按码点索引
 /// （返回单字符 str）、dict 按键（缺键返回 null）；其他类型 H001。
-/// 借用 obj/key，返回新句柄（元素 retain / null / err）。
+/// 借用 obj/key，返回新句柄（元素 retain / null / err）。定义了 `__index` 时内建
+/// H001 回退重载（G2.4）。
 #[no_mangle]
 pub extern "C" fn rt_index(obj: u64, key: u64, ci: u64, pc: u64) -> u64 {
     let (ci, pc) = (ci as u32, pc as u32);
+    let r = index_inner(obj, key, ci, pc);
+    // G2.4 运算符重载：定义了 __index 时，内建索引类型不支持（H001）→ 回退重载
+    // （镜像 vm.rs Index 执行臂：先内建、H001 才回退；obj/key 为借用，先 retain 再转交）。
+    if handle_err_code(r) == Some("H001") {
+        if let Some(v) = call_overload_borrowed("__index", &[obj, key], ci, pc) {
+            cell_release(r);
+            return v;
+        }
+    }
+    r
+}
+
+/// 内建索引（list / str / dict；借用 obj/key，返回新句柄）。
+fn index_inner(obj: u64, key: u64, ci: u32, pc: u32) -> u64 {
     let c = cell(obj);
     match c.pkind {
         P_LIST => {

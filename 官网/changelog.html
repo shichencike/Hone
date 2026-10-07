@@ -63,7 +63,7 @@
 <li>值模型：句柄式（寄存器持 u64 句柄指向堆上 <code class="inline">HnCell</code>，跨 object ↔ rustc 只传 i64，规避 Windows x64</li>
 <li>调用模型：统一 <code class="inline">rt_call</code> 名分发（用户函数 / lambda / 内置表），lambda 按值捕获；错误经 ERR 句柄</li>
 <li>语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码逐字节一致，含完整错误渲染</li>
-<li>当前支持范围（M0 + M1 + M2 G2.1–G2.3）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda /</li>
+<li>当前支持范围（M0 + M1 + M2 G2.1–G2.4）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda /</li>
 <li>语义对齐修正：native 后端 <code class="inline">==</code>/<code class="inline">!=</code> 对 dict 的隐藏 <code class="inline">__struct__</code> 标记键原按「过滤后比较」处理，</li>
 <li>依赖本机 rustc（M3 起改预编译工具链移除）；runtime 源码内嵌进 hone 二进制，干净机器自足</li>
 <li>回归：<code class="inline">tests/regress4.py</code>（正常路径三引擎）、<code class="inline">tests/regress_err.py</code>（错误诊断三引擎逐字符）；</li>
@@ -73,6 +73,8 @@
 </ul>
 <h4><span class="flag fix">修复</span></h4>
 <ul>
+<li><strong>原生编译后端支持运算符重载</strong>（M2 G2.4）：<code class="inline">__add</code> / <code class="inline">__sub</code> / <code class="inline">__mul</code> / <code class="inline">__div</code> / <code class="inline">__mod</code> /</li>
+<li><strong>参数个数校验三引擎对齐</strong>：<code class="inline">fn f(a)</code> 被以 2 个实参调用（经运算符重载路径可达）时，</li>
 <li><strong><code class="inline">&amp;&amp;</code> / <code class="inline">||</code> 改为真正的短路求值</strong>（此前 VM 在分支前无条件求值右侧）：<code class="inline">false &amp;&amp; f()</code> / <code class="inline">true || f()</code></li>
 <li><strong>条件站点严格 bool 校验</strong>（解释器运行期兜底，VM 原先按 truthy 静默放行）：if / while /</li>
 <li><strong>逻辑操作数严格 bool</strong>：<code class="inline">&amp;&amp;</code> / <code class="inline">||</code> 右侧非 bool 报 H001「logical operators require <code class="inline">bool</code></li>

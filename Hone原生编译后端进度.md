@@ -10,13 +10,13 @@
 |---|---|---|
 | **M0 管线打通** | ✅ 完成 | T1–T10 全完成（三引擎逐字节对齐；`build --exe --native` + `natgen` 共用管线；文档已同步） |
 | **M1 核心语义** | ✅ 完成 | G1.1 RC+COW / G1.2 list / G1.3 dict / G1.4 for-in / G1.5 别名用例集 / G1.6 全量回归（三引擎）；审计暴露并修复 6 处引擎缺陷 |
-| **M2 功能对齐** | 🔵 进行中 | G2.1 struct 完成（构造 / Field / `__struct__` 全路径过滤 / 相等语义；字段写入为 VM 编译期 H999 同源）；G2.2 enum 完成（构造 / match / 显示 / 相等 / 容器传参）；**G2.3 match 完成**（字面量 / 变体 / 载荷绑定 / 通配 / 无匹配 H005 / 绑定作用域 / 闭包捕获），并连带修掉 6 处既有 interp-VM 分歧（match 无匹配错误码、绑定变量泄漏、lambda 捕获取外层、`&&`/`||` 无短路、条件 truthy 放行、解构文案）；G2.4–G2.7 待办 |
+| **M2 功能对齐** | 🔵 进行中 | G2.1 struct 完成（构造 / Field / `__struct__` 全路径过滤 / 相等语义；字段写入为 VM 编译期 H999 同源）；G2.2 enum 完成（构造 / match / 显示 / 相等 / 容器传参）；G2.3 match 完成（字面量 / 变体 / 载荷绑定 / 通配 / 无匹配 H005 / 绑定作用域 / 闭包捕获）+ 连带修掉 6 处既有 interp-VM 分歧；**G2.4 运算符重载完成**（15 个 `__op` 回退链，runtime 内实现，natgen 零改动）+ 连带修掉参数个数校验文案（重载路径可达）；**新登记 G2.8：默认参数在 VM / nat 未实现**（解释器与 AOT 支持）；G2.5–G2.7 待办 |
 | **M3 集成与优化** | ⬜ 未开始 | import 合并/交叉编译/体积裁剪/工具链打包/CI；任务组 G3.1–G3.7 |
 
-**当前可运行产物**：`tests/m1/list.hn` / `tests/m1/dict.hn` / `tests/smoke/rc_alias.test.hn` / `tests/m2/struct.hn` / `tests/m2/enum.hn` / `tests/m2/match.hn` / `tests/m2/conditions.hn` → nat exe，三引擎逐字节对齐（含 list/dict 读写、for-in 迭代、别名 RC+COW 值语义、struct 构造/字段/隐藏键过滤/相等、enum 构造/match/显示/相等/容器与传参、match 全形态与绑定作用域、lambda 捕获、条件严格 bool 与 `&&`/`||` 短路）。
-**复现**：`hone build --exe --native tests/m2/match.hn -o match.exe && ./match.exe`
-**回归入口**：`python tests/regress4.py`（正常路径三引擎，10 例全绿）、`python tests/regress_err.py`（错误诊断三引擎逐字符，57 例全绿）、`python tests/regress3.py`（interp vs VM 全 examples，真实逻辑差异 0）、`python tests/regress_ir.py`（文本 IR 往返，BAD=0）。
-**审计工具**：`python tests/tools/audit_err.py`（55 例错误文案 + help 行 nat-vs-interp 批量比对）；`python tests/tools/probe_align.py`（50 例 match / 条件 / 逻辑 / 解构形态的 interp-VM[-nat] 逐字节比对，**G2.3 的 6 处分歧即由它扫出**；加 `--nat` 追加第三引擎）。
+**当前可运行产物**：`tests/m1/list.hn` / `tests/m1/dict.hn` / `tests/smoke/rc_alias.test.hn` / `tests/m2/struct.hn` / `tests/m2/enum.hn` / `tests/m2/match.hn` / `tests/m2/conditions.hn` / `tests/m2/overload.hn` → nat exe，三引擎逐字节对齐（含 list/dict 读写、for-in 迭代、别名 RC+COW 值语义、struct 构造/字段/隐藏键过滤/相等、enum 构造/match/显示/相等/容器与传参、match 全形态与绑定作用域、lambda 捕获、条件严格 bool 与 `&&`/`||` 短路、15 个 `__op` 运算符重载回退）。
+**复现**：`hone build --exe --native tests/m2/overload.hn -o ov.exe && ./ov.exe`
+**回归入口**：`python tests/regress4.py`（正常路径三引擎，11 例全绿）、`python tests/regress_err.py`（错误诊断三引擎逐字符，62 例全绿）、`python tests/regress3.py`（interp vs VM 全 examples，真实逻辑差异 0）、`python tests/regress_ir.py`（文本 IR 往返，BAD=0）。
+**审计工具**：`python tests/tools/audit_err.py`（55 例错误文案 + help 行 nat-vs-interp 批量比对）；`python tests/tools/probe_align.py`（82 例 match / 条件 / 逻辑 / 解构 / 重载形态的 interp-VM[-nat] 逐字节比对，**G2.3 的 6 处 + G2.4 的 2 处分歧即由它扫出**；加 `--nat` 追加第三引擎）。
 **验证前置**：改代码先 `cargo build`（`target/` 旧二进制会静默沿用），回归脚本依赖 `target/debug/hone.exe`。
 
 ---
@@ -256,10 +256,11 @@
 - [x] **G2.1 struct**：构造 / `Field` / readonly 拦截 / `__struct__` 标记键全路径过滤（display/len/keys/for-in/解构/==/json）
 - [x] **G2.2 enum**：`NewEnum` / `EnumElem` / `IsEnumVariant` + 点号变体构造（`Color.Red` 零参调用形态）
 - [x] **G2.3 match**：模式匹配 lowering（字面量 / 变体载荷绑定 / 通配 / 无匹配 H005 / 绑定作用域 / 闭包捕获）；连带修复 6 处既有 interp-VM 分歧（见实现进度）
-- [ ] **G2.4 运算符重载**：`__add` / `__eq` / `__neg` / `__len` 等回退链（镜像 `Vm::overload` 的触发条件：仅非 native 组合 + TYPE_MISMATCH）
+- [x] **G2.4 运算符重载**：`__add` / `__eq` / `__neg` / `__len` 等回退链（镜像 `Vm::overload` 的触发条件：仅非 native 组合 + TYPE_MISMATCH）
 - [ ] **G2.5 alias / goto**：alias 解析表接入 rt_call；goto 已是 Label+Jmp（基线覆盖，补用例）
 - [ ] **G2.6 async-await**：`GoCall` / `Await` 线程 lowering（future 值 + wait，与 VM 线程语义对齐；跨线程值传递按 M2 边界）
 - [ ] **G2.7 H999 边界对齐**：lowering 显式全覆盖单测（`Instr` 全变体断言）+ 新后端 H999 集合 = VM H999 集合 + `.t_neg` / `examples` 全过
+- [ ] **G2.8 默认参数（VM / 原生后端）**：`fn f(a, b = 2)` 在解释器与 AOT 可用，**VM 与 nat 省略即报 H011**（G2.4 探针发现，见实现进度）
 
 ### G2.1 实现进度（2026-10-07）—— 完成
 
@@ -342,6 +343,48 @@
   `cargo test -p honeruntime` **19/19**（新增 `condcheck_and_isboolval`：消息逐字 + 无 help 行 +
   定位 caret + 短路判定四象限 + 堆计数归零）。
 
+### G2.4 实现进度（2026-10-08）—— 完成
+
+- **范围界定**：`__op` 回退链在 **runtime 内**实现（`rt_binop` / `rt_unop` / `rt_index` /
+  `call_builtin` 的 `len` 臂），**natgen 与字节码零改动**——回退发生在内建失败之后，
+  与引擎无关。这是本任务能「只改 runtime」的原因。
+- **触发条件逐条镜像 `vm.rs` exec 臂**（先读 VM 实现再写 runtime，不靠推测）：
+  | 运算 | 回退条件 |
+  |---|---|
+  | `+ - * / %` | 非「数字×数字 / str×str」组合 **且** 错误码为 H001（除零 H009、溢出 H010 **不**回退）|
+  | `==` / `!=` | 内建比较的任何失败都回退（无 native 判定）|
+  | `< <= > >=` | 非「数字对」（int×int / float×float），**错误码不限** |
+  | `-x` / `!x` | 仅 H001 |
+  | `len(x)` / `x[i]` | 内建失败即回退（`x[i]` 含越界——list/str 越界也是 H001，同样回退）|
+- **所有权纪律**（runtime 最易错的一处）：`rt_binop` / `rt_unop` 消费 x/y，回退时把**已持有的引用
+  转交**被调帧（不 drop）；`rt_index` 与 `len` 是借用型调用点，先 `rt_retain` 再转交，
+  未定义 `__op` 时把 retain 掉的那份还回去。回退成功时内建产生的错误句柄要 `cell_release`。
+- **连带修复（探针扫出的既有缺陷，都在重载路径上可达）**：三引擎的**参数个数校验**原本是
+  中文硬编码消息、无定位、无 help（VM `call_chunk` / `call_lambda`，runtime `call_chunk_idx` /
+  `call_fn_h`），而解释器是规范文案。统一为解释器形态：
+  - 多参：`` `f` expects at most N arguments, got M `` / `lambda expects at most …` + help
+  - 少参：`` missing argument `c` of `f` `` / `missing argument \`c\``（lambda 无「of」）+ help
+  - VM 侧 `call_chunk` / `call_lambda` / `overload` 三处补 `span` 传递（此前 `call_chunk` 无 span 参数）；
+    async / go 两条线程路径传零 span（line=0 → plain 渲染，与现状一致）
+  - runtime 新增每 chunk **形参名表** `hn_rt_param_names`（wrapper 侧 `NAT_PARAM_NAMES` +
+    `NAT_PARAM_NAME_COUNTS`）——`CHUNK_NPARAMS` 只有个数，报错指名道姓需要名字
+- **新登记缺口 G2.8（默认参数）**：探针扫 `fn f(a, b: int = 2)` 时发现 **VM / nat 完全不支持
+  默认参数**（省略即 H011），而解释器与 AOT 支持（`hone.md §1.14` 文档化特性），
+  i.e. `--vm` 与 `--native` 下这是**功能缺失**而非仅文案分叉。4 个探针用例稳定复现
+  （`default_omitted` / `default_expr` / `default_in_fn` / `default_lambda`）。
+  设计草案见决策记录；本轮只登记 + 写引擎边界，不动手（涉及新指令，M 级）。
+- **用例**：`tests/m2/overload.hn`（6 组：dict 模拟复数的 `__add`/`__mul`/`__eq` /
+  其余九个二元 `__op` / 一元 `__neg`/`__not` / `__len`/`__index` / native 组合与错误不回退 /
+  重载参与条件与短路 / struct 与 enum 实例参与），33 行输出三引擎逐字节一致；
+  错误用例 `ov_arity_many`、`ov_arity_missing`、`ov_body_error`（重载内报错，span 落在重载函数内）、
+  `ov_native_div0`（native 错误不回退）、`lambda_arity`（lambda 参数个数文案）共 5 例新增。
+- **验证**：`probe_align.py --only overload` **32 例三引擎 0 分歧**（新增 overload 组并入永久探针，
+  全工具共 82 例）；`regress3` 真实逻辑差异 = 0（`call_chunk` 签名与消息改动无回退）；
+  `regress_ir` OK=38 BAD=0；`regress4` **11/11**（新增 overload.hn）；`regress_err` **62/62**
+  （新增 5 例；nat 运行期 39 / checker 同源拒 22 / 显式登记跳过 1）；`cargo test` 4/4；
+  `cargo test -p honeruntime` 19/19。首轮 regress_err 曾 1 处 FAIL（lambda 报错多了反引号），
+  修 runtime 文案分支后复跑全绿——正是三引擎回归该抓的东西。
+
 ## M3 — 集成与优化（任务组）
 
 - [ ] **G3.1 import 构建期解析**：本地路径递归合并 + 远程 `~/.hone/cache/` 下载（设计 §7.3）；跨文件同名定义报错
@@ -359,8 +402,8 @@
 - [ ] `hone build --exe hello.hn` 在无 gcc 的干净机器上产出可运行 exe（M3 完成无 rustc 依赖）
 - [ ] `hone build --exe app.hn --target x86_64-unknown-linux-musl` 在 Windows 上产出 linux exe，CI 二次验证（G3.2/G3.6）
 - [x] `regress4.py` 正常路径三引擎（interp/VM/nat）逐字节对齐——M0 三例 + M1 三例（list/dict/别名）
-      + M2 四例（struct / enum / match / conditions）共 **10 例全绿**
-- [x] `regress_err.py` 错误诊断三引擎逐字符对齐——**57 例全绿**（nat：运行期 34 / checker 同源拒 22 / 显式登记跳过 1）
+      + M2 五例（struct / enum / match / conditions / overload）共 **11 例全绿**
+- [x] `regress_err.py` 错误诊断三引擎逐字符对齐——**62 例全绿**（nat：运行期 39 / checker 同源拒 22 / 显式登记跳过 1）
 - [x] `tests/tools/audit_err.py` 55 例错误文案 + help 行 nat-vs-interp 一致（M1 据此修复 6 处引擎缺陷；
       G2.3 的 6 处分歧由条件/逻辑/match 探针矩阵发现，`audit_err.py` 待按新错误形态扩充用例）
 - [ ] 新后端 H999 集合与 VM 完全一致（无静默漏实现）（G2.7）
@@ -405,3 +448,14 @@
 | 绑定变量寄存器 | 走 `decl_tmp` + 分支作用域（不进 `var_next` / `chunk.locals`） | 与推导式循环变量同口径；`decl` 会推高 `var_next` 并让 `exit()` 把 `tmp_next` 拉回低水位，可能复用表达式内活跃临时寄存器 |
 | lambda 捕获顺序 | 内层优先（`scopes.iter().rev()`，与 `lookup` 同序） | 遮蔽下解释器捕获内层值；原正序首见即取会捕获被遮蔽的外层值 |
 | 探针形态 | 固化为 `tests/tools/probe_align.py`（含 `--nat`），不留在临时目录 | 与 `audit_err.py` 同定位：可复用的开发期扫雷工具，须随仓库维护 |
+
+### G2.4 已定决策（2026-10-08）
+
+| 项 | 决策 | 理由 |
+|---|---|---|
+| 回退链落点 | 全部放 **runtime**（`rt_binop` / `rt_unop` / `rt_index` / `len` 臂），natgen 与字节码零改动 | 回退发生在内建失败之后，属运行期语义；同一字节码天然覆盖 interp 无关的第三引擎 |
+| 触发条件来源 | 逐条抄 `vm.rs` exec 臂（`is_num_or_str_pair` / `is_num_pair` + 错误码判定），不自行设计 | 三引擎逐字节一致的前提是「同一张触发条件表」；VM 已有实现，照抄即可 |
+| 比较运算的错误码 | `Lt/Le/Gt/Ge` 回退**不限错误码**（VM 现状），算术限 H001 | VM 的既有行为；改它会动到内建路径的既有语义，超出本任务 |
+| 参数校验对齐方向 | 三引擎统一到**解释器**文案（英文 + 定位 + help），不保留中文硬编码 | 解释器是规范载体；且重载路径上必须逐字节一致 |
+| 形参名传递 | wrapper 新增 `NAT_PARAM_NAMES` / `NAT_PARAM_NAME_COUNTS` + `hn_rt_param_names` | `CHUNK_NPARAMS` 只有个数；报错要指名道姓。沿用 G2.1/G2.2 的静态表模式 |
+| 默认参数（G2.8）方向 | 在**被调帧序言**按 `nargs` 填默认值（需要新指令暴露实参数），不在调用方求值 | 解释器在「仅含形参的调用环境」里求默认值（引用全局会 H002）；调用方求值会多看见局部变量，反而与解释器分叉。序言方案可精确复现 |

@@ -12,12 +12,13 @@
     跨帧传播 + 静态 catch 映射（无 setjmp），Throw/ThrowStr 归一 H600
   - 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码逐字节一致，含完整错误渲染
     （`--> 文件:行:列` / 行号行 / caret / help）
-  - 当前支持范围（M0 + M1 + M2 G2.1–G2.3）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda /
+  - 当前支持范围（M0 + M1 + M2 G2.1–G2.4）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda /
     捕获（值语义）、try-catch / throw / 错误字段访问、**list / dict 读写与 for-in 迭代**、
     **struct 构造与字段读取**（`__struct__` 隐藏标记键全路径过滤；`==` 按同名 struct 判定，
     异名 struct 恒不等；字段写入与 VM 一致编译期 H999）、**enum 构造 / 显示 / 相等 / 进容器**、
     **match 全形态**（字面量模式、变体模式与载荷绑定、`_` 通配、无匹配分支 H005）、
-    **条件严格 bool 与 `&&`/`||` 短路求值**、内置子集（print/len/append/
+    **条件严格 bool 与 `&&`/`||` 短路求值**、**运算符重载（15 个 `__op` 回退链）**、
+    内置子集（print/len/append/
     keys/values/has_key/to_str/to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq/read_file）；
     子集外指令编译期报 H990「未实现」（M2 逐步放开）
   - 语义对齐修正：native 后端 `==`/`!=` 对 dict 的隐藏 `__struct__` 标记键原按「过滤后比较」处理，
@@ -32,6 +33,13 @@
   - 设计 / 进度：`Hone原生编译后端设计.md`、`Hone原生编译后端进度.md`
 
 ### 修复
+- **原生编译后端支持运算符重载**（M2 G2.4）：`__add` / `__sub` / `__mul` / `__div` / `__mod` /
+  `__eq` / `__ne` / `__lt` / `__le` / `__gt` / `__ge` / `__neg` / `__not` / `__len` / `__index`
+  回退链（触发条件逐条镜像解释器：算术限「非数字/str 组合 + H001」，比较限「非数字对」，
+  除零/溢出等内建错误不回退）；实现落在 runtime，字节码与 lowering 无需改动
+- **参数个数校验三引擎对齐**：`fn f(a)` 被以 2 个实参调用（经运算符重载路径可达）时，
+  VM 与原生后端原报中文硬编码消息且无定位无 help，现统一为解释器文案
+  （`expects at most N arguments, got M` / ``missing argument `c` of `f` ``）+ 定位 + help
 - **`&&` / `||` 改为真正的短路求值**（此前 VM 在分支前无条件求值右侧）：`false && f()` / `true || f()`
   原先仍调用 `f`（副作用可见），且 `true || (1 / 0 == 0)` 原先触发除零——现与解释器一致：
   左侧恰为 `false`（`&&`）/ `true`（`||`）才短路，否则求值右侧

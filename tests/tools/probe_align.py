@@ -91,8 +91,64 @@ DESTRUCT = {
     "ds_ok": 'a, b = [1, 2];\nprint(to_str(a + b));\n',
 }
 
-GROUPS = {"match": MATCH, "cond": COND, "logic": LOGIC, "destruct": DESTRUCT}
+# ── 运算符重载（G2.4）：各 __op 回退 + native 组合/错误不回退 + 重载内报错 ──
+_OV = """fn __add(a, b) { return "add"; }
+fn __sub(a, b) { return "sub"; }
+fn __mul(a, b) { return "mul"; }
+fn __div(a, b) { return "div"; }
+fn __mod(a, b) { return "mod"; }
+fn __eq(a, b) { return true; }
+fn __ne(a, b) { return false; }
+fn __lt(a, b) { return true; }
+fn __le(a, b) { return true; }
+fn __gt(a, b) { return true; }
+fn __ge(a, b) { return true; }
+fn __neg(a) { return "neg"; }
+fn __not(a) { return "not"; }
+fn __len(a) { return 42; }
+fn __index(a, i) { return "idx"; }
+"""
+OVERLOAD = {
+    "bin_add": _OV + 'd = {"a": 1};\nprint(to_str(d + 1));\n',
+    "bin_sub": _OV + 'd = {"a": 1};\nprint(to_str(d - 1));\n',
+    "bin_mul": _OV + 'd = {"a": 1};\nprint(to_str(d * 2));\n',
+    "bin_div": _OV + 'd = {"a": 1};\nprint(to_str(d / 2));\n',
+    "bin_mod": _OV + 'd = {"a": 1};\nprint(to_str(d % 2));\n',
+    "cmp_eq": _OV + 'print(to_str(1 == "a"));\n',
+    "cmp_ne": _OV + 'print(to_str(1 != "a"));\n',
+    "cmp_mix": _OV + 'print(to_str("a" < 1));\nprint(to_str(1 >= "a"));\n',
+    "un_neg": _OV + 'print(-"a");\n',
+    "un_not": _OV + 'print(!5);\n',
+    "b_len": _OV + 'print(to_str(len(5)));\n',
+    "b_index": _OV + 'print("a"[0]);\n',
+    # native 组合 / native 错误**不**回退
+    "native_int_add": _OV + 'print(1 + 2);\n',
+    "native_str_add": _OV + 'print("a" + "b");\n',
+    "native_str_mul": _OV + 'print("a" * "b");\n',
+    "native_div0": _OV + 'print(1 / 0);\n',
+    "native_mod0": _OV + 'print(1 % 0);\n',
+    "native_overflow": _OV + 'print(9223372036854775807 + 1);\n',
+    # 越界索引是 H001 → 仍回退（VM 语义），三引擎须一致
+    "oob_list_index": _OV + 'l = [1, 2];\nprint(l[9]);\n',
+    "oob_str_index": _OV + 'print("ab"[9]);\n',
+    # 未定义 __op 时错误原样
+    "no_ov_add": 'd = {"a": 1};\nprint(to_str(d + 1));\n',
+    "no_ov_len": 'print(to_str(len(5)));\n',
+    "no_ov_index": 'print("a")[0];\n',
+    "no_ov_neg": 'print(-"a");\n',
+    "no_ov_eq": 'print(to_str(1 == "a"));\n',
+    # 重载体内报错 / 参数个数不匹配（span 与文案三引擎对齐）
+    "ov_raises": 'fn __add(a, b) { return 1 / 0; }\nd = {"a": 1};\nprint(to_str(d + 1));\n',
+    "ov_too_many": 'fn __add(a) { return "x"; }\nd = {"a": 1};\nprint(to_str(d + 1));\n',
+    "ov_missing": 'fn __add(a, b, c) { return to_str(c); }\nd = {"a": 1};\nprint(d + 1);\n',
+    # 重载参与条件 / 短路 / struct / enum
+    "ov_in_cond": _OV + 'd = {"a": 1};\nif (d == 1) { print("eq-true"); }\n',
+    "ov_in_short": _OV + 'd = {"a": 1};\nprint(to_str(false && (d == 1)));\n',
+    "ov_struct": 'struct P { x: int };\nfn __add(a, b) { return "p-add"; }\np = P(1);\nprint(to_str(p + 1));\n',
+    "ov_enum": 'enum E { A, B }\nfn __add(a, b) { return "e-add"; }\ne = E.A;\nprint(to_str(e + 1));\n',
+}
 
+GROUPS = {"match": MATCH, "cond": COND, "logic": LOGIC, "destruct": DESTRUCT, "overload": OVERLOAD}
 
 def run(cmd, timeout=30):
     try:

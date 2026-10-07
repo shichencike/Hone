@@ -470,6 +470,9 @@ print(add5(10));       // 15
   · 参数个数检查：最少 = 必选参数个数，最多 = 总参数个数
   · lambda 参数同样支持默认值
 · 限制：hone build --dll 暂不支持默认参数（报错提示改用解释模式）
+· **引擎边界（M2 待补）**：默认参数目前**仅解释器与 AOT（`build --exe -c`）支持**；
+  VM（`--vm`）与原生编译后端（`--native`）尚未实现——省略带默认值的参数时报
+  `H011 missing argument \`b\` of \`f\``（而非取默认值）。详见《Hone原生编译后端进度》G2.8
 · 示例：
 
 fn greet(name, greeting = "Hello") {
@@ -620,7 +623,14 @@ print(v?.name ?? "匿名");  // 匿名（与空值合并配合）
   · `__op` 未定义时，不支持的运算维持原有报错（H001/H003）
   · 定义了重载后，涉及动态值（Unknown）的运算静态检查放宽（交给运行时判定），
     相等/比较操作数不再被强制成 int 等错误类型
-  · AOT 原生编译支持二元/一元重载（生成「内建组合 → 内建运算，否则 → __op 调用」分派链）
+  · 回退触发条件（精确语义，三引擎一致）：
+    · 二元算术（`+ - * / %`）：内建失败 **且** 操作数不是「数字×数字 / str×str」组合 **且**
+      错误码为 H001（除零 H009、溢出 H010 等内建错误**不**回退）
+    · `==` / `!=`：内建比较的任何失败都回退
+    · `< <= > >=`：内建失败 **且** 不是「数字对」（int×int / float×float）——错误码不限
+    · 一元 `-x` / `!x`：仅 H001 回退；`len(x)` / `x[i]`：内建失败即回退
+  · AOT 原生编译支持二元/一元重载（生成「内建组合 → 内建运算，否则 → __op 调用」分派链）；
+    原生编译后端（`--native`，M2 G2.4）同样支持，回退链在 runtime 内完成
 · 示例（dict 模拟复数，见 examples/overload_demo.hn）：
 
 fn mk_complex(re, im) {
@@ -1433,6 +1443,9 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   · **条件与短路（G2.3）**：if / while / do-while / for / 三元 / 推导式 `if` 过滤六处条件站点
     严格 bool 校验（非 bool → H001，消息按站点）；`&&` / `||` 短路求值（右侧不求值，
     副作用不可见）+ 操作数严格 bool，与解释器逐字节一致
+  · **运算符重载（G2.4）**：`__add` / `__sub` / `__mul` / `__div` / `__mod` / `__eq` / `__ne` /
+    `__lt` / `__le` / `__gt` / `__ge` / `__neg` / `__not` / `__len` / `__index` 回退链，
+    触发条件逐条镜像解释器（见 1.20）；native 不改 lowering，回退在 runtime 内完成
   · 内置子集：print / len / append / keys / values / has_key / to_str / to_int / to_float / is_int /
     is_float / is_bool / is_str / is_list / is_dict / is_null / type_of / abs / max / min / assert /
     assert_eq / read_file（assert 失败 H700 文案对齐）
@@ -1440,10 +1453,12 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   · 注意：`d["k"] = v` 这类dict 索引写入被类型检查器静态拒绝（索引须 int，而 dict 键恒为字符串
     字面量），故 dict 在脚本层只读，取值走 for-in / keys / values / has_key
 · 当前限制（M2/M3 逐步放开）：
-  · M0–M2 G2.3 子集外指令（运算符重载 / alias / async-await / goto 以外的跳转 /
+  · M0–M2 G2.4 子集外指令（alias / async-await / goto 以外的跳转 /
     import / 切片 / byte / bytes 等）在**编译期**报 H990（internal）「指令未实现」——编译期即拒绝，
     不产出错误二进制
   · struct 字段写入 `p.x = 3` 在 VM 为编译期 H999（M2 未放开），解释器支持（含 readonly 拦截）
+  · **默认参数**（`fn f(a, b = 2)`）在 VM / 原生后端未实现（省略即报 H011，见 1.14 与进度文档 G2.8）；
+    解释器与 AOT 支持
   · 依赖本机 rustc（rustc 与 Rust std 的链接期依赖）；M3 起改为随 hone 分发的预编译工具链，移除 rustc 依赖
   · `cow` 声明 / 形参与 VM 一致按引擎边界处理（解释器特性，见 1.3）
 · 与 AOT（-c）的分工：AOT 走 C 中间文件 + gcc/clang，体积几十 KB、零运行时依赖，但错误渲染为简化一行；
@@ -1451,7 +1466,8 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   二者互斥：`-c` 与 `--native` 同用报 H005 显式错误
 · 验证基线：`tests/m1/list.hn`（list 承载 13 组断言）、`tests/m1/dict.hn`（dict + 迭代 12 组断言）、
   `tests/smoke/rc_alias.test.hn`（别名 RC+COW 11 组断言）、`tests/m2/struct.hn`、
-  `tests/m2/enum.hn`、`tests/m2/match.hn`、`tests/m2/conditions.hn`（match 全形态 + 条件/短路）
+  `tests/m2/enum.hn`、`tests/m2/match.hn`、`tests/m2/conditions.hn`（match 全形态 + 条件/短路）、
+  `tests/m2/overload.hn`（15 个 `__op` 回退 + native 不回退）
   经 `hone build --exe --native <file>` 复现，interp / VM / nat 三引擎逐字节一致；
   改代码后先 `cargo build`（target/ 旧二进制会静默沿用），
   再跑 `python tests/regress4.py` 与 `python tests/regress_err.py`

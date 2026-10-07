@@ -1806,7 +1806,7 @@ impl Vm {
                 let result = match v_neg(v.clone(), span, self) {
                     Ok(r) => Ok(r),
                     Err(e) if err_code(&e) == Some(codes::TYPE_MISMATCH) => {
-                        match self.overload("__neg", vec![v]) {
+                        match self.overload("__neg", vec![v], span) {
                             Some(r) => r,
                             None => Err(e),
                         }
@@ -1820,7 +1820,7 @@ impl Vm {
                 let result = match v_not(v.clone(), span, self) {
                     Ok(r) => Ok(r),
                     Err(e) if err_code(&e) == Some(codes::TYPE_MISMATCH) => {
-                        match self.overload("__not", vec![v]) {
+                        match self.overload("__not", vec![v], span) {
                             Some(r) => r,
                             None => Err(e),
                         }
@@ -1838,7 +1838,7 @@ impl Vm {
                 let result = match v_add(x.clone(), y.clone(), span, self, "+", tn_a, tn_b) {
                     Ok(v) => Ok(v),
                     Err(e) if !native && err_code(&e) == Some(codes::TYPE_MISMATCH) => {
-                        match self.overload("__add", vec![x, y]) {
+                        match self.overload("__add", vec![x, y], span) {
                             Some(r) => r,
                             None => Err(e),
                         }
@@ -1856,7 +1856,7 @@ impl Vm {
                 let result = match v_sub(x.clone(), y.clone(), span, self, "-", tn_a, tn_b) {
                     Ok(v) => Ok(v),
                     Err(e) if !native && err_code(&e) == Some(codes::TYPE_MISMATCH) => {
-                        match self.overload("__sub", vec![x, y]) {
+                        match self.overload("__sub", vec![x, y], span) {
                             Some(r) => r,
                             None => Err(e),
                         }
@@ -1874,7 +1874,7 @@ impl Vm {
                 let result = match v_mul(x.clone(), y.clone(), span, self, "*", tn_a, tn_b) {
                     Ok(v) => Ok(v),
                     Err(e) if !native && err_code(&e) == Some(codes::TYPE_MISMATCH) => {
-                        match self.overload("__mul", vec![x, y]) {
+                        match self.overload("__mul", vec![x, y], span) {
                             Some(r) => r,
                             None => Err(e),
                         }
@@ -1892,7 +1892,7 @@ impl Vm {
                 let result = match v_div(x.clone(), y.clone(), span, self, "/", tn_a, tn_b) {
                     Ok(v) => Ok(v),
                     Err(e) if !native && err_code(&e) == Some(codes::TYPE_MISMATCH) => {
-                        match self.overload("__div", vec![x, y]) {
+                        match self.overload("__div", vec![x, y], span) {
                             Some(r) => r,
                             None => Err(e),
                         }
@@ -1910,7 +1910,7 @@ impl Vm {
                 let result = match v_mod(x.clone(), y.clone(), span, self, "%", tn_a, tn_b) {
                     Ok(v) => Ok(v),
                     Err(e) if !native && err_code(&e) == Some(codes::TYPE_MISMATCH) => {
-                        match self.overload("__mod", vec![x, y]) {
+                        match self.overload("__mod", vec![x, y], span) {
                             Some(r) => r,
                             None => Err(e),
                         }
@@ -1924,7 +1924,7 @@ impl Vm {
                 let y = self.frames[fi].regs[b].clone();
                 let result = match v_eq(&x, &y, span, self) {
                     Ok(e) => Ok(Value::Bool(e)),
-                    Err(e) => match self.overload("__eq", vec![x, y]) {
+                    Err(e) => match self.overload("__eq", vec![x, y], span) {
                         Some(r) => r,
                         None => Err(e),
                     },
@@ -1936,7 +1936,7 @@ impl Vm {
                 let y = self.frames[fi].regs[b].clone();
                 let result = match v_eq(&x, &y, span, self) {
                     Ok(e) => Ok(Value::Bool(!e)),
-                    Err(e) => match self.overload("__ne", vec![x, y]) {
+                    Err(e) => match self.overload("__ne", vec![x, y], span) {
                         Some(r) => r,
                         None => Err(e),
                     },
@@ -1952,7 +1952,7 @@ impl Vm {
                         if is_num_pair(&x, &y) {
                             Err(e)
                         } else {
-                            match self.overload("__lt", vec![x, y]) {
+                            match self.overload("__lt", vec![x, y], span) {
                                 Some(r) => r,
                                 None => Err(e),
                             }
@@ -1970,7 +1970,7 @@ impl Vm {
                         if is_num_pair(&x, &y) {
                             Err(e)
                         } else {
-                            match self.overload("__le", vec![x, y]) {
+                            match self.overload("__le", vec![x, y], span) {
                                 Some(r) => r,
                                 None => Err(e),
                             }
@@ -1988,7 +1988,7 @@ impl Vm {
                         if is_num_pair(&x, &y) {
                             Err(e)
                         } else {
-                            match self.overload("__gt", vec![x, y]) {
+                            match self.overload("__gt", vec![x, y], span) {
                                 Some(r) => r,
                                 None => Err(e),
                             }
@@ -2006,7 +2006,7 @@ impl Vm {
                         if is_num_pair(&x, &y) {
                             Err(e)
                         } else {
-                            match self.overload("__ge", vec![x, y]) {
+                            match self.overload("__ge", vec![x, y], span) {
                                 Some(r) => r,
                                 None => Err(e),
                             }
@@ -2058,7 +2058,7 @@ impl Vm {
                     match v_index(&obj, &key, span, self) {
                         Ok(v) => Ok(v),
                         Err(e) if err_code(&e) == Some(codes::TYPE_MISMATCH) => {
-                            match self.overload("__index", vec![obj, key]) {
+                            match self.overload("__index", vec![obj, key], span) {
                                 Some(r) => r,
                                 None => Err(e),
                             }
@@ -2300,9 +2300,14 @@ impl Vm {
     /// 运算符重载回退：若顶层定义了 `name`（如 `__add` / `__lt` / `__index`），调用之并返回
     /// `Some(result)`；未定义则返回 `None`（由调用方继续抛出原错误）。
     /// 镜像解释器 `Interp::call_overload`：仅在内建运算因操作数类型不匹配而失败时尝试。
-    fn overload(&mut self, name: &str, args: Vec<Value>) -> Option<Result<Value, Value>> {
+    fn overload(
+        &mut self,
+        name: &str,
+        args: Vec<Value>,
+        span: &Span,
+    ) -> Option<Result<Value, Value>> {
         if let Some(&ci) = self.func_map.get(name) {
-            Some(self.call_chunk(ci, args))
+            Some(self.call_chunk(ci, args, span))
         } else {
             None
         }
@@ -2336,7 +2341,7 @@ impl Vm {
                 }
             }
             if let Some(&ci) = self.func_map.get(&func) {
-                return self.call_chunk(ci, args);
+                return self.call_chunk(ci, args, span);
             }
             if builtins::is_builtin(&func) {
                 return self.call_builtin(&func, args, span);
@@ -2355,7 +2360,7 @@ impl Vm {
             ));
         }
         if let Some(&ci) = self.func_map.get(&func) {
-            return self.call_chunk(ci, args);
+            return self.call_chunk(ci, args, span);
         }
         if let Some(fields) = self.struct_defs.get(&func) {
             let mut d = Vec::new();
@@ -2371,7 +2376,7 @@ impl Vm {
             return match self.call_builtin(&func, args.clone(), span) {
                 Ok(v) => Ok(v),
                 Err(e) if err_code(&e) == Some(codes::TYPE_MISMATCH) => {
-                    match self.overload("__len", args) {
+                    match self.overload("__len", args, span) {
                         Some(r) => r,
                         None => Err(e),
                     }
@@ -2385,22 +2390,37 @@ impl Vm {
         Err(self.mk_err(codes::UNDEFINED, format!("undefined function `{}`", func), span))
     }
 
-    fn call_chunk(&mut self, ci: usize, args: Vec<Value>) -> Result<Value, Value> {
+    fn call_chunk(&mut self, ci: usize, args: Vec<Value>, span: &Span) -> Result<Value, Value> {
         let expected = self.chunks[ci].params.len();
         if args.len() != expected {
-            return Err(Value::Error(ErrorObj {
-                code: codes::ARG_COUNT,
-                message: format!(
-                    "函数 `{}` 期望 {} 个参数，收到 {}",
-                    self.chunks[ci].name, expected, args.len()
-                ),
-                file: self.file.clone(),
-                line: 0,
-                col: 0,
-                len: 0,
-                context: String::new(),
-                help: None,
-            }));
+            // G2.4：消息 / 定位 / help 对齐解释器 call_fn（原先是中文硬编码、无定位无 help，
+            // 经运算符重载路径可达——`fn __add(a)` 被 `d + 1` 以 2 实参调用）。
+            let name = self.chunks[ci].name.clone();
+            let (msg, help) = if args.len() > expected {
+                (
+                    format!(
+                        "`{}` expects at most {} arguments, got {}",
+                        name,
+                        expected,
+                        args.len()
+                    ),
+                    "check the number of arguments passed",
+                )
+            } else {
+                (
+                    format!(
+                        "missing argument `{}` of `{}`",
+                        self.chunks[ci].params[args.len()], name
+                    ),
+                    "pass the required argument, or give the parameter a default value",
+                )
+            };
+            return Err(self.mk_err_with(
+                codes::ARG_COUNT,
+                msg,
+                span,
+                Some(help.to_string()),
+            ));
         }
         let nregs = self.chunks[ci].nregs;
         let mut regs = vec![Value::Null; nregs];
@@ -2438,16 +2458,24 @@ impl Vm {
         let chunk = &self.chunks[ci];
         let expected = chunk.params.len();
         if args.len() != expected {
-            return Err(Value::Error(ErrorObj {
-                code: codes::ARG_COUNT,
-                message: format!("lambda 期望 {} 个参数，收到 {}", expected, args.len()),
-                file: self.file.clone(),
-                line: span.line,
-                col: span.col,
-                len: span.len.max(1),
-                context: String::new(),
-                help: None,
-            }));
+            // G2.4：消息 / help 对齐解释器 call_lambda（原先中文硬编码、无 help）。
+            let (msg, help) = if args.len() > expected {
+                (
+                    format!("lambda expects at most {} arguments, got {}", expected, args.len()),
+                    "pass exactly the declared number of arguments",
+                )
+            } else {
+                (
+                    format!("missing argument `{}`", chunk.params[args.len()]),
+                    "pass the required argument, or give the parameter a default value",
+                )
+            };
+            return Err(self.mk_err_with(
+                codes::ARG_COUNT,
+                msg,
+                span,
+                Some(help.to_string()),
+            ));
         }
         let nregs = chunk.nregs;
         let mut regs = vec![Value::Null; nregs];
@@ -2500,7 +2528,8 @@ impl Vm {
             let mut vm = Vm::new(
                 chunks, func_map, struct_defs, enum_defs, aliases, async_fns, &file, &src, false,
             );
-            let result = vm.call_chunk(ci, args);
+            let no_span = Span { line: 0, col: 0, len: 0 };
+            let result = vm.call_chunk(ci, args, &no_span);
             // 用带 src 的实例方法转换，保留源码上下文（否则 await 抛出的错误会丢 line_text）。
             let result = result.map_err(|v| vm.value_to_zerror(&v));
             fut.complete(result);
@@ -2542,7 +2571,8 @@ impl Vm {
             let mut vm = Vm::new(
                 chunks, func_map, struct_defs, enum_defs, aliases, async_fns, &file, &src, false,
             );
-            if let Err(e) = vm.call_chunk(ci, args) {
+            let no_span = Span { line: 0, col: 0, len: 0 };
+            if let Err(e) = vm.call_chunk(ci, args, &no_span) {
                 let ze = vm.value_to_zerror(&e);
                 eprintln!("{}", ze);
             }

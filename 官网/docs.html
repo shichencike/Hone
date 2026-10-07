@@ -802,12 +802,14 @@ age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span cl
       四个执行后端（AST 解释器、寄存器式字节码 VM、AOT、原生编译）语义一致，差别只在性能与部署形态；
       其中原生编译后端与解释器 / VM 做到 stdout + stderr + 退出码<strong>逐字节一致</strong>（含完整错误渲染），
       回归见 <code class="inline">tests/regress4.py</code>。</p>
-    <p><strong>原生编译后端当前范围（M0 + M1 + M2 G2.1–G2.3）</strong>：标量全类型与运算、if/while/标签跳转、
+    <p><strong>原生编译后端当前范围（M0 + M1 + M2 G2.1–G2.4）</strong>：标量全类型与运算、if/while/标签跳转、
       函数递归 / lambda / 捕获（值语义）、try-catch / throw / 错误字段访问、list / dict 读写与
       for-in 迭代（含推导式）、struct 构造与字段读取（隐藏 <code>__struct__</code> 标记键全路径
       过滤；<code>==</code> 按同名 struct 判定）、enum 构造 / 显示 / 相等 / 进容器、
       match 全形态（字面量与变体模式、载荷绑定、<code>_</code> 通配，无匹配分支 H005）、
-      条件严格 bool 与 <code>&amp;&amp;</code> / <code>||</code> 短路求值，以及内置子集
+      条件严格 bool 与 <code>&amp;&amp;</code> / <code>||</code> 短路求值、运算符重载
+      （<code>__add</code> / <code>__eq</code> / <code>__neg</code> / <code>__len</code> 等 15 个
+      <code>__op</code> 回退），以及内置子集
       （print/len/append/keys/values/has_key/to_str/to_int/to_float/is_*/type_of/abs/max/min/
       assert/assert_eq/read_file）；struct 字段写入与 VM 一致编译期 H999，其余子集外指令在编译期
       报 H990「未实现」（M2 逐步放开）。依赖本机 rustc，<code>-c</code> 与
