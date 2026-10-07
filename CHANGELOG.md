@@ -11,15 +11,33 @@
   - 调用模型：统一 `rt_call` 名分发（用户函数 / lambda / 内置表），lambda 按值捕获；错误经 ERR 句柄
     跨帧传播 + 静态 catch 映射（无 setjmp），Throw/ThrowStr 归一 H600
   - 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码逐字节一致，含完整错误渲染
-    （`--> 文件:行:列` / 行号行 / caret / help）；回归脚本 `tests/regress4.py`（fib / hello / err_divzero 全绿）
-  - 当前支持范围（M0 子集）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda / 捕获（值语义）、
-    try-catch / throw / 错误字段访问、内置子集（print/len/to_str/to_int/to_float/is_*/type_of/abs/max/min/
-    assert/assert_eq/read_file）；子集外指令编译期报 H990「未实现」（M1/M2 逐步放开）
+    （`--> 文件:行:列` / 行号行 / caret / help）
+  - 当前支持范围（M0 + M1）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda / 捕获（值语义）、
+    try-catch / throw / 错误字段访问、**list / dict 读写与 for-in 迭代**、内置子集（print/len/append/
+    keys/values/has_key/to_str/to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq/read_file）；
+    子集外指令编译期报 H990「未实现」（M2 逐步放开）
   - 依赖本机 rustc（M3 起改预编译工具链移除）；runtime 源码内嵌进 hone 二进制，干净机器自足
+  - 回归：`tests/regress4.py`（正常路径三引擎）、`tests/regress_err.py`（错误诊断三引擎逐字符）；
+    开发期扫雷工具 `tests/tools/audit_err.py`（55 例错误文案 + help 行批量比对）
   - 顺手修复：VM lambda 捕获实参寄存器绑定 bug（原按 `ncap+i` 偏移，捕获/参数寄存器不从 0 起排时
     实参填错位，`base + x` 报 int+null）；AOT Windows CRLF 行尾问题（C 运行时文本模式 `\n`→CRLF 与
     Rust 侧 LF 不一致，`hn_init_line_endings()` 切二进制模式）
   - 设计 / 进度：`Hone原生编译后端设计.md`、`Hone原生编译后端进度.md`
+
+### 修复
+- **解释器整数取负溢出改抛 H010**：`-x` 遇 `i64::MIN` 原先直接 panic（`attempt to negate with
+  overflow`），与 VM / nat 后端行为不一致——改为 `checked_neg` 并报H010（带 help），三引擎统一
+- **VM 推导式双变量在列表源上的行为对齐解释器**：`[x for k, v in list]` / `{k: v for k, v in list}`
+  原先静默退化为单变量（且编译期因列表路径未声明第二变量报「未定义变量」）；新增 `Instr::Raise`
+  指令复现解释器报错「推导式 `for k, v in` 要求 dict，得到 list」，natgen 同步 `rt_raise`
+- **VM 嵌套索引赋值**：`m[i][j] = x` 原先报H999「仅支持单层索引赋值」，现按解释器的递归写回语义
+  展开为「从深到浅」的 IndexSet 链
+- **VM 解构错误文案对齐解释器**：区分列表 / 字典解构形态不符（各有专属 help）、列表元素数不足时
+  报实际变量数并补help
+
+### 变更
+- **`Instr::DestructGet` 增字段**：签名由 `(dst, obj, key)` 扩为 `(dst, obj, key, nvars, is_dict)`，
+  供 VM 侧复现解释器的解构报错文案（文本 IR 往返格式同步为 `DESTRUCTGET r{d} r{o} r{k} {n} {list|dict}`）
 
 ## [v0.7.12] - 2026-09-25
 

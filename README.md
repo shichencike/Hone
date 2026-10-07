@@ -61,11 +61,14 @@ AOT 的真实定位是「比解释器快一个数量级、几十 KB、零依赖�
 
 - 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码**逐字节一致**，
   含完整错误渲染（`--> 文件:行:列` / 行号行 / caret / help）；回归见 `tests/regress4.py`
-- 值模型：句柄式（寄存器持 u64 句柄指向堆上 `HnCell`）+ 引用计数；lambda 按值捕获，
-  错误经 ERR 句柄跨帧传播 + 静态 catch 映射（无 setjmp）
-- 当前支持范围（M0 子集）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda / 捕获、
-  try-catch / throw / 错误字段访问、内置子集（print/len/to_str/to_int/to_float/is_*/type_of/abs/max/min/
-  assert/assert_eq/read_file）；子集外指令编译期报 H990「未实现」（M1/M2 逐步放开）
+  （正常路径）与 `tests/regress_err.py`（错误诊断逐字符）
+- 值模型：句柄式（寄存器持 u64 句柄指向堆上 `HnCell`）+ 引用计数 + 写时复制（COW）；
+  lambda 按值捕获，错误经 ERR 句柄跨帧传播 + 静态 catch 映射（无 setjmp）
+- 当前支持范围（M0 + M1）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda / 捕获、
+  try-catch / throw / 错误字段访问、**list / dict 读写与 for-in 迭代**、列表与字典推导式、
+  **别名值语义（RC+COW，O(1) 拷贝）**、内置子集（print/len/append/keys/values/has_key/to_str/
+  to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq/read_file）；子集外指令编译期报
+  H990「未实现」（M2 逐步放开）
 - 依赖本机 rustc（M3 起改为随 hone 分发的预编译工具链）；与 `-c` 互斥（H005 显式报错）
 
 ## 用法

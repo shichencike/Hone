@@ -71,6 +71,19 @@ struct RtImports {
     rt_throw: FuncId,
     rt_throwstr: FuncId,
     rt_field: FuncId,
+    // M1：list/dict 承载（G1.2/G1.3）+ for-in 迭代（G1.4）。
+    rt_newlist: FuncId,
+    rt_newdict: FuncId,
+    rt_index: FuncId,
+    rt_indexset: FuncId,
+    rt_destructget: FuncId,
+    rt_len: FuncId,
+    rt_keys: FuncId,
+    rt_islist: FuncId,
+    rt_isdict: FuncId,
+    rt_isnull: FuncId,
+    rt_itercheck: FuncId,
+    rt_raise: FuncId,
 }
 
 /// 本 chunk 内解析好的 FuncRef（借用 bcx.func，生命周期随本 chunk）。
@@ -94,6 +107,18 @@ struct RtRefs {
     rt_throw: FuncRef,
     rt_throwstr: FuncRef,
     rt_field: FuncRef,
+    rt_newlist: FuncRef,
+    rt_newdict: FuncRef,
+    rt_index: FuncRef,
+    rt_indexset: FuncRef,
+    rt_destructget: FuncRef,
+    rt_len: FuncRef,
+    rt_keys: FuncRef,
+    rt_islist: FuncRef,
+    rt_isdict: FuncRef,
+    rt_isnull: FuncRef,
+    rt_itercheck: FuncRef,
+    rt_raise: FuncRef,
 }
 
 impl RtImports {
@@ -191,6 +216,24 @@ impl RtImports {
             rt_throw: imp(module, "rt_throw", &sig3_1)?,
             rt_throwstr: imp(module, "rt_throwstr", &sig3_1)?,
             rt_field: imp(module, "rt_field", &sig4_1)?,
+            // M1：rt_newlist/rt_newdict(ptr, n, ci, pc)；rt_index/rt_destructget(obj, key, ci, pc)；
+            // rt_indexset(obj, key, val, ci, pc)（sig5_1）；rt_len/rt_keys(v, ci, pc)；
+            // rt_itercheck(src, is_comp, ci, pc)；rt_islist/rt_isdict/rt_isnull(h)。
+            rt_newlist: imp(module, "rt_newlist", &sig4_1)?,
+            rt_newdict: imp(module, "rt_newdict", &sig4_1)?,
+            rt_index: imp(module, "rt_index", &sig4_1)?,
+            rt_indexset: imp(module, "rt_indexset", &sig5_1)?,
+            // M1：rt_destructget(obj, key, nvars, is_dict, ci, pc)——6 参（sig6_1，镜像解释器文案）。
+            rt_destructget: imp(module, "rt_destructget", &sig6_1)?,
+            rt_len: imp(module, "rt_len", &sig3_1)?,
+            rt_keys: imp(module, "rt_keys", &sig3_1)?,
+            rt_islist: imp(module, "rt_islist", &sig1)?,
+            rt_isdict: imp(module, "rt_isdict", &sig1)?,
+            rt_isnull: imp(module, "rt_isnull", &sig1)?,
+            rt_itercheck: imp(module, "rt_itercheck", &sig4_1)?,
+            // M1：rt_raise(code_sidx, msg_sidx, help_sidx, ci, pc) —— 5 参（sig5_1）。
+            // help_sidx = -1 表示该分支无 help 行（哨兵，镜像解释器 help=None）。
+            rt_raise: imp(module, "rt_raise", &sig5_1)?,
         })
     }
 
@@ -215,6 +258,18 @@ impl RtImports {
             rt_throw: module.declare_func_in_func(self.rt_throw, func),
             rt_throwstr: module.declare_func_in_func(self.rt_throwstr, func),
             rt_field: module.declare_func_in_func(self.rt_field, func),
+            rt_newlist: module.declare_func_in_func(self.rt_newlist, func),
+            rt_newdict: module.declare_func_in_func(self.rt_newdict, func),
+            rt_index: module.declare_func_in_func(self.rt_index, func),
+            rt_indexset: module.declare_func_in_func(self.rt_indexset, func),
+            rt_destructget: module.declare_func_in_func(self.rt_destructget, func),
+            rt_len: module.declare_func_in_func(self.rt_len, func),
+            rt_keys: module.declare_func_in_func(self.rt_keys, func),
+            rt_islist: module.declare_func_in_func(self.rt_islist, func),
+            rt_isdict: module.declare_func_in_func(self.rt_isdict, func),
+            rt_isnull: module.declare_func_in_func(self.rt_isnull, func),
+            rt_itercheck: module.declare_func_in_func(self.rt_itercheck, func),
+            rt_raise: module.declare_func_in_func(self.rt_raise, func),
         }
     }
 }
@@ -543,6 +598,109 @@ impl<'x, 'f> ChunkLower<'x, 'f> {
                 let r = self.call1(rf, &[cimm, capsptr, ncimm]);
                 self.store_slot(*d, r);
             }
+            // ── M1：list/dict 承载（G1.2/G1.3）+ for-in 迭代（G1.4） ──
+            // 语义逐条镜像 vm.rs 执行臂；所有权协议见 runtime 文件头注释：
+            // 读操作（rt_index/rt_destructget/rt_len/rt_keys）借用、返回新句柄；
+            // 写操作（rt_indexset）返回「新槽值句柄」，调用方 store_slot 无条件替换。
+            Instr::IsNull(d, s) => {
+                let v = self.load_slot(*s);
+                let r0 = self.call1(self.rt.rt_isnull, &[v]);
+                let r = self.call1(self.rt.rt_bool, &[r0]);
+                self.store_slot(*d, r);
+            }
+            Instr::IsDict(d, s) => {
+                let v = self.load_slot(*s);
+                let r0 = self.call1(self.rt.rt_isdict, &[v]);
+                let r = self.call1(self.rt.rt_bool, &[r0]);
+                self.store_slot(*d, r);
+            }
+            Instr::IterCheck(s, is_comp) => {
+                let v = self.load_slot(*s);
+                let ic = self.bcx.ins().iconst(I64, i64::from(*is_comp));
+                let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
+                let pci = self.bcx.ins().iconst(I64, pc as i64);
+                let r = self.call1(self.rt.rt_itercheck, &[v, ic, cii, pci]);
+                self.check_err(r, pc);
+                // 通过则 r 为 null 句柄（无 dest），显式释放。
+                self.bcx.ins().call(self.rt.rt_drop, &[r]);
+            }
+            Instr::Index(d, o, k) => {
+                let vo = self.load_slot(*o);
+                let vk = self.load_slot(*k);
+                let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
+                let pci = self.bcx.ins().iconst(I64, pc as i64);
+                let r = self.call1(self.rt.rt_index, &[vo, vk, cii, pci]);
+                self.check_err(r, pc);
+                self.store_slot(*d, r);
+            }
+            Instr::IndexSet(o, k, v) => {
+                let vo = self.load_slot(*o);
+                let vk = self.load_slot(*k);
+                let vv = self.load_slot(*v);
+                let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
+                let pci = self.bcx.ins().iconst(I64, pc as i64);
+                let r = self.call1(self.rt.rt_indexset, &[vo, vk, vv, cii, pci]);
+                self.check_err(r, pc);
+                // 无条件替换协议：正常路径把槽 o 换为 cow 后的「新槽值句柄」。
+                self.store_slot(*o, r);
+            }
+            Instr::DestructGet(d, o, k, nvars, is_dict) => {
+                let vo = self.load_slot(*o);
+                let vk = self.load_slot(*k);
+                let nimm = self.bcx.ins().iconst(I64, *nvars as i64);
+                let dimm = self.bcx.ins().iconst(I64, i64::from(*is_dict));
+                let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
+                let pci = self.bcx.ins().iconst(I64, pc as i64);
+                let r = self.call1(self.rt.rt_destructget, &[vo, vk, nimm, dimm, cii, pci]);
+                self.check_err(r, pc);
+                self.store_slot(*d, r);
+            }
+            Instr::Len(d, s) => {
+                let v = self.load_slot(*s);
+                let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
+                let pci = self.bcx.ins().iconst(I64, pc as i64);
+                let r = self.call1(self.rt.rt_len, &[v, cii, pci]);
+                self.check_err(r, pc);
+                self.store_slot(*d, r);
+            }
+            Instr::Keys(d, s) => {
+                let v = self.load_slot(*s);
+                let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
+                let pci = self.bcx.ins().iconst(I64, pc as i64);
+                let r = self.call1(self.rt.rt_keys, &[v, cii, pci]);
+                self.check_err(r, pc);
+                self.store_slot(*d, r);
+            }
+            Instr::NewList(d, base, n) => {
+                // 元素句柄（借用）打包进 param_ss 连续区；rt_newlist 内部 retain 建 cell。
+                for i in 0..*n {
+                    let v = self.load_slot(*base + i);
+                    self.bcx
+                        .ins()
+                        .stack_store(I64, v, self.param_ss, 8 * i as i32);
+                }
+                let argptr = self.bcx.ins().stack_addr(I64, self.param_ss, Offset32::new(0));
+                let nimm = self.bcx.ins().iconst(I64, *n as i64);
+                let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
+                let pci = self.bcx.ins().iconst(I64, pc as i64);
+                let r = self.call1(self.rt.rt_newlist, &[argptr, nimm, cii, pci]);
+                self.store_slot(*d, r);
+            }
+            Instr::NewDict(d, base, n) => {
+                // 成对 (key, val) 句柄（借用）打包进 param_ss 连续区；rt_newdict 内部转键 + retain。
+                for i in 0..*n * 2 {
+                    let v = self.load_slot(*base + i);
+                    self.bcx
+                        .ins()
+                        .stack_store(I64, v, self.param_ss, 8 * i as i32);
+                }
+                let argptr = self.bcx.ins().stack_addr(I64, self.param_ss, Offset32::new(0));
+                let nimm = self.bcx.ins().iconst(I64, *n as i64);
+                let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
+                let pci = self.bcx.ins().iconst(I64, pc as i64);
+                let r = self.call1(self.rt.rt_newdict, &[argptr, nimm, cii, pci]);
+                self.store_slot(*d, r);
+            }
             // T6：throw —— rt_throw 归一（str→H600 / error 重抛 / 其余→H001），
             // 归一结果经 check_err 路由（有 handler→catch 槽；无→跨帧传播）。
             Instr::Throw(reg) => {
@@ -574,6 +732,36 @@ impl<'x, 'f> ChunkLower<'x, 'f> {
                 let pci = self.bcx.ins().iconst(I64, pc as i64);
                 let rf = self.rt.rt_throwstr;
                 let r = self.call1(rf, &[s_imm, cii, pci]);
+                self.check_err(r, pc);
+            }
+            // ── M1：Raise(code, msg, help) —— 运行期直接产生错误（VM 与解释器同源报错的 lowering）。
+            // 三段文本（错误码 / 消息 / help）取 strtab 索引传runtime；help_sidx = -1
+            // 表示「本分支无 help 行」，runtime 据此不渲染 help（镜像解释器 help=None）。
+            Instr::Raise(code, msg, help) => {
+                let mut lookup = |s: &str| -> Result<i64, ZError> {
+                    self.field_str_idx
+                        .get(s)
+                        .map(|&i| i as i64)
+                        .ok_or_else(|| {
+                            ZError::plain(
+                                codes::INTERNAL,
+                                format!("natgen: Raise 文本 `{s}` 缺少字符串表索引"),
+                                None::<String>,
+                            )
+                        })
+                };
+                let c_imm = self.bcx.ins().iconst(I64, lookup(code)?);
+                let m_imm = self.bcx.ins().iconst(I64, lookup(msg)?);
+                let h_imm = match help {
+                    Some(h) => self.bcx.ins().iconst(I64, lookup(h)?),
+                    // 哨兵 = u64::MAX（runtime 侧 HELP_NONE_SIDX）：本分支无 help 行。
+                    None => self.bcx.ins().iconst(I64, -1i64 as u64 as i64),
+                };
+                let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
+                let pci = self.bcx.ins().iconst(I64, pc as i64);
+                let r = self.call1(self.rt.rt_raise, &[c_imm, m_imm, h_imm, cii, pci]);
+                // Raise 产出的必然是错误句柄：直接进错误路由（有 handler→catch 槽，
+                // 无→ 跨帧传播），随后无正常路径。
                 self.check_err(r, pc);
             }
             // T6：错误对象字段访问（e.code/.message/.file/.line/.col/.context）——
@@ -724,11 +912,13 @@ fn lower_chunk(
     let entry = blocks[&0];
     bcx.switch_to_block(entry);
     // 栈槽：每 VM 寄存器一个 8B ExplicitSlot（入口初始化，递归经独立栈帧）+ 实参
-    // 打包区（Call 前连续 store，T5）+ 捕获打包区（MakeLambda 前连续 store，T5）。
-    let max_nargs = code
+    // 打包区（Call/NewList/NewDict 前连续 store，T5/M1）＋ 捕获打包区（MakeLambda，T5）。
+    let max_pack = code
         .iter()
         .filter_map(|i| match i {
             Instr::Call(_, _, _, n) => Some(*n),
+            Instr::NewList(_, _, n) => Some(*n),
+            Instr::NewDict(_, _, n) => Some(*n * 2),
             _ => None,
         })
         .max()
@@ -751,7 +941,7 @@ fn lower_chunk(
     }
     let param_ss = bcx.create_sized_stack_slot(StackSlotData::new(
         StackSlotKind::ExplicitSlot,
-        (8 * max_nargs.max(1)) as u32,
+        (8 * max_pack.max(1)) as u32,
         3,
     ));
     let cap_ss = bcx.create_sized_stack_slot(StackSlotData::new(

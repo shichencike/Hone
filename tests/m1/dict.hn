@@ -1,0 +1,119 @@
+// G1.3 dict 承载 + G1.4 for-in 迭代。
+// 注意：Hone 的 dict 无脚本层索引读写语法（`d["k"]` 会被 checker 拒：索引须 int，
+// 而 dict 键恒为字符串字面量），取值走 for-in / keys / values / has_key，
+// 故 dict 的 COW 写路径在脚本层不可达（G1.1 的 list 写路径才是 COW 主战场）。
+
+// ── 1. 字面量、显示、len ──
+d = {"x": 10, "y": 20};
+print(d);
+print("len:" + to_str(len(d)));
+
+// ── 2. keys / values / has_key ──
+k = keys(d);
+v = values(d);
+print("keys:" + to_str(k));
+print("values:" + to_str(v));
+print("has_key(x):" + to_str(has_key(d, "x")));
+print("has_key(z):" + to_str(has_key(d, "z")));
+
+// ── 3. 取值：官方范式为 for-in 查表 ──
+fn dict_get(src, want : str) {
+    for key, val in src {
+        if (key == want) { return val; }
+    }
+    return "";
+}
+print("get x:" + to_str(dict_get(d, "x")));
+print("get y:" + to_str(dict_get(d, "y")));
+print("get missing:" + to_str(dict_get(d, "missing")));
+
+// ── 4. 相等性：按插入序逐对比较 ──
+e1 = {"p": 1, "q": 2};
+e2 = {"p": 1, "q": 2};
+e3 = {"q": 2, "p": 1};
+print("e1 == e2:" + to_str(e1 == e2));
+print("e1 == e3:" + to_str(e1 == e3));
+print("e1 == d:" + to_str(e1 == d));
+
+// ── 5. 空字典 ──
+ed = {};
+print("空字典:" + to_str(ed));
+print("len:" + to_str(len(ed)));
+
+// ── 6. 嵌套容器作为 dict 值 ──
+dd = {"a": [1, 2], "b": {"c": 3}};
+print(dd);
+print("嵌套 list:" + to_str(dict_get(dd, "a")));
+print("嵌套 dict:" + to_str(dict_get(dict_get(dd, "b"), "c")));
+
+// ── 7. G1.4 迭代：list 单变量 / list 双变量位置 / dict 双变量 k,v ──
+s1 = 0;
+for x in [1, 2, 3] {
+    s1 = s1 + x;
+}
+print("list 单变量求和:" + to_str(s1));
+
+s3 = 0;
+for k3, v3 in d {
+    s3 = s3 + v3;
+}
+print("dict k,v 求和:" + to_str(s3));
+
+names = "";
+for k4 in k {
+    names = names + k4;
+}
+print("遍历 keys 拼接:" + to_str(names));
+
+// ── 8. 遍历 list of dict / dict of list ──
+// 注：dict_get 返回动态类型（命中可能是 int，缺失返回 str），直接参与 int 累加会被
+// checker 静态拒绝（H001 禁隐式转换）。故用带返回标注的包装函数取 int。
+fn dict_int(src, want : str) -> int {
+    for key, val in src {
+        if (key == want) { return val; }
+    }
+    return 0;
+}
+s5 = 0;
+for row in [{"n": 1}, {"n": 2}, {"n": 4}] {
+    s5 = s5 + dict_int(row, "n");
+}
+print("遍历 dict 列表:" + to_str(s5));
+
+tot = 0;
+for kk, lst in dd {
+    tot = tot + len(lst);
+}
+print("遍历 dict 的 list 值:" + to_str(tot));
+
+// ── 9. 遍历中 break / continue ──
+acc = 0;
+for k5, v5 in d {
+    if (k5 == "y") { continue; }
+    acc = acc + v5;
+}
+print("continue 后:" + to_str(acc));
+
+acc2 = "";
+for k6 in keys(d) {
+    acc2 = acc2 + k6;
+    if (k6 == "y") { break; }
+}
+print("break 后:" + to_str(acc2));
+
+// ── 10. 类型判定 ──
+print("type_of(d):" + to_str(type_of(d)));
+print("type_of(keys):" + to_str(type_of(k)));
+print("is_dict(d):" + to_str(is_dict(d)));
+print("is_dict(list):" + to_str(is_dict([1, 2])));
+
+// ── 11. 字典解构 ──
+{name, age} = {"name": "hone", "age": 7};
+print("name:" + name);
+print("age:" + to_str(age));
+{nickname: nick} = {"nickname": "zzz"};
+print("改名解构 nick:" + nick);
+
+// ── 12. 字典推导式 ──
+sq = {kk: v6 * 2 for kk, v6 in d};
+print("字典推导:" + to_str(sq));

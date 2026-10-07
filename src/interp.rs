@@ -3243,7 +3243,19 @@ impl Interp {
                 let tn = v.type_name();
                 match op {
                     UnOp::Neg => match v {
-                        Value::Int(x) => Ok(Value::Int(-x)),
+                        // 取负溢出（仅 i64::MIN）报 H010，与 VM 的 checked_neg 一致——
+                        // 直接写 `-x` 会在 debug 构建 panic，违反 interp/VM 一致铁律。
+                        Value::Int(x) => x
+                            .checked_neg()
+                            .map(Value::Int)
+                            .ok_or_else(|| {
+                                self.runtime_err(
+                                    codes::INTEGER_OVERFLOW,
+                                    "integer overflow",
+                                    *span,
+                                    Some("the result does not fit in a 64-bit signed integer"),
+                                )
+                            }),
                         Value::Float(x) => Ok(Value::Float(-x)),
                         // 类型不支持：若定义了 __neg 则回退重载
                         other => match self.call_overload("__neg", vec![other], *span) {

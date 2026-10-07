@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """三引擎回归：interp（hone run）/ VM（--vm）/ nat（build --exe --native）三路
-stdout+stderr 逐字节比对。
+stdout+stderr+退出码 逐字节比对。
 
 用法：在仓库根目录执行 python tests/regress4.py
 约定：
-  - 用例集 = M0 三引擎可对齐项（examples/fib.hn、examples/hello.hn 正常路径 +
-    错误渲染用例）；M1/M2 任务组落地后按进度文档「T9 冒烟用例扩展」逐步扩容。
+  - 用例集 = M0 基线三例（examples/fib.hn、examples/hello.hn、examples/err_divzero.hn）
+    + M1 新增用例集（tests/m1/list.hn、tests/m1/dict.hn、tests/smoke/rc_alias.test.hn）。
+    M2 任务组落地后按进度文档继续扩容。
     （AOT-C 后端 build --exe -c 暂不纳入本回归：其错误渲染为简化一行，
     与 interp/VM 的完整 ZError 渲染无法逐字节对齐；待 AOT 错误渲染对齐后另立比对。）
+  - 错误诊断逐字符对齐由 tests/regress_err.py 承担（含 nat 第三引擎）；
+    本脚本聚焦正常路径 + 单例错误渲染。
   - 每用例单独编译 nat 产物（产物内含该脚本，不可跨用例复用）；
     nat 中间 object（stem.nat.o）与临时 exe 跑完即删。
   - 任一用例首跑出现分叉 → 重试至多 3 次，任一次三路一致即判 FLAKY（随机数/
@@ -26,11 +29,15 @@ from regress_common import should_skip  # noqa: E402
 
 BIN = "./target/debug/hone.exe"
 
-# M0 三引擎可对齐用例：fib/hello 正常路径 + err_divzero 错误渲染路径。
+# 三引擎对齐用例集：M0 基线三例 + M1 新增用例集（G1.2 list / G1.3 dict+G1.4 迭代 /
+# G1.5 别名 RC+COW）。错误诊断的逐字符对齐由 regress_err.py 承担（含 nat 第三引擎）。
 CASES = [
     "examples/fib.hn",
     "examples/hello.hn",
     "examples/err_divzero.hn",
+    "tests/m1/list.hn",
+    "tests/m1/dict.hn",
+    "tests/smoke/rc_alias.test.hn",
 ]
 
 ENGINES = ("interp", "vm", "nat")

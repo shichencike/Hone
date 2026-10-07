@@ -1,10 +1,20 @@
 #!/usr/bin/env python3
-"""错误对齐回归：逐用例比对「解释器」与「VM」的错误输出是否逐字节一致。
+"""错误对齐回归：逐用例比对「解释器」/「VM」/「nat 原生编译」的错误输出是否逐字节一致。
 
 用法：在仓库根目录执行 python tests/regress_err.py
 约定：任何一处差异都视为失败（报错必须精准，行/列/文案/help 全对齐）。
+
+nat（build --exe --native）作为第三引擎接入（G1.6），两条比对路径：
+  1. 编译成功 → 跑产物，比对 (stdout+stderr, 退出码)。
+  2. 编译期拒 → 分两类：
+     a. checker 静态拦截：checker 是解释器/VM/AOT/nat 共用的前端，属同源行为，
+        剥离 build 的 [N/4] 阶段进度行后，报错文本应与 `hone run` 逐字节一致；
+     b. natgen 自身能力边界（lowering 阶段 H990/H999，M2 待落地）→ 列入
+        NAT_UNSUPPORTED 显式登记，不静默跳过（每项须写明待落地任务号）。
 """
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,7 +23,7 @@ import tempfile
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 BIN = "./target/debug/hone.exe"
 
-# 每个用例：期望两侧产生完全相同的 stdout+stderr（通常是运行期错误）。
+# 每个用例：期望各引擎产生完全相同的 (stdout+stderr, 退出码)。
 CASES = {
     # 变量 / 函数
     "undef_var": 'x = 1;\nprint(y);\n',
@@ -43,10 +53,14 @@ CASES = {
     # 迭代 / 推导式
     "for_notiter": 'x = 1;\nfor t in x { print(t); }\n',
     "comp_notiter": 'y = 3;\nz = [i for i in y];\nprint(z);\n',
-    # 解构
+    # 解构（M1：解构错误文案已对齐解释器形态/变量数，见 G1.2/G1.3）
     "ds_too_few": 'a, b = [1];\nprint(a, b);\n',
     "ds_notiter": 'a, b = 5;\nprint(a, b);\n',
     "ds_dict_missing": '{m} = {"a": 1};\nprint(m);\n',
+    "ds_list_got_dict": 'a, b = {"x": 1, "y": 2};\n',
+    "ds_dict_got_list": '{c, d} = [1, 2];\n',
+    "ds_short": 'x, y = [1];\nprint(y);\n',
+    "ds_key_not_str": '{c, d} = {1: 2, 3: 4};\n',
     # match / await / 控制流
     "match_no_arm": 'x = 5;\nmatch x {\n    1 => { print("one"); }\n    2 => { print("two"); }\n}\n',
     "await_non_future": 'x = 5;\ny = await x;\nprint(y);\n',
@@ -54,7 +68,7 @@ CASES = {
     # 内置 / 转换 / 重载
     "str_to_int": 'print(to_int("abc"));\n',
     "len_bad": 'print(len(5));\n',
-    "append_bad": 'print(append(1, 2));\n',
+    "append_bad": 'print(append(5, 1));\n',
     "dict_key_bool_get": 'd = {"a": 1};\nprint(d[true]);\n',
     "dict_key_bool_set": 'd = {"a": 1};\nd[true] = 2;\nprint(d);\n',
     "enum_payload_oob": 'enum E { A(1) }\ne = E.A(9);\nprint(e[5]);\n',
@@ -66,40 +80,103 @@ CASES = {
     ),
 }
 
+# natgen 能力边界：lowering 阶段报 H990/H999（M2 任务组待落地），无法比对运行期错误。
+# 显式登记而非静默跳过——新增条目必须写明待落地任务号，避免「漏实现被当成通过」。
+NAT_UNSUPPORTED = {
+    "await_non_future": "H990 Await 指令未实现 → M2 G2.6 async-await",
+}
 
-def run(args):
-    p = subprocess.run(args, capture_output=True, text=True, timeout=20)
-    return p.stdout + p.stderr
+
+def run_hone(args, timeout=20):
+    p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    return (p.stdout + p.stderr, p.returncode)
+
+
+def strip_stage_lines(text: str) -> str:
+    """剥掉 build 的 [N/4] 阶段进度行（余下报错本体应与 `hone run` 一致）。"""
+    out = [ln for ln in text.splitlines() if not re.match(r"^\[\d/4\]", ln)]
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
+def nat_run(path: str, tmp: str):
+    """nat 第三引擎。返回 (结果, 状态)；结果 = (stdout+stderr, 退出码)。
+    状态：ok（编译成功已跑产物）/ build_reject（checker 同源拒）/ unsupported（natgen 边界）
+    """
+    exe = os.path.join(tmp, "nat_case.exe")
+    if os.path.exists(exe):
+        os.remove(exe)
+    obj = os.path.join(os.getcwd(), os.path.splitext(os.path.basename(path))[0] + ".nat.o")
+    text, rc = run_hone([BIN, "build", "--exe", "--native", path, "-o", exe], timeout=120)
+    if os.path.exists(obj):
+        os.remove(obj)
+    if rc == 0 and os.path.exists(exe):
+        res = run_hone([exe])
+        os.remove(exe)
+        return res, "ok"
+    if re.search(r"error\[H99[09]\]: natgen:", text):
+        return (text, rc), "unsupported"
+    return (strip_stage_lines(text), rc), "build_reject"
 
 
 def main():
+    have_nat = shutil.which("rustc") is not None
+    if not have_nat:
+        print("nat: 无 rustc，跳过第三引擎（仅比对 interp / VM）", file=sys.stderr)
     tmp = tempfile.mkdtemp(prefix="hone_err_")
     passed = failed = 0
     fails = []
-    for name, src in CASES.items():
-        path = os.path.join(tmp, name + ".hn")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(src)
-        try:
-            interp = run([BIN, "run", path])
-            vm = run([BIN, "run", "--vm", path])
-        except subprocess.TimeoutExpired:
-            failed += 1
-            fails.append((name, "TIMEOUT", "", ""))
-            continue
-        if interp == vm:
-            passed += 1
-            print(f"PASS  {name}")
-        else:
-            failed += 1
-            fails.append((name, interp, vm))
-            print(f"FAIL  {name}")
+    counts = {"ok": 0, "build_reject": 0, "unsupported": 0, "off": 0}
+    try:
+        for name, src in CASES.items():
+            path = os.path.join(tmp, name + ".hn")
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(src)
+            try:
+                base = run_hone([BIN, "run", path])
+                vm = run_hone([BIN, "run", "--vm", path])
+            except subprocess.TimeoutExpired:
+                failed += 1
+                fails.append((name, "TIMEOUT", []))
+                print(f"TIMEOUT  {name}")
+                continue
+            results = [("interp", base), ("vm", vm)]
+            if have_nat:
+                if name in NAT_UNSUPPORTED:
+                    counts["off"] += 1
+                else:
+                    try:
+                        nat, status = nat_run(path, tmp)
+                    except subprocess.TimeoutExpired:
+                        nat, status = ("[TIMEOUT]", -1), "ok"
+                    counts[status] = counts.get(status, 0) + 1
+                    results.append(("nat", nat))
+            diffs = [(e, r[0]) for e, r in results[1:] if r != base]
+            if not diffs:
+                passed += 1
+                print(f"PASS  {name}")
+            else:
+                failed += 1
+                fails.append((name, base[0], diffs))
+                print(f"FAIL  {name}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
-    print(f"\nPASS={passed} FAIL={failed} (共 {len(CASES)} 个错误用例)")
-    for name, i, v in fails:
+    engines = "interp/VM" + ("/nat" if have_nat else "")
+    print(f"\nPASS={passed} FAIL={failed} (共 {len(CASES)} 个错误用例, 引擎 {engines})")
+    if have_nat:
+        print(f"nat 路径分布: 运行期(ok)={counts['ok']} "
+              f"checker同源拒(build_reject)={counts['build_reject']} "
+              f"能力边界(unsupported/登记跳过)={counts['unsupported']} "
+              f"显式跳过={counts['off']}")
+    if NAT_UNSUPPORTED:
+        print("nat 能力边界（显式登记，待落地后移除）:")
+        for n, why in NAT_UNSUPPORTED.items():
+            print(f"  {n}: {why}")
+    for name, i, diffs in fails:
         print(f"\n--- {name} ---")
         print("interp:", repr(i))
-        print("vm    :", repr(v))
+        for eng, val in diffs:
+            print(f"{eng:5s}:", repr(val))
     return 1 if failed else 0
 
 

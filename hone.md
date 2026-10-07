@@ -1394,25 +1394,39 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · 调用模型：统一走 `rt_call` 名分发（用户函数 / lambda / 内置表），lambda 按值捕获；错误经 ERR 句柄跨帧传播，
   每个 fallible 指令后静态查「最近活跃 catch」映射跳 handler（无 setjmp），Throw/ThrowStr 归一 H600
 · 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码**逐字节一致**（含完整错误渲染
-  `--> 文件名:行:列` / 行号行 / caret / help / 结尾空行），回归脚本 `tests/regress4.py`（M0 用例集：fib / hello / err_divzero）
-· 当前支持范围（M0 子集）：
+  `--> 文件名:行:列` / 行号行 / caret / help / 结尾空行）。回归入口两条：
+  `tests/regress4.py`（正常路径三引擎）与 `tests/regress_err.py`（错误诊断三引擎逐字符）；
+  开发期另有扫雷工具 `tests/tools/audit_err.py`（55 例错误文案 + help 行批量比对）
+· 当前支持范围（M0 + M1）：
   · 标量全类型：int / float / bool / char / str / null 常量、算术 / 比较 / 一元运算、str 拼接与 ==/!=
   · 控制流：if-else / while / 标签跳转（Label+Jmp 覆盖 goto）
   · 函数与 lambda：递归、向前引用、lambda 直调与作参、捕获（值语义）、闭包嵌套
-  · try-catch / throw：跨帧捕获、嵌套重抛、错误对象字段（e.code/.message/.file/.line/.col）
-  · 内置子集：print / len / to_str / to_int / to_float / is_int / is_float / is_bool / is_str / type_of /
-    abs / max / min / assert / assert_eq / read_file（assert 失败 H700 文案对齐）
+  · try-catch / throw：跨帧捕获、嵌套重抛、错误对象字段（e.code/.message/.file/.line/.col/.context）
+  · **容器（M1）**：list 字面量 / 索引读写 / append / len / 结构相等 / 嵌套与深索引 / 列表解构；
+    dict 字面量 / keys / values / has_key / len / 结构相等 / 嵌套 / 字典解构（含改名形式）/ 字典推导式
+  · **迭代（M1）**：`for x in list`、`for k in dict`、`for k, v in dict`，含循环体内break / continue；
+    列表与字典推导式（`[x for x in list]`、`{k: v for k, v in dict}`，含 `if` 过滤）
+  · **值语义（M1）**：RC+COW——变量读取为O(1) 引用计数，写入点过 COW 门（独占则原地写，
+    共享则浅拷独占副本），别名隔离与解释器深拷贝语义逐字节一致
+  · 内置子集：print / len / append / keys / values / has_key / to_str / to_int / to_float / is_int /
+    is_float / is_bool / is_str / is_list / is_dict / is_null / type_of / abs / max / min / assert /
+    assert_eq / read_file（assert 失败 H700 文案对齐）
   · 错误码对齐 VM：H001 / H002 / H006 / H007 / H009 / H010 / H011 / H401–H404 / H600 / H700
-· 当前限制（M1/M2 逐步放开）：
-  · M0 子集外指令（list / dict / 迭代 / 推导式 / struct / enum / match / 运算符重载 / async / import / 切片 /
-    byte / bytes 等）在**编译期**报 H990（internal）「指令未实现」——编译期即拒绝，不产出错误二进制
+  · 注意：`d["k"] = v` 这类dict 索引写入被类型检查器静态拒绝（索引须 int，而 dict 键恒为字符串
+    字面量），故 dict 在脚本层只读，取值走 for-in / keys / values / has_key
+· 当前限制（M2/M3 逐步放开）：
+  · M0/M1 子集外指令（struct / enum / match / 运算符重载 / alias / async-await / goto 以外的跳转 /
+    import / 切片 / byte / bytes 等）在**编译期**报 H990（internal）「指令未实现」——编译期即拒绝，
+    不产出错误二进制
   · 依赖本机 rustc（rustc 与 Rust std 的链接期依赖）；M3 起改为随 hone 分发的预编译工具链，移除 rustc 依赖
   · `cow` 声明 / 形参与 VM 一致按引擎边界处理（解释器特性，见 1.3）
 · 与 AOT（-c）的分工：AOT 走 C 中间文件 + gcc/clang，体积几十 KB、零运行时依赖，但错误渲染为简化一行；
   native 走 Cranelift 机器码 + rustc，错误渲染与双引擎逐字节一致，语义对齐是它的首要目标。
   二者互斥：`-c` 与 `--native` 同用报 H005 显式错误
-· 验证基线：`bench/fib15.hn`（610）经 `hone natgen bench/fib15.hn -o bench/fib15.exe` 复现；
-  改代码后先 `cargo build`（target/ 旧二进制会静默沿用），再跑 `python tests/regress4.py`
+· 验证基线：`tests/m1/list.hn`（list 承载 13 组断言）、`tests/m1/dict.hn`（dict + 迭代 12 组断言）、
+  `tests/smoke/rc_alias.test.hn`（别名 RC+COW 11 组断言）三例经 `hone natgen <file> -o <exe>` 复现，
+  interp / VM / nat 三引擎逐字节一致；改代码后先 `cargo build`（target/ 旧二进制会静默沿用），
+  再跑 `python tests/regress4.py` 与 `python tests/regress_err.py`
 
 4.8 AOT 性能实测
 

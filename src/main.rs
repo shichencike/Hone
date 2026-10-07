@@ -1649,6 +1649,14 @@ fn build_native(
             if let vm::Instr::ThrowStr(s) = ins {
                 push_str(s);
             }
+            // M1：Raise 的错误码 / 消息 / help 文本进 strtab（rt_raise 名分发用）。
+            if let vm::Instr::Raise(code, msg, help) = ins {
+                push_str(code);
+                push_str(msg);
+                if let Some(h) = help {
+                    push_str(h);
+                }
+            }
         }
         for name in c.locals.keys() {
             push_str(name);

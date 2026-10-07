@@ -8,20 +8,15 @@
 
 | 里程碑 | 状态 | 说明 |
 |---|---|---|
-| **M0 管线打通** | ✅ 完成 | T1 工程地基 + T2 值模型 + T3 运算与比较 + T4 错误渲染 + T5 rt_call 名分发与 lambda + T6 最小 try-catch/throw + T7 命令集成 + T8 三引擎回归 regress4 + T9 冒烟用例扩展 + T10 文档同步 完成（catch 静态映射 + 跨帧传播 + Throw/ThrowStr/Field 归一，try-catch 全边界用例三引擎逐字节对齐；`build --exe --native` 与 `natgen` 共用管线；regress4 三引擎（interp/VM/nat）M0 用例集全绿；smoke 用例集探测全部陈旧不可对齐、无扩容项；文档已同步）；M0 任务组完结 |
-| **M1 核心语义** | ⬜ 未开始 | list/dict/迭代/RC+COW；任务组 G1.1–G1.6 |
+| **M0 管线打通** | ✅ 完成 | T1–T10 全完成（三引擎逐字节对齐；`build --exe --native` + `natgen` 共用管线；文档已同步） |
+| **M1 核心语义** | ✅ 完成 | G1.1 RC+COW / G1.2 list / G1.3 dict / G1.4 for-in / G1.5 别名用例集 / G1.6 全量回归（三引擎）；审计暴露并修复 6 处引擎缺陷 |
 | **M2 功能对齐** | ⬜ 未开始 | struct/enum/match/重载/alias/async；任务组 G2.1–G2.7 |
 | **M3 集成与优化** | ⬜ 未开始 | import 合并/交叉编译/体积裁剪/工具链打包/CI；任务组 G3.1–G3.7 |
 
-**当前可运行产物**：`bench/fib15.hn` → `fib15.nat.o` → `bench/fib15.exe`，执行输出 `610`（interp / VM / nat 逐字节对齐）。
-**复现**：`hone natgen bench/fib15.hn -o bench/fib15.exe && ./bench/fib15.exe`
-**T2 验证**：`bench/t2_values.hn`（标量全类型 / 字符串常量 / null）与 `examples/hello.hn`，nat 产物与 interp / VM 逐字节一致；debug 构建出口泄漏断言无触发。
-**T4 验证**：`examples/err_divzero.hn`（及 1/0、溢出、多行、跨帧、嵌套、Tab 等错误用例）nat 产物与 interp / VM 的 stderr 逐字节一致（`--> file:line:col` / caret / help / 结尾空行 / 退出码 1）。
-**T5 验证**：递归 / lambda / 捕获（值语义）/ 内置集（print/len/to_str/to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq）/ 向前引用 / 高阶 lambda 用例，nat 产物与 interp / VM 逐字节一致；内置错误（H006/H700）渲染一致。
-**T6 验证**：`examples/try_catch.hn`（H009 跨帧捕获 / H006 转换 / throw str / 嵌套重抛 / H401 回退）+ 10 个 `.t6*` 边界用例（throw 变量/字面、try 内 break 跳出、try 正常完成、try 内 return 弹帧、callee 无 try 错误跨帧传播、callee 陈旧 try、外层 try 包裹循环、嵌套重抛 line 定位）nat 与 interp / VM 的 stdout+stderr+退出码逐字节一致；M0 五例（fib15/t2/t3/hello/err_divzero）与 regress3/regress_err/regress_ir 无回退。
-**T7 验证**：`hone build --exe --native` 与 `hone natgen` 共用 `build_native`，fib15（610）/ hello 产物运行输出与退出码同 interp 逐字节一致；`-c`（AOT）行为不变且与 `--native` 互斥（H005 显式报错）；默认 bundle 模式复跑无回归（逐字节对齐）；`hone --help` 文案同步。
-**T8 验证**：`python tests/regress4.py` 三引擎（interp / VM / nat）M0 用例集全绿（PASS=3）——`examples/fib.hn`、`examples/hello.hn`、`examples/err_divzero.hn` 三路 stdout+stderr+退出码逐字节一致。AOT-C（`build --exe -c`）按用户决定不纳入本回归（其错误渲染为简化一行，与完整 ZError 渲染无法逐字节对齐；AOT 功能本身保留）。附带修复 AOT Windows CRLF 行尾问题（C 运行时文本模式 `\n`→CRLF，与 Rust 侧 LF 不一致；main 入口 `hn_init_line_endings()` 切二进制模式）。
-**T9 结论**：`tests/smoke/` 全部 8 个用例在 interp 层即 exit=1（陈旧 fixture / 非 M0 指令集），interp==VM 但无法三引擎全绿，无可用扩容项——详见 T9 节。
+**当前可运行产物**：`tests/m1/list.hn` / `tests/m1/dict.hn` / `tests/smoke/rc_alias.test.hn` → nat exe，三引擎逐字节对齐（含 list/dict 读写、for-in 迭代、别名 RC+COW 值语义）。
+**复现**：`hone natgen tests/m1/dict.hn -o dict.exe && ./dict.exe`
+**回归入口**：`python tests/regress4.py`（正常路径三引擎，6 例全绿）、`python tests/regress_err.py`（错误诊断三引擎逐字符，41 例全绿，其中 nat 运行期 18 例 / checker 同源拒 22 例 / 显式登记跳过 1 例）。
+**审计工具**：`python tests/tools/audit_err.py`（55 例错误文案 + help 行 nat-vs-interp 批量比对，开发期扫雷用；本轮据此发现并修复 6 处缺陷）。
 **验证前置**：改代码先 `cargo build`（`target/` 旧二进制会静默沿用），回归脚本依赖 `target/debug/hone.exe`。
 
 ---
@@ -225,12 +220,36 @@
 
 ## M1 — 核心语义（任务组）
 
-- [ ] **G1.1 RC+COW 值模型**（设计 §4.8）：`cow()` 门 + 惰性 path 深拷（list 写槽只拷外层 + 槽位、dict 同理）；debug 断言（rc 下溢 / 泄漏 / cow 后独占）
-- [ ] **G1.2 list 承载**：`HnList` + `NewList` / `Index` / `IndexSet` / `append` / `len` / 解构 `DestructGet`
-- [ ] **G1.3 dict 承载**：`HnDict` + 键值读写 / `keys` / `len`（`__struct__` 隐藏键过滤约定在 G2.1 生效）
-- [ ] **G1.4 for-in 迭代**：`IterCheck` + list/dict 迭代协议（与 VM 迭代序逐位一致）
-- [ ] **G1.5 别名用例集**：`tests/smoke/rc_alias.test.hn`（`b=a; a[i]=x; print(b)` 类，retain/cow/release 三路径）
-- [ ] **G1.6 全量回归**：`regress3` 全部用例三引擎（interp/VM/nat）对齐 + `regress_err` 错误逐字符对齐（nat 接入）
+- [x] **G1.1 RC+COW 值模型**（设计 §4.8）：`cow()` 门 + 惰性 path 深拷（list 写槽只拷外层 + 槽位、dict 同理）；debug 断言（rc 下溢 / 泄漏 / cow 后独占）
+- [x] **G1.2 list 承载**：`HnList` + `NewList` / `Index` / `IndexSet` / `append` / `len` / 解构 `DestructGet`
+- [x] **G1.3 dict 承载**：`HnDict` + 键值读写 / `keys` / `len`（`__struct__` 隐藏键过滤约定在 G2.1 生效）
+- [x] **G1.4 for-in 迭代**：`IterCheck` + list/dict 迭代协议（与 VM 迭代序逐位一致）
+- [x] **G1.5 别名用例集**：`tests/smoke/rc_alias.test.hn`（`b=a; a[i]=x; print(b)` 类，retain/cow/release 三路径）
+- [x] **G1.6 全量回归**：`regress3` 无回退 + `regress_err` 接入nat 第三引擎（41 例）+ `regress4` 扩容至 6 例
+
+### G1.1–G1.6 实现进度（2026-10-07）—— M1 完成
+
+- **句柄式容器落地**：新增 `T_LIST` / `T_DICT` 标签 + `P_LIST`（`*mut HnList{items: Vec<u64>}`）/ `P_DICT`（`*mut HnDict{pairs: Vec<(String, u64)>}`）payload kind；`cell_release` 的 kind 分派补两个分支（逐项 `cell_release` 元素引用）。元素/值存**句柄引用**（进容器时 retain），故嵌套容器天然共享而不深拷。
+- **COW 门 `cow_handle(h)`**：独占（rc==1）原样返回；共享（rc>1）按 kind 浅拷一份独占副本（`make_cell_list`/`make_cell_dict`逐项 retain，兄弟元素不碰——设计 §4.8 惰性 path 深拷的「只拷外层」形态）。**拷贝分支不动原 cell 的 rc**：各持有者仍各自持一份引用，rc 守恒。
+- **写路径协议（rt_indexset）**：错误检查在cow **之前**（越界不应触发拷贝）；成功后若 `cow_handle` 返回原句柄（原地写分支）则 `rt_retain` 补一引用交还调用方，`store_slot` 替换槽时 drop 旧引用恰好守恒；拷贝分支则返回新句柄，槽的旧引用被 drop 后 rc 仍 ≥1（别名安全）。natgen 侧 `IndexSet` lowering 用「无条件 `store_slot(o, r)`」匹配该协议。
+- **for-in 无专用指令**：VM 编译器已把 `for k[, v] in src` 降解为 `IterCheck / IsDict / 跳转 + Len / Index / Keys / Index` 序列（G1.4 只需 `rt_itercheck` 补齐 runtime 一端，迭代序天然与 VM 逐位一致）。推导式同理（`[x for x in list]` / `{k: v for k, v in dict}`）。
+- **dict 无脚本层写入语法**：`d["k"]` 被checker 静态拒（索引须 int，而 dict 键恒为字符串字面量），故 dict 的 COW 写路径**脚本层不可达**，只有 list 写路径是 COW 主战场；`cow_handle` 的 P_DICT 分支仍保留（G2.1 struct 写入落地后启用）。取值走 for-in / `keys` / `values` / `has_key`。
+- **G1.5 别名用例集**：`tests/smoke/rc_alias.test.hn` 11 组 35 断言——基础别名 / 三层别名链 / 反复写（独占原地分支）/ 交替写两别名 / 嵌套容器深索引 / 槽位整体替换 / 函数传参按值 / append 返回新容器 / 循环内改写自身 / dict 只读别名 / str 不可变别名。interp / VM / nat 三引擎逐字节一致（含 11 组标签输出）。
+- **G1.6 回归接入**：
+  - `regress4.py` 用例集3 → 6（增`tests/m1/list.hn`、`tests/m1/dict.hn`、`tests/smoke/rc_alias.test.hn`），退出码纳入比对。
+  - `regress_err.py` 增 nat 第三引擎，两条路径：**编译成功**→跑产物比(stdout+stderr, 退出码)；**编译期拒**→剥离`[N/4]` 阶段进度行后与 `hone run` 比对（checker 是四引擎共享前端，静态拒属同源行为，必须逐字节对齐）。用例 37 → 41（补M1 解构形态/ 变量数 / 键类型 4 例）。能力边界（`await_non_future` H990）经`NAT_UNSUPPORTED` 显式登记待落地任务号，不静默跳过。
+  - 新增 `tests/tools/audit_err.py`：55 例错误文案 + help 行批量比对探针（本轮据此发现 6 处缺陷，见下）。
+  - `tests/m1/{list,dict}.hn` 正式用例集（各 13 / 12 组语义断言）。
+- **审计暴露并修复的 6 处引擎缺陷**（均属「文档/直觉」与实现不一致，必须实地验证才能发现）：
+  | # | 缺陷 | 位置 | 性质 |
+  |---|---|---|---|
+  | 1 | 解释器 `-x`遇 `i64::MIN` 直接 panic（`attempt to negate with overflow`），VM/nat 均报 H010 | `interp.rs` UnOp::Neg | **违反 interp/VM 一致铁律**；改 `checked_neg` + H010 + help |
+  | 2 | VM 推导式双变量（`{k: v for k, v in dict}`）在**列表源**上静默退化为单变量，且编译期因列表路径未声明 `var2` 报「未定义变量」 | `vm.rs compile_comp` | interp/VM 分叉；新增 `Instr::Raise` 指令复现解释器「列表源 + 双变量」报错（natgen 同步 `rt_raise`） |
+  | 3 | nat `rt_field` 只处理 error 对象，dict 点号访问报「requires an `error` value」 | `runtime rt_field` | 补 dict/struct 按键查找 + H002「unknown field（列出实有键）」，镜像 `interp field_value` 分支顺序 |
+  | 4 | nat `rt_field` / `len` / `to_int` / `to_float` / `abs` 多处 help 缺失或文案漂移 | `runtime` 各错误臂 | 以 `builtins.rs` 为权威补help；对「解释器显式无 help」分支（如 `abs` 溢出）引入 `err_h_explicit_no_help`哨兵（`Some("")`），阻止渲染层 `hn_help_for` 凭空补行 |
+  | 5 | nat 解构错误文案用值显示（`got 5`）而非类型名（`got int`） | `runtime rt_destructget` | 改 `type_name(c.t)` |
+  | 6 | `raise` 时 `Hnv` 的 `error_p`存局部 `String` 指针会悬垂 | `runtime rt_raise` | 错误码归一为 `&'static str`（`HnErr.code_p` 契约要求静态生命周期） |
+- **验证结论**：`cargo build` 通过；`cargo test` 4/4、`cargo test -p honeruntime` **18/18**（M0 11 + M1 7）；`regress3` **FAIL=0**（PASS≈46–47 / FLAKY 4–5 随机的即 alias_demo / server_demo / threads / time_random / uuid_demo 五例，真实逻辑差异恒为 0）；`regress_ir` **BAD=0**（OK≈38–39，FLAKY 同理）；`regress4`（三引擎）**6/6 全绿**；`regress_err`（三引擎）**41/41 全绿**（nat：运行期 18 / checker 同源拒 22 / 显式登记跳过 1）；`audit_err.py` **55/55 一致**（修复前 50/55）。
 
 ## M2 — 功能对齐（任务组）
 
@@ -258,10 +277,12 @@
 
 - [ ] `hone build --exe hello.hn` 在无 gcc 的干净机器上产出可运行 exe（M3 完成无 rustc 依赖）
 - [ ] `hone build --exe app.hn --target x86_64-unknown-linux-musl` 在 Windows 上产出 linux exe，CI 二次验证（G3.2/G3.6）
-- [~] `regress4.py` 全用例三引擎（interp/VM/nat）逐字节对齐（含错误诊断）（M0 用例集 fib/hello/err_divzero 已对齐（T8/T9）；G1.6 全量扩容待 M1）
+- [x] `regress4.py` 正常路径三引擎（interp/VM/nat）逐字节对齐——M0 三例 + M1 三例（list/dict/别名）共 **6 例全绿**
+- [x] `regress_err.py` 错误诊断三引擎逐字符对齐——**41 例全绿**（nat：运行期 18 / checker 同源拒 22 / 显式登记跳过 1）
+- [x] `tests/tools/audit_err.py` 55 例错误文案 + help 行 nat-vs-interp 一致（本轮据此修复 6 处引擎缺陷）
 - [ ] 新后端 H999 集合与 VM 完全一致（无静默漏实现）（G2.7）
 - [ ] 产物 ≤5MB（M3 后 ≤3MB）（G3.3）
-- [x] 文档同步：`hone.md` / `CHANGELOG.md` / `README.md` / 官网 changelog（T10 完成；后续每里程碑核销）
+- [x] 文档同步：`hone.md` / `CHANGELOG.md` / `README.md` / 官网 changelog（T10 完成；M1 里程碑已同步前三处，官网待上传）
 
 ---
 

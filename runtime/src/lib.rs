@@ -19,9 +19,11 @@
 //
 // ── Hnv（cell 内的值本体） ──
 // 标签：T_INT / T_FLOAT / T_BOOL_TRUE / T_BOOL_FALSE / T_CHAR / T_NULL / T_STR / T_ERR
+//       / T_FN / T_LIST / T_DICT
 //   标量：a=值位（int / f64 位 / 码点），b=0，payload=0
 //   T_STR：a=字节起始 *const u8，b=字节长度，payload=容量（用于释放）
 //   T_ERR：a=0，b=0，payload=*mut HnErr
+//   T_LIST / T_DICT：a/b=0，payload=*mut HnList / *mut HnDict（M1：元素/值句柄由 cell 拥有）
 //
 // ── ABI（object 侧 import，本文件定义；全 u64 进出，干净寄存器 ABI） ──
 // __hn_main() -> u64             object 内 main chunk（object 定义，返回最终值句柄）
@@ -46,6 +48,8 @@ const T_NULL: u64 = 5;
 const T_STR: u64 = 6;
 const T_ERR: u64 = 7;
 const T_FN: u64 = 8;
+const T_LIST: u64 = 9;
+const T_DICT: u64 = 10;
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -98,11 +102,25 @@ const P_NONE: u64 = 0; // 标量
 const P_STR: u64 = 1;  // payload=容量，a=字节指针，b=长度
 const P_ERR: u64 = 2;  // payload=*mut HnErr
 const P_FN: u64 = 3;   // payload=*mut HnFnBox（T5：lambda 值，a=chunk 索引）
+const P_LIST: u64 = 4; // payload=*mut HnList（M1：list 值，元素为句柄引用）
+const P_DICT: u64 = 5; // payload=*mut HnDict（M1：dict 值，键 String + 句柄值）
 
 /// lambda 值（T5）：chunk 索引 + 捕获句柄数组（每项 retain 引用，按值捕获语义）。
 struct HnFnBox {
     ci: u32,
     caps: Vec<u64>,
+}
+
+/// list 值（M1）：元素句柄（每项 retain 引用，cell 拥有；写路径先过 cow 门）。
+struct HnList {
+    items: Vec<u64>,
+}
+
+/// dict 值（M1）：键 String（Hone dict 键恒为 str/int 转串，镜像 v_index 的 Dict 臂）+ 句柄值。
+/// 写路径先过 cow 门；隐藏 `\u{0}__struct__` 标记键在用户可见路径过滤（G2.1 起生效，
+/// M1 先按普通键处理，长度/显示/keys 已带过滤钩子）。
+struct HnDict {
+    pairs: Vec<(String, u64)>,
 }
 
 #[derive(Clone, Copy)]
@@ -157,6 +175,18 @@ fn cell_release(h: u64) {
                     let b = Box::from_raw(c.payload as *mut HnFnBox);
                     for &h in &b.caps {
                         cell_release(h);
+                    }
+                }
+                P_LIST => {
+                    let b = Box::from_raw(c.payload as *mut HnList);
+                    for &h in &b.items {
+                        cell_release(h);
+                    }
+                }
+                P_DICT => {
+                    let b = Box::from_raw(c.payload as *mut HnDict);
+                    for (_, h) in &b.pairs {
+                        cell_release(*h);
                     }
                 }
                 _ => {}
@@ -218,6 +248,141 @@ fn make_cell_str(bytes: Vec<u8>) -> u64 {
     }));
     leak_check_inc();
     c as u64
+}
+
+/// 由元素句柄列表建一个「拥有型」list 句柄（rc=1）：逐项 retain 进 cell（元素借用）。
+fn make_cell_list(items: &[u64]) -> u64 {
+    let boxed = Box::new(HnList {
+        items: items.iter().map(|&h| rt_retain(h)).collect(),
+    });
+    let c = Box::into_raw(Box::new(HnCell {
+        rc: 1,
+        t: T_LIST,
+        a: 0,
+        b: 0,
+        pkind: P_LIST,
+        payload: Box::into_raw(boxed) as u64,
+    }));
+    leak_check_inc();
+    c as u64
+}
+
+/// 由键值对建一个「拥有型」dict 句柄（rc=1）：键转 String（镜像 NewDict 的 value_to_str），
+/// 值逐项 retain。
+fn make_cell_dict(pairs: &[(String, u64)]) -> u64 {
+    let boxed = Box::new(HnDict {
+        pairs: pairs
+            .iter()
+            .map(|(k, v)| (k.clone(), rt_retain(*v)))
+            .collect(),
+    });
+    let c = Box::into_raw(Box::new(HnCell {
+        rc: 1,
+        t: T_DICT,
+        a: 0,
+        b: 0,
+        pkind: P_DICT,
+        payload: Box::into_raw(boxed) as u64,
+    }));
+    leak_check_inc();
+    c as u64
+}
+
+/// 隐藏 struct 标记键（与 interp/vm 的 STRUCT_MARKER_KEY 一致，G2.1 起过滤生效）。
+const HIDDEN_STRUCT_KEY: &str = "\u{0}__struct__";
+#[inline]
+fn is_hidden_key(k: &str) -> bool {
+    k == HIDDEN_STRUCT_KEY
+}
+
+/// 写时复制门（设计 §4.8）：独占（rc==1）返回原句柄原地写；共享（rc>1）浅拷一份
+/// 独占副本（元素/值 retain，兄弟元素不碰——惰性 path 深拷的「只拷外层」形态）。
+/// **拷贝分支不修改原 cell 的 rc**：原引用仍由各持有者（槽等）负责释放——调用方
+/// （rt_indexset）把返回的「新槽值句柄」store_slot 替换时，槽的 drop 会释放旧引用，
+/// 其余持有者（如别名变量）rc 守恒。str 不可变，写路径不经过此门。
+fn cow_handle(h: u64) -> u64 {
+    let c = cell(h);
+    if c.rc <= 1 {
+        return h;
+    }
+    match c.pkind {
+        P_LIST => {
+            let src = unsafe { &*(c.payload as *const HnList) };
+            make_cell_list(&src.items)
+        }
+        P_DICT => {
+            let src = unsafe { &*(c.payload as *const HnDict) };
+            make_cell_dict(&src.pairs)
+        }
+        _ => h,
+    }
+}
+
+/// 句柄 → 显示串（递归；错误用完整渲染，容器递归 display）。
+pub fn handle_display(h: u64) -> String {
+    let c = cell(h);
+    match c.pkind {
+        P_STR => {
+            let b = unsafe { std::slice::from_raw_parts(c.a as *const u8, c.b as usize) };
+            return String::from_utf8_lossy(b).into_owned();
+        }
+        P_ERR => return err_render(h),
+        P_LIST => {
+            let l = unsafe { &*(c.payload as *const HnList) };
+            let inner: Vec<String> = l.items.iter().map(|&e| handle_display(e)).collect();
+            return format!("[{}]", inner.join(", "));
+        }
+        P_DICT => {
+            let d = unsafe { &*(c.payload as *const HnDict) };
+            let inner: Vec<String> = d
+                .pairs
+                .iter()
+                .filter(|(k, _)| !is_hidden_key(k))
+                .map(|(k, v)| format!("{}: {}", k, handle_display(*v)))
+                .collect();
+            return format!("{{{}}}", inner.join(", "));
+        }
+        _ => {}
+    }
+    hnv_display(c.hnv())
+}
+
+/// 递归值相等（镜像 interp Value::eq / vm values_eq 的容器臂）：标量走 cmpv_inner，
+/// str 走字节比较，list/dict 递归结构比较（dict 按键序逐对比较，与 Rust Vec== 一致——
+/// Hone dict 插入序即比较序，interp/VM 同为 Vec<(String,Value)>）。
+fn values_eq_h(a: u64, b: u64, ci: u32, pc: u32) -> bool {
+    let ca = cell(a);
+    let cb = cell(b);
+    if ca.t != cb.t {
+        return false;
+    }
+    match ca.pkind {
+        P_STR => str_eq(a, b),
+        P_LIST => {
+            let la = unsafe { &*(ca.payload as *const HnList) };
+            let lb = unsafe { &*(cb.payload as *const HnList) };
+            la.items.len() == lb.items.len()
+                && la
+                    .items
+                    .iter()
+                    .zip(lb.items.iter())
+                    .all(|(&x, &y)| values_eq_h(x, y, ci, pc))
+        }
+        P_DICT => {
+            let da = unsafe { &*(ca.payload as *const HnDict) };
+            let db = unsafe { &*(cb.payload as *const HnDict) };
+            // 隐藏键不参与相等（镜像 interp eq 的 Dict 臂：Rust Vec== 含隐藏键；
+            // 但 interp 的 dict == 直接 a==b 含 __struct__？vm values_eq 需确认——G2.1
+            // 起 struct 才有标记键，M1 dict 无隐藏键，此处过滤为防御性对齐）。
+            let pa: Vec<&(String, u64)> = da.pairs.iter().filter(|(k, _)| !is_hidden_key(k)).collect();
+            let pb: Vec<&(String, u64)> = db.pairs.iter().filter(|(k, _)| !is_hidden_key(k)).collect();
+            pa.len() == pb.len()
+                && pa.iter().zip(pb.iter()).all(|((ka, va), (kb, vb))| {
+                    ka == kb && values_eq_h(*va, *vb, ci, pc)
+                })
+        }
+        _ => cmpv_inner(7, ca.hnv(), cb.hnv(), ci, pc).t == T_BOOL_TRUE,
+    }
 }
 
 #[inline]
@@ -348,6 +513,21 @@ fn hn_help_for(code: &str, msg: &str) -> Option<String> {
                 "Hone has no implicit type conversion".to_string()
             } else if m("cannot compare `") {
                 "comparison operators work on `int` / `float` / `char`".to_string()
+            } else if m("`for in` requires") {
+                "iterate a list with `for x in list` or a dict with `for k, v in dict`".to_string()
+            } else if m("comprehension requires") {
+                "comprehend over a list with `for x in list` or a dict with `for k, v in dict`"
+                    .to_string()
+            } else if m("list index must be an int") {
+                "use an integer expression as the index, e.g. `a[0]`, `a[i]`".to_string()
+            } else if m("string length") {
+                "check the index against `len(str)`".to_string()
+            } else if m("out of bounds") {
+                "check the index against `len(list)`".to_string()
+            } else if m("destructuring requires") {
+                "destructure a list with `a, b = [..]` or a dict with `{a, b} = dict`".to_string()
+            } else if m("field access") {
+                "only error values (catch variables) support field access".to_string()
             } else {
                 return None;
             }
@@ -387,7 +567,13 @@ fn err_render(h: u64) -> String {
             .and_then(|t| t.get(e.pc as usize))
             .map(|t| (t[0] as usize, t[1] as usize, t[2] as usize));
         // help 优先用错误自带（镜像 VM 显式 help 的调用点），否则回退 hn_help_for 推导。
-        let help = e.help.clone().or_else(|| hn_help_for(code, &msg));
+        // help = Some("") 是「显式无 help」哨兵（见 err_h_explicit_no_help）：跳过回退，
+        // 镜像解释器该分支传 None 的行为。
+        let help = match e.help.as_deref() {
+            Some("") => None,
+            Some(h) => Some(h.to_string()),
+            None => hn_help_for(code, &msg),
+        };
         render_error_with_help(code, &msg, &file, &src, span, help.as_deref())
     }
 }
@@ -479,6 +665,8 @@ fn type_name(t: u64) -> &'static str {
         T_STR => "str",
         T_ERR => "error",
         T_FN => "fn",
+        T_LIST => "list",
+        T_DICT => "dict",
         _ => "?",
     }
 }
@@ -496,19 +684,6 @@ pub fn hnv_display(v: Hnv) -> String {
         T_FN => "fn".to_string(),
         _ => "null".to_string(),
     }
-}
-
-/// 句柄版 display（T_STR 需句柄取字节）。
-pub fn handle_display(h: u64) -> String {
-    let c = cell(h);
-    if c.t == T_STR {
-        let b = unsafe { std::slice::from_raw_parts(c.a as *const u8, c.b as usize) };
-        return String::from_utf8_lossy(b).into_owned();
-    }
-    if c.t == T_ERR {
-        return err_render(h);
-    }
-    hnv_display(c.hnv())
 }
 
 /// str+str 拼接（镜像 v_add 的 Str 臂）：合并字节建新句柄（rc=1）。
@@ -743,6 +918,13 @@ fn err_h_help(code: &'static str, msg: &str, ci: u32, pc: u32, help: Option<Stri
     Hnv { t: T_ERR, a: e as u64, b: 0 }
 }
 
+/// 「本分支确定无 help 行」的哨兵 help。解释器某些分支显式传 None（如 builtins.rs 的
+/// `abs` 溢出），渲染层不得回退 hn_help_for凭空补一行help——否则 nat 会比解释器多
+/// 出一行。约定：help = Some(空串) 表示「显式无 help」，err_render 据此跳过回退。
+fn err_h_explicit_no_help(code: &'static str, msg: &str, ci: u32, pc: u32) -> Hnv {
+    err_h_help(code, msg, ci, pc, Some(String::new()))
+}
+
 /// (ci,pc) 定位行文本（去尾空白）——catch e 里 `e.context` 字段取值，与 VM mk_err_with /
 /// 解释器 ErrorObj 的 context 填充一致（src.lines().nth(line-1).trim_end()）。
 fn err_context(ci: u32, pc: u32) -> String {
@@ -827,21 +1009,97 @@ pub extern "C" fn rt_throwstr(sidx: u64, ci: u64, pc: u64) -> u64 {
     err_h_ctx("H600", m, ci, pc)
 }
 
-/// 错误对象字段访问（镜像 vm.rs v_field 的 Error 臂 / 解释器）。
-/// M0 值模型无 dict/struct，非 error 值统一按 v_field 的 `other` 臂报 H001。
+/// M1：Raise 的「本分支无 help 行」哨兵 strtab 索引（u64 传参，取 u64::MAX 而非 -1，
+/// 避免 rustc 的 useless-comparison 警告；索引本身不会取到）。
+const HELP_NONE_SIDX: u64 = u64::MAX;
+
+/// M1：Raise —— 运行期直接产生一个错误句柄（错误码 / 消息 / help 三段文本均取自 strtab）。
+/// 用于镜像解释器「求值期按容器实际类型分支报错」的语义（如推导式 `for k, v in`
+/// 遇到列表源时报错）。help_sidx = HELP_NONE_SIDX（u64::MAX）表示「本分支无 help 行」，
+/// 此时不渲染 help（镜像解释器该分支传 None）。返回的错误句柄交由 lowering 的
+/// check_err 路由（有 handler→catch 槽；无→跨帧传播）。
+#[no_mangle]
+pub extern "C" fn rt_raise(code_sidx: u64, msg_sidx: u64, help_sidx: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let code = strtab_name(code_sidx as u32);
+    let msg = strtab_name(msg_sidx as u32);
+    let help = if help_sidx == HELP_NONE_SIDX {
+        // 哨兵：无 help 行。用 Some("") 阻止渲染层回退 hn_help_for凭空补 help。
+        Some(String::new())
+    } else {
+        Some(strtab_name(help_sidx as u32))
+    };
+    // err_h_help 收&'static str 的错误码，而此处 code 来自字符串表（动态）——
+    // 故先把字符串表的错误码归一为 &'static str（HnErr.code_p 契约要求静态生命周期，
+    // 直接存局部 String 的指针会在函数返回后悬垂）。错误码取值集合固定且极小
+    // （见 vm.rs 的 Raise 可用码集合），未命中时回退 H990 内部错误。
+    let code: &'static str = match code.as_str() {
+        "H001" => "H001",
+        "H002" => "H002",
+        "H009" => "H009",
+        "H010" => "H010",
+        "H999" => "H999",
+        _ => "H990",
+    };
+    let e = Box::into_raw(Box::new(HnErr {
+        code_p: code.as_ptr() as u64,
+        code_l: code.len() as u64,
+        msg: msg.into_bytes(),
+        ci,
+        pc,
+        help,
+    }));
+    make_cell(Hnv { t: T_ERR, a: e as u64, b: 0 })
+}
+
+/// 字段访问：镜像 interp `field_value` / vm `v_field` 的分支顺序——
+/// dict（G1.3：按键取字段，struct 实例同走此路径）→ error（错误属性）→ 其他类型 H001。
 /// 消费 obj 引用（rc-1）后返回新句柄（调用方持有所有权）。
 #[no_mangle]
 pub extern "C" fn rt_field(obj: u64, fsidx: u64, ci: u64, pc: u64) -> u64 {
     let (ci, pc) = (ci as u32, pc as u32);
     let field = strtab_name(fsidx as u32);
     let c = cell(obj);
+    // dict / struct 实例：按键取字段（跳过隐藏 `__struct__` 标记键），缺失报 H002 并列出实有键。
+    if c.pkind == P_DICT {
+        // 先在 borrow 存活期内取齐「命中的值句柄」或「实有键列表」，再释放 obj——
+        // 否则 cell_release 可能析构 cell，其 payload 随即失效（use-after-free）。
+        let d = unsafe { &*(c.payload as *const HnDict) };
+        let found = d
+            .pairs
+            .iter()
+            .find(|(k, _)| !is_hidden_key(k) && *k == field)
+            .map(|(_, v)| *v);
+        let keys = if found.is_none() {
+            d.pairs
+                .iter()
+                .filter(|(k, _)| !is_hidden_key(k))
+                .map(|(k, _)| k.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            String::new()
+        };
+        cell_release(obj);
+        return match found {
+            Some(v) => rt_retain(v),
+            None => make_cell(err_h_help(
+                "H002",
+                &format!("unknown field `{}` (dict/struct has {})", field, keys),
+                ci,
+                pc,
+                Some("check the field name, or the struct definition".to_string()),
+            )),
+        };
+    }
     if c.t != T_ERR {
         cell_release(obj);
-        return make_cell(err_h(
+        return make_cell(err_h_help(
             "H001",
             &format!("field access `.{}` requires an `error` value, got `{}`", field, type_name(c.t)),
             ci,
             pc,
+            Some("only error values (catch variables) support field access".to_string()),
         ));
     }
     // code 由 (code_p,code_l) 还原为 &'static str（不借用 e），msg/位置为自持值——
@@ -870,11 +1128,12 @@ pub extern "C" fn rt_field(obj: u64, fsidx: u64, ci: u64, pc: u64) -> u64 {
         "line" => make_cell(Hnv::int(line as i64)),
         "col" => make_cell(Hnv::int(col as i64)),
         "context" => make_cell_str(ctx.into_bytes()),
-        other => make_cell(err_h(
+        other => make_cell(err_h_help(
             "H002",
             &format!("unknown error field `{}`", other),
             ci,
             pc,
+            Some("error fields: code, message, file, line, col, context".to_string()),
         )),
     }
 }
@@ -1120,6 +1379,10 @@ fn is_m0_builtin(name: &str) -> bool {
         name,
         "print"
             | "len"
+            | "append"
+            | "keys"
+            | "values"
+            | "has_key"
             | "to_str"
             | "to_int"
             | "to_float"
@@ -1127,6 +1390,9 @@ fn is_m0_builtin(name: &str) -> bool {
             | "is_float"
             | "is_bool"
             | "is_str"
+            | "is_list"
+            | "is_dict"
+            | "is_null"
             | "type_of"
             | "abs"
             | "max"
@@ -1177,15 +1443,138 @@ fn call_builtin(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
                 b_arg_err(name, 1, nargs, ci, pc)
             } else {
                 let c = cell(a0());
-                if c.t == T_STR {
-                    Hnv::int(c.b as i64)
-                } else {
-                    err_h(
+                match c.pkind {
+                    P_STR => Hnv::int(c.b as i64),
+                    P_LIST => {
+                        let l = unsafe { &*(c.payload as *const HnList) };
+                        Hnv::int(l.items.len() as i64)
+                    }
+                    P_DICT => {
+                        let d = unsafe { &*(c.payload as *const HnDict) };
+                        Hnv::int(
+                            d.pairs
+                                .iter()
+                                .filter(|(k, _)| !is_hidden_key(k))
+                                .count() as i64,
+                        )
+                    }
+                    _ => err_h_help(
                         "H001",
-                        &format!("`len` expects a string, list, dict, or bytes, got `{}`", type_name(c.t)),
+                        &format!(
+                            "`len` expects a string, list, dict, or bytes, got `{}`",
+                            type_name(c.t)
+                        ),
                         ci,
                         pc,
+                        Some("`len` returns the byte length of a string/bytes, or the element count of a list/dict".to_string()),
+                    ),
+                }
+            }
+        }
+        "append" => {
+            if nargs != 2 {
+                b_arg_err(name, 2, nargs, ci, pc)
+            } else {
+                // rt_append 借用参数（内部 retain 元素与新值），完成后显式 drop 参数再返回。
+                let r = rt_append(a0(), a1(), ci as u64, pc as u64);
+                drop_args(argptr, nargs);
+                return r;
+            }
+        }
+        "keys" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                let c = cell(a0());
+                if c.pkind != P_DICT {
+                    err_h_help(
+                        "H001",
+                        &format!("`keys` expects a dict, got `{}`", type_name(c.t)),
+                        ci,
+                        pc,
+                        Some("pass a dict as the argument".to_string()),
                     )
+                } else {
+                    let d = unsafe { &*(c.payload as *const HnDict) };
+                    let keys: Vec<u64> = d
+                        .pairs
+                        .iter()
+                        .filter(|(k, _)| !is_hidden_key(k))
+                        .map(|(k, _)| make_cell_str(k.clone().into_bytes()))
+                        .collect();
+                    let cell = make_cell_list(&keys);
+                    for &k in &keys {
+                        cell_release(k);
+                    }
+                    drop_args(argptr, nargs);
+                    return cell;
+                }
+            }
+        }
+        "values" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                let c = cell(a0());
+                if c.pkind != P_DICT {
+                    err_h_help(
+                        "H001",
+                        &format!("`values` expects a dict, got `{}`", type_name(c.t)),
+                        ci,
+                        pc,
+                        Some("pass a dict as the argument".to_string()),
+                    )
+                } else {
+                    let d = unsafe { &*(c.payload as *const HnDict) };
+                    let vals: Vec<u64> = d
+                        .pairs
+                        .iter()
+                        .filter(|(k, _)| !is_hidden_key(k))
+                        .map(|(_, v)| *v)
+                        .collect();
+                    let cell = make_cell_list(&vals);
+                    drop_args(argptr, nargs);
+                    return cell;
+                }
+            }
+        }
+        "has_key" => {
+            if nargs != 2 {
+                b_arg_err(name, 2, nargs, ci, pc)
+            } else {
+                let c = cell(a0());
+                if c.pkind != P_DICT {
+                    err_h_help(
+                        "H001",
+                        &format!("`has_key` expects a dict, got `{}`", type_name(c.t)),
+                        ci,
+                        pc,
+                        Some("pass a dict as the first argument and a key string as the second".to_string()),
+                    )
+                } else {
+                    let kc = cell(a1());
+                    if kc.t != T_STR {
+                        err_h_help(
+                            "H001",
+                            &format!(
+                                "`{}` expects a string for argument 2, got `{}`",
+                                name,
+                                type_name(kc.t)
+                            ),
+                            ci,
+                            pc,
+                            Some("pass a string value".to_string()),
+                        )
+                    } else {
+                        let d = unsafe { &*(c.payload as *const HnDict) };
+                        let k = String::from_utf8_lossy(str_bytes(a1())).into_owned();
+                        Hnv::bool_(
+                            d.pairs
+                                .iter()
+                                .filter(|(ek, _)| !is_hidden_key(ek))
+                                .any(|(ek, _)| *ek == k),
+                        )
+                    }
                 }
             }
         }
@@ -1247,11 +1636,12 @@ fn call_builtin(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
                         let t = s.trim();
                         let digits = t.strip_prefix('-').unwrap_or(t);
                         if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
-                            err_h(
+                            err_h_help(
                                 "H006",
                                 &format!("cannot convert `{}` to `int`: not a pure digit string", s),
                                 ci,
                                 pc,
+                                Some("`to_int` on a string requires digits only (optional leading `-`)".to_string()),
                             )
                         } else {
                             match t.parse::<i64>() {
@@ -1265,11 +1655,12 @@ fn call_builtin(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
                             }
                         }
                     }
-                    other => err_h(
+                    other => err_h_help(
                         "H001",
                         &format!("cannot convert `{}` to `int`", type_name(other)),
                         ci,
                         pc,
+                        Some("`to_int` accepts `int`, `float` or a pure-digit `str`".to_string()),
                     ),
                 }
             }
@@ -1286,19 +1677,21 @@ fn call_builtin(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
                         let s = String::from_utf8_lossy(str_bytes(a0())).into_owned();
                         match s.trim().parse::<f64>() {
                             Ok(f) => Hnv::float(f),
-                            Err(_) => err_h(
+                            Err(_) => err_h_help(
                                 "H007",
                                 &format!("cannot convert `{}` to `float`: invalid format", s),
                                 ci,
                                 pc,
+                                Some("`to_float` on a string requires a number format like `2.718`".to_string()),
                             ),
                         }
                     }
-                    other => err_h(
+                    other => err_h_help(
                         "H001",
                         &format!("cannot convert `{}` to `float`", type_name(other)),
                         ci,
                         pc,
+                        Some("`to_float` accepts `int`, `float` or a numeric `str`".to_string()),
                     ),
                 }
             }
@@ -1332,6 +1725,27 @@ fn call_builtin(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
                 Hnv::bool_(cell(a0()).t == T_STR)
             }
         }
+        "is_list" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                Hnv::bool_(cell(a0()).t == T_LIST)
+            }
+        }
+        "is_dict" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                Hnv::bool_(cell(a0()).t == T_DICT)
+            }
+        }
+        "is_null" => {
+            if nargs != 1 {
+                b_arg_err(name, 1, nargs, ci, pc)
+            } else {
+                Hnv::bool_(cell(a0()).t == T_NULL)
+            }
+        }
         "type_of" => {
             if nargs != 1 {
                 b_arg_err(name, 1, nargs, ci, pc)
@@ -1349,14 +1763,17 @@ fn call_builtin(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
                 match c.t {
                     T_INT => match (c.a as i64).checked_abs() {
                         Some(v) => Hnv::int(v),
-                        None => err_h("H010", "`abs` overflow on i64::MIN", ci, pc),
+                        // 注意：解释器 builtins.rs 该分支 help 传 None（无 help 行），
+                        // 不得用 vm_help_for 的 H010 兜底文案——那会让 nat 多出一行 help。
+                        None => err_h_explicit_no_help("H010", "`abs` overflow on i64::MIN", ci, pc),
                     },
                     T_FLOAT => Hnv::float(f64::from_bits(c.a).abs()),
-                    other => err_h(
+                    other => err_h_help(
                         "H001",
                         &format!("`abs` expects a number, got `{}`", type_name(other)),
                         ci,
                         pc,
+                        Some("pass an `int` or `float`".to_string()),
                     ),
                 }
             }
@@ -1496,6 +1913,11 @@ pub extern "C" fn rt_binop(op: u64, x: u64, y: u64, ci: u64, pc: u64) -> u64 {
             let eq = str_eq(x, y);
             make_cell(Hnv::bool_(if op == 7 { eq } else { !eq }))
         }
+        // list/dict ==/!=（v_eq 容器臂）：递归结构比较（M1），结果 bool 建新句柄。
+        7 | 8 if (cx.t == T_LIST || cx.t == T_DICT) && cx.t == cy.t => {
+            let eq = values_eq_h(x, y, ci, pc);
+            make_cell(Hnv::bool_(if op == 7 { eq } else { !eq }))
+        }
         _ => {
             let h = match op {
                 0..=4 => arith_inner(op, cx.hnv(), cy.hnv(), ci, pc),
@@ -1549,6 +1971,404 @@ pub extern "C" fn rt_truthy(h: u64) -> u64 {
 #[no_mangle]
 pub extern "C" fn rt_is_err(h: u64) -> u64 {
     u64::from(cell(h).t == T_ERR)
+}
+
+// ── M1：list/dict 承载（G1.2/G1.3）与 RC+COW 写门（G1.1） ──
+// 语义逐条镜像 vm.rs：v_index / v_index_set / v_destruct_get / v_len / v_keys /
+// IterCheck 执行臂；所有权协议：
+//   * rt_newlist/rt_newdict：从连续参数区读句柄（借用），retain 进新 cell，返回新句柄
+//   * rt_index/rt_destructget/rt_len/rt_keys：借用，返回新句柄（元素 retain / null / err）
+//   * rt_indexset：借用 obj/key/val，cow 后原地写，返回「新槽值句柄」（无条件替换协议：
+//     调用方 store_slot(slot, r)——原地写时内部已 retain，替换后 rc 守恒）
+//   * rt_append：借用，返回新 list 句柄（值语义，不修改原值）
+
+/// dict 键 String 化（镜像 v_index 的 Dict 臂）：Str 原样、Int to_string、其他 H001。
+fn dict_key(h: u64, ci: u32, pc: u32) -> Result<String, Hnv> {
+    let c = cell(h);
+    match c.t {
+        T_STR => Ok(String::from_utf8_lossy(str_bytes(h)).into_owned()),
+        T_INT => Ok((c.a as i64).to_string()),
+        other => Err(err_h(
+            "H001",
+            &format!("字典键类型不支持: {}", type_name(other)),
+            ci,
+            pc,
+        )),
+    }
+}
+
+/// 建 list（NewList lowering）：ptr 指向 n 个连续句柄（借用），retain 建 cell。
+#[no_mangle]
+pub extern "C" fn rt_newlist(ptr: u64, n: u64, _ci: u64, _pc: u64) -> u64 {
+    let items: Vec<u64> = (0..n as usize).map(|i| arg_at(ptr, i)).collect();
+    make_cell_list(&items)
+}
+
+/// 建 dict（NewDict lowering）：ptr 指向 n 对连续 (key, val) 句柄；键转 String（镜像
+/// NewDict 执行臂：Str 原样、其他 value_to_str——与 v_index 的「字典键类型不支持」不同，
+/// 字面量构造允许任意键转串）。
+#[no_mangle]
+pub extern "C" fn rt_newdict(ptr: u64, n: u64, _ci: u64, _pc: u64) -> u64 {
+    let mut pairs: Vec<(String, u64)> = Vec::with_capacity(n as usize);
+    for i in 0..n as usize {
+        let kh = arg_at(ptr, 2 * i);
+        let vh = arg_at(ptr, 2 * i + 1);
+        let k = {
+            let c = cell(kh);
+            if c.t == T_STR {
+                String::from_utf8_lossy(str_bytes(kh)).into_owned()
+            } else {
+                handle_display(kh)
+            }
+        };
+        pairs.push((k, vh));
+    }
+    make_cell_dict(&pairs)
+}
+
+/// 索引读取（Index lowering，镜像 v_index）：list 按 int（越界 H001）、str 按码点索引
+/// （返回单字符 str）、dict 按键（缺键返回 null）；其他类型 H001。
+/// 借用 obj/key，返回新句柄（元素 retain / null / err）。
+#[no_mangle]
+pub extern "C" fn rt_index(obj: u64, key: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let c = cell(obj);
+    match c.pkind {
+        P_LIST => {
+            let kc = cell(key);
+            if kc.t != T_INT {
+                return make_cell(err_h(
+                    "H001",
+                    &format!("list index must be an int, got `{}`", handle_display(key)),
+                    ci,
+                    pc,
+                ));
+            }
+            let idx = kc.a as i64;
+            let l = unsafe { &*(c.payload as *const HnList) };
+            if idx < 0 || idx as usize >= l.items.len() {
+                return make_cell(err_h(
+                    "H001",
+                    &format!("index {} out of bounds (list length {})", idx, l.items.len()),
+                    ci,
+                    pc,
+                ));
+            }
+            rt_retain(l.items[idx as usize])
+        }
+        P_STR => {
+            let kc = cell(key);
+            if kc.t != T_INT {
+                return make_cell(err_h(
+                    "H001",
+                    &format!("list index must be an int, got `{}`", handle_display(key)),
+                    ci,
+                    pc,
+                ));
+            }
+            let idx = kc.a as i64;
+            let s = String::from_utf8_lossy(str_bytes(obj)).into_owned();
+            let chars: Vec<char> = s.chars().collect();
+            if idx < 0 || idx as usize >= chars.len() {
+                return make_cell(err_h(
+                    "H001",
+                    &format!("index {} out of bounds (string length {})", idx, chars.len()),
+                    ci,
+                    pc,
+                ));
+            }
+            make_cell_str(chars[idx as usize].to_string().into_bytes())
+        }
+        P_DICT => match dict_key(key, ci, pc) {
+            Ok(k) => {
+                let d = unsafe { &*(c.payload as *const HnDict) };
+                for (kk, vv) in &d.pairs {
+                    if *kk == k {
+                        return rt_retain(*vv);
+                    }
+                }
+                make_cell(Hnv::null())
+            }
+            Err(e) => make_cell(e),
+        },
+        _ => make_cell(err_h(
+            "H001",
+            &format!("cannot index a value of type `{}`", handle_display(obj)),
+            ci,
+            pc,
+        )),
+    }
+}
+
+/// 索引赋值（IndexSet lowering，镜像 v_index_set）：cow 门 + list 槽替换 / dict 键写或
+/// push。借用 obj/key/val，返回「新槽值句柄」（无条件替换协议，见文件头注释）。
+#[no_mangle]
+pub extern "C" fn rt_indexset(obj: u64, key: u64, val: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let c = cell(obj);
+    match c.pkind {
+        P_LIST => {
+            let kc = cell(key);
+            if kc.t != T_INT {
+                return make_cell(err_h(
+                    "H001",
+                    &format!("list index must be an int, got `{}`", handle_display(key)),
+                    ci,
+                    pc,
+                ));
+            }
+            let idx = kc.a as i64;
+            let len = {
+                let l = unsafe { &*(c.payload as *const HnList) };
+                l.items.len()
+            };
+            if idx < 0 || idx as usize >= len {
+                return make_cell(err_h(
+                    "H001",
+                    &format!("index {} out of bounds (list length {})", idx, len),
+                    ci,
+                    pc,
+                ));
+            }
+            let mut owned = cow_handle(obj);
+            if owned == obj {
+                owned = rt_retain(owned); // 原地写：补引用，供调用方 store_slot 替换守恒
+            }
+            unsafe {
+                let l = &mut *((owned as *mut HnCell).read().payload as *mut HnList);
+                cell_release(l.items[idx as usize]);
+                l.items[idx as usize] = rt_retain(val);
+            }
+            owned
+        }
+        P_DICT => match dict_key(key, ci, pc) {
+            Ok(k) => {
+                let mut owned = cow_handle(obj);
+                if owned == obj {
+                    owned = rt_retain(owned);
+                }
+                unsafe {
+                    let d = &mut *((owned as *mut HnCell).read().payload as *mut HnDict);
+                    match d.pairs.iter_mut().find(|(kk, _)| *kk == k) {
+                        Some((_, vv)) => {
+                            cell_release(*vv);
+                            *vv = rt_retain(val);
+                        }
+                        None => d.pairs.push((k, rt_retain(val))),
+                    }
+                }
+                owned
+            }
+            Err(e) => make_cell(e),
+        },
+        _ => make_cell(err_h(
+            "H001",
+            &format!("cannot index a value of type `{}`", handle_display(obj)),
+            ci,
+            pc,
+        )),
+    }
+}
+
+/// 解构取值（DestructGet lowering，镜像 interp DestructAssign 语义：形态区分 + 变量数文案）。
+/// 借用 obj/key，返回新句柄（元素 retain / err）；nvars = 目标变量数，is_dict = `{a, b} = dict` 形态。
+#[no_mangle]
+pub extern "C" fn rt_destructget(obj: u64, key: u64, nvars: u64, is_dict: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let is_dict = is_dict != 0;
+    let nvars = nvars as usize;
+    let c = cell(obj);
+    match c.pkind {
+        P_LIST => {
+            if is_dict {
+                return make_cell(err_h_help(
+                    "H001",
+                    "dict destructuring `{...} =` requires a dict value, got a list",
+                    ci,
+                    pc,
+                    Some("use `a, b = list` for list destructuring".to_string()),
+                ));
+            }
+            let kc = cell(key);
+            if kc.t != T_INT {
+                return make_cell(err_h_help(
+                    "H001",
+                    &format!("list index must be an int, got `{}`", handle_display(key)),
+                    ci,
+                    pc,
+                    Some("use an integer expression as the index, e.g. `a[0]`, `a[i]`".to_string()),
+                ));
+            }
+            let idx = kc.a as i64;
+            let l = unsafe { &*(c.payload as *const HnList) };
+            if idx < 0 || idx as usize >= l.items.len() {
+                return make_cell(err_h_help(
+                    "H001",
+                    &format!(
+                        "destructuring a list of {} element(s) into {} variable(s)",
+                        l.items.len(),
+                        nvars
+                    ),
+                    ci,
+                    pc,
+                    Some("the list must have at least as many elements as the variables".to_string()),
+                ));
+            }
+            rt_retain(l.items[idx as usize])
+        }
+        P_DICT => {
+            if !is_dict {
+                return make_cell(err_h_help(
+                    "H001",
+                    "list destructuring `a, b =` requires a list value, got a dict",
+                    ci,
+                    pc,
+                    Some("use `{a, b} = dict` for dict destructuring".to_string()),
+                ));
+            }
+            match dict_key(key, ci, pc) {
+                Ok(k) => {
+                    let d = unsafe { &*(c.payload as *const HnDict) };
+                    for (kk, vv) in &d.pairs {
+                        if *kk == k {
+                            return rt_retain(*vv);
+                        }
+                    }
+                    make_cell(err_h_help(
+                        "H002",
+                        &format!("dict has no key `{}` for destructuring", k),
+                        ci,
+                        pc,
+                        Some("check the key name, or the dict value being destructured".to_string()),
+                    ))
+                }
+                Err(e) => make_cell(e),
+            }
+        }
+        _ => make_cell(err_h_help(
+            "H001",
+            &format!(
+                "destructuring requires a list or dict value, got `{}`",
+                // 用类型名而非值显示——镜像解释器 field_value/destructuring 分支的
+                // other.type_name()（值显示会写成 `5`，与解释器的 `int` 不一致）。
+                type_name(c.t)
+            ),
+            ci,
+            pc,
+            Some("destructure a list with `a, b = [..]` or a dict with `{a, b} = dict`".to_string()),
+        )),
+    }
+}
+
+/// 长度（Len 指令 lowering，镜像 v_len）：list 元素数 / dict 非隐藏键数 / str 字节长。
+#[no_mangle]
+pub extern "C" fn rt_len(v: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let c = cell(v);
+    match c.pkind {
+        P_STR => make_cell(Hnv::int(c.b as i64)),
+        P_LIST => {
+            let l = unsafe { &*(c.payload as *const HnList) };
+            make_cell(Hnv::int(l.items.len() as i64))
+        }
+        P_DICT => {
+            let d = unsafe { &*(c.payload as *const HnDict) };
+            let n = d.pairs.iter().filter(|(k, _)| !is_hidden_key(k)).count();
+            make_cell(Hnv::int(n as i64))
+        }
+        _ => make_cell(err_h_help(
+            "H001",
+            &format!(
+                "`len` expects a string, list, dict, or bytes, got `{}`",
+                type_name(c.t)
+            ),
+            ci,
+            pc,
+            Some("`len` returns the byte length of a string/bytes, or the element count of a list/dict".to_string()),
+        )),
+    }
+}
+
+/// 键列表（Keys lowering，镜像 v_keys）：dict → list[Str]（隐藏键过滤）；其他 H001。
+#[no_mangle]
+pub extern "C" fn rt_keys(v: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let c = cell(v);
+    if c.pkind != P_DICT {
+        return make_cell(err_h(
+            "H001",
+            &format!("`keys` expects a dict, got `{}`", handle_display(v)),
+            ci,
+            pc,
+        ));
+    }
+    let d = unsafe { &*(c.payload as *const HnDict) };
+    let keys: Vec<u64> = d
+        .pairs
+        .iter()
+        .filter(|(k, _)| !is_hidden_key(k))
+        .map(|(k, _)| make_cell_str(k.clone().into_bytes()))
+        .collect();
+    // make_cell_list 内部 retain 每个元素；keys 的原始引用须显式释放（否则 rc+1 泄漏）。
+    let cell = make_cell_list(&keys);
+    for &k in &keys {
+        cell_release(k);
+    }
+    cell
+}
+
+#[no_mangle]
+pub extern "C" fn rt_islist(h: u64) -> u64 {
+    u64::from(cell(h).t == T_LIST)
+}
+
+#[no_mangle]
+pub extern "C" fn rt_isdict(h: u64) -> u64 {
+    u64::from(cell(h).t == T_DICT)
+}
+
+#[no_mangle]
+pub extern "C" fn rt_isnull(h: u64) -> u64 {
+    u64::from(cell(h).t == T_NULL)
+}
+
+/// 迭代源检查（IterCheck lowering，镜像 VM 执行臂）：非 list/dict → H001。
+/// is_comp=1 为推导式（"comprehension requires..."），0 为 `for in`。
+#[no_mangle]
+pub extern "C" fn rt_itercheck(src: u64, is_comp: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let c = cell(src);
+    if c.t != T_LIST && c.t != T_DICT {
+        let what = if is_comp != 0 { "comprehension" } else { "`for in`" };
+        return make_cell(err_h(
+            "H001",
+            &format!("{} requires a list or dict, got `{}`", what, type_name(c.t)),
+            ci,
+            pc,
+        ));
+    }
+    make_cell(Hnv::null())
+}
+
+/// append 内置（镜像 builtins.rs append）：值语义返回新 list（元素 retain + 新值 retain），
+/// 不修改原值；非 list → H001 + help。
+#[no_mangle]
+pub extern "C" fn rt_append(list: u64, val: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let c = cell(list);
+    if c.pkind != P_LIST {
+        return make_cell(err_h_help(
+            "H001",
+            &format!("`append` expects a list, got `{}`", type_name(c.t)),
+            ci,
+            pc,
+            Some("use `l = append(l, x)` to add `x` to the tail of list `l`".to_string()),
+        ));
+    }
+    let l = unsafe { &*(c.payload as *const HnList) };
+    let mut items: Vec<u64> = l.items.clone(); // 借用句柄值拷贝（make_cell_list 内部 retain）
+    items.push(val);
+    make_cell_list(&items)
 }
 
 /// 产物入口：ERR → rt_unwind；否则 drop 后退出码 0（与 hone run 一致）。
@@ -1848,6 +2668,224 @@ mod tests {
             "error[H009]: division by zero\n  --> tab.hn:2:8\n2 |     x = 1 / 0;\n  |           ^\nhelp: check the divisor before dividing\n"
         );
         cell_release(r);
+        assert_eq!(heap_live(), base);
+    }
+
+    // ── M1：list/dict 承载 + RC+COW 写门（G1.1/G1.2/G1.3） ──
+    // 所有权契约：rt_newlist/rt_newdict/rt_index/rt_indexset/rt_len/rt_keys/rt_append/
+    // rt_destructget 均「借用」输入（调用方保留引用、负责释放）；rt_binop/rt_unop
+    // 「消费」输入（调用方不得再释放）。测试严格按此管理句柄。
+
+    #[test]
+    fn list_basic_and_cow_alias() {
+        // G1.2 + G1.1：字面量建 list、索引读写、b=a 别名值语义（写 a 不污染 b）。
+        let _g = locked();
+        let base = heap_live();
+        let (h1, h2, h3) = (rt_i64(1), rt_i64(2), rt_i64(3));
+        let items = [h1, h2, h3];
+        let a = rt_newlist(items.as_ptr() as u64, 3, 0, 0);
+        assert_eq!(handle_display(a), "[1, 2, 3]");
+        assert_eq!(cell(a).t, T_LIST);
+        // b = a（Move retain）：rc=2。
+        let b = rt_retain(a);
+        assert_eq!(cell(a).rc, 2);
+        // a[0] = 100：cow 拷贝（rc=2>1），槽替换后 a 独占、b 原值不变。
+        let (h0, h100) = (rt_i64(0), rt_i64(100));
+        let new_a = rt_indexset(a, h0, h100, 0, 0);
+        assert_ne!(new_a, a, "共享写必须 COW 拷贝出新句柄");
+        assert_eq!(handle_display(new_a), "[100, 2, 3]");
+        assert_eq!(handle_display(b), "[1, 2, 3]");
+        // cow 拷贝不修改原 cell rc：a 槽 + b 槽 = 2（拷贝时仅值 retain 进新 cell）。
+        assert_eq!(cell(a).rc, 2, "原句柄仍由 a/b 两槽持有");
+        cell_release(new_a);
+        cell_release(b);
+        cell_release(a);
+        cell_release(h1);
+        cell_release(h2);
+        cell_release(h3);
+        cell_release(h0);
+        cell_release(h100);
+        assert_eq!(heap_live(), base);
+    }
+
+    #[test]
+    fn list_cow_inplace_when_exclusive() {
+        // G1.1：独占（rc==1）写路径原地改，不拷贝（cow 门放行）。
+        let _g = locked();
+        let base = heap_live();
+        let (h1, h2) = (rt_i64(1), rt_i64(2));
+        let a = rt_newlist([h1, h2].as_ptr() as u64, 2, 0, 0);
+        assert_eq!(cell(a).rc, 1);
+        let (h0, h9) = (rt_i64(0), rt_i64(9));
+        let r = rt_indexset(a, h0, h9, 0, 0);
+        assert_eq!(r, a, "独占写返回原句柄");
+        assert_eq!(handle_display(a), "[9, 2]");
+        // 原地写路径 rt_indexset 内部 retain 补引用（无条件替换协议），须按「槽替换」释放两次。
+        cell_release(r);
+        cell_release(a);
+        cell_release(h1);
+        cell_release(h2);
+        cell_release(h0);
+        cell_release(h9);
+        assert_eq!(heap_live(), base);
+    }
+
+    #[test]
+    fn list_index_errors() {
+        // G1.2：越界 / 非 int 键 / 类型错误文案对齐。
+        let _g = locked();
+        let base = heap_live();
+        let (h1, h2) = (rt_i64(1), rt_i64(2));
+        let a = rt_newlist([h1, h2].as_ptr() as u64, 2, 0, 0);
+        let h5 = rt_i64(5);
+        let e1 = rt_index(a, h5, 0, 0);
+        assert_eq!(cell(e1).t, T_ERR);
+        assert!(err_render(e1).contains("index 5 out of bounds (list length 2)"));
+        cell_release(e1);
+        cell_release(h5);
+        // 非 int 键（脚本不可达，checker 静态拒绝；防御性对齐）。
+        let ks = make_cell_str(b"k".to_vec());
+        let e2 = rt_index(a, ks, 0, 0);
+        assert!(err_render(e2).contains("list index must be an int, got `k`"));
+        cell_release(e2);
+        cell_release(ks);
+        // 非容器索引。
+        let (h1b, h0b) = (rt_i64(1), rt_i64(0));
+        let e3 = rt_index(h1b, h0b, 0, 0);
+        assert!(err_render(e3).contains("cannot index a value of type `1`"));
+        cell_release(e3);
+        cell_release(h1b);
+        cell_release(h0b);
+        cell_release(a);
+        cell_release(h1);
+        cell_release(h2);
+        assert_eq!(heap_live(), base);
+    }
+
+    #[test]
+    fn dict_basic_and_keys() {
+        // G1.3：NewDict 字面量、len、keys、==（按序结构比较）、display。
+        let _g = locked();
+        let base = heap_live();
+        let (kx, ky) = (make_cell_str(b"x".to_vec()), make_cell_str(b"y".to_vec()));
+        let (v10, v20) = (rt_i64(10), rt_i64(20));
+        let d = rt_newdict([kx, v10, ky, v20].as_ptr() as u64, 2, 0, 0);
+        assert_eq!(handle_display(d), "{x: 10, y: 20}");
+        assert_eq!(cell(d).t, T_DICT);
+        let len = rt_len(d, 0, 0);
+        assert_eq!(cell(len).t, T_INT);
+        cell_release(len);
+        // keys → ["x", "y"]
+        let ks = rt_keys(d, 0, 0);
+        assert_eq!(handle_display(ks), "[x, y]");
+        cell_release(ks);
+        // dict 相等（插入序一致 → 相等）；rt_binop 消费 d/d2。
+        let (v10b, v20b) = (rt_i64(10), rt_i64(20));
+        let d2 = rt_newdict([kx, v10b, ky, v20b].as_ptr() as u64, 2, 0, 0);
+        let eq = rt_binop(7, d, d2, 0, 0);
+        assert_eq!(handle_display(eq), "true");
+        cell_release(eq);
+        // 键句柄 dict 不 retain（键 String 化），值句柄 dict retain——全部显式释放。
+        cell_release(kx);
+        cell_release(ky);
+        cell_release(v10);
+        cell_release(v20);
+        cell_release(v10b);
+        cell_release(v20b);
+        assert_eq!(heap_live(), base);
+    }
+
+    #[test]
+    fn dict_cow_write() {
+        // G1.3 + G1.1：dict 写（键写/新增）先过 cow 门；共享写不污染别名。
+        let _g = locked();
+        let base = heap_live();
+        let (kx, ky, kz) = (
+            make_cell_str(b"x".to_vec()),
+            make_cell_str(b"y".to_vec()),
+            make_cell_str(b"z".to_vec()),
+        );
+        let (v1, v2, v3, v9) = (rt_i64(1), rt_i64(2), rt_i64(3), rt_i64(9));
+        let d = rt_newdict([kx, v1, ky, v2].as_ptr() as u64, 2, 0, 0);
+        let alias = rt_retain(d);
+        let new_d = rt_indexset(d, kz, v3, 0, 0);
+        assert_ne!(new_d, d, "共享写必须 COW 拷贝");
+        assert_eq!(handle_display(new_d), "{x: 1, y: 2, z: 3}");
+        assert_eq!(handle_display(alias), "{x: 1, y: 2}");
+        // 独占写原地（r2==new_d，内部 retain 补引用——按槽替换释放两次：r2 + new_d）。
+        let r2 = rt_indexset(new_d, kz, v9, 0, 0);
+        assert_eq!(r2, new_d);
+        assert_eq!(handle_display(new_d), "{x: 1, y: 2, z: 9}");
+        cell_release(r2);
+        cell_release(new_d);
+        cell_release(alias);
+        cell_release(d);
+        cell_release(kx);
+        cell_release(ky);
+        cell_release(kz);
+        cell_release(v1);
+        cell_release(v2);
+        cell_release(v3);
+        cell_release(v9);
+        assert_eq!(heap_live(), base);
+    }
+
+    #[test]
+    fn append_returns_new_list() {
+        // G1.2：append 值语义（返回新 list，原值不变）。
+        let _g = locked();
+        let base = heap_live();
+        let (h1, h2, h3) = (rt_i64(1), rt_i64(2), rt_i64(3));
+        let a = rt_newlist([h1, h2].as_ptr() as u64, 2, 0, 0);
+        let r = rt_append(a, h3, 0, 0);
+        assert_eq!(handle_display(r), "[1, 2, 3]");
+        assert_eq!(handle_display(a), "[1, 2]");
+        // 非 list → H001 + help。
+        let (n1, n2) = (rt_i64(1), rt_i64(2));
+        let e = rt_append(n1, n2, 0, 0);
+        assert!(err_render(e).contains("`append` expects a list, got `int`"));
+        cell_release(e);
+        cell_release(n1);
+        cell_release(n2);
+        cell_release(r);
+        cell_release(a);
+        cell_release(h1);
+        cell_release(h2);
+        cell_release(h3);
+        assert_eq!(heap_live(), base);
+    }
+
+    #[test]
+    fn destructget_semantics() {
+        // G1.2：解构取值（形态区分 + 变量数 + 缺键文案）。
+        let _g = locked();
+        let base = heap_live();
+        let (h7, h8) = (rt_i64(7), rt_i64(8));
+        let l = rt_newlist([h7, h8].as_ptr() as u64, 2, 0, 0);
+        let h1 = rt_i64(1);
+        let v = rt_destructget(l, h1, 2, 0, 0, 0);
+        assert_eq!(handle_display(v), "8");
+        cell_release(v);
+        cell_release(h1);
+        // 越界：`x, y = [1]` → 报变量数。
+        let o1 = rt_i64(1);
+        let l1 = rt_newlist([o1].as_ptr() as u64, 1, 0, 0);
+        let h1b = rt_i64(1);
+        let e = rt_destructget(l1, h1b, 2, 0, 0, 0);
+        assert!(err_render(e).contains("destructuring a list of 1 element(s) into 2 variable(s)"));
+        cell_release(e);
+        cell_release(h1b);
+        cell_release(l1);
+        cell_release(o1);
+        // dict 形态收到 list。
+        let h0 = rt_i64(0);
+        let e2 = rt_destructget(l, h0, 2, 1, 0, 0);
+        assert!(err_render(e2).contains("dict destructuring `{...} =` requires a dict value, got a list"));
+        cell_release(e2);
+        cell_release(h0);
+        cell_release(l);
+        cell_release(h7);
+        cell_release(h8);
         assert_eq!(heap_live(), base);
     }
 }

@@ -69,7 +69,7 @@ pub enum Instr {
     IterCheck(usize, bool),      // src, is_comp（迭代源必须是 list/dict，否则报错）
     Index(usize, usize, usize),    // dst, obj, key
     IndexSet(usize, usize, usize), // obj, key, val
-    DestructGet(usize, usize, usize), // dst, obj, key（解构专用：列表越界/字典缺键报错）
+    DestructGet(usize, usize, usize, usize, bool), // dst, obj, key, nvars, is_dict（解构专用：列表越界/字典缺键报错；nvars/is_dict 用于镜像解释器文案）
     Field(usize, usize, String),   // dst, obj, field
     Len(usize, usize),             // dst, src
     Keys(usize, usize),            // dst, src(dict)
@@ -92,6 +92,12 @@ pub enum Instr {
     TryPop,                       // 正常路径弹出 try 栈
     Throw(usize),                 // reg 持有被抛值（str→H600，error 原样）
     ThrowStr(String),             // 直接抛字面字符串 → H600
+    /// 运行期直接产生一个错误并走错误路由（抛Error 值，由 try_catch / exec 传播）。
+    /// 用途：解释器在求值期按容器实际类型分支报错（如「推导式 `for k, v in` 要求 dict，
+    /// 得到 list」），VM 需在对应分支发射本指令才能逐字节对齐——此前 VM 缺该路径，
+    /// 双变量推导式在列表源上静默退化为单变量，与解释器分叉（G1.6 审计发现）。
+    /// 字段：错误码、消息、help（None = 该分支无 help 行）。
+    Raise(&'static str, String, Option<String>),
     DebugPrint(usize),            // reg
     Breakpoint,                   // 无操作数
     Nop,
@@ -493,13 +499,33 @@ impl Compiler {
                 }
             }
             Stmt::IndexAssign { target, value, .. } => {
-                if let Expr::Index { obj, index, .. } = target {
-                    let ro = self.compile_expr(&**obj);
-                    let rk = self.compile_expr(&**index);
-                    let rv = self.compile_expr(value);
-                    self.emit(Instr::IndexSet(ro, rk, rv));
-                } else {
-                    self.fail(codes::NOT_IMPLEMENTED, "VM: 仅支持单层索引赋值 a[i] = x");
+                // 嵌套索引赋值展开为「从深到浅」的 IndexSet 链（镜像 interp set_index_value
+                // 递归写回）：m[i][j] = x → t = Index(m, i); IndexSet(t, j, x); IndexSet(m, i, t)。
+                // 单层 a[i] = x 时链长为 1，与旧行为等价。
+                let rv = self.compile_expr(value);
+                let mut chain: Vec<(Expr, Expr)> = Vec::new();
+                let mut cur: &Expr = target;
+                loop {
+                    match cur {
+                        Expr::Index { obj, index, .. } => {
+                            chain.push(((**obj).clone(), (**index).clone()));
+                            cur = obj;
+                        }
+                        _ => break,
+                    }
+                }
+                if chain.is_empty() {
+                    self.fail(codes::NOT_IMPLEMENTED, "VM: 仅支持索引赋值 a[i] = x");
+                }
+                let mut val_reg = rv;
+                for (obj, idx) in &chain {
+                    let ro = self.compile_expr(obj);
+                    let rk = self.compile_expr(idx);
+                    // IndexSet 语义：regs[o] = 修改后值；最深一层 obj 为标识符时直接
+                    // 写回其槽（m[i][j]=x 的 m），中间层 obj 为 Index 读取的临时寄存器，
+                    // 其结果作为上一层的新容器值（val_reg 链式传递）。
+                    self.emit(Instr::IndexSet(ro, rk, val_reg));
+                    val_reg = ro;
                 }
             }
             Stmt::DestructAssign { targets, value, .. } => {
@@ -523,7 +549,10 @@ impl Compiler {
                     };
                     let rk = self.tmp();
                     self.emit(Instr::LoadK(rk, k));
-                    self.emit(Instr::DestructGet(ri, saved, rk));
+                    // nvars/is_dict 镜像解释器 DestructAssign 的报错文案（列表越界报变量数、
+                    // 形态不符区分 list/dict 解构语法）。
+                    let is_dict = targets.iter().all(|(_, k)| k.is_some());
+                    self.emit(Instr::DestructGet(ri, saved, rk, targets.len(), is_dict));
                     match self.lookup(name) {
                         Some(r) => self.emit(Instr::Move(r, ri)),
                         None => {
@@ -1010,11 +1039,11 @@ impl Compiler {
                 self.emit(Instr::NewDict(r, base, n));
                 r
             }
-            Expr::ListComp { elem, var, var2, iter, cond, .. } => {
-                self.compile_comp(iter, var, var2, elem, None, cond)
+            Expr::ListComp { elem, var, var2, iter, cond, span } => {
+                self.compile_comp(iter, var, var2, elem, None, cond, span)
             }
-            Expr::DictComp { key, value, var, var2, iter, cond, .. } => {
-                self.compile_comp(iter, var, var2, value, Some(key), cond)
+            Expr::DictComp { key, value, var, var2, iter, cond, span } => {
+                self.compile_comp(iter, var, var2, value, Some(key), cond, span)
             }
             Expr::FStr(segs, _) => self.compile_fstr(segs),
             Expr::Field { obj, field, .. } => {
@@ -1359,6 +1388,7 @@ impl Compiler {
         value_expr: &Expr,
         key_expr: Option<&Expr>,
         cond: &Option<Box<Expr>>,
+        comp_span: &Span,
     ) -> usize {
         // 推导式是一个自包含的临时作用域：内部所有寄存器（结果、迭代源、循环变量、
         // 循环内临时量）都从 tmp_next 分配并整体管理，结束仅保留结果寄存器 rres，其余回收。
@@ -1387,8 +1417,26 @@ impl Compiler {
         self.jit(risdict, &ldict);
         // ── 列表路径 ──
         self.emit_label(&llist);
+        // 解释器在「列表源 + 双变量」时报错而非退化为单变量（G1.6 审计发现的 interp/VM
+        // 分叉）：VM 两条路径都在编译期展开，故此处也发射 Raise，且需把 var2 声明进
+        // 作用域，否则产出表达式引用 var2 会在编译期就报「未定义变量」。
+        if var2.is_some() {
+            let saved_span = self.cur_span.clone();
+            self.cur_span = comp_span.clone();
+            self.emit(Instr::Raise(
+                codes::TYPE_MISMATCH,
+                "comprehension `for k, v in` requires a dict, got a list".to_string(),
+                Some("comprehend over lists with a single variable: `for x in list`".to_string()),
+            ));
+            self.cur_span = saved_span;
+        }
         self.scopes.push((HashMap::new(), self.var_next));
         let rvar = self.decl_tmp(var);
+        if let Some(v2) = var2 {
+            // 双变量在列表路径下恒为 null（上面已Raise 报错，此路径不可达）；
+            // 仅为满足作用域查找而声明。
+            self.decl_tmp(v2);
+        }
         let _syn = self.syn();
         let rcnt = self.decl_tmp(&_syn);
         let k0 = self.const_idx(Const::Int(0));
@@ -1971,10 +2019,10 @@ impl Vm {
                 v_index_set(&mut dst, &key, val, span, self)?;
                 self.frames[fi].regs[o] = dst;
             }
-            Instr::DestructGet(d, o, k) => {
+            Instr::DestructGet(d, o, k, nvars, is_dict) => {
                 let obj = self.frames[fi].regs[o].clone();
                 let key = self.frames[fi].regs[k].clone();
-                self.frames[fi].regs[d] = v_destruct_get(&obj, &key, span, self)?;
+                self.frames[fi].regs[d] = v_destruct_get(&obj, &key, span, self, nvars, is_dict)?;
             }
             Instr::Field(d, o, field) => {
                 let obj = self.frames[fi].regs[o].clone();
@@ -2139,6 +2187,11 @@ impl Vm {
                     context: String::new(),
                     help: None,
                 }));
+            }
+            Instr::Raise(code, msg, help) => {
+                // 直接抛出错误值：与解释器求值期报错同构，由exec 的 Err 路由
+                // 交给 try_catch捕获或向上传播。
+                return Err(self.mk_err_with(code, msg.clone(), span, help.clone()));
             }
             Instr::DebugPrint(reg) => {
                 if self.debug {
@@ -2916,32 +2969,61 @@ fn v_index_set(dst: &mut Value, key: &Value, val: Value, span: &Span, vm: &Vm) -
 }
 
 /// 解构取值：列表按位取（越界报错），字典按键取（缺键报错），其他类型报错。
-/// 与解释器 exec_stmt 的 DestructAssign 语义一致。
-fn v_destruct_get(obj: &Value, key: &Value, span: &Span, vm: &Vm) -> Result<Value, Value> {
+/// 与解释器 exec_stmt 的 DestructAssign 语义一致（含形态区分与变量数报错文案）。
+/// nvars = 解构目标变量数；is_dict = 目标是否全为带键形态（`{a, b} = dict`）。
+fn v_destruct_get(
+    obj: &Value,
+    key: &Value,
+    span: &Span,
+    vm: &Vm,
+    nvars: usize,
+    is_dict: bool,
+) -> Result<Value, Value> {
     match obj {
         Value::List(l) => {
+            // 形态不符：`{...} =` 收到列表（镜像解释器 1031-1036）
+            if is_dict {
+                return Err(vm.mk_err_with(
+                    codes::TYPE_MISMATCH,
+                    "dict destructuring `{...} =` requires a dict value, got a list".to_string(),
+                    span,
+                    Some("use `a, b = list` for list destructuring".to_string()),
+                ));
+            }
             if let Value::Int(i) = key {
                 let idx = *i;
                 if idx < 0 || (idx as usize) >= l.len() {
-                    return Err(vm.mk_err(
+                    return Err(vm.mk_err_with(
                         codes::TYPE_MISMATCH,
                         format!(
-                            "destructuring a list of {} element(s) into more variables",
-                            l.len()
+                            "destructuring a list of {} element(s) into {} variable(s)",
+                            l.len(),
+                            nvars
                         ),
                         span,
+                        Some("the list must have at least as many elements as the variables".to_string()),
                     ));
                 }
                 Ok(l[idx as usize].clone())
             } else {
-                Err(vm.mk_err(
+                Err(vm.mk_err_with(
                     codes::TYPE_MISMATCH,
                     format!("list index must be an int, got `{}`", value_to_str(key)),
                     span,
+                    Some("use an integer expression as the index, e.g. `a[0]`, `a[i]`".to_string()),
                 ))
             }
         }
         Value::Dict(d) => {
+            // 形态不符：`a, b =` 收到字典（镜像解释器 1058-1063）
+            if !is_dict {
+                return Err(vm.mk_err_with(
+                    codes::TYPE_MISMATCH,
+                    "list destructuring `a, b =` requires a list value, got a dict".to_string(),
+                    span,
+                    Some("use `{a, b} = dict` for dict destructuring".to_string()),
+                ));
+            }
             let k = match key {
                 Value::Str(s) => s.clone(),
                 Value::Int(i) => i.to_string(),
@@ -2958,19 +3040,21 @@ fn v_destruct_get(obj: &Value, key: &Value, span: &Span, vm: &Vm) -> Result<Valu
                     return Ok(vv.clone());
                 }
             }
-            Err(vm.mk_err(
+            Err(vm.mk_err_with(
                 codes::UNDEFINED,
                 format!("dict has no key `{}` for destructuring", k),
                 span,
+                Some("check the key name, or the dict value being destructured".to_string()),
             ))
         }
-        other => Err(vm.mk_err(
+        other => Err(vm.mk_err_with(
             codes::TYPE_MISMATCH,
             format!(
                 "destructuring requires a list or dict value, got `{}`",
                 value_to_str(other)
             ),
             span,
+            Some("destructure a list with `a, b = [..]` or a dict with `{a, b} = dict`".to_string()),
         )),
     }
 }
@@ -3335,7 +3419,14 @@ fn instr_text(ins: &Instr, consts: &[Const]) -> String {
         }
         Instr::Index(d, o, k) => format!("INDEX   r{} r{} r{}", d, o, k),
         Instr::IndexSet(o, k, v) => format!("INDEXSET r{} r{} r{}", o, k, v),
-        Instr::DestructGet(d, o, k) => format!("DESTRUCTGET r{} r{} r{}", d, o, k),
+        Instr::DestructGet(d, o, k, nvars, is_dict) => format!(
+            "DESTRUCTGET r{} r{} r{} {} {}",
+            d,
+            o,
+            k,
+            nvars,
+            if *is_dict { "dict" } else { "list" }
+        ),
         Instr::Field(d, o, f) => format!("FIELD   r{} r{} {}", d, o, f),
         Instr::Len(d, s) => format!("LEN     r{} r{}", d, s),
         Instr::Keys(d, s) => format!("KEYS    r{} r{}", d, s),
@@ -3361,6 +3452,15 @@ fn instr_text(ins: &Instr, consts: &[Const]) -> String {
         Instr::TryPop => "TRYPOP".to_string(),
         Instr::Throw(r) => format!("THROW   r{}", r),
         Instr::ThrowStr(s) => format!("THROWSTR \"{}\"", s),
+        Instr::Raise(code, msg, help) => format!(
+            "RAISE {} {:?}{}",
+            code,
+            msg,
+            match help {
+                Some(h) => format!(" help={:?}", h),
+                None => String::new(),
+            }
+        ),
         Instr::DebugPrint(r) => format!("DEBUGPRINT r{}", r),
         Instr::Breakpoint => "BREAKPOINT".to_string(),
         Instr::Nop => "NOP".to_string(),
@@ -3886,8 +3986,16 @@ fn parse_instr(body: &str, consts: &[Const]) -> Result<Instr, String> {
             Instr::IndexSet(reg(toks[0])?, reg(toks[1])?, reg(toks[2])?)
         }
         "DESTRUCTGET" => {
-            need(3)?;
-            Instr::DestructGet(reg(toks[0])?, reg(toks[1])?, reg(toks[2])?)
+            need(5)?;
+            Instr::DestructGet(
+                reg(toks[0])?,
+                reg(toks[1])?,
+                reg(toks[2])?,
+                toks[3]
+                    .parse()
+                    .map_err(|_| format!("DESTRUCTGET nvars 非法: {}", toks[3]))?,
+                toks[4] == "dict",
+            )
         }
         "FIELD" => {
             need(3)?;
@@ -3985,6 +4093,26 @@ fn parse_instr(body: &str, consts: &[Const]) -> Result<Instr, String> {
             Instr::Throw(reg(toks[0])?)
         }
         "THROWSTR" => Instr::ThrowStr(unescape_str(rest)?),
+        "RAISE" => {
+            // 文本形态：RAISE <code> <msg...> [help=<help...>]
+            need(2)?;
+            let (code, tail) = (toks[0], &toks[1..]);
+            let (msg, help) = match tail.iter().position(|t| t.starts_with("help=")) {
+                Some(i) => (
+                    tail[..i].join(" "),
+                    Some(unescape_str(&tail[i..].join(" ")[5..])?),
+                ),
+                None => (tail.join(" "), None),
+            };
+            let code: &'static str = match code {
+                "H001" => codes::TYPE_MISMATCH,
+                "H002" => codes::UNDEFINED,
+                "H009" => codes::DIV_ZERO,
+                "H999" => codes::NOT_IMPLEMENTED,
+                other => return Err(format!("RAISE 错误码非法: {}", other)),
+            };
+            Instr::Raise(code, unescape_str(&msg)?, help)
+        }
         "DEBUGPRINT" => {
             need(1)?;
             Instr::DebugPrint(reg(toks[0])?)
