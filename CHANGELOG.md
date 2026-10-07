@@ -12,10 +12,17 @@
     跨帧传播 + 静态 catch 映射（无 setjmp），Throw/ThrowStr 归一 H600
   - 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码逐字节一致，含完整错误渲染
     （`--> 文件:行:列` / 行号行 / caret / help）
-  - 当前支持范围（M0 + M1）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda / 捕获（值语义）、
-    try-catch / throw / 错误字段访问、**list / dict 读写与 for-in 迭代**、内置子集（print/len/append/
+  - 当前支持范围（M0 + M1 + M2 G2.1–G2.3）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda /
+    捕获（值语义）、try-catch / throw / 错误字段访问、**list / dict 读写与 for-in 迭代**、
+    **struct 构造与字段读取**（`__struct__` 隐藏标记键全路径过滤；`==` 按同名 struct 判定，
+    异名 struct 恒不等；字段写入与 VM 一致编译期 H999）、**enum 构造 / 显示 / 相等 / 进容器**、
+    **match 全形态**（字面量模式、变体模式与载荷绑定、`_` 通配、无匹配分支 H005）、
+    **条件严格 bool 与 `&&`/`||` 短路求值**、内置子集（print/len/append/
     keys/values/has_key/to_str/to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq/read_file）；
     子集外指令编译期报 H990「未实现」（M2 逐步放开）
+  - 语义对齐修正：native 后端 `==`/`!=` 对 dict 的隐藏 `__struct__` 标记键原按「过滤后比较」处理，
+    异名 struct 同值误判相等（VM/interp 均判 false）——改为「双侧标记键均存在 → 同名且可见字段
+    逐对相等」，三引擎对齐
   - 依赖本机 rustc（M3 起改预编译工具链移除）；runtime 源码内嵌进 hone 二进制，干净机器自足
   - 回归：`tests/regress4.py`（正常路径三引擎）、`tests/regress_err.py`（错误诊断三引擎逐字符）；
     开发期扫雷工具 `tests/tools/audit_err.py`（55 例错误文案 + help 行批量比对）
@@ -25,6 +32,24 @@
   - 设计 / 进度：`Hone原生编译后端设计.md`、`Hone原生编译后端进度.md`
 
 ### 修复
+- **`&&` / `||` 改为真正的短路求值**（此前 VM 在分支前无条件求值右侧）：`false && f()` / `true || f()`
+  原先仍调用 `f`（副作用可见），且 `true || (1 / 0 == 0)` 原先触发除零——现与解释器一致：
+  左侧恰为 `false`（`&&`）/ `true`（`||`）才短路，否则求值右侧
+- **条件站点严格 bool 校验**（解释器运行期兜底，VM 原先按 truthy 静默放行）：if / while /
+  do-while / for / 三元 / 推导式 `if` 过滤六处，非 bool 条件（enum、struct、字符串等动态值）
+  改报 H001 且消息按站点区分；`do { } while (enum)` 原先死循环
+- **逻辑操作数严格 bool**：`&&` / `||` 右侧非 bool 报 H001「logical operators require `bool`
+  operands」（原先当 truthy 处理并直接返回该值）
+- **match 无匹配分支的错误码对齐**：原 VM 抛字面串 → H600「match failed: 无匹配分支 (H005)」，
+  与解释器的 H005「no match arm matched the value」+ help 不一致——改走 `Instr::Raise`，
+  三引擎逐字节一致（runtime 侧 `rt_raise` 错误码白名单与文本 IR 装配同步补 H005）
+- **match 绑定变量作用域**：绑定原先插进所在作用域且从不弹出，会顶掉外层同名变量
+  （绑定后外层变量在 VM 侧被改写，解释器分支结束即出作用域）；改为「临时区声明 + 分支作用域」，
+  外层同名变量不受影响
+- **lambda 捕获取内层同名变量**：捕获表原先按「外→内」遍历且首见即取，遮蔽场景下捕获到被遮蔽的
+  外层值（`match` 绑定遮蔽外层名时，闭包拿到外层值而非绑定值）——改为与 `lookup` 同序（内层优先）
+- **解构非容器值的错误文案**：VM 原用值显示（`got 5`），解释器用类型名（`got int`）——VM 改用
+  `type_name()`，三引擎一致（既有用例被 `print` 参数数静态错误掩盖，本轮补运行期用例）
 - **解释器整数取负溢出改抛 H010**：`-x` 遇 `i64::MIN` 原先直接 panic（`attempt to negate with
   overflow`），与 VM / nat 后端行为不一致——改为 `checked_neg` 并报H010（带 help），三引擎统一
 - **VM 推导式双变量在列表源上的行为对齐解释器**：`[x for k, v in list]` / `{k: v for k, v in list}`
@@ -36,6 +61,11 @@
   报实际变量数并补help
 
 ### 变更
+- **新增两条字节码指令**：`Instr::CondCheck(reg, kind)`（条件严格 bool 校验，kind 区分
+  if / while / do-while / for / ternary / 逻辑运算 / 推导式 if 七个站点）与
+  `Instr::IsBoolVal(dst, src, want)`（值是否恰为 `Bool(want)`，供 `&&`/`||` 短路判定）。
+  natgen 同步 lowering 到 `rt_condcheck` / `rt_isboolval`；文本 IR 形态为
+  `CONDCHK r{reg} {kind}` 与 `ISBOOLV r{dst} r{src} {true|false}`（`hone run --disasm` 往返一致）
 - **`Instr::DestructGet` 增字段**：签名由 `(dst, obj, key)` 扩为 `(dst, obj, key, nvars, is_dict)`，
   供 VM 侧复现解释器的解构报错文案（文本 IR 往返格式同步为 `DESTRUCTGET r{d} r{o} r{k} {n} {list|dict}`）
 

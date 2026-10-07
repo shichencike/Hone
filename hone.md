@@ -149,6 +149,14 @@ Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.7.12）
 · C 风格 for：for (init; cond; step) { ... }  三段均可省略（如 for (;;) 为无限循环，配合 break 退出）
 · continue 关键字：跳过本次循环剩余语句，直接进入下一次迭代（仅循环体内合法，与 break 相对）
 · 条件表达式必须显式返回 bool，禁止隐式转换（如 if (1) 视为非法）
+  · 运行期兜底同规则：条件值非 bool（如 enum / struct / 字符串）时报 H001，消息按站点区分
+    （if / while / do-while / for / ternary / 推导式 if 六种站点各有文案，均无 help 行），
+    三个引擎（解释器 / VM / 原生）逐字节一致
+· 逻辑运算 `&&` / `||`：**短路求值**（左侧已决定结果时右侧不求值，副作用不可见，
+  `false && f()` 不调用 f；`true || f()` 同理）
+  · 左侧短路判据：仅当左侧**恰为** `false`（`&&`）/ `true`（`||`）才短路；否则求值右侧，
+    且右侧必须是 bool，否则报 H001（消息以 `logical operators require` 开头 + 操作数类型名）
+  · 优先级：`&&` 高于 `||`，均低于比较运算；结合性均为左结合
 
 1.4.1 标签与跳转（goto）
 
@@ -344,9 +352,12 @@ print(Math.double(21));   // 42（类方法不受影响）
 · 模式支持：
   · 字面量（整数/浮点/布尔/字符串/字符，如 42、3.14、true、"hi"、'a'）
   · 枚举变体：Color.Red（无载荷）或 Shape.Circle(r)（带载荷，r 绑定到分支体变量；
-    `_` 忽略某项：Shape.Rect(w, _)）；绑定变量仅在本分支体内可见
-  · `_` 通配符（匹配任意值，只能出现一次且放最后）
-· match 是表达式，返回匹配分支的值；所有分支都不匹配时运行时报错（建议补 `_` 兜底）
+    `_` 忽略某项：Shape.Rect(w, _)）；**绑定变量仅在本分支体内可见**（分支结束即出作用域，
+    外层同名变量不受影响；绑定名与外层变量同名时 checker 会按类型归一）
+  · `_` 通配符（匹配任意值；重复出现报 H005，惯例放最后——放在前面则先命中、后续分支不可达）
+· match 是表达式（不能作语句），返回匹配分支的值；各分支类型可以不同，返回值为动态类型
+· **无匹配分支**（未命中且无 `_`）为运行期错误 H005：`no match arm matched the value`，
+  help 提示补 `_` 兜底（三个引擎逐字节一致）
 · 各分支类型可以不同，返回值为动态类型
 · 示例：
 
@@ -1397,7 +1408,7 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   `--> 文件名:行:列` / 行号行 / caret / help / 结尾空行）。回归入口两条：
   `tests/regress4.py`（正常路径三引擎）与 `tests/regress_err.py`（错误诊断三引擎逐字符）；
   开发期另有扫雷工具 `tests/tools/audit_err.py`（55 例错误文案 + help 行批量比对）
-· 当前支持范围（M0 + M1）：
+· 当前支持范围（M0 + M1 + M2 G2.1–G2.3）：
   · 标量全类型：int / float / bool / char / str / null 常量、算术 / 比较 / 一元运算、str 拼接与 ==/!=
   · 控制流：if-else / while / 标签跳转（Label+Jmp 覆盖 goto）
   · 函数与 lambda：递归、向前引用、lambda 直调与作参、捕获（值语义）、闭包嵌套
@@ -1408,6 +1419,20 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
     列表与字典推导式（`[x for x in list]`、`{k: v for k, v in dict}`，含 `if` 过滤）
   · **值语义（M1）**：RC+COW——变量读取为O(1) 引用计数，写入点过 COW 门（独占则原地写，
     共享则浅拷独占副本），别名隔离与解释器深拷贝语义逐字节一致
+  · **struct（M2）**：`struct Point { x: int, y: int };` 定义后 `p = Point(1, 2)` 构造，
+    `p.x` 字段读取；实例内部携带隐藏 `__struct__` 标记键（=结构体名），display / len / keys /
+    values / has_key / for-in / 解构 / 相等 / 字段缺失报错列键 全部路径过滤不暴露；
+    `==`/`!=` 按「同名 struct 且可见字段逐对相等」判定（异名 struct 恒不等，与普通 dict 区分）；
+    字段写入 `p.x = 3` 与 VM 一致为编译期 H999（解释器 `hone run` 支持，含 readonly 拦截）
+  · **enum（M2 G2.2）**：`enum Color { Red, ... };` / 带载荷变体；两种构造入口
+    （点号零参 `Color.Red`、带参 `Shape.Circle(1.5)`）、`type_of` → `enum`、显示
+    `Name.Variant(v, …)`、相等（枚举名 + 变体 + 载荷递归，跨枚举同名变体恒不等）、进 list / dict
+  · **match（M2 G2.3）**：字面量模式（int / float / bool / str / char）、枚举变体模式
+    （无载荷 / 载荷绑定 / `_` 忽略载荷）、`_` 通配；无匹配分支运行期报 H005
+    （`no match arm matched the value`，help 提示补 `_`），与解释器逐字节一致
+  · **条件与短路（G2.3）**：if / while / do-while / for / 三元 / 推导式 `if` 过滤六处条件站点
+    严格 bool 校验（非 bool → H001，消息按站点）；`&&` / `||` 短路求值（右侧不求值，
+    副作用不可见）+ 操作数严格 bool，与解释器逐字节一致
   · 内置子集：print / len / append / keys / values / has_key / to_str / to_int / to_float / is_int /
     is_float / is_bool / is_str / is_list / is_dict / is_null / type_of / abs / max / min / assert /
     assert_eq / read_file（assert 失败 H700 文案对齐）
@@ -1415,17 +1440,20 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   · 注意：`d["k"] = v` 这类dict 索引写入被类型检查器静态拒绝（索引须 int，而 dict 键恒为字符串
     字面量），故 dict 在脚本层只读，取值走 for-in / keys / values / has_key
 · 当前限制（M2/M3 逐步放开）：
-  · M0/M1 子集外指令（struct / enum / match / 运算符重载 / alias / async-await / goto 以外的跳转 /
+  · M0–M2 G2.3 子集外指令（运算符重载 / alias / async-await / goto 以外的跳转 /
     import / 切片 / byte / bytes 等）在**编译期**报 H990（internal）「指令未实现」——编译期即拒绝，
     不产出错误二进制
+  · struct 字段写入 `p.x = 3` 在 VM 为编译期 H999（M2 未放开），解释器支持（含 readonly 拦截）
   · 依赖本机 rustc（rustc 与 Rust std 的链接期依赖）；M3 起改为随 hone 分发的预编译工具链，移除 rustc 依赖
   · `cow` 声明 / 形参与 VM 一致按引擎边界处理（解释器特性，见 1.3）
 · 与 AOT（-c）的分工：AOT 走 C 中间文件 + gcc/clang，体积几十 KB、零运行时依赖，但错误渲染为简化一行；
   native 走 Cranelift 机器码 + rustc，错误渲染与双引擎逐字节一致，语义对齐是它的首要目标。
   二者互斥：`-c` 与 `--native` 同用报 H005 显式错误
 · 验证基线：`tests/m1/list.hn`（list 承载 13 组断言）、`tests/m1/dict.hn`（dict + 迭代 12 组断言）、
-  `tests/smoke/rc_alias.test.hn`（别名 RC+COW 11 组断言）三例经 `hone natgen <file> -o <exe>` 复现，
-  interp / VM / nat 三引擎逐字节一致；改代码后先 `cargo build`（target/ 旧二进制会静默沿用），
+  `tests/smoke/rc_alias.test.hn`（别名 RC+COW 11 组断言）、`tests/m2/struct.hn`、
+  `tests/m2/enum.hn`、`tests/m2/match.hn`、`tests/m2/conditions.hn`（match 全形态 + 条件/短路）
+  经 `hone build --exe --native <file>` 复现，interp / VM / nat 三引擎逐字节一致；
+  改代码后先 `cargo build`（target/ 旧二进制会静默沿用），
   再跑 `python tests/regress4.py` 与 `python tests/regress_err.py`
 
 4.8 AOT 性能实测

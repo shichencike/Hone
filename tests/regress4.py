@@ -30,7 +30,9 @@ from regress_common import should_skip  # noqa: E402
 BIN = "./target/debug/hone.exe"
 
 # 三引擎对齐用例集：M0 基线三例 + M1 新增用例集（G1.2 list / G1.3 dict+G1.4 迭代 /
-# G1.5 别名 RC+COW）。错误诊断的逐字符对齐由 regress_err.py 承担（含 nat 第三引擎）。
+# G1.5 别名 RC+COW）+ M2 新增（G2.1 struct 构造/字段/隐藏键过滤/相等语义、
+# G2.2 enum 构造/match 基础/显示/相等/容器、G2.3 match 全形态：字面量/变体/绑定/作用域/闭包）。
+# 错误诊断的逐字符对齐由 regress_err.py 承担（含 nat 第三引擎）。
 CASES = [
     "examples/fib.hn",
     "examples/hello.hn",
@@ -38,6 +40,10 @@ CASES = [
     "tests/m1/list.hn",
     "tests/m1/dict.hn",
     "tests/smoke/rc_alias.test.hn",
+    "tests/m2/struct.hn",
+    "tests/m2/enum.hn",
+    "tests/m2/match.hn",
+    "tests/m2/conditions.hn",
 ]
 
 ENGINES = ("interp", "vm", "nat")

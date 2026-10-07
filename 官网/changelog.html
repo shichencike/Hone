@@ -63,11 +63,32 @@
 <li>值模型：句柄式（寄存器持 u64 句柄指向堆上 <code class="inline">HnCell</code>，跨 object ↔ rustc 只传 i64，规避 Windows x64</li>
 <li>调用模型：统一 <code class="inline">rt_call</code> 名分发（用户函数 / lambda / 内置表），lambda 按值捕获；错误经 ERR 句柄</li>
 <li>语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码逐字节一致，含完整错误渲染</li>
-<li>当前支持范围（M0 子集）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda / 捕获（值语义）、</li>
+<li>当前支持范围（M0 + M1 + M2 G2.1–G2.3）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda /</li>
+<li>语义对齐修正：native 后端 <code class="inline">==</code>/<code class="inline">!=</code> 对 dict 的隐藏 <code class="inline">__struct__</code> 标记键原按「过滤后比较」处理，</li>
 <li>依赖本机 rustc（M3 起改预编译工具链移除）；runtime 源码内嵌进 hone 二进制，干净机器自足</li>
+<li>回归：<code class="inline">tests/regress4.py</code>（正常路径三引擎）、<code class="inline">tests/regress_err.py</code>（错误诊断三引擎逐字符）；</li>
 <li>顺手修复：VM lambda 捕获实参寄存器绑定 bug（原按 <code class="inline">ncap+i</code> 偏移，捕获/参数寄存器不从 0 起排时</li>
 <li>设计 / 进度：<code class="inline">Hone原生编译后端设计.md</code>、<code class="inline">Hone原生编译后端进度.md</code></li>
 </ul></li>
+</ul>
+<h4><span class="flag fix">修复</span></h4>
+<ul>
+<li><strong><code class="inline">&amp;&amp;</code> / <code class="inline">||</code> 改为真正的短路求值</strong>（此前 VM 在分支前无条件求值右侧）：<code class="inline">false &amp;&amp; f()</code> / <code class="inline">true || f()</code></li>
+<li><strong>条件站点严格 bool 校验</strong>（解释器运行期兜底，VM 原先按 truthy 静默放行）：if / while /</li>
+<li><strong>逻辑操作数严格 bool</strong>：<code class="inline">&amp;&amp;</code> / <code class="inline">||</code> 右侧非 bool 报 H001「logical operators require <code class="inline">bool</code></li>
+<li><strong>match 无匹配分支的错误码对齐</strong>：原 VM 抛字面串 → H600「match failed: 无匹配分支 (H005)」，</li>
+<li><strong>match 绑定变量作用域</strong>：绑定原先插进所在作用域且从不弹出，会顶掉外层同名变量</li>
+<li><strong>lambda 捕获取内层同名变量</strong>：捕获表原先按「外→内」遍历且首见即取，遮蔽场景下捕获到被遮蔽的</li>
+<li><strong>解构非容器值的错误文案</strong>：VM 原用值显示（<code class="inline">got 5</code>），解释器用类型名（<code class="inline">got int</code>）——VM 改用</li>
+<li><strong>解释器整数取负溢出改抛 H010</strong>：<code class="inline">-x</code> 遇 <code class="inline">i64::MIN</code> 原先直接 panic（`attempt to negate with</li>
+<li><strong>VM 推导式双变量在列表源上的行为对齐解释器</strong>：<code class="inline">[x for k, v in list]</code> / <code class="inline">{k: v for k, v in list}</code></li>
+<li><strong>VM 嵌套索引赋值</strong>：<code class="inline">m[i][j] = x</code> 原先报H999「仅支持单层索引赋值」，现按解释器的递归写回语义</li>
+<li><strong>VM 解构错误文案对齐解释器</strong>：区分列表 / 字典解构形态不符（各有专属 help）、列表元素数不足时</li>
+</ul>
+<h4><span class="flag chg">变更</span></h4>
+<ul>
+<li><strong>新增两条字节码指令</strong>：<code class="inline">Instr::CondCheck(reg, kind)</code>（条件严格 bool 校验，kind 区分</li>
+<li><strong><code class="inline">Instr::DestructGet</code> 增字段</strong>：签名由 <code class="inline">(dst, obj, key)</code> 扩为 <code class="inline">(dst, obj, key, nvars, is_dict)</code>，</li>
 </ul>
 </div>
 <div class="release">

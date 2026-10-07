@@ -87,6 +87,14 @@ pub enum Instr {
     Jmp(usize),                   // target pc（编译期占位 0，resolve 后填真实下标）
     JmpIfFalse(usize, usize),     // cond_reg, target
     JmpIfTrue(usize, usize),      // cond_reg, target
+    /// 条件严格 bool 校验（G2.3 引擎对齐）：非 bool → H001，消息按站点镜像解释器。
+    /// 解释器在 if / while / do-while / for / ternary 五处条件站点**运行期**校验 bool，
+    /// VM 此前统一走 truthy 判定，enum / struct 等动态类型值不报错也不拦（分叉）。
+    /// kind：0=if 1=while 2=do-while 3=for 4=ternary 5=逻辑运算 6=推导式 if 过滤。
+    CondCheck(usize, u8),
+    /// 值是否恰为 Bool(want)（无类型错误，恒产出 bool）——&&/|| 的短路判定，
+    /// 镜像解释器 `if let Value::Bool(false) = l` / `if let Value::Bool(true) = l`。
+    IsBoolVal(usize, usize, bool), // dst, src, want
     Label(String),                // 伪指令：标签
     TryBegin(usize, usize),       // handler_pc（占位 0）, catch_reg
     TryPop,                       // 正常路径弹出 try 栈
@@ -278,6 +286,16 @@ impl Compiler {
     }
     fn reset_tmp(&mut self) {
         self.tmp_next = self.var_next;
+    }
+
+    /// G2.3 引擎对齐：条件站点发射严格 bool 校验指令（span 显式给定——
+    /// 与解释器各站点的错误定位一致：语句条件取 expr_span(cond)，
+    /// 逻辑运算 / ternary 取整表达式 span（= 运算符 token））。
+    fn cond_check(&mut self, r: usize, kind: u8, span: Span) {
+        let saved = self.cur_span.clone();
+        self.cur_span = span;
+        self.emit(Instr::CondCheck(r, kind));
+        self.cur_span = saved;
     }
 
     fn const_idx(&mut self, c: Const) -> usize {
@@ -608,6 +626,8 @@ impl Compiler {
             }
             Stmt::If { cond, then_branch, else_branch, .. } => {
                 let rc = self.compile_expr(cond);
+                // G2.3：条件严格 bool 校验（解释器 if 站点的运行期 H001 对齐）。
+                self.cond_check(rc, 0, expr_span(cond));
                 let lelse = self.new_label("Lelse");
                 let lend = self.new_label("Lend");
                 self.jif(rc, &lelse);
@@ -630,6 +650,7 @@ impl Compiler {
                 let lend = self.new_label("Lend");
                 self.emit_label(&lstart);
                 let rc = self.compile_expr(cond);
+                self.cond_check(rc, 1, expr_span(cond));
                 self.jif(rc, &lend);
                 self.loop_labels.push((lstart.clone(), lend.clone()));
                 for s2 in body {
@@ -653,6 +674,7 @@ impl Compiler {
                 self.loop_labels.pop();
                 self.emit_label(&leval);
                 let rc = self.compile_expr(cond);
+                self.cond_check(rc, 2, expr_span(cond));
                 self.jit(rc, &lstart);
                 self.emit_label(&lend);
             }
@@ -667,6 +689,7 @@ impl Compiler {
                 self.emit_label(&lcond);
                 if let Some(c) = cond {
                     let rc = self.compile_expr(c);
+                    self.cond_check(rc, 3, expr_span(c));
                     self.jif(rc, &lend);
                 }
                 self.loop_labels.push((lstep.clone(), lend.clone()));
@@ -1094,6 +1117,30 @@ impl Compiler {
                 r
             }
             Expr::Binary { op, lhs, rhs, .. } => {
+                // G2.3 引擎对齐：&&/|| 改**短路求值**。此前 rhs 在分支前无条件求值——
+                // 与解释器分叉（`false && f()` 仍调用 f，副作用可见），且非 bool 操作数
+                // 静默按 truthy 处理。新语义逐条镜像解释器：
+                //   And = a 恰为 Bool(false) → false；否则 b 必须为 bool → 结果为 b；
+                //   Or  = a 恰为 Bool(true)  → true; 否则 b 必须为 bool → 结果为 b。
+                // 非 bool 的 b → H001「logical operators require `bool` operands」（span = 运算符）。
+                if matches!(op, BinOp::And | BinOp::Or) {
+                    let is_and = matches!(op, BinOp::And);
+                    let ra = self.compile_expr(lhs);
+                    let r = self.tmp();
+                    let rt = self.tmp();
+                    self.emit(Instr::IsBoolVal(rt, ra, !is_and)); // And 判 false / Or 判 true
+                    let lshort = self.new_label("Lshort");
+                    let lend = self.new_label("Lend");
+                    self.jit(rt, &lshort);
+                    let rb = self.compile_expr(rhs); // 延迟到分支后编译：短路时不求值
+                    self.cond_check(rb, 5, expr_span(e));
+                    self.emit(Instr::Move(r, rb));
+                    self.jmp(&lend);
+                    self.emit_label(&lshort);
+                    self.emit(Instr::LoadBool(r, !is_and));
+                    self.emit_label(&lend);
+                    return r;
+                }
                 let ra = self.compile_expr(lhs);
                 let rb = self.compile_expr(rhs);
                 let r = self.tmp();
@@ -1109,28 +1156,8 @@ impl Compiler {
                     BinOp::Le => self.emit(Instr::Le(r, ra, rb)),
                     BinOp::Gt => self.emit(Instr::Gt(r, ra, rb)),
                     BinOp::Ge => self.emit(Instr::Ge(r, ra, rb)),
-                    BinOp::And => {
-                        // a && b : 若 a 为假，结果为假；否则结果为 b
-                        let lend = self.new_label("Lend");
-                        let ltrue = self.new_label("LandT");
-                        self.jit(ra, &ltrue); // ra 为真 -> 取 b
-                        self.emit(Instr::LoadBool(r, false));
-                        self.jmp(&lend);
-                        self.emit_label(&ltrue);
-                        self.emit(Instr::Move(r, rb));
-                        self.emit_label(&lend);
-                    }
-                    BinOp::Or => {
-                        // a || b : 若 a 为真，结果为 a；否则结果为 b
-                        let lend = self.new_label("Lend");
-                        let ltrue = self.new_label("LorT");
-                        self.jit(ra, &ltrue); // ra 为真 -> 取 a
-                        self.emit(Instr::Move(r, rb));
-                        self.jmp(&lend);
-                        self.emit_label(&ltrue);
-                        self.emit(Instr::Move(r, ra));
-                        self.emit_label(&lend);
-                    }
+                    // And / Or 已在函数开头短路分支处理（早返回）。
+                    BinOp::And | BinOp::Or => unreachable!("And/Or 已由短路分支处理"),
                     BinOp::Coalesce => {
                         let lend = self.new_label("Lend");
                         let lelse = self.new_label("Lelse");
@@ -1195,23 +1222,34 @@ impl Compiler {
                         }
                     }
                     self.emit_label(&li);
+                    // 绑定变量与分支体按独立作用域编译（G2.3 对齐解释器的 push_scope/pop_scope）。
+                    // 用「临时区声明 + 手工压/弹作用域」（与推导式循环变量 decl_tmp 同口径）：
+                    // 绑定不推进 var_next、不写 chunk.locals，弹出后对外层完全无痕——
+                    // 此前 decl 直接插进当前作用域且从不弹出，绑定寄存器会顶掉外层同名变量
+                    // （`rr` 绑定后外层 `rr` 在 VM 侧被改写；interp 分支结束弹作用域、外层不变）。
+                    self.scopes.push((HashMap::new(), self.var_next));
                     // 变体模式：跳转目标之后、求值 body 之前完成载荷绑定
                     if let Pattern::Variant { binds, .. } = pat {
                         for (idx, b) in binds.iter().enumerate() {
                             if let Some(name) = b {
-                                let rbind = self.decl(name);
+                                let rbind = self.decl_tmp(name);
                                 self.emit(Instr::EnumElem(rbind, rv, idx));
                             }
                         }
                     }
                     let ra = self.compile_expr(body);
                     self.emit(Instr::Move(rresult, ra));
+                    self.scopes.pop();
                     self.jmp(&lend);
                     self.emit_label(&lnext);
                 }
                 if !has_wild {
-                    self.emit(Instr::ThrowStr(
-                        "match failed: 无匹配分支 (H005)".to_string(),
+                    // 无匹配分支：报与解释器逐字节一致的 H005（此前抛字面串 → H600 分叉，
+                    // G2.3 审计探针实测）。span 取 match 表达式自身（cur_span 未被子表达式改写）。
+                    self.emit(Instr::Raise(
+                        codes::SYNTAX,
+                        "no match arm matched the value".to_string(),
+                        Some("add a `_` wildcard arm as the fallback".to_string()),
                     ));
                 }
                 self.emit_label(&lend);
@@ -1261,6 +1299,8 @@ impl Compiler {
             }
             Expr::Ternary { cond, then_expr, else_expr, .. } => {
                 let rc = self.compile_expr(cond);
+                // G2.3：ternary 条件严格 bool（span = 整表达式 = `?` token，与解释器一致）。
+                self.cond_check(rc, 4, expr_span(e));
                 let r = self.tmp();
                 let lelse = self.new_label("Lelse");
                 let lend = self.new_label("Lend");
@@ -1280,8 +1320,11 @@ impl Compiler {
                 self.label_seq += 1;
 
                 // 收集当前可见的捕获变量（名字 + 外层寄存器），供 MakeLambda 运行时读取。
+                // 作用域按「内层优先」遍历（rev = 与 lookup 同序，内层同名遮蔽外层）：
+                // 正序首见即取会捕获**最外层**同名变量——match 绑定遮蔽外层名时，
+                // 闭包捕获到被遮蔽的外层值（interp 取内层绑定值），审计探针实测分叉。
                 let mut captures: Vec<(String, usize)> = Vec::new();
-                for scope in self.scopes.iter() {
+                for scope in self.scopes.iter().rev() {
                     for (name, &r) in scope.0.iter() {
                         if !captures.iter().any(|(n, _)| n == name) {
                             captures.push((name.clone(), r));
@@ -1531,6 +1574,8 @@ impl Compiler {
         let after = self.new_label("Lafter");
         if let Some(c) = cond {
             let rc = self.compile_expr(c);
+            // G2.3：推导式 if 过滤条件严格 bool（解释器 comprehension 站点的 H001 对齐）。
+            self.cond_check(rc, 6, expr_span(c));
             self.jif(rc, &after);
         }
         match key_expr {
@@ -1977,6 +2022,19 @@ impl Vm {
             Instr::IsDict(d, s) => {
                 self.frames[fi].regs[d] =
                     Value::Bool(matches!(self.frames[fi].regs[s], Value::Dict(_)));
+            }
+            // G2.3 引擎对齐：条件严格 bool 校验（消息逐字镜像解释器对应分支，无 help）。
+            Instr::CondCheck(r, kind) => {
+                let v = &self.frames[fi].regs[r];
+                if !matches!(v, Value::Bool(_)) {
+                    let msg = cond_check_msg(kind, v.type_name());
+                    return Err(self.mk_err(codes::TYPE_MISMATCH, msg, span));
+                }
+            }
+            // G2.3 引擎对齐：&&/|| 短路判定（值恰为 Bool(want)，无类型错误）。
+            Instr::IsBoolVal(d, s, want) => {
+                let v = &self.frames[fi].regs[s];
+                self.frames[fi].regs[d] = Value::Bool(matches!(v, Value::Bool(b) if *b == want));
             }
             Instr::IterCheck(s, is_comp) => {
                 if !matches!(
@@ -2516,6 +2574,20 @@ fn is_truthy(v: &Value) -> bool {
     }
 }
 
+/// CondCheck 各站点的错误消息（逐字镜像解释器 if/while/do-while/for/ternary/
+/// 逻辑运算/推导式 if 七处的运行期校验文案，均无 help 行）。
+fn cond_check_msg(kind: u8, tn: &str) -> String {
+    match kind {
+        0 => format!("if condition must be `bool`, got `{tn}`"),
+        1 => format!("while condition must be `bool`, got `{tn}`"),
+        2 => format!("do-while condition must be `bool`, got `{tn}`"),
+        3 => format!("for condition must be `bool`, got `{tn}`"),
+        4 => format!("ternary condition must be `bool`, got `{tn}`"),
+        5 => format!("logical operators require `bool` operands, got `{tn}`"),
+        _ => format!("comprehension `if` condition must be `bool`, got `{tn}`"),
+    }
+}
+
 /// 根据错误码与消息正文推导 help 文本，与解释器 runtime_err 里各调用点的 help 对齐，
 /// 使 VM 错误渲染与解释器逐行一致（零回归目标）。
 fn vm_help_for(code: &'static str, msg: &str) -> Option<String> {
@@ -3051,7 +3123,7 @@ fn v_destruct_get(
             codes::TYPE_MISMATCH,
             format!(
                 "destructuring requires a list or dict value, got `{}`",
-                value_to_str(other)
+                other.type_name()
             ),
             span,
             Some("destructure a list with `a, b = [..]` or a dict with `{a, b} = dict`".to_string()),
@@ -3414,6 +3486,10 @@ fn instr_text(ins: &Instr, consts: &[Const]) -> String {
         Instr::Ge(d, a, b) => format!("GE      r{} r{} r{}", d, a, b),
         Instr::IsNull(d, s) => format!("ISNULL  r{} r{}", d, s),
         Instr::IsDict(d, s) => format!("ISDICT  r{} r{}", d, s),
+        Instr::CondCheck(r, kind) => format!("CONDCHK r{} {}", r, kind),
+        Instr::IsBoolVal(d, s, want) => {
+            format!("ISBOOLV r{} r{} {}", d, s, if *want { "true" } else { "false" })
+        }
         Instr::IterCheck(s, is_comp) => {
             format!("ITERCHK r{} {}", s, if *is_comp { "comp" } else { "forin" })
         }
@@ -3973,6 +4049,23 @@ fn parse_instr(body: &str, consts: &[Const]) -> Result<Instr, String> {
             need(2)?;
             Instr::IsDict(reg(toks[0])?, reg(toks[1])?)
         }
+        "CONDCHK" => {
+            need(2)?;
+            Instr::CondCheck(
+                reg(toks[0])?,
+                toks[1]
+                    .parse()
+                    .map_err(|_| format!("CONDCHK kind 非法: {}", toks[1]))?,
+            )
+        }
+        "ISBOOLV" => {
+            need(3)?;
+            match toks[2] {
+                "true" => Instr::IsBoolVal(reg(toks[0])?, reg(toks[1])?, true),
+                "false" => Instr::IsBoolVal(reg(toks[0])?, reg(toks[1])?, false),
+                other => return Err(format!("ISBOOLV want 非法: {}", other)),
+            }
+        }
         "ITERCHK" => {
             need(2)?;
             Instr::IterCheck(reg(toks[0])?, toks[1] == "comp")
@@ -4107,6 +4200,7 @@ fn parse_instr(body: &str, consts: &[Const]) -> Result<Instr, String> {
             let code: &'static str = match code {
                 "H001" => codes::TYPE_MISMATCH,
                 "H002" => codes::UNDEFINED,
+                "H005" => codes::SYNTAX,
                 "H009" => codes::DIV_ZERO,
                 "H999" => codes::NOT_IMPLEMENTED,
                 other => return Err(format!("RAISE 错误码非法: {}", other)),

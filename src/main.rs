@@ -1665,6 +1665,23 @@ fn build_native(
     for name in vm_mod.func_map.keys() {
         push_str(name);
     }
+    // G2.1：struct 定义表进 strtab（构造名分发 + 字段名序列 + `__struct__` 标记键）。
+    // 标记键是隐藏键，脚本里不可能写出来，须在此显式收集（wrapper 侧 rt.rs 的
+    // HIDDEN_STRUCT_KEY 常量与之一致，runtime 按内容匹配取 strtab 索引）。
+    push_str("\u{0}__struct__");
+    for (name, fields) in vm_mod.struct_defs.iter() {
+        push_str(name);
+        for f in fields {
+            push_str(f);
+        }
+    }
+    // G2.2：enum 定义表进 strtab（构造/匹配名分发 + 枚举名/变体名序列）。
+    for (name, variants) in vm_mod.enum_defs.iter() {
+        push_str(name);
+        for (v, _) in variants {
+            push_str(v);
+        }
+    }
     drop(push_str);
     // 程序静态表（T4）：每 chunk 的 span 表（line,col,len）与 chunk.code 一一对应，
     // 编入生成式 wrapper 经 hn_rt_prog_init 传入 runtime，rt_unwind 按 (ci,pc) 查表
@@ -1811,6 +1828,65 @@ fn build_native(
         loc_counts.len(),
         loc_counts.join(",")
     ));
+    // struct 定义表（G2.1）：NAT_STRUCT_DEFS = (strtab_idx, 字段数) 交错；
+    // NAT_STRUCT_FIELDS = 字段名 strtab 索引按定义序扁平排列（字段名序决定实例键序，
+    // 与 VM 构造臂的字段遍历序一致）；NAT_STRUCT_FIELD_COUNTS = 每 struct 字段数。
+    let mut struct_defs_items: Vec<String> = Vec::new();
+    let mut struct_fields_items: Vec<String> = Vec::new();
+    let mut struct_field_counts: Vec<String> = Vec::new();
+    for (name, fields) in vm_mod.struct_defs.iter() {
+        struct_defs_items.push(strtab_idx[name].to_string());
+        struct_defs_items.push(fields.len().to_string());
+        struct_field_counts.push(fields.len().to_string());
+        for f in fields {
+            struct_fields_items.push(strtab_idx[f].to_string());
+        }
+    }
+    wrapper.push_str(&format!(
+        "static NAT_STRUCT_DEFS: [u32; {}] = [{}];\n",
+        struct_defs_items.len(),
+        struct_defs_items.join(",")
+    ));
+    wrapper.push_str(&format!(
+        "static NAT_STRUCT_FIELDS: [u32; {}] = [{}];\n",
+        struct_fields_items.len(),
+        struct_fields_items.join(",")
+    ));
+    wrapper.push_str(&format!(
+        "static NAT_STRUCT_FIELD_COUNTS: [u32; {}] = [{}];\n",
+        struct_field_counts.len(),
+        struct_field_counts.join(",")
+    ));
+    // enum 定义表（G2.2）：NAT_ENUM_DEFS = (strtab_idx, 变体数) 交错；
+    // NAT_ENUM_VARIANTS = (变体名 sidx, 载荷数) 按定义序扁平排列；
+    // NAT_ENUM_VARIANT_COUNTS = 每 enum 变体数。
+    let mut enum_defs_items: Vec<String> = Vec::new();
+    let mut enum_variant_items: Vec<String> = Vec::new();
+    let mut enum_variant_counts: Vec<String> = Vec::new();
+    for (name, variants) in vm_mod.enum_defs.iter() {
+        enum_defs_items.push(strtab_idx[name].to_string());
+        enum_defs_items.push(variants.len().to_string());
+        enum_variant_counts.push(variants.len().to_string());
+        for (v, payload) in variants {
+            enum_variant_items.push(strtab_idx[v].to_string());
+            enum_variant_items.push(payload.to_string());
+        }
+    }
+    wrapper.push_str(&format!(
+        "static NAT_ENUM_DEFS: [u32; {}] = [{}];\n",
+        enum_defs_items.len(),
+        enum_defs_items.join(",")
+    ));
+    wrapper.push_str(&format!(
+        "static NAT_ENUM_VARIANTS: [u32; {}] = [{}];\n",
+        enum_variant_items.len(),
+        enum_variant_items.join(",")
+    ));
+    wrapper.push_str(&format!(
+        "static NAT_ENUM_VARIANT_COUNTS: [u32; {}] = [{}];\n",
+        enum_variant_counts.len(),
+        enum_variant_counts.join(",")
+    ));
     wrapper.push_str("#[allow(non_camel_case_types)]\n");
     wrapper.push_str("fn main() {\n");
     wrapper.push_str("    let ptrs: Vec<*const u8> = NAT_STRS.iter().map(|s| s.as_ptr()).collect();\n");
@@ -1841,6 +1917,12 @@ fn build_native(
     ));
     wrapper.push_str(&format!(
         "    hn_rt_locals_init(NAT_LOCS.as_ptr(), NAT_LOC_COUNTS.as_ptr(), NAT_LOC_COUNTS.len());\n"
+    ));
+    wrapper.push_str(&format!(
+        "    hn_rt_structs_init(NAT_STRUCT_DEFS.as_ptr(), NAT_STRUCT_FIELDS.as_ptr(), NAT_STRUCT_FIELD_COUNTS.as_ptr(), NAT_STRUCT_FIELD_COUNTS.len());\n"
+    ));
+    wrapper.push_str(&format!(
+        "    hn_rt_enums_init(NAT_ENUM_DEFS.as_ptr(), NAT_ENUM_VARIANTS.as_ptr(), NAT_ENUM_VARIANT_COUNTS.as_ptr(), NAT_ENUM_VARIANT_COUNTS.len());\n"
     ));
     wrapper.push_str("    std::process::exit(hn_entry() as i32);\n");
     wrapper.push_str("    // hn_entry：ERR → rt_unwind（渲染 → stderr → exit(1)）；否则退出码 0。\n");

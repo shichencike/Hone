@@ -62,7 +62,27 @@ CASES = {
     "ds_short": 'x, y = [1];\nprint(y);\n',
     "ds_key_not_str": '{c, d} = {1: 2, 3: 4};\n',
     # match / await / 控制流
-    "match_no_arm": 'x = 5;\nmatch x {\n    1 => { print("one"); }\n    2 => { print("two"); }\n}\n',
+    # （match 是表达式、不能作语句：解析期 H005「expected a statement」——三引擎同源。）
+    "match_as_stmt": 'x = 5;\nmatch x {\n    1 => { print("one"); }\n    2 => { print("two"); }\n}\n',
+    # （match 无匹配分支：G2.3 由「抛字面串 → H600」改为与解释器逐字节的 H005 + help；
+    #  用例用表达式形态，真走运行期 Raise 路径。）
+    "match_no_arm": 'x = 5;\ny = match x {\n    1 => "one",\n    2 => "two",\n};\nprint(y);\n',
+    "match_no_arm_enum": 'enum C { A, B };\nc = C.A;\ny = match c { C.B => 1 };\nprint(y);\n',
+    # G2.3 引擎对齐：条件严格 bool / 逻辑操作数严格 bool 的运行期 H001（此前 VM 按 truthy
+    # 静默放行，enum / struct 等动态类型值上分叉）。逐站点冻结消息/定位。
+    "cond_if_enum": 'enum C { A, B };\nc = C.A;\nif (c) { print("x"); }\n',
+    "cond_while_enum": 'enum C { A, B };\nc = C.A;\nwhile (c) { break; }\n',
+    "cond_dowhile_enum": 'enum C { A, B };\nc = C.A;\ndo { break; } while (c);\n',
+    "cond_for_enum": 'enum C { A, B };\nc = C.A;\nfor (i = 0; c; i = i + 1) { break; }\n',
+    "cond_ternary_enum": 'enum C { A, B };\nc = C.A;\nx = (c ? 1 : 2);\nprint(to_str(x));\n',
+    "cond_struct_if": 'struct P { x: int };\np = P(1);\nif (p) { print("x"); }\n',
+    "logic_and_enum": 'enum C { A, B };\nc = C.A;\nprint(to_str(c && c));\n',
+    "logic_or_enum": 'enum C { A, B };\nc = C.A;\nprint(to_str(c || c));\n',
+    "logic_and_rhs": 'enum C { A, B };\nc = C.A;\nprint(to_str(true && c));\n',
+    "comp_if_enum": 'enum C { A, B };\nc = C.A;\nl = [x for x in [1, 2] if c];\nprint(to_str(l));\n',
+    # （解构 other 臂文案：interp 报类型名、VM 曾报值显示；G2.3 修 VM 为 type_name。
+    #  既有 ds_notiter 用例被 print 的 H011 静态错误掩盖，此处单语句真走运行期。）
+    "ds_notiter_run": 'a, b = 5;\n',
     "await_non_future": 'x = 5;\ny = await x;\nprint(y);\n',
     "break_outside": 'break;\n',
     # 内置 / 转换 / 重载
@@ -72,6 +92,11 @@ CASES = {
     "dict_key_bool_get": 'd = {"a": 1};\nprint(d[true]);\n',
     "dict_key_bool_set": 'd = {"a": 1};\nd[true] = 2;\nprint(d);\n',
     "enum_payload_oob": 'enum E { A(1) }\ne = E.A(9);\nprint(e[5]);\n',
+    "enum_for_in": 'enum E { A, B }\ne = E.A;\nfor x in e { print(x); }\n',
+    "enum_len": 'enum E { A(float) }\ne = E.A(1.0);\nprint(len(e));\n',
+    "enum_destruct": 'enum E { A(int) }\ne = E.A(1);\na, b = e;\n',
+    # （enum 解构 `x, y = e`：G2.3 已修 VM 解构 other 臂文案（改 type_name），三引擎一致，
+    #  故可固化——ds_notiter_run 覆盖同类非容器解构。）
     "throw_num": 'throw 5;\n',
     # try/catch 上下文
     "try_catch_ctx": (

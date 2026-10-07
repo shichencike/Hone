@@ -50,6 +50,7 @@ const T_ERR: u64 = 7;
 const T_FN: u64 = 8;
 const T_LIST: u64 = 9;
 const T_DICT: u64 = 10;
+const T_ENUM: u64 = 11;
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -104,6 +105,7 @@ const P_ERR: u64 = 2;  // payload=*mut HnErr
 const P_FN: u64 = 3;   // payload=*mut HnFnBox（T5：lambda 值，a=chunk 索引）
 const P_LIST: u64 = 4; // payload=*mut HnList（M1：list 值，元素为句柄引用）
 const P_DICT: u64 = 5; // payload=*mut HnDict（M1：dict 值，键 String + 句柄值）
+const P_ENUM: u64 = 6; // payload=*mut HnEnum（G2.2：enum 值，a=枚举名 sidx，b=变体 sidx，载荷句柄）
 
 /// lambda 值（T5）：chunk 索引 + 捕获句柄数组（每项 retain 引用，按值捕获语义）。
 struct HnFnBox {
@@ -114,6 +116,12 @@ struct HnFnBox {
 /// list 值（M1）：元素句柄（每项 retain 引用，cell 拥有；写路径先过 cow 门）。
 struct HnList {
     items: Vec<u64>,
+}
+
+/// enum 值（G2.2，镜像 interp EnumVal）：a=枚举名 strtab 索引，b=变体 strtab 索引，
+/// 载荷为句柄数组（每项 retain 引用，cell 拥有）。
+struct HnEnum {
+    payload: Vec<u64>,
 }
 
 /// dict 值（M1）：键 String（Hone dict 键恒为 str/int 转串，镜像 v_index 的 Dict 臂）+ 句柄值。
@@ -186,6 +194,12 @@ fn cell_release(h: u64) {
                 P_DICT => {
                     let b = Box::from_raw(c.payload as *mut HnDict);
                     for (_, h) in &b.pairs {
+                        cell_release(*h);
+                    }
+                }
+                P_ENUM => {
+                    let b = Box::from_raw(c.payload as *mut HnEnum);
+                    for h in &b.payload {
                         cell_release(*h);
                     }
                 }
@@ -342,6 +356,17 @@ pub fn handle_display(h: u64) -> String {
                 .collect();
             return format!("{{{}}}", inner.join(", "));
         }
+        // enum 显示：Color.Red / Shape.Circle(1.5)（镜像 interp Value::display 的 Enum 臂）。
+        P_ENUM => {
+            let b = unsafe { &*(c.payload as *const HnEnum) };
+            let name = strtab_name(c.a as u32);
+            let variant = strtab_name(c.b as u32);
+            if b.payload.is_empty() {
+                return format!("{name}.{variant}");
+            }
+            let inner: Vec<String> = b.payload.iter().map(|&e| handle_display(e)).collect();
+            return format!("{name}.{variant}({})", inner.join(", "));
+        }
         _ => {}
     }
     hnv_display(c.hnv())
@@ -368,20 +393,62 @@ fn values_eq_h(a: u64, b: u64, ci: u32, pc: u32) -> bool {
                     .zip(lb.items.iter())
                     .all(|(&x, &y)| values_eq_h(x, y, ci, pc))
         }
-        P_DICT => {
-            let da = unsafe { &*(ca.payload as *const HnDict) };
-            let db = unsafe { &*(cb.payload as *const HnDict) };
-            // 隐藏键不参与相等（镜像 interp eq 的 Dict 臂：Rust Vec== 含隐藏键；
-            // 但 interp 的 dict == 直接 a==b 含 __struct__？vm values_eq 需确认——G2.1
-            // 起 struct 才有标记键，M1 dict 无隐藏键，此处过滤为防御性对齐）。
-            let pa: Vec<&(String, u64)> = da.pairs.iter().filter(|(k, _)| !is_hidden_key(k)).collect();
-            let pb: Vec<&(String, u64)> = db.pairs.iter().filter(|(k, _)| !is_hidden_key(k)).collect();
-            pa.len() == pb.len()
-                && pa.iter().zip(pb.iter()).all(|((ka, va), (kb, vb))| {
-                    ka == kb && values_eq_h(*va, *vb, ci, pc)
-                })
+        P_DICT => dict_values_eq_h(dict_payload(&ca), dict_payload(&cb), ci, pc),
+        // enum 相等（镜像 interp Value::eq 的 Enum 臂）：枚举名 + 变体 + 载荷逐项相等。
+        P_ENUM => {
+            if ca.a != cb.a || ca.b != cb.b {
+                return false;
+            }
+            let ea = unsafe { &*(ca.payload as *const HnEnum) };
+            let eb = unsafe { &*(cb.payload as *const HnEnum) };
+            ea.payload.len() == eb.payload.len()
+                && ea
+                    .payload
+                    .iter()
+                    .zip(eb.payload.iter())
+                    .all(|(&x, &y)| values_eq_h(x, y, ci, pc))
         }
         _ => cmpv_inner(7, ca.hnv(), cb.hnv(), ci, pc).t == T_BOOL_TRUE,
+    }
+}
+
+#[inline]
+fn dict_payload(c: &HnCell) -> &'static HnDict {
+    unsafe { &*(c.payload as *const HnDict) }
+}
+
+/// dict 相等判定（G2.1，镜像 interp `dict_values_eq`；与 VM `v_eq` 的 Dict 臂——Rust
+/// `Vec==` 深比较——对 struct 实例语义重合：标记键同名则两侧相同、不同名则两侧不同，
+/// 普通 dict 无隐藏键走 else 分支）：
+/// - struct 实例（带 `__struct__` 标记键）：同名且可见字段按插入序逐对相等；
+/// - 普通 dict：全键值逐对相等。
+fn dict_values_eq_h(da: &'static HnDict, db: &'static HnDict, ci: u32, pc: u32) -> bool {
+    let name_of = |d: &'static HnDict| -> Option<&str> {
+        d.pairs
+            .iter()
+            .find(|(k, _)| is_hidden_key(k))
+            .and_then(|(_, v)| std::str::from_utf8(str_bytes(*v)).ok())
+    };
+    match (name_of(da), name_of(db)) {
+        (Some(a), Some(b)) => {
+            if a != b {
+                return false;
+            }
+            let va: Vec<&(String, u64)> = da.pairs.iter().filter(|(k, _)| !is_hidden_key(k)).collect();
+            let vb: Vec<&(String, u64)> = db.pairs.iter().filter(|(k, _)| !is_hidden_key(k)).collect();
+            if va.len() != vb.len() {
+                return false;
+            }
+            va.iter()
+                .zip(vb.iter())
+                .all(|((ka, va_), (kb, vb_))| ka == kb && values_eq_h(*va_, *vb_, ci, pc))
+        }
+        _ => da.pairs.len() == db.pairs.len()
+            && da
+                .pairs
+                .iter()
+                .zip(db.pairs.iter())
+                .all(|((ka, va), (kb, vb))| ka == kb && values_eq_h(*va, *vb, ci, pc)),
     }
 }
 
@@ -667,6 +734,7 @@ fn type_name(t: u64) -> &'static str {
         T_FN => "fn",
         T_LIST => "list",
         T_DICT => "dict",
+        T_ENUM => "enum",
         _ => "?",
     }
 }
@@ -1032,10 +1100,12 @@ pub extern "C" fn rt_raise(code_sidx: u64, msg_sidx: u64, help_sidx: u64, ci: u6
     // err_h_help 收&'static str 的错误码，而此处 code 来自字符串表（动态）——
     // 故先把字符串表的错误码归一为 &'static str（HnErr.code_p 契约要求静态生命周期，
     // 直接存局部 String 的指针会在函数返回后悬垂）。错误码取值集合固定且极小
-    // （见 vm.rs 的 Raise 可用码集合），未命中时回退 H990 内部错误。
+    // （见 vm.rs 的 Raise 发射点：推导式双变量 H001、match 无匹配分支 H005），
+    // 未命中时回退 H990 内部错误——**新增 Raise 码必须同步此表**，否则被静默归为 H990。
     let code: &'static str = match code.as_str() {
         "H001" => "H001",
         "H002" => "H002",
+        "H005" => "H005",
         "H009" => "H009",
         "H010" => "H010",
         "H999" => "H999",
@@ -1154,6 +1224,16 @@ static FUNCS: std::sync::Mutex<Vec<(u32, u32, u32)>> = std::sync::Mutex::new(Vec
 static LOCALS: std::sync::Mutex<Vec<Vec<(u32, u32)>>> = std::sync::Mutex::new(Vec::new());
 static CHUNK_NPARAMS: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
 static FN_PTRS: std::sync::Mutex<Vec<FnPtr>> = std::sync::Mutex::new(Vec::new());
+// G2.1：struct 定义表 structs[i] = (strtab_idx, 字段数)，字段名按定义序存
+// STRUCT_FIELDS[i]（strtab 索引）。与 vm.rs struct_defs 对应（构造时字段名序列
+// 决定实例键序；只存名，readonly 标志 VM 侧同样不存——字段写入 VM 编译期 H999）。
+static STRUCT_DEFS: std::sync::Mutex<Vec<(u32, u32)>> = std::sync::Mutex::new(Vec::new());
+static STRUCT_FIELDS: std::sync::Mutex<Vec<Vec<u32>>> = std::sync::Mutex::new(Vec::new());
+// G2.2：enum 定义表（镜像 vm.rs enum_defs）。ENUM_DEFS[i] = (枚举名 strtab 索引, 变体数)；
+// ENUM_VARIANTS[i][j] = (变体名 strtab 索引, 载荷个数)。构造分发用；载荷类型不在运行期
+// 校验（checker 已静态校验，与 struct 字段类型同口径）。
+static ENUM_DEFS: std::sync::Mutex<Vec<(u32, u32)>> = std::sync::Mutex::new(Vec::new());
+static ENUM_VARIANTS: std::sync::Mutex<Vec<Vec<(u32, u32)>>> = std::sync::Mutex::new(Vec::new());
 
 /// 全局函数表：funcs[i] = (strtab_idx, ci, nparams)。
 #[no_mangle]
@@ -1165,6 +1245,29 @@ pub extern "C" fn hn_rt_funcs_init(funcs: *const u32, n: usize) {
         let c = unsafe { *funcs.add(i * 3 + 1) };
         let p = unsafe { *funcs.add(i * 3 + 2) };
         t.push((f, c, p));
+    }
+}
+
+/// struct 定义表：defs[i] = (strtab_idx, 字段数) 交错；字段名扁平数组按定义序
+/// （fields 指针 + 每 struct 字段数 counts 前缀和定位）。G2.1 起 call_global 据此
+/// 构造带 `__struct__` 标记键的 dict 实例（与 VM do_call 的 struct 臂同序）。
+#[no_mangle]
+pub extern "C" fn hn_rt_structs_init(defs: *const u32, fields: *const u32, counts: *const u32, n: usize) {
+    let mut t = STRUCT_DEFS.lock().unwrap();
+    let mut f = STRUCT_FIELDS.lock().unwrap();
+    t.clear();
+    f.clear();
+    let mut off = 0usize;
+    for i in 0..n {
+        let s = unsafe { *defs.add(i * 2) };
+        let cnt = unsafe { *defs.add(i * 2 + 1) } as usize;
+        t.push((s, cnt as u32));
+        let mut v = Vec::with_capacity(cnt);
+        for j in 0..cnt {
+            v.push(unsafe { *fields.add(off + j) });
+        }
+        f.push(v);
+        off += cnt;
     }
 }
 
@@ -1207,6 +1310,31 @@ pub extern "C" fn hn_rt_fn_ptrs_init(ptrs: *const usize, n: usize) {
         // fn 指针与 usize 同宽：transmute 往返（wrapper 侧 fn as usize 传入）。
         let f: FnPtr = unsafe { std::mem::transmute(p) };
         t.push(f);
+    }
+}
+
+/// enum 定义表：defs[i] = (枚举名 strtab 索引, 变体数) 交错；变体 (名 sidx, 载荷数)
+/// 按 (variants 指针, counts 前缀和) 扁平定位。G2.2 起 call_global 的点号分发据此
+/// 构造 enum 值（与 VM do_call 的 enum 臂同序）。
+#[no_mangle]
+pub extern "C" fn hn_rt_enums_init(defs: *const u32, variants: *const u32, counts: *const u32, n: usize) {
+    let mut t = ENUM_DEFS.lock().unwrap();
+    let mut v = ENUM_VARIANTS.lock().unwrap();
+    t.clear();
+    v.clear();
+    let mut off = 0usize;
+    for i in 0..n {
+        let s = unsafe { *defs.add(i * 2) };
+        let cnt = unsafe { *defs.add(i * 2 + 1) } as usize;
+        t.push((s, cnt as u32));
+        let mut vs = Vec::with_capacity(cnt);
+        for j in 0..cnt {
+            let vn = unsafe { *variants.add(off * 2) };
+            let vp = unsafe { *variants.add(off * 2 + 1) } as u32;
+            vs.push((vn, vp));
+            off += 1;
+        }
+        v.push(vs);
     }
 }
 
@@ -1319,8 +1447,20 @@ fn call_fn_h(h: u64, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
 
 /// 全局名分发（无局部变量优先路径）：点号名 / 用户函数 / 内置 / H002。
 fn call_global(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
-    // 点号名：用户函数表查（M0 无 import，点号用户函数不存在）→ 库未加载 H404。
-    if name.contains('.') {
+    // 点号名：G2.2 枚举构造（Color.Red，镜像 VM do_call 序：enum → 函数 → 内置 → 库未加载）。
+    if let Some((head, tail)) = name.split_once('.') {
+        if let Some((_, name_sidx, vs)) = enum_lookup(head) {
+            if vs.iter().any(|(v, _)| strtab_name_eq(*v, tail)) {
+                let vsidx = vs.iter().find(|(v, _)| strtab_name_eq(*v, tail)).unwrap().0;
+                // 载荷 = 全部实参（retain 进 box；实参数组引用在此释放，与 Call lowering 约定一致）。
+                let mut payload = Vec::with_capacity(nargs as usize);
+                for i in 0..nargs as usize {
+                    payload.push(rt_retain(arg_at(argptr, i)));
+                }
+                drop_args(argptr, nargs);
+                return make_cell_enum(name_sidx, vsidx, payload);
+            }
+        }
         if let Some((fci, np)) = func_lookup(name) {
             return call_chunk_idx(fci, np, argptr, nargs, name);
         }
@@ -1340,11 +1480,81 @@ fn call_global(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
     if let Some((fci, np)) = func_lookup(name) {
         return call_chunk_idx(fci, np, argptr, nargs, name);
     }
+    // G2.1：struct 构造（VM do_call 序：func_map 之后、内置之前）。
+    if let Some((si, nfields)) = struct_lookup(name) {
+        return construct_struct(si, nfields as usize, name, argptr, nargs, ci, pc);
+    }
     if is_m0_builtin(name) {
         return call_builtin(name, argptr, nargs, ci, pc);
     }
     drop_args(argptr, nargs);
     make_cell(err_h("H002", &format!("undefined function `{}`", name), ci, pc))
+}
+
+/// struct 定义表按名查找 → (表下标, 字段数)。
+fn struct_lookup(name: &str) -> Option<(usize, u32)> {
+    let t = STRUCT_DEFS.lock().unwrap();
+    for (i, &(s, n)) in t.iter().enumerate() {
+        if strtab_name_eq(s, name) {
+            return Some((i, n));
+        }
+    }
+    None
+}
+
+/// struct 构造（镜像 VM do_call 的 struct 臂）：
+/// 实例 = dict，首键 `__struct__` → **结构体名**（隐藏标记，所有用户可见路径过滤；
+/// 相等语义据此区分同名/异名 struct，与 VM/interp 的标记值一致），
+/// 其余键按字段定义序、值 = 实参（缺省补 null；多出的实参在此释放——
+/// checker 已静态拒绝多余实参，此分支为防御性对齐）。
+fn construct_struct(si: usize, nfields: usize, name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
+    let fields = STRUCT_FIELDS.lock().unwrap()[si].clone();
+    let name_sidx = STRUCT_DEFS.lock().unwrap()[si].0;
+    let mut pairs: Vec<(String, u64)> = Vec::with_capacity(nfields + 1);
+    // 标记值 = 结构体名的 strtab 句柄（rt_str = retain 表项，make_cell_dict 内再 retain 守恒）。
+    pairs.push((HIDDEN_STRUCT_KEY.to_string(), rt_str(name_sidx as u64)));
+    let mut used_args = 0usize;
+    for (fi, fsidx) in fields.iter().enumerate() {
+        if fi < nargs as usize {
+            pairs.push((strtab_name(*fsidx as u32), rt_retain(arg_at(argptr, fi))));
+            used_args = fi + 1;
+        } else {
+            let h = rt_null();
+            pairs.push((strtab_name(*fsidx as u32), h));
+        }
+    }
+    // 多余实参（nargs > 字段数）：VM 构造臂直接不读，引用须在此释放。
+    for i in used_args..nargs as usize {
+        cell_release(arg_at(argptr, i));
+    }
+    make_cell_dict(&pairs)
+}
+
+/// enum 定义表按名查找 → (表下标, 枚举名 sidx, 变体表)。
+fn enum_lookup(name: &str) -> Option<(usize, u32, Vec<(u32, u32)>)> {
+    let t = ENUM_DEFS.lock().unwrap();
+    for (i, &(s, _)) in t.iter().enumerate() {
+        if strtab_name_eq(s, name) {
+            let vs = ENUM_VARIANTS.lock().unwrap()[i].clone();
+            return Some((i, s, vs));
+        }
+    }
+    None
+}
+
+/// 建 enum 值句柄（rc=1）：a=枚举名 sidx，b=变体 sidx，载荷句柄逐项 retain（消费）。
+fn make_cell_enum(name_sidx: u32, variant_sidx: u32, payload: Vec<u64>) -> u64 {
+    let boxed = Box::into_raw(Box::new(HnEnum { payload }));
+    let c = Box::into_raw(Box::new(HnCell {
+        rc: 1,
+        t: T_ENUM,
+        a: name_sidx as u64,
+        b: variant_sidx as u64,
+        pkind: P_ENUM,
+        payload: boxed as u64,
+    }));
+    leak_check_inc();
+    c as u64
 }
 
 /// 带局部变量优先的名分发（镜像 Vm::do_call）：
@@ -1913,8 +2123,8 @@ pub extern "C" fn rt_binop(op: u64, x: u64, y: u64, ci: u64, pc: u64) -> u64 {
             let eq = str_eq(x, y);
             make_cell(Hnv::bool_(if op == 7 { eq } else { !eq }))
         }
-        // list/dict ==/!=（v_eq 容器臂）：递归结构比较（M1），结果 bool 建新句柄。
-        7 | 8 if (cx.t == T_LIST || cx.t == T_DICT) && cx.t == cy.t => {
+        // list/dict/enum ==/!=（v_eq 容器臂）：递归结构比较，结果 bool 建新句柄。
+        7 | 8 if (cx.t == T_LIST || cx.t == T_DICT || cx.t == T_ENUM) && cx.t == cy.t => {
             let eq = values_eq_h(x, y, ci, pc);
             make_cell(Hnv::bool_(if op == 7 { eq } else { !eq }))
         }
@@ -2260,6 +2470,47 @@ pub extern "C" fn rt_destructget(obj: u64, key: u64, nvars: u64, is_dict: u64, c
     }
 }
 
+// ── G2.2：enum 指令（NewEnum / EnumElem / IsEnumVariant 的 lowering 目标）──
+// 语义逐条镜像 vm.rs 执行臂（2058–2085 行）；所有权协议同 M1 读指令：
+// src 句柄借用（槽内保留），返回新句柄由调用方 store_slot。
+
+/// NewEnum：由载荷句柄（param_ss 连续区，借用）建 enum 值——逐项 retain 入 box，
+/// 实参数组引用（lowering 的 retain 产物，与 Call 同约定）在此统一释放。
+/// 无错误路径（镜像 VM：直接 clone 载荷），ci/pc 省略。
+#[no_mangle]
+pub extern "C" fn rt_newenum(n_sidx: u64, v_sidx: u64, argptr: u64, nargs: u64) -> u64 {
+    let mut payload = Vec::with_capacity(nargs as usize);
+    for i in 0..nargs as usize {
+        payload.push(rt_retain(arg_at(argptr, i)));
+    }
+    drop_args(argptr, nargs);
+    make_cell_enum(n_sidx as u32, v_sidx as u32, payload)
+}
+
+/// EnumElem：借 enum 值，返回第 idx 项载荷的新句柄。
+/// 非枚举值 / 越界 → H001（镜像 VM mk_err 文案；checker 已静态校验，防御性保留）。
+#[no_mangle]
+pub extern "C" fn rt_enumelem(src: u64, idx: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let c = cell(src);
+    if c.t != T_ENUM {
+        return make_cell(err_h("H001", "EnumElem 作用于非枚举值", ci, pc));
+    }
+    let b = unsafe { &*(c.payload as *const HnEnum) };
+    match b.payload.get(idx as usize) {
+        Some(h) => rt_retain(*h),
+        None => make_cell(err_h("H001", "枚举载荷索引越界", ci, pc)),
+    }
+}
+
+/// IsEnumVariant：借值，按 strtab 索引比较枚举名 + 变体（索引相等 ⇔ 名字相等，
+/// 主程序侧收集时去重）。无错误路径（镜像 VM：恒返回 bool）。
+#[no_mangle]
+pub extern "C" fn rt_isenumvariant(src: u64, n_sidx: u64, v_sidx: u64) -> u64 {
+    let c = cell(src);
+    make_cell(Hnv::bool_(c.t == T_ENUM && c.a == n_sidx && c.b == v_sidx))
+}
+
 /// 长度（Len 指令 lowering，镜像 v_len）：list 元素数 / dict 非隐藏键数 / str 字节长。
 #[no_mangle]
 pub extern "C" fn rt_len(v: u64, ci: u64, pc: u64) -> u64 {
@@ -2348,6 +2599,38 @@ pub extern "C" fn rt_itercheck(src: u64, is_comp: u64, ci: u64, pc: u64) -> u64 
         ));
     }
     make_cell(Hnv::null())
+}
+
+/// 条件严格 bool 校验（G2.3 引擎对齐，镜像 VM `Instr::CondCheck` 执行臂）：
+/// 非 bool → H001，消息按站点；通过 → null 句柄（调用方 drop）。
+/// 解释器七处条件站点均传 help=None，故用 explicit_no_help 阻渲染层回退补行。
+#[no_mangle]
+pub extern "C" fn rt_condcheck(v: u64, kind: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let c = cell(v);
+    if c.t == T_BOOL_TRUE || c.t == T_BOOL_FALSE {
+        return make_cell(Hnv::null());
+    }
+    let tn = type_name(c.t);
+    let msg = match kind {
+        0 => format!("if condition must be `bool`, got `{tn}`"),
+        1 => format!("while condition must be `bool`, got `{tn}`"),
+        2 => format!("do-while condition must be `bool`, got `{tn}`"),
+        3 => format!("for condition must be `bool`, got `{tn}`"),
+        4 => format!("ternary condition must be `bool`, got `{tn}`"),
+        5 => format!("logical operators require `bool` operands, got `{tn}`"),
+        _ => format!("comprehension `if` condition must be `bool`, got `{tn}`"),
+    };
+    make_cell(err_h_explicit_no_help("H001", &msg, ci, pc))
+}
+
+/// 值是否恰为 Bool(want)（无类型错误，恒产出 bool 句柄）——&&/|| 短路判定，
+/// 镜像 VM `Instr::IsBoolVal` 执行臂 / 解释器 `if let Value::Bool(false) = l`。
+#[no_mangle]
+pub extern "C" fn rt_isboolval(v: u64, want: u64) -> u64 {
+    let c = cell(v);
+    let is = (c.t == T_BOOL_TRUE && want != 0) || (c.t == T_BOOL_FALSE && want == 0);
+    rt_bool(u64::from(is))
 }
 
 /// append 内置（镜像 builtins.rs append）：值语义返回新 list（元素 retain + 新值 retain），
@@ -2886,6 +3169,63 @@ mod tests {
         cell_release(l);
         cell_release(h7);
         cell_release(h8);
+        assert_eq!(heap_live(), base);
+    }
+
+    // ── G2.3 引擎对齐：条件严格 bool 校验 + &&/|| 短路判定 ──
+
+    #[test]
+    fn condcheck_and_isboolval() {
+        let _g = locked();
+        let src = "if (c) { }\n";
+        let sp0: [u32; 3] = [1, 5, 1]; // 第 1 行，第 5 列（`c`）
+        let ptrs: [*const u32; 1] = [sp0.as_ptr()];
+        let lens: [usize; 1] = [3];
+        hn_rt_prog_init(
+            b"c.hn".as_ptr(),
+            4,
+            src.as_ptr(),
+            src.len(),
+            ptrs.as_ptr(),
+            lens.as_ptr(),
+            1,
+        );
+        let base = heap_live();
+        // bool 值通过 → null 句柄（无错误）。
+        let tb = rt_bool(1);
+        let ok = rt_condcheck(tb, 0, 0, 0);
+        assert_eq!(cell(ok).t, T_NULL);
+        cell_release(ok);
+        // 非 bool（int）→ H001，消息逐字镜像解释器 if 站点，且**无 help 行**
+        // （err_h_explicit_no_help 哨兵阻渲染层回退补行）。
+        let h1 = rt_i64(1);
+        let e = rt_condcheck(h1, 0, 0, 0);
+        assert_eq!(
+            err_render(e),
+            "error[H001]: if condition must be `bool`, got `int`\n  --> c.hn:1:5\n1 | if (c) { }\n  |     ^\n"
+        );
+        cell_release(e);
+        // kind=6：推导式 if 过滤站点文案。
+        let e6 = rt_condcheck(h1, 6, 0, 0);
+        assert!(err_render(e6).contains("comprehension `if` condition must be `bool`, got `int`"));
+        cell_release(e6);
+        // IsBoolVal：bool 精确匹配 want；非 bool 一律 false（无类型错误）。
+        let t = rt_isboolval(tb, 1);
+        assert_eq!(handle_display(t), "true");
+        cell_release(t);
+        let f = rt_isboolval(tb, 0);
+        assert_eq!(handle_display(f), "false");
+        cell_release(f);
+        let g = rt_isboolval(h1, 1);
+        assert_eq!(handle_display(g), "false");
+        cell_release(g);
+        let h0 = rt_i64(0);
+        let g2 = rt_isboolval(h0, 0);
+        assert_eq!(handle_display(g2), "false");
+        cell_release(g2);
+        cell_release(tb);
+        cell_release(h1);
+        cell_release(h0);
         assert_eq!(heap_live(), base);
     }
 }

@@ -64,11 +64,14 @@ AOT 的真实定位是「比解释器快一个数量级、几十 KB、零依赖�
   （正常路径）与 `tests/regress_err.py`（错误诊断逐字符）
 - 值模型：句柄式（寄存器持 u64 句柄指向堆上 `HnCell`）+ 引用计数 + 写时复制（COW）；
   lambda 按值捕获，错误经 ERR 句柄跨帧传播 + 静态 catch 映射（无 setjmp）
-- 当前支持范围（M0 + M1）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda / 捕获、
+- 当前支持范围（M0 + M1 + M2 G2.1–G2.3）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda / 捕获、
   try-catch / throw / 错误字段访问、**list / dict 读写与 for-in 迭代**、列表与字典推导式、
+  **struct 构造与字段读取**（隐藏 `__struct__` 标记键全路径过滤；`==` 按同名 struct 判定）、
+  **enum 构造 / 显示 / 相等 / 进容器**、**match 全形态**（字面量与变体模式、载荷绑定、`_` 通配、
+  无匹配分支 H005）、**条件严格 bool 与 `&&`/`||` 短路求值**、
   **别名值语义（RC+COW，O(1) 拷贝）**、内置子集（print/len/append/keys/values/has_key/to_str/
-  to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq/read_file）；子集外指令编译期报
-  H990「未实现」（M2 逐步放开）
+  to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq/read_file）；struct 字段写入与 VM 一致
+  编译期 H999；其余子集外指令编译期报 H990「未实现」（M2 逐步放开）
 - 依赖本机 rustc（M3 起改为随 hone 分发的预编译工具链）；与 `-c` 互斥（H005 显式报错）
 
 ## 用法

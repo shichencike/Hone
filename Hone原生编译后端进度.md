@@ -10,13 +10,13 @@
 |---|---|---|
 | **M0 管线打通** | ✅ 完成 | T1–T10 全完成（三引擎逐字节对齐；`build --exe --native` + `natgen` 共用管线；文档已同步） |
 | **M1 核心语义** | ✅ 完成 | G1.1 RC+COW / G1.2 list / G1.3 dict / G1.4 for-in / G1.5 别名用例集 / G1.6 全量回归（三引擎）；审计暴露并修复 6 处引擎缺陷 |
-| **M2 功能对齐** | ⬜ 未开始 | struct/enum/match/重载/alias/async；任务组 G2.1–G2.7 |
+| **M2 功能对齐** | 🔵 进行中 | G2.1 struct 完成（构造 / Field / `__struct__` 全路径过滤 / 相等语义；字段写入为 VM 编译期 H999 同源）；G2.2 enum 完成（构造 / match / 显示 / 相等 / 容器传参）；**G2.3 match 完成**（字面量 / 变体 / 载荷绑定 / 通配 / 无匹配 H005 / 绑定作用域 / 闭包捕获），并连带修掉 6 处既有 interp-VM 分歧（match 无匹配错误码、绑定变量泄漏、lambda 捕获取外层、`&&`/`||` 无短路、条件 truthy 放行、解构文案）；G2.4–G2.7 待办 |
 | **M3 集成与优化** | ⬜ 未开始 | import 合并/交叉编译/体积裁剪/工具链打包/CI；任务组 G3.1–G3.7 |
 
-**当前可运行产物**：`tests/m1/list.hn` / `tests/m1/dict.hn` / `tests/smoke/rc_alias.test.hn` → nat exe，三引擎逐字节对齐（含 list/dict 读写、for-in 迭代、别名 RC+COW 值语义）。
-**复现**：`hone natgen tests/m1/dict.hn -o dict.exe && ./dict.exe`
-**回归入口**：`python tests/regress4.py`（正常路径三引擎，6 例全绿）、`python tests/regress_err.py`（错误诊断三引擎逐字符，41 例全绿，其中 nat 运行期 18 例 / checker 同源拒 22 例 / 显式登记跳过 1 例）。
-**审计工具**：`python tests/tools/audit_err.py`（55 例错误文案 + help 行 nat-vs-interp 批量比对，开发期扫雷用；本轮据此发现并修复 6 处缺陷）。
+**当前可运行产物**：`tests/m1/list.hn` / `tests/m1/dict.hn` / `tests/smoke/rc_alias.test.hn` / `tests/m2/struct.hn` / `tests/m2/enum.hn` / `tests/m2/match.hn` / `tests/m2/conditions.hn` → nat exe，三引擎逐字节对齐（含 list/dict 读写、for-in 迭代、别名 RC+COW 值语义、struct 构造/字段/隐藏键过滤/相等、enum 构造/match/显示/相等/容器与传参、match 全形态与绑定作用域、lambda 捕获、条件严格 bool 与 `&&`/`||` 短路）。
+**复现**：`hone build --exe --native tests/m2/match.hn -o match.exe && ./match.exe`
+**回归入口**：`python tests/regress4.py`（正常路径三引擎，10 例全绿）、`python tests/regress_err.py`（错误诊断三引擎逐字符，57 例全绿）、`python tests/regress3.py`（interp vs VM 全 examples，真实逻辑差异 0）、`python tests/regress_ir.py`（文本 IR 往返，BAD=0）。
+**审计工具**：`python tests/tools/audit_err.py`（55 例错误文案 + help 行 nat-vs-interp 批量比对）；`python tests/tools/probe_align.py`（50 例 match / 条件 / 逻辑 / 解构形态的 interp-VM[-nat] 逐字节比对，**G2.3 的 6 处分歧即由它扫出**；加 `--nat` 追加第三引擎）。
 **验证前置**：改代码先 `cargo build`（`target/` 旧二进制会静默沿用），回归脚本依赖 `target/debug/hone.exe`。
 
 ---
@@ -253,13 +253,94 @@
 
 ## M2 — 功能对齐（任务组）
 
-- [ ] **G2.1 struct**：构造 / `Field` / readonly 拦截 / `__struct__` 标记键全路径过滤（display/len/keys/for-in/解构/==/json）
-- [ ] **G2.2 enum**：`NewEnum` / `EnumElem` / `IsEnumVariant` + 点号变体构造（`Color.Red` 零参调用形态）
-- [ ] **G2.3 match**：模式匹配 lowering（载荷绑定 / 通配）
+- [x] **G2.1 struct**：构造 / `Field` / readonly 拦截 / `__struct__` 标记键全路径过滤（display/len/keys/for-in/解构/==/json）
+- [x] **G2.2 enum**：`NewEnum` / `EnumElem` / `IsEnumVariant` + 点号变体构造（`Color.Red` 零参调用形态）
+- [x] **G2.3 match**：模式匹配 lowering（字面量 / 变体载荷绑定 / 通配 / 无匹配 H005 / 绑定作用域 / 闭包捕获）；连带修复 6 处既有 interp-VM 分歧（见实现进度）
 - [ ] **G2.4 运算符重载**：`__add` / `__eq` / `__neg` / `__len` 等回退链（镜像 `Vm::overload` 的触发条件：仅非 native 组合 + TYPE_MISMATCH）
 - [ ] **G2.5 alias / goto**：alias 解析表接入 rt_call；goto 已是 Label+Jmp（基线覆盖，补用例）
 - [ ] **G2.6 async-await**：`GoCall` / `Await` 线程 lowering（future 值 + wait，与 VM 线程语义对齐；跨线程值传递按 M2 边界）
 - [ ] **G2.7 H999 边界对齐**：lowering 显式全覆盖单测（`Instr` 全变体断言）+ 新后端 H999 集合 = VM H999 集合 + `.t_neg` / `examples` 全过
+
+### G2.1 实现进度（2026-10-07）—— 完成
+
+- **范围界定（以 VM 实际语义为准）**：struct 实例 = 带 `\u{0}__struct__` 隐藏标记键的 dict（标记值 = 结构体名，与 VM/interp 构造臂一致）。字段写入 `p.f = x`（`FieldAssign`）在 **VM 编译期 H999**（`fail(NOT_IMPLEMENTED, "VM: 字段赋值 obj.field = x 暂不支持")`，`compile_module` 即返回 Err），natgen 管线先走 `compile_module` 故**同源被拦**，lowering 不会见到该指令——readonly 字段的运行时拦截在 VM 侧不可达（VM `struct_defs` 只存字段名不存 readonly 标志），G2.1 无需运行时拦截路径。范围条的「readonly 拦截」按此登记为「编译期 H999 同源」核销。
+- **构造（runtime）**：`call_global` 在 func_map 之后、内置之前插 struct 臂（逐位镜像 VM `do_call` 顺序：局部变量 → async → 点号名 → func_map → struct → 内置 → H002）。`STRUCT_DEFS`/`STRUCT_FIELDS` 注册表经 wrapper `hn_rt_structs_init` 注入（`(strtab_idx, 字段数)` 交错 + 字段名 strtab 索引按定义序扁平）；实例首键 `__struct__` → 结构体名 strtab 句柄，其余键按字段序取值（缺省补 null；多余实参释放——checker 已静态拒绝，防御性对齐）。
+- **相等语义修正（三引擎分叉点）**：原 `values_eq_h` 的 dict 臂对两侧做隐藏键过滤后逐对比较，导致**异名 struct 同值误判相等**（VM/interp 对 `Point(3,4) == Vec2(3,4)` 均判 false——VM 的 Rust `Vec==` 含标记键、interp `dict_values_eq` 显式同名校验）。改 `dict_values_eq_h`：双侧标记键均存在 → 同名且可见字段逐对相等；否则全键值逐对相等（普通 dict 无隐藏键走 else，行为不变）。该修正同时覆盖 `==`/`!=`（rt_binop 7/8）与 `assert_eq`（共用 `values_eq_h`）。
+- **隐藏键过滤复用 M1 钩子**：display / len / keys / values / has_key / for-in / 解构 / 字段访问（unknown field 列键）各路径 M1 已带 `is_hidden_key` 过滤，本轮 struct 实例携带标记键后全部自动生效；`type_of(struct)` 报 `dict`（与 interp/VM 一致，struct 无独立类型名）。
+- **wrapper（main.rs）**：strtab 收集补 struct 定义名 + 字段名 + `\u{0}__struct__` 标记键（隐藏键脚本不可书写，须显式收集）；生成 `NAT_STRUCT_DEFS` / `NAT_STRUCT_FIELDS` / `NAT_STRUCT_FIELD_COUNTS` 静态表并接 `hn_rt_structs_init`。
+- **用例**：`tests/m2/struct.hn`（10 组：构造+字段读 / readonly 字段读取 / 隐藏键过滤 7 路径 / 相等四象限（同名同值、同名异值、**异名同值 false**、struct vs 普通 dict）/ 解构+推导式 / 嵌套 struct（Box{inner: Point}）/ list of struct / 别名+函数传参 / dict 值为 struct / 单字段边界）；错误用例 `struct_err_field.hn`（unknown field H002 列实有键）/ `struct_err_undef.hn`（checker 同源拒）。
+- **用例侧语言约束（非 nat 差异）**：`pts[1].x` 语法不可写（字段链基只认标识符，parser 约束）；字段访问结果为 `Unknown` 类型，双 Unknown 的 `*` 报 H003（四引擎共享 checker 规则，一臂 `to_int` 即可）；函数内引用 struct 类型需 `[Point]` 类型参数声明（编译期擦除）。
+- **验证**：`tests/m2/struct.hn` 47 行输出三引擎逐字节一致；两错误用例三引擎一致；`regress4` **7/7 全绿**（6 → 7，新增 struct.hn）；`regress_err` 41/41 无回退；`regress3` 真实逻辑差异 = 0；`regress_ir` BAD=0；`cargo test -p honeruntime` 18/18。
+
+### G2.2 实现进度（2026-10-07）—— 完成
+
+- **范围界定（以 VM 实际语义为准）**：enum 值 = 三字段结构（枚举名 `ty` + 变体 `variant` + 载荷 `payload` 句柄数组），运行时以 `T_ENUM`/`P_ENUM` 类型与 `HnEnum{payload}` 载荷建模，`a`/`b` 复用句柄 cell 槽存枚举名/变体名的 strtab 索引（索引相等 ⇔ 名字相等，主程序侧 strtab 去重）。
+- **两条构造入口（镜像 VM `do_call` 分发序：enum → func → 内置 → 库未加载）**：
+  1. **点号零参形态 `Color.Red`**：VM 编译臂把它编成 `Call("Color.Red", 0)`（`enum_defs.contains_key(head)` 命中），运行时经 `rt_call` → `call_global` 点号分支的 **enum 臂**构造（`ENUM_DEFS`/`ENUM_VARIANTS` 注册表查变体，无实参）。
+  2. **带载荷形态 `Shape.Circle(1.5)`**：VM 把带参构造 `Expr::Call(Ident "Shape.Circle")` 也走点号 Call，实参打包入 `param_ss`（`NewEnum` lowering 臂同 `Call` 约定：retain 入连续区，runtime 消费并 `drop_args` 释放）。
+- **三个指令 lowering（镜像 vm.rs 执行臂 2058–2085）**：`rt_newenum(n_sidx,v_sidx,argptr,nargs)`（无错误路径，逐项 retain 载荷入 box）；`rt_enumelem(src,idx,ci,pc)`（借 src 返回载荷新句柄，非枚举/越界 → H001）；`rt_isenumvariant(src,n_sidx,v_sidx)`（恒返 bool，供 match 模式分派）。均入 `RtImports`/`RtRefs` 并同步 `max_pack`（`NewEnum` 占 `n` 个打包槽）。
+- **语义臂复用 M1 钩子**：`display`（`P_ENUM`：`Name.Variant` 无载荷 / `Name.Variant(v, …)` 有载荷，镜像 interp `display` 的 Enum 臂）；`==`/`!=`（`values_eq_h` 的 `P_ENUM` 臂：枚举名 + 变体 + 载荷逐项递归相等，镜像 interp `Value::eq` 的 Enum 臂；`rt_binop` 7/8 的容器守卫补 `T_ENUM`）；`type_of` → `enum`；`len` 的 else 臂经 `type_name(T_ENUM)` 报 `enum`（与 builtins.rs `len` 文案同源）。
+- **wrapper（main.rs）**：strtab 收集补 enum 定义名 + 各变体名；生成 `NAT_ENUM_DEFS`（`(strtab_idx,变体数)` 交错）/ `NAT_ENUM_VARIANTS`（`(变体名 sidx,载荷数)` 扁平）/ `NAT_ENUM_VARIANT_COUNTS` 静态表并接 `hn_rt_enums_init`。
+- **用例**：`tests/m2/enum.hn`（8 组：简单变体构造+显示 / 带载荷变体 / match 无载荷+载荷绑定+通配+作函数参数 / 相等四象限（同名同值、同名异值、**跨枚举同名变体 false**、载荷递归）/ type_of / enum 进 list（显示/索引/相等）+ dict 值 / 别名+函数传参 / 多类型载荷（str+int）显示与相等）；错误用例 `regress_err.py` 新增 `enum_for_in`（运行期 H001 `for in` 非 list/dict，nat 真走 `rt_itercheck`）/ `enum_len`（运行期 H001 `len` 非 string/list/dict/bytes，nat 真走 `call_builtin` 的 len else 臂）/ `enum_payload_oob`（checker 同源拒 H005）。
+- **审计暴露 2 处既有引擎分歧**（非 G2.2 引入，本轮 diff 未触碰 vm.rs/interp.rs，登记待修；**已在 G2.3 一并修复**，详见 G2.3 进度）：
+  1. **`if (enum值)` truthy 判定**：interp 报 `H001 if condition must be bool, got enum`（拒绝），VM 却当 truthy 放行（`if(enum)` 走真分支）。探针确认 `if(5)`/`if("a")` 两引擎一致报 H008，说明 `if` 本应严格 bool，enum 应同型拒绝——**VM 侧漏了 enum 类型的 bool 校验**。`enum.hn` 不固化该路径。
+  2. **解构 other 臂文案 `type_name` vs `value_to_str`**：`x, y = 非容器值` 时 interp 报 `got <type_name>`（如 `enum`/`int`），VM 报 `got <value_to_str>`（如 `E.A(1)`/`5`）。探针确认**纯 `a, b = 5` 单语句即分叉**（与 enum 无关），且既有用例 `ds_notiter`（`a,b=5; print(a,b)`）因 `print` 的 H011 参数数错误**掩盖**了该解构分歧从未被暴露。**建议修 VM `v_destruct_get` 的 other 臂改用 `other.type_name()` 与 interp 对齐。**
+- **验证**：`tests/m2/enum.hn` 三引擎（interp/VM/nat）逐字节一致；3 个新错误用例三引擎对齐全 PASS（`enum_for_in`/`enum_len` 走 nat 运行期、`enum_payload_oob` 走 checker 同源拒）；`regress4` **8/8 全绿**（7 → 8，新增 enum.hn）；`regress_err` **43/43 全绿**（41 → 43，新增 2 运行期 + 1 同源拒）；`regress3` 真实逻辑差异 = 0；`regress_ir` BAD=0；`cargo build` 通过（7 条存量警告，非本轮引入）。
+
+### G2.3 实现进度（2026-10-07）—— 完成
+
+- **范围界定（以解释器实际语义为准）**：`match` 在 VM 编译器里降解为 `Eq` / `IsEnumVariant` / `EnumElem` +
+  分支跳转，指令集 G2.2 已全覆盖，**natgen 无需新增 lowering**；本任务实际工作是
+  ①把 match 的运行期错误路径与作用域语义对齐解释器 ②补正式用例集 ③连带修掉审计暴露的既有引擎分歧。
+- **探针先行（`tmp_probe/match_probe*.py`，36 例形态矩阵）**：先跑 interp vs VM 形态比对再动手，
+  一次性扫出 3 处 match 侧分叉（无匹配错误码、绑定变量泄漏、lambda 捕获取外层）；
+  再用条件/逻辑/解构探针扫出 3 类更严重的既有分叉（见下「连带修复」）。
+- **无匹配分支错误码对齐**：VM 原发 `ThrowStr("match failed: 无匹配分支 (H005)")` → 运行期 H600，
+  与解释器 H005「no match arm matched the value」+ help 不一致——改发 `Instr::Raise(codes::SYNTAX, …)`。
+  连带两处同步：runtime `rt_raise` 的错误码白名单（未命中会静默归 H990，nat 曾渲染成 H990）、
+  文本 IR 装配的 `RAISE` 码表（缺 H005 会导致 `--disasm` 往返失败）。nat 三引擎逐字节一致。
+- **绑定变量作用域**：绑定原用 `decl()` 插进**所在作用域且从不弹出** → 绑定寄存器顶掉外层同名变量
+  （`rr` 绑定后外层 `rr` 在 VM 侧被改写，解释器分支结束即 `pop_scope`）。改为
+  「`scopes.push` + `decl_tmp` + 分支末 `scopes.pop`」（与推导式循环变量同口径）：不推进 `var_next`、
+  不写 `chunk.locals`，对外层完全无痕。
+- **lambda 捕获改内层优先**：`Expr::Lambda` 捕获表按「外→内」遍历且首见即取，遮蔽场景下捕获到被遮蔽的
+  外层值（`match` 绑定遮蔽外层名时，闭包拿到外层值而非绑定值）——改为 `.rev()`（与 `lookup` 同序）。
+- **连带修复的 3 类既有引擎分歧（G2.2 登记 2 处 + 新发现 1 类）**：
+  | # | 分歧 | 位置 | 性质 |
+  |---|---|---|---|
+  | 1 | 条件 truthy 放行：6 处站点（if/while/do-while/for/ternary/推导式 `if` 过滤）非 bool 值当真 | `vm.rs` JmpIfFalse/JmpIfTrue 执行臂 | G2.2 登记项；`do {} while(enum)` 原先**死循环**；enum/struct 等动态值全部放行 |
+  | 2 | `&&`/`||` **无短路**：右侧在分支前无条件求值；且操作数非 bool 时当 truthy 并直接返回该值 | `vm.rs` `Expr::Binary` And/Or 臂 | 新发现（**可见副作用的正确性 bug**）：`false && f()` 仍调用 f、`true \|\| (1/0==0)` 触发除零 |
+  | 3 | 解构非容器文案：VM 用值显示 `got 5`，解释器用类型名 `got int` | `vm.rs` `v_destruct_get` other 臂 | G2.2 登记项（被 `print` H011 静态错误掩盖，从未暴露） |
+- **新指令两条（VM / natgen / runtime / 文本 IR 四处同步）**：
+  - `Instr::CondCheck(reg, kind)`：非 bool → H001，消息按 kind 分站点（0=if 1=while 2=do-while
+    3=for 4=ternary 5=逻辑运算 6=推导式 if），**均无 help 行**（解释器七处均传 `None`，runtime 用
+    `err_h_explicit_no_help` 哨兵阻渲染层回退补行）。span 取解释器同款：语句条件取 `expr_span(cond)`，
+    逻辑运算/ternary 取整表达式 span（= 运算符 token）。
+  - `Instr::IsBoolVal(dst, src, want)`：值是否恰为 `Bool(want)`，无类型错误——供 `&&`/`||` 短路判定，
+    镜像解释器 `if let Value::Bool(false) = l`（**注意：短路判据是「恰为该布尔值」，非 truthy**）。
+  - And/Or 重编译：`Expr::Binary` 对 And/Or 提前分流——先求值左操作数 → `IsBoolVal` 判短路 →
+    短路才编译右操作数（真短路）→ `CondCheck(rhs, 5)` → 结果为右值；非短路路径结果为该布尔字面量。
+  - runtime 新增 `rt_condcheck` / `rt_isboolval`（`rt_condcheck` 通过时返回 null 句柄，由 natgen 显式
+    drop，同 `rt_itercheck` 口径）；natgen 加 `sig2_1` 签名 + 两个导入 + 两个 lowering 臂。
+  - 文本 IR：`CONDCHK r{reg} {kind}` / `ISBOOLV r{dst} r{src} {true|false}`（`regress_ir` 往返 BAD=0）。
+- **探针固化为工具**：`tests/tools/probe_align.py`（50 例：match 20 / cond 11 / logic 14 / destruct 5），
+  默认 interp vs VM，`--nat` 追加第三引擎。与 `audit_err.py` 分工：
+  前者盯正常路径形态与动态值下的条件/逻辑，后者盯错误文案与 help 行。
+  （自写比对脚本注意剥 nat build 的 `[N/4]` 阶段行，否则 checker 同源拒会误判成分歧。）
+- **用例**：`tests/m2/match.hn`（6 组：字面量五类型 / 臂顺序与无通配命中 / 变体无载荷·多载荷绑定·
+  `_` 忽略·跨枚举同名变体 / 绑定作用域（遮蔽后外层不变、同表达式内 `+ rr` 读外层、臂后同名可重声明）/
+  闭包捕获绑定与外层变量 / 嵌套·函数返回·作实参·list 字面量·循环累加），24 行输出三引擎逐字节一致；
+  `tests/m2/conditions.hn`（5 组：短路副作用可见性 / 短路避免除零 / 普通布尔组合 / 优先级与结合 /
+  逻辑结果直接作条件）。错误用例：`match_as_stmt`（表达式语句位置解析期 H005）、`match_no_arm`、
+  `match_no_arm_enum`、`cond_if/while/dowhile/for/ternary_enum`、`cond_struct_if`、`logic_and/or_enum`、
+  `logic_and_rhs`、`comp_if_enum`、`ds_notiter_run`、`enum_destruct`（G2.2 登记项修复后解除冻结，
+  共 15 例新增）。
+- **验证**：三引擎探针矩阵 50 例（match 20 / cond 11 / logic 14 / destruct 5，`--nat`）全部一致；
+  `regress4` **10/10 全绿**（8 → 10，新增 match.hn / conditions.hn）；
+  `regress_err` **全绿**（43 → 57，新增 15 例）；`regress3` 真实逻辑差异 = 0（And/Or 重编译覆盖
+  全部 examples 无回退）；`regress_ir` BAD=0（两条新指令往返 OK）；`cargo test` 4/4；
+  `cargo test -p honeruntime` **19/19**（新增 `condcheck_and_isboolval`：消息逐字 + 无 help 行 +
+  定位 caret + 短路判定四象限 + 堆计数归零）。
 
 ## M3 — 集成与优化（任务组）
 
@@ -277,12 +358,16 @@
 
 - [ ] `hone build --exe hello.hn` 在无 gcc 的干净机器上产出可运行 exe（M3 完成无 rustc 依赖）
 - [ ] `hone build --exe app.hn --target x86_64-unknown-linux-musl` 在 Windows 上产出 linux exe，CI 二次验证（G3.2/G3.6）
-- [x] `regress4.py` 正常路径三引擎（interp/VM/nat）逐字节对齐——M0 三例 + M1 三例（list/dict/别名）共 **6 例全绿**
-- [x] `regress_err.py` 错误诊断三引擎逐字符对齐——**41 例全绿**（nat：运行期 18 / checker 同源拒 22 / 显式登记跳过 1）
-- [x] `tests/tools/audit_err.py` 55 例错误文案 + help 行 nat-vs-interp 一致（本轮据此修复 6 处引擎缺陷）
+- [x] `regress4.py` 正常路径三引擎（interp/VM/nat）逐字节对齐——M0 三例 + M1 三例（list/dict/别名）
+      + M2 四例（struct / enum / match / conditions）共 **10 例全绿**
+- [x] `regress_err.py` 错误诊断三引擎逐字符对齐——**57 例全绿**（nat：运行期 34 / checker 同源拒 22 / 显式登记跳过 1）
+- [x] `tests/tools/audit_err.py` 55 例错误文案 + help 行 nat-vs-interp 一致（M1 据此修复 6 处引擎缺陷；
+      G2.3 的 6 处分歧由条件/逻辑/match 探针矩阵发现，`audit_err.py` 待按新错误形态扩充用例）
 - [ ] 新后端 H999 集合与 VM 完全一致（无静默漏实现）（G2.7）
 - [ ] 产物 ≤5MB（M3 后 ≤3MB）（G3.3）
-- [x] 文档同步：`hone.md` / `CHANGELOG.md` / `README.md` / 官网 changelog（T10 完成；M1 里程碑已同步前三处，官网待上传）
+- [x] 文档同步：`hone.md`（§1.4 短路与条件 / §1.10 match / §4.7 后端范围）、`CHANGELOG.md`、
+      `README.md`、官网 `docs.html` + `changelog.html`（`gen_changelog.py` 重生成）；
+      官网待上传（沿用 M1 起的既有流程）
 
 ---
 
@@ -309,3 +394,14 @@
 | 调用模型 | M0 统一走 `rt_call` 名分发，不做编译期直调内联 | 正确性优先；与 `Vm::do_call` 逻辑单点镜像；直调优化留 M1 |
 | 错误传播 | 函数返回值 ERR 跨帧传播 + 每 fallible 指令静态最近 catch 映射（§4.5） | Cranelift 无 setjmp；与 VM `try_catch` 的「仅建立帧捕获」语义天然同构 |
 | lambda 块 | lowering 为独立导出函数 `hn_f<ci>`；`HnFn{ci, caps}` 经 `rt_call_fn` 调度 | 与用户函数同构，捕获按值（整表 retain）对齐 C 运行时语义 |
+
+### G2.3 已定决策（2026-10-07）
+
+| 项 | 决策 | 理由 |
+|---|---|---|
+| match 语义基准 | 以**解释器实际行为**为准修 VM（无匹配 → H005 + help；绑定随分支出作用域），不反向改解释器 | 解释器是规范载体且文案更完整；VM 侧改动不影响既有 nat 语义（nat 镜像 VM 字节码，自动跟随） |
+| 短路判据 | `&&`/`||` 的短路条件是「左操作数**恰为** `false`/`true`」，不是 truthy | 镜像解释器 `if let Value::Bool(false) = l`；这是唯一能逐字节对齐的判据（truthy 判据在 `0`/`""` 等动态值上分叉） |
+| 严格 bool 校验落点 | 新增 `CondCheck` 指令在**编译期**逐站点发射（而非在 JmpIfFalse 里统一判） | 各站点文案与 span 不同（`if` vs `while` vs 运算符 token），统一判无法还原定位；编译期发射对 nat 是零成本（同一字节码） |
+| 绑定变量寄存器 | 走 `decl_tmp` + 分支作用域（不进 `var_next` / `chunk.locals`） | 与推导式循环变量同口径；`decl` 会推高 `var_next` 并让 `exit()` 把 `tmp_next` 拉回低水位，可能复用表达式内活跃临时寄存器 |
+| lambda 捕获顺序 | 内层优先（`scopes.iter().rev()`，与 `lookup` 同序） | 遮蔽下解释器捕获内层值；原正序首见即取会捕获被遮蔽的外层值 |
+| 探针形态 | 固化为 `tests/tools/probe_align.py`（含 `--nat`），不留在临时目录 | 与 `audit_err.py` 同定位：可复用的开发期扫雷工具，须随仓库维护 |

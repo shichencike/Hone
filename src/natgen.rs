@@ -84,6 +84,13 @@ struct RtImports {
     rt_isnull: FuncId,
     rt_itercheck: FuncId,
     rt_raise: FuncId,
+    // G2.2：enum 指令（NewEnum/EnumElem/IsEnumVariant 的 lowering 目标）。
+    rt_newenum: FuncId,
+    rt_enumelem: FuncId,
+    rt_isenumvariant: FuncId,
+    // G2.3：条件严格 bool 校验 + &&/|| 短路判定（引擎对齐）。
+    rt_condcheck: FuncId,
+    rt_isboolval: FuncId,
 }
 
 /// 本 chunk 内解析好的 FuncRef（借用 bcx.func，生命周期随本 chunk）。
@@ -119,6 +126,11 @@ struct RtRefs {
     rt_isnull: FuncRef,
     rt_itercheck: FuncRef,
     rt_raise: FuncRef,
+    rt_newenum: FuncRef,
+    rt_enumelem: FuncRef,
+    rt_isenumvariant: FuncRef,
+    rt_condcheck: FuncRef,
+    rt_isboolval: FuncRef,
 }
 
 impl RtImports {
@@ -138,6 +150,14 @@ impl RtImports {
         let sig1_0 = {
             let mut s = Signature::new(cc);
             s.params.push(AbiParam::new(I64));
+            s
+        };
+        // G2.3：rt_isboolval(v, want) -> bool 句柄。
+        let sig2_1 = {
+            let mut s = Signature::new(cc);
+            s.params.push(AbiParam::new(I64));
+            s.params.push(AbiParam::new(I64));
+            s.returns.push(AbiParam::new(I64));
             s
         };
         // T4：fallible 运算带出错指令位置 (ci, pc) —— runtime 查 span 表渲染行/列/caret。
@@ -234,6 +254,15 @@ impl RtImports {
             // M1：rt_raise(code_sidx, msg_sidx, help_sidx, ci, pc) —— 5 参（sig5_1）。
             // help_sidx = -1 表示该分支无 help 行（哨兵，镜像解释器 help=None）。
             rt_raise: imp(module, "rt_raise", &sig5_1)?,
+            // G2.2：rt_newenum(n_sidx, v_sidx, argptr, nargs)（sig4_1，无 ci/pc——无错误路径）；
+            // rt_enumelem(src, idx, ci, pc)（sig4_1，fallible）；
+            // rt_isenumvariant(src, n_sidx, v_sidx)（sig3_1，恒返回 bool）。
+            rt_newenum: imp(module, "rt_newenum", &sig4_1)?,
+            rt_enumelem: imp(module, "rt_enumelem", &sig4_1)?,
+            rt_isenumvariant: imp(module, "rt_isenumvariant", &sig3_1)?,
+            // G2.3：rt_condcheck(v, kind, ci, pc)（sig4_1）；rt_isboolval(v, want)（sig2_1）。
+            rt_condcheck: imp(module, "rt_condcheck", &sig4_1)?,
+            rt_isboolval: imp(module, "rt_isboolval", &sig2_1)?,
         })
     }
 
@@ -270,6 +299,11 @@ impl RtImports {
             rt_isnull: module.declare_func_in_func(self.rt_isnull, func),
             rt_itercheck: module.declare_func_in_func(self.rt_itercheck, func),
             rt_raise: module.declare_func_in_func(self.rt_raise, func),
+            rt_newenum: module.declare_func_in_func(self.rt_newenum, func),
+            rt_enumelem: module.declare_func_in_func(self.rt_enumelem, func),
+            rt_isenumvariant: module.declare_func_in_func(self.rt_isenumvariant, func),
+            rt_condcheck: module.declare_func_in_func(self.rt_condcheck, func),
+            rt_isboolval: module.declare_func_in_func(self.rt_isboolval, func),
         }
     }
 }
@@ -340,6 +374,21 @@ impl<'x, 'f> ChunkLower<'x, 'f> {
     fn retain(&mut self, v: Value) -> Value {
         let f = self.rt.rt_retain;
         self.call1(f, &[v])
+    }
+
+    /// 枚举名 / 变体名 → strtab 索引（G2.2，口径同 Field 字段名：main.rs 已把
+    /// enum_defs 全集收进 strtab，field_str_idx = strtab 全集反查表）。
+    fn enum_str_idx(&mut self, s: &str, kind: &str) -> Result<usize, ZError> {
+        self.field_str_idx
+            .get(s)
+            .copied()
+            .ok_or_else(|| {
+                ZError::plain(
+                    codes::INTERNAL,
+                    format!("natgen: enum {kind} `{s}` 缺少字符串表索引"),
+                    None::<String>,
+                )
+            })
     }
 
     /// fallible 指令后统一 ERR 检查：ERR → err_ret 块；否则切到新 cont 块继续。
@@ -614,6 +663,24 @@ impl<'x, 'f> ChunkLower<'x, 'f> {
                 let r = self.call1(self.rt.rt_bool, &[r0]);
                 self.store_slot(*d, r);
             }
+            // G2.3：条件严格 bool 校验（镜像 VM CondCheck 执行臂；消息按站点）。
+            Instr::CondCheck(r, kind) => {
+                let v = self.load_slot(*r);
+                let k = self.bcx.ins().iconst(I64, i64::from(*kind));
+                let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
+                let pci = self.bcx.ins().iconst(I64, pc as i64);
+                let e = self.call1(self.rt.rt_condcheck, &[v, k, cii, pci]);
+                self.check_err(e, pc);
+                // 通过则 e 为 null 句柄（无 dest），显式释放（同 IterCheck 口径）。
+                self.bcx.ins().call(self.rt.rt_drop, &[e]);
+            }
+            // G2.3：&&/|| 短路判定（值恰为 Bool(want)，无错误路径）。
+            Instr::IsBoolVal(d, s, want) => {
+                let v = self.load_slot(*s);
+                let w = self.bcx.ins().iconst(I64, i64::from(*want));
+                let r = self.call1(self.rt.rt_isboolval, &[v, w]);
+                self.store_slot(*d, r);
+            }
             Instr::IterCheck(s, is_comp) => {
                 let v = self.load_slot(*s);
                 let ic = self.bcx.ins().iconst(I64, i64::from(*is_comp));
@@ -714,7 +781,7 @@ impl<'x, 'f> ChunkLower<'x, 'f> {
                 let r = self.call1(rf, &[x, cii, pci]);
                 self.check_err(r, pc);
             }
-            // T6：字面字符串 throw（match 无匹配分支，M2 产生）——rt_throwstr → H600。
+            // T6：字面字符串 throw（`throw "msg"` 形态）——rt_throwstr → H600。
             Instr::ThrowStr(s) => {
                 let sidx = self
                     .field_str_idx
@@ -786,6 +853,49 @@ impl<'x, 'f> ChunkLower<'x, 'f> {
                 let rf = self.rt.rt_field;
                 let r = self.call1(rf, &[x, f_imm, cii, pci]);
                 self.check_err(r, pc);
+                self.store_slot(*d, r);
+            }
+            // G2.2：enum 三指令（语义镜像 vm.rs 执行臂 2058–2085）。
+            // 枚举名 / 变体名 → strtab 索引复用 field_str_idx（strtab 全集反查；
+            // main.rs 已把 enum_defs 的名字收进 strtab，同 Field 字段名口径）。
+            Instr::NewEnum(d, ename, variant, pbase, np) => {
+                // 载荷区打包（同 Call 约定：retain 入 param_ss，runtime 消费并释放）。
+                for i in 0..*np {
+                    let v = self.load_slot(*pbase + i);
+                    let r = self.retain(v);
+                    self.bcx
+                        .ins()
+                        .stack_store(I64, r, self.param_ss, 8 * i as i32);
+                }
+                let argptr = self.bcx.ins().stack_addr(I64, self.param_ss, Offset32::new(0));
+                let n_imm = self.bcx.ins().iconst(I64, *np as i64);
+                let ni = self.enum_str_idx(ename, "枚举名")? as i64;
+                let vi = self.enum_str_idx(variant, "变体名")? as i64;
+                let n_sidx = self.bcx.ins().iconst(I64, ni);
+                let v_sidx = self.bcx.ins().iconst(I64, vi);
+                let r = self.call1(self.rt.rt_newenum, &[n_sidx, v_sidx, argptr, n_imm]);
+                self.store_slot(*d, r);
+            }
+            Instr::EnumElem(d, src, idx) => {
+                // 借用 src（槽保留），返回载荷新句柄；越界/非枚举 → 错误路由。
+                let v = self.load_slot(*src);
+                let x = self.retain(v);
+                let i_imm = self.bcx.ins().iconst(I64, *idx as i64);
+                let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
+                let pci = self.bcx.ins().iconst(I64, pc as i64);
+                let r = self.call1(self.rt.rt_enumelem, &[x, i_imm, cii, pci]);
+                self.check_err(r, pc);
+                self.store_slot(*d, r);
+            }
+            Instr::IsEnumVariant(d, src, ename, variant) => {
+                // 借用 src，恒返回 bool（无错误路径）。
+                let v = self.load_slot(*src);
+                let x = self.retain(v);
+                let ni = self.enum_str_idx(ename, "枚举名")? as i64;
+                let vi = self.enum_str_idx(variant, "变体名")? as i64;
+                let n_sidx = self.bcx.ins().iconst(I64, ni);
+                let v_sidx = self.bcx.ins().iconst(I64, vi);
+                let r = self.call1(self.rt.rt_isenumvariant, &[x, n_sidx, v_sidx]);
                 self.store_slot(*d, r);
             }
             // T6：TryBegin / TryPop 为 lowering 期元指令——catch 路由全在 check_err 的
@@ -919,6 +1029,7 @@ fn lower_chunk(
             Instr::Call(_, _, _, n) => Some(*n),
             Instr::NewList(_, _, n) => Some(*n),
             Instr::NewDict(_, _, n) => Some(*n * 2),
+            Instr::NewEnum(_, _, _, _, n) => Some(*n),
             _ => None,
         })
         .max()
