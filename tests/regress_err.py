@@ -104,6 +104,9 @@ CASES = {
     "ov_body_error": 'fn __add(a, b) { return 1 / 0; }\nd = {"a": 1};\nprint(to_str(d + 1));\n',
     "ov_native_div0": 'fn __div(a, b) { return "d"; }\nprint(1 / 0);\n',
     "lambda_arity": 'g = fn(a, b) { return a; };\nprint(to_str(g(1, 2, 3)));\n',
+    # G2.5 别名：解析到不存在的名字（三引擎统一报 H002，指名道姓解析后的原名）
+    "alias_undef": 'alias nope as nn;\nnn();\n',
+    "alias_undef_builtin": 'alias nope2 as nn2;\nprint(to_str(nn2([1])));\n',
     "throw_num": 'throw 5;\n',
     # try/catch 上下文
     "try_catch_ctx": (

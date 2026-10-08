@@ -10,13 +10,13 @@
 |---|---|---|
 | **M0 管线打通** | ✅ 完成 | T1–T10 全完成（三引擎逐字节对齐；`build --exe --native` + `natgen` 共用管线；文档已同步） |
 | **M1 核心语义** | ✅ 完成 | G1.1 RC+COW / G1.2 list / G1.3 dict / G1.4 for-in / G1.5 别名用例集 / G1.6 全量回归（三引擎）；审计暴露并修复 6 处引擎缺陷 |
-| **M2 功能对齐** | 🔵 进行中 | G2.1 struct 完成（构造 / Field / `__struct__` 全路径过滤 / 相等语义；字段写入为 VM 编译期 H999 同源）；G2.2 enum 完成（构造 / match / 显示 / 相等 / 容器传参）；G2.3 match 完成（字面量 / 变体 / 载荷绑定 / 通配 / 无匹配 H005 / 绑定作用域 / 闭包捕获）+ 连带修掉 6 处既有 interp-VM 分歧；**G2.4 运算符重载完成**（15 个 `__op` 回退链，runtime 内实现，natgen 零改动）+ 连带修掉参数个数校验文案（重载路径可达）；**新登记 G2.8：默认参数在 VM / nat 未实现**（解释器与 AOT 支持）；G2.5–G2.7 待办 |
+| **M2 功能对齐** | 🔵 进行中 | G2.1 struct 完成（构造 / Field / `__struct__` 全路径过滤 / 相等语义；字段写入为 VM 编译期 H999 同源）；G2.2 enum 完成（构造 / match / 显示 / 相等 / 容器传参）；G2.3 match 完成（字面量 / 变体 / 载荷绑定 / 通配 / 无匹配 H005 / 绑定作用域 / 闭包捕获）+ 连带修掉 6 处既有 interp-VM 分歧；**G2.4 运算符重载完成**（15 个 `__op` 回退链，runtime 内实现，natgen 零改动）+ 连带修掉参数个数校验文案（重载路径可达）；**G2.5 alias / goto 完成**（alias 表进 runtime + natgen 编译期解析；连带修掉解释器「别名指向变量」分叉）；**新登记 G2.8 默认参数 / G2.9 点号内置族两项缺口**；G2.6 / G2.7 待办 |
 | **M3 集成与优化** | ⬜ 未开始 | import 合并/交叉编译/体积裁剪/工具链打包/CI；任务组 G3.1–G3.7 |
 
-**当前可运行产物**：`tests/m1/list.hn` / `tests/m1/dict.hn` / `tests/smoke/rc_alias.test.hn` / `tests/m2/struct.hn` / `tests/m2/enum.hn` / `tests/m2/match.hn` / `tests/m2/conditions.hn` / `tests/m2/overload.hn` → nat exe，三引擎逐字节对齐（含 list/dict 读写、for-in 迭代、别名 RC+COW 值语义、struct 构造/字段/隐藏键过滤/相等、enum 构造/match/显示/相等/容器与传参、match 全形态与绑定作用域、lambda 捕获、条件严格 bool 与 `&&`/`||` 短路、15 个 `__op` 运算符重载回退）。
-**复现**：`hone build --exe --native tests/m2/overload.hn -o ov.exe && ./ov.exe`
-**回归入口**：`python tests/regress4.py`（正常路径三引擎，11 例全绿）、`python tests/regress_err.py`（错误诊断三引擎逐字符，62 例全绿）、`python tests/regress3.py`（interp vs VM 全 examples，真实逻辑差异 0）、`python tests/regress_ir.py`（文本 IR 往返，BAD=0）。
-**审计工具**：`python tests/tools/audit_err.py`（55 例错误文案 + help 行 nat-vs-interp 批量比对）；`python tests/tools/probe_align.py`（82 例 match / 条件 / 逻辑 / 解构 / 重载形态的 interp-VM[-nat] 逐字节比对，**G2.3 的 6 处 + G2.4 的 2 处分歧即由它扫出**；加 `--nat` 追加第三引擎）。
+**当前可运行产物**：`tests/m1/list.hn` / `tests/m1/dict.hn` / `tests/smoke/rc_alias.test.hn` / `tests/m2/struct.hn` / `tests/m2/enum.hn` / `tests/m2/match.hn` / `tests/m2/conditions.hn` / `tests/m2/overload.hn` / `tests/m2/alias_goto.hn` → nat exe，三引擎逐字节对齐（含 list/dict 读写、for-in 迭代、别名 RC+COW 值语义、struct 构造/字段/隐藏键过滤/相等、enum 构造/match/显示/相等/容器与传参、match 全形态与绑定作用域、lambda 捕获、条件严格 bool 与 `&&`/`||` 短路、15 个 `__op` 运算符重载回退、alias 别名与 goto 跳转）。
+**复现**：`hone build --exe --native tests/m2/alias_goto.hn -o ag.exe && ./ag.exe`
+**回归入口**：`python tests/regress4.py`（正常路径三引擎，12 例全绿）、`python tests/regress_err.py`（错误诊断三引擎逐字符，64 例全绿）、`python tests/regress3.py`（interp vs VM 全 examples，真实逻辑差异 0）、`python tests/regress_ir.py`（文本 IR 往返，BAD=0）。
+**审计工具**：`python tests/tools/audit_err.py`（55 例错误文案 + help 行 nat-vs-interp 批量比对）；`python tests/tools/probe_align.py`（93 例 match / 条件 / 逻辑 / 解构 / 重载 / alias+goto 形态的 interp-VM[-nat] 逐字节比对，**G2.3 的 6 处 + G2.4 的 2 处 + G2.5 的 1 处分歧即由它扫出**；加 `--nat` 追加第三引擎）。
 **验证前置**：改代码先 `cargo build`（`target/` 旧二进制会静默沿用），回归脚本依赖 `target/debug/hone.exe`。
 
 ---
@@ -257,10 +257,12 @@
 - [x] **G2.2 enum**：`NewEnum` / `EnumElem` / `IsEnumVariant` + 点号变体构造（`Color.Red` 零参调用形态）
 - [x] **G2.3 match**：模式匹配 lowering（字面量 / 变体载荷绑定 / 通配 / 无匹配 H005 / 绑定作用域 / 闭包捕获）；连带修复 6 处既有 interp-VM 分歧（见实现进度）
 - [x] **G2.4 运算符重载**：`__add` / `__eq` / `__neg` / `__len` 等回退链（镜像 `Vm::overload` 的触发条件：仅非 native 组合 + TYPE_MISMATCH）
-- [ ] **G2.5 alias / goto**：alias 解析表接入 rt_call；goto 已是 Label+Jmp（基线覆盖，补用例）
+- [x] **G2.5 alias / goto**：alias 表接入 runtime（`call_global` 解析）+ natgen 编译期解析（决定 rt_callv）；
+      goto 经用例固化（Label+Jmp 基线已覆盖）
 - [ ] **G2.6 async-await**：`GoCall` / `Await` 线程 lowering（future 值 + wait，与 VM 线程语义对齐；跨线程值传递按 M2 边界）
 - [ ] **G2.7 H999 边界对齐**：lowering 显式全覆盖单测（`Instr` 全变体断言）+ 新后端 H999 集合 = VM H999 集合 + `.t_neg` / `examples` 全过
 - [ ] **G2.8 默认参数（VM / 原生后端）**：`fn f(a, b = 2)` 在解释器与 AOT 可用，**VM 与 nat 省略即报 H011**（G2.4 探针发现，见实现进度）
+- [ ] **G2.9 点号内置族**：`time.*` / `random.*` / `sys.*` / `os.*` 等在原生后端完全缺失（直接调用即 H404，非alias 专属）；G2.5 探针发现
 
 ### G2.1 实现进度（2026-10-07）—— 完成
 
@@ -385,6 +387,44 @@
   `cargo test -p honeruntime` 19/19。首轮 regress_err 曾 1 处 FAIL（lambda 报错多了反引号），
   修 runtime 文案分支后复跑全绿——正是三引擎回归该抓的东西。
 
+### G2.5 实现进度（2026-10-08）—— 完成
+
+- **范围界定**：别名分派在两个层次补齐——**runtime 侧** `call_global` 入口解析（覆盖内置 /
+  struct 构造等全局目标），**natgen 侧编译期解析**（决定 `rt_callv` 还是 `rt_call`）。
+  goto 无需实现（Label+Jmp 基线已覆盖），本轮只补用例固化。
+- **既有能力与缺口盘点（探针先行）**：
+  | 形态 | 修复前 interp | 修复前 VM | 修复前 nat |
+  |---|---|---|---|
+  | alias → 用户函数 | ✓ | ✓（编译器展开进 func_map） | ✓ |
+  | alias → 内置（print/len/to_str） | ✓ | ✓（运行期 resolve_alias） | ✗ H002 |
+  | alias → struct 构造名 | ✓ | ✓ | ✗ H002 |
+  | alias → 变量（持有 lambda） | **✗ H002** | ✓ | ✗ H002 |
+- **三处修复**：
+  1. **runtime 加别名表**（`ALIASES` + `hn_rt_aliases_init`，wrapper 侧 `NAT_ALIASES`），
+     `call_global` 第一行解析（可叠加、限轮数防环，同 `resolve_alias`）。
+  2. **wrapper strtab 必须显式收集别名的原名与新名**：原名可能只出现在 `alias` 声明里
+     （`alias len as mylen` 的 `len` 从不作为 Call 名出现），漏收集会拿到 `unwrap_or(0)`
+     的错误索引——症状极具迷惑性：H002 报的是**另一个无关函数的名字**（`len` 被解析成 strtab[0] = `x`）。
+  3. **natgen Call lowering 编译期解析别名**：别名指向局部变量（lambda 闭包 / 函数名字符串）
+     时必须走 `rt_callv`；runtime 的全局分发看不见调用帧的局部变量，不解析就一定 H002。
+- **连带修复 interp-VM 分叉（方向与前几轮相反：VM 能用、解释器不能）**：VM 的 `do_call`
+  把 `resolve_alias` 放在**局部变量查找之前**，解释器却把别名分支放在 `call_fn` 末尾且
+  只查函数表 → `alias gvar as g2; g2(1)` 解释器报 H002、VM 正常。改法：解释器在
+  `Expr::Call` 入口先解析别名（可叠加），再走「lambda 变量 → type 实例方法 → call_fn」的
+  正常分派，`call_fn` 内保留兜底分支。修复后「别名即透明改名」在三个引擎都成立。
+- **新登记缺口 G2.9（点号内置族）**：探针发现 `alias time.now as tnow` 在 nat 报
+  `H404 library \`time\` is not loaded`——**根因不是 alias，而是 runtime 完全没有点号内置
+  （time.* / random.* / sys.* / os.* …）的任何实现**，直接写 `time.now()` 同样 H404。
+  该族涉及时间/随机等不确定输出，逐个对齐是独立任务，本轮只登记 + 写引擎边界。
+- **附带确认（不是缺陷）**：把枚举**变体**别名当值读（`alias E.A as EA; e = EA;`）三引擎
+  统一报 H002——别名只覆盖可调用名，文档已注明。
+- **用例**：`tests/m2/alias_goto.hn`（7 组：alias→内置 / 叠加别名 / alias→struct 构造 /
+  alias→变量 / alias 在循环中 / goto 向后跳 / goto 跳出循环·嵌套循环·try），17 行输出三引擎
+  逐字节一致；错误用例 `alias_undef`、`alias_undef_builtin`（别名指向不存在的名字）2 例新增；
+  `probe_align.py` 新增 alias 组 11 例（含 4 例 goto），全工具 93 例。
+- **验证**：alias 组 11 例三引擎 0 分歧；`regress3` 真实逻辑差异 = 0；`regress_ir` OK=39 BAD=0；
+  `cargo test` 4/4；`regress4` **12/12**（新增 alias_goto.hn）；`regress_err` **64/64**（新增 2 例）。
+
 ## M3 — 集成与优化（任务组）
 
 - [ ] **G3.1 import 构建期解析**：本地路径递归合并 + 远程 `~/.hone/cache/` 下载（设计 §7.3）；跨文件同名定义报错
@@ -402,8 +442,8 @@
 - [ ] `hone build --exe hello.hn` 在无 gcc 的干净机器上产出可运行 exe（M3 完成无 rustc 依赖）
 - [ ] `hone build --exe app.hn --target x86_64-unknown-linux-musl` 在 Windows 上产出 linux exe，CI 二次验证（G3.2/G3.6）
 - [x] `regress4.py` 正常路径三引擎（interp/VM/nat）逐字节对齐——M0 三例 + M1 三例（list/dict/别名）
-      + M2 五例（struct / enum / match / conditions / overload）共 **11 例全绿**
-- [x] `regress_err.py` 错误诊断三引擎逐字符对齐——**62 例全绿**（nat：运行期 39 / checker 同源拒 22 / 显式登记跳过 1）
+      + M2 六例（struct / enum / match / conditions / overload / alias_goto）共 **12 例全绿**
+- [x] `regress_err.py` 错误诊断三引擎逐字符对齐——**64 例全绿**（nat：运行期 41 / checker 同源拒 22 / 显式登记跳过 1）
 - [x] `tests/tools/audit_err.py` 55 例错误文案 + help 行 nat-vs-interp 一致（M1 据此修复 6 处引擎缺陷；
       G2.3 的 6 处分歧由条件/逻辑/match 探针矩阵发现，`audit_err.py` 待按新错误形态扩充用例）
 - [ ] 新后端 H999 集合与 VM 完全一致（无静默漏实现）（G2.7）
@@ -459,3 +499,13 @@
 | 参数校验对齐方向 | 三引擎统一到**解释器**文案（英文 + 定位 + help），不保留中文硬编码 | 解释器是规范载体；且重载路径上必须逐字节一致 |
 | 形参名传递 | wrapper 新增 `NAT_PARAM_NAMES` / `NAT_PARAM_NAME_COUNTS` + `hn_rt_param_names` | `CHUNK_NPARAMS` 只有个数；报错要指名道姓。沿用 G2.1/G2.2 的静态表模式 |
 | 默认参数（G2.8）方向 | 在**被调帧序言**按 `nargs` 填默认值（需要新指令暴露实参数），不在调用方求值 | 解释器在「仅含形参的调用环境」里求默认值（引用全局会 H002）；调用方求值会多看见局部变量，反而与解释器分叉。序言方案可精确复现 |
+
+### G2.5 已定决策（2026-10-08）
+
+| 项 | 决策 | 理由 |
+|---|---|---|
+| 别名解析落点 | **两处都做**：runtime `call_global` 入口解析（全局目标）+ natgen Call lowering 编译期解析（决定 callv） | runtime 看不见帧内局部变量，编译期解析才能把「别名→变量」导到 `rt_callv`；两者职责不重叠 |
+| strtab 收集范围 | 别名的**原名与新名都要显式收集** | 原名可能从不作为 Call 名出现（`alias len as mylen`），漏了会静默解析成 strtab[0]，报错指向无关函数名 |
+| interp 侧对齐方向 | 解释器改成「先解析别名再走完整分派」（对齐 VM），不改 VM | 「别名即透明改名」；VM 的顺序（resolve_alias → locals → fns → builtin）本就是更完整的那版 |
+| goto | 不动实现，只补用例 | Label+Jmp lowering 基线已覆盖，探针 4 种形态三引擎本来就一致 |
+| 点号内置（G2.9） | 单独立项，不在 G2.5 顺手做 | 涉及 time/random 等不确定输出，逐个对齐需要各自的测试口径，混进来会让 G2.5 验收失焦 |

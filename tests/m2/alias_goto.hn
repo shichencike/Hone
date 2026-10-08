@@ -1,0 +1,72 @@
+// G2.5：alias（别名解析）+ goto（标签跳转）三引擎正常路径。
+// 错误路径（别名指向不存在的名字等）由 tests/regress_err.py 的 alias_* 用例承担。
+// 未覆盖形态：`alias time.now as t`（点号内置别名）——runtime 尚无点号内置实现（G2.9），
+// 直接写 time.now() 也是 H404，与 alias 无关。
+
+// ── 1. alias → 内置函数 ──
+alias print as p;
+p("builtin-alias");
+alias len as mylen;
+print("len:" + to_str(mylen([1, 2, 3])));
+alias to_str as ts;
+print("ts:" + ts(42));
+
+// ── 2. alias → 用户函数 + 叠加别名 ──
+fn double(x) { return x * 2; }
+alias double as d2;
+alias d2 as d3;
+print("chain:" + to_str(d3(5)));
+
+// ── 3. alias → struct 构造名 ──
+struct Point { x: int };
+alias Point as Pt;
+pp = Pt(7);
+print("struct:" + to_str(pp.x) + "/" + to_str(pp == Pt(7)));
+
+// ── 4. alias → 变量（持有 lambda 的全局）──
+gvar = fn(k) { return k + 1; };
+alias gvar as g2;
+print("var:" + to_str(g2(1)));
+
+// ── 5. alias 在循环里使用 ──
+// 注：别名调用的返回值类型对 checker 未知（动态外部），不能直接参与算术 / 比较
+// （`dd(i) > 2` 报 H001，三引擎同源），故只把结果交给 to_str 打印。
+alias double as dd;
+acc = "";
+for (i = 0; i < 3; i = i + 1) {
+    acc = acc + ts(dd(i)) + ";";
+}
+print("loop:" + acc);
+
+// ── 6. goto：向后跳（手写循环）──
+i = 0;
+again:
+print("tick:" + to_str(i));
+i = i + 1;
+if (i < 3) { goto again; }
+print("goto-done");
+
+// ── 7. goto：跳出循环 / 跳出嵌套循环 / 跳出 try ──
+for (k = 0; k < 5; k = k + 1) {
+    if (k == 2) { goto out; }
+    print("pre:" + to_str(k));
+}
+out:
+print("out");
+j = 0;
+for (a = 0; a < 3; a = a + 1) {
+    for (b = 0; b < 3; b = b + 1) {
+        j = j + 1;
+        if (b == 1) { goto nested_done; }
+    }
+}
+nested_done:
+print("nested:" + to_str(j));
+try {
+    goto skip;
+    print("unreachable");
+} catch e {
+    print("caught");
+}
+skip:
+print("after");

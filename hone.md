@@ -1359,7 +1359,13 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · 支持二次重命名：alias 原名称 as 新名称;
 · 原名支持点号路径（模块/类/内置点号函数）：alias time.now as tnow; 之后可 tnow(...) 调用
 · 别名可叠加（别名再起别名），可指向内置函数：alias print as p;
+· 可指向 struct 构造名（alias Point as Pt;）与持有 lambda 的变量（alias gvar as g2;）——
+  别名即「透明改名」，调用行为与原名完全一致，三个引擎一致
 · 别名作用域为文件级（当前 .hn 文件全局可见）
+· **引擎边界**：`alias time.now as t`（点号内置别名）在原生编译后端不可用——runtime 尚未实现
+  点号内置族（`time.*` / `random.*` / `sys.*` 等，直接写 `time.now()` 也报 H404），见进度文档 G2.9；
+  解释器与 VM 支持。另：把枚举**变体**别名当值读（`alias E.A as EA; e = EA;`）三引擎均报
+  H002——别名只覆盖可调用名
 
 4.5 DLL 打包（hone build --dll）
 

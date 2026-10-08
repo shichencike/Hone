@@ -2086,6 +2086,23 @@ impl Interp {
         }
     }
 
+    /// 别名解析（可叠加）：`alias_map` 是「新名 → 原名」，按 `alias_map.len()` 轮数上限
+    /// 迭代（防 `alias a as b; alias b as a;` 环）。未定义别名返回 None。
+    /// 镜像 vm.rs `resolve_alias`（同样按 aliases.len() 限轮数）。
+    fn resolve_alias_name(&self, name: &str) -> Option<String> {
+        if !self.alias_map.contains_key(name) {
+            return None;
+        }
+        let mut cur = name.to_string();
+        for _ in 0..=self.alias_map.len() {
+            match self.alias_map.get(&cur) {
+                Some(next) => cur = next.clone(),
+                None => break,
+            }
+        }
+        Some(cur)
+    }
+
     fn call_fn(&mut self, callee: &str, args: Vec<Value>, span: Span) -> Result<Value, ZError> {
         if self.async_fns.contains(callee) {
             // 异步函数调用：后台线程执行，返回 future（await 等待结果）
@@ -2134,7 +2151,10 @@ impl Interp {
             }
             // 内置函数优先（含 time.now / random.int / sys.* 等点号内置）
             builtins::call(callee, args, span, &self.file, &self.src)
-        } else if let Some(orig) = self.alias_map.get(callee).cloned() {
+        } else if let Some(orig) = self.resolve_alias_name(callee) {
+            // 兜底：Call 表达式入口已先解析别名并走完整分派；此处覆盖 call_fn 的其它调用点。
+            // 注意 VM 的 do_call 是「先解析别名 → 再查局部变量」，故别名指向**变量**（如持有
+            // lambda 的全局）只在 VM 侧可用——别名到变量/lambda 的形态由解释器入口对齐（见 Expr::Call）。
             self.call_fn(&orig, args, span)
         } else if callee.contains('.') {
             self.call_lib_fn(callee, args, span)
@@ -3414,6 +3434,12 @@ impl Interp {
                 for a in args {
                     arg_vals.push(self.eval_expr(env, a)?);
                 }
+                // G2.5 引擎对齐：别名先解析（可叠加），再走「lambda 变量 → type 实例方法 →
+                // call_fn」的正常分派——镜像 vm.rs do_call 把 resolve_alias 放在最前。
+                // 差异后果：别名指向**变量**（如持有 lambda 的全局）此前只有 VM 能调用
+                // （解释器的别名分支只查函数表，报 H002 undefined function）。
+                let resolved = self.resolve_alias_name(callee);
+                let callee = resolved.as_deref().unwrap_or(callee);
                 // 变量名调用优先解析为 lambda 值（闭包），否则走全局函数/内置/库解析
                 if let Some(Value::Lambda(f)) = env.get(callee).cloned() {
                     return self.exec_lambda(&f, arg_vals, *span);

@@ -45,6 +45,7 @@ CASES = [
     "tests/m2/match.hn",
     "tests/m2/conditions.hn",
     "tests/m2/overload.hn",
+    "tests/m2/alias_goto.hn",
 ]
 
 ENGINES = ("interp", "vm", "nat")

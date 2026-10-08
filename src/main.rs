@@ -1682,6 +1682,13 @@ fn build_native(
             push_str(v);
         }
     }
+    // G2.5：alias 的**原名**与新名都进 strtab。原名可能只出现在 alias 声明里
+    // （`alias len as mylen` 的 `len` 从不作为 Call 名出现），不显式收集会拿到
+    // 错误索引（unwrap_or(0)）→ runtime 把别名解析成无关的名字（症状：H002 说另一个函数名）。
+    for (orig, new_name) in &vm_mod.aliases {
+        push_str(orig);
+        push_str(new_name);
+    }
     drop(push_str);
     // 程序静态表（T4）：每 chunk 的 span 表（line,col,len）与 chunk.code 一一对应，
     // 编入生成式 wrapper 经 hn_rt_prog_init 传入 runtime，rt_unwind 按 (ci,pc) 查表
@@ -1877,6 +1884,21 @@ fn build_native(
         struct_field_counts.len(),
         struct_field_counts.join(",")
     ));
+    // alias 表（G2.5）：NAT_ALIASES = (新名 sidx, 原名 sidx) 交错。
+    // 指向用户函数的别名由 VM 编译器展开进 func_map（NAT_FUNCS 已含），
+    // 这里覆盖内置 / 点号内置 / struct 构造等非函数目标。
+    let mut alias_items: Vec<String> = Vec::new();
+    for (orig, new_name) in &vm_mod.aliases {
+        let o = *strtab_idx.get(orig).unwrap_or(&0);
+        let n = *strtab_idx.get(new_name).unwrap_or(&0);
+        alias_items.push(n.to_string());
+        alias_items.push(o.to_string());
+    }
+    wrapper.push_str(&format!(
+        "static NAT_ALIASES: [u32; {}] = [{}];\n",
+        alias_items.len(),
+        alias_items.join(",")
+    ));
     // enum 定义表（G2.2）：NAT_ENUM_DEFS = (strtab_idx, 变体数) 交错；
     // NAT_ENUM_VARIANTS = (变体名 sidx, 载荷数) 按定义序扁平排列；
     // NAT_ENUM_VARIANT_COUNTS = 每 enum 变体数。
@@ -1947,6 +1969,10 @@ fn build_native(
     ));
     wrapper.push_str(&format!(
         "    hn_rt_enums_init(NAT_ENUM_DEFS.as_ptr(), NAT_ENUM_VARIANTS.as_ptr(), NAT_ENUM_VARIANT_COUNTS.as_ptr(), NAT_ENUM_VARIANT_COUNTS.len());\n"
+    ));
+    // G2.5：别名表（内置 / 点号内置 / struct 构造目标的别名解析）。
+    wrapper.push_str(&format!(
+        "    hn_rt_aliases_init(NAT_ALIASES.as_ptr(), NAT_ALIASES.len() / 2);\n"
     ));
     wrapper.push_str("    std::process::exit(hn_entry() as i32);\n");
     wrapper.push_str("    // hn_entry：ERR → rt_unwind（渲染 → stderr → exit(1)）；否则退出码 0。\n");

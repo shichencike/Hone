@@ -148,7 +148,33 @@ OVERLOAD = {
     "ov_enum": 'enum E { A, B }\nfn __add(a, b) { return "e-add"; }\ne = E.A;\nprint(to_str(e + 1));\n',
 }
 
-GROUPS = {"match": MATCH, "cond": COND, "logic": LOGIC, "destruct": DESTRUCT, "overload": OVERLOAD}
+# ── alias（别名解析）与 goto（标签跳转）：G2.5 ──
+ALIAS = {
+    "alias_builtin": 'alias print as p;\np("hi");\n',
+    "alias_len": 'alias len as mylen;\nprint(to_str(mylen([1, 2, 3])));\n',
+    "alias_user": 'fn f(x) { return x * 2; }\nalias f as g;\nprint(to_str(g(5)));\n',
+    "alias_chain": 'fn f(x) { return x * 2; }\nalias f as g;\nalias g as h;\nprint(to_str(h(5)));\n',
+    "alias_struct": 'struct P { x: int };\nalias P as Pt;\np = Pt(7);\nprint(to_str(p.x));\n',
+    # 别名指向持有 lambda 的变量（G2.5：解释器原先报 H002、VM 可用，nat 需编译期解析）
+    "alias_var": 'gvar = fn(k) { return k + 1; };\nalias gvar as g2;\nprint(to_str(g2(1)));\n',
+    "alias_undef": 'alias nope as nn;\nnn();\n',
+    # goto：向后跳 / 跳出循环 / 跳出嵌套循环 / 跳出 try
+    "goto_back": 'i = 0;\nagain:\nprint(to_str(i));\ni = i + 1;\nif (i < 3) { goto again; }\nprint("done");\n',
+    "goto_out_loop": 'for (i = 0; i < 5; i = i + 1) {\n  if (i == 2) { goto out; }\n  print(to_str(i));\n}\nout:\nprint("out");\n',
+    "goto_nested": 'j = 0;\nfor (a = 0; a < 3; a = a + 1) {\n  for (b = 0; b < 3; b = b + 1) {\n    j = j + 1;\n    if (b == 1) { goto done; }\n  }\n}\ndone:\nprint(to_str(j));\n',
+    "goto_in_try": 'try {\n  goto skip;\n  print("nope");\n} catch e {\n  print("caught");\n}\nskip:\nprint("after");\n',
+    # 注：`alias time.now as t`（点号内置别名）不固化——runtime 尚无点号内置实现（G2.9），
+    # 直接写 time.now() 也是 H404，与 alias 无关。
+}
+
+GROUPS = {
+    "match": MATCH,
+    "cond": COND,
+    "logic": LOGIC,
+    "destruct": DESTRUCT,
+    "overload": OVERLOAD,
+    "alias": ALIAS,
+}
 
 def run(cmd, timeout=30):
     try:

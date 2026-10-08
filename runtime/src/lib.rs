@@ -1237,6 +1237,12 @@ static STRUCT_FIELDS: std::sync::Mutex<Vec<Vec<u32>>> = std::sync::Mutex::new(Ve
 // 校验（checker 已静态校验，与 struct 字段类型同口径）。
 static ENUM_DEFS: std::sync::Mutex<Vec<(u32, u32)>> = std::sync::Mutex::new(Vec::new());
 static ENUM_VARIANTS: std::sync::Mutex<Vec<Vec<(u32, u32)>>> = std::sync::Mutex::new(Vec::new());
+// G2.5：别名表 ALIASES[i] = (原名 strtab 索引, 新名 strtab 索引)（镜像 vm.rs aliases，
+// 方向与 VM 相反：VM 存 (original, new_name)，这里按「新名 → 原名」存便于解析）。
+// 指向用户函数的别名由 VM 编译器展开进 func_map（→ wrapper 的 NAT_FUNCS），
+// 这里补的是**内置 / 点号内置 / struct 构造**等非函数目标（VM 侧走 do_call 的
+// resolve_alias 兜底）。别名可叠加，解析轮数上限同 VM（aliases.len()）。
+static ALIASES: std::sync::Mutex<Vec<(u32, u32)>> = std::sync::Mutex::new(Vec::new());
 
 /// 全局函数表：funcs[i] = (strtab_idx, ci, nparams)。
 #[no_mangle]
@@ -1402,6 +1408,36 @@ pub extern "C" fn hn_rt_enums_init(defs: *const u32, variants: *const u32, count
     }
 }
 
+/// G2.5：别名表初始化（wrapper 传「新名, 原名」交错的 strtab 索引）。
+#[no_mangle]
+pub extern "C" fn hn_rt_aliases_init(pairs: *const u32, n: usize) {
+    let mut t = ALIASES.lock().unwrap();
+    t.clear();
+    for i in 0..n {
+        // 传入顺序（新名, 原名）→ 内部存（新名, 原名）
+        let new_s = unsafe { *pairs.add(i * 2) };
+        let orig_s = unsafe { *pairs.add(i * 2 + 1) };
+        t.push((new_s, orig_s));
+    }
+}
+
+/// 名字解析别名（可叠加；未定义别名返回 None）。限轮数防环，同 vm.rs resolve_alias。
+fn resolve_alias_name(name: &str) -> Option<String> {
+    let t = ALIASES.lock().unwrap();
+    if !t.iter().any(|(n, _)| strtab_name_eq(*n, name)) {
+        return None;
+    }
+    let mut cur = name.to_string();
+    for _ in 0..=t.len() {
+        match t.iter().find(|(n, _)| strtab_name_eq(*n, &cur)) {
+            Some(&(_, orig)) => cur = strtab_name(orig),
+            None => break,
+        }
+    }
+    drop(t);
+    Some(cur)
+}
+
 /// 字符串表第 sidx 项的名字（UTF-8 字节）。
 fn strtab_name(sidx: u32) -> String {
     let t = STRTAB.lock().unwrap();
@@ -1519,6 +1555,11 @@ fn call_fn_h(h: u64, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
 
 /// 全局名分发（无局部变量优先路径）：点号名 / 用户函数 / 内置 / H002。
 fn call_global(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
+    // G2.5：别名先解析（可叠加）——镜像 vm.rs do_call 把 resolve_alias 放在分派最前。
+    // 指向用户函数的别名已由编译器展开进 func_map；这里覆盖内置 / 点号内置 / struct 构造。
+    let resolved = resolve_alias_name(name);
+    let resolved_ref = resolved.as_deref();
+    let name = resolved_ref.unwrap_or(name);
     // 点号名：G2.2 枚举构造（Color.Red，镜像 VM do_call 序：enum → 函数 → 内置 → 库未加载）。
     if let Some((head, tail)) = name.split_once('.') {
         if let Some((_, name_sidx, vs)) = enum_lookup(head) {

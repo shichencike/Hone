@@ -11,7 +11,7 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   - `python tests/regress4.py` — 三引擎正常路径逐字节对齐（需本机 rustc）
   - `python tests/regress_ir.py` — 文本 IR 往返
   - `python tests/tools/audit_err.py` — 开发期扫雷：55 例错误文案 + help 行 nat-vs-interp 批量比对（慢，不入常规回归）
-  - `python tests/tools/probe_align.py` — 开发期扫雷：82 例 match / 条件 / 逻辑 / 解构 / 重载 形态的 interp-vs-VM 逐字节比对；`--nat` 追加第三引擎（每例单独 build，慢）。动态类型值（enum/struct）下的条件与逻辑分叉、以及重载回退边界靠它扫出。
+  - `python tests/tools/probe_align.py` — 开发期扫雷：93 例 match / 条件 / 逻辑 / 解构 / 重载 / alias+goto 形态的 interp-vs-VM 逐字节比对；`--nat` 追加第三引擎（每例单独 build，慢）。动态类型值（enum/struct）下的条件与逻辑分叉、以及重载回退边界靠它扫出。
 - CI（.github/workflows/ci.yml）只做 `cargo build/test --locked` + hello/fib smoke；无 rustfmt/clippy 配置，格式化用语言自带 `hone fmt`（作用于 .hn，非 Rust）。
 
 ## 架构
@@ -26,6 +26,10 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
 - 运算符重载（G2.4）：`__op` 回退链**全部在 runtime**（`rt_binop` / `rt_unop` / `rt_index` /
   `call_builtin` 的 `len` 臂），字节码与 natgen 无需改动。触发条件表以 `vm.rs` exec 臂为准
   （算术：非数字/str 组合 + H001；比较：非数字对、错误码不限；一元：H001）。
+- 别名（G2.5）：三处同步——runtime `ALIASES` 表 + `call_global` 入口解析、natgen Call lowering
+  编译期解析（决定 rt_callv / rt_call）、wrapper `NAT_ALIASES` **且原名与新名都要进 strtab**
+  （原名可能从不作为 Call 名出现，漏收集会静默解析成 strtab[0]，报错指向无关函数名）。
+  语义基准：VM `do_call`（先 resolve_alias → 再查局部变量 → 函数 → 内置）。
 - 参数个数校验三引擎统一到解释器文案（`expects at most N arguments, got M` /
   ``missing argument `c` of `f` `` + 定位 + help）——**不要**改回中文硬编码消息。
 - 条件与逻辑语义（改 `vm.rs` 编译臂时注意，解释器为准）：`if`/`while`/`do-while`/`for`/三元/推导式 `if` 过滤六处条件站点**运行期严格 bool**（`Instr::CondCheck`），`&&`/`||` 短路求值且右侧操作数严格 bool（`Instr::IsBoolVal` 判「恰为该布尔值」，不是 truthy）。

@@ -12,12 +12,13 @@
     跨帧传播 + 静态 catch 映射（无 setjmp），Throw/ThrowStr 归一 H600
   - 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码逐字节一致，含完整错误渲染
     （`--> 文件:行:列` / 行号行 / caret / help）
-  - 当前支持范围（M0 + M1 + M2 G2.1–G2.4）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda /
+  - 当前支持范围（M0 + M1 + M2 G2.1–G2.5）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda /
     捕获（值语义）、try-catch / throw / 错误字段访问、**list / dict 读写与 for-in 迭代**、
     **struct 构造与字段读取**（`__struct__` 隐藏标记键全路径过滤；`==` 按同名 struct 判定，
     异名 struct 恒不等；字段写入与 VM 一致编译期 H999）、**enum 构造 / 显示 / 相等 / 进容器**、
     **match 全形态**（字面量模式、变体模式与载荷绑定、`_` 通配、无匹配分支 H005）、
     **条件严格 bool 与 `&&`/`||` 短路求值**、**运算符重载（15 个 `__op` 回退链）**、
+    **alias（别名解析，可叠加；可指向内置 / struct 构造 / 变量）**、**goto 标签跳转**、
     内置子集（print/len/append/
     keys/values/has_key/to_str/to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq/read_file）；
     子集外指令编译期报 H990「未实现」（M2 逐步放开）
@@ -33,6 +34,16 @@
   - 设计 / 进度：`Hone原生编译后端设计.md`、`Hone原生编译后端进度.md`
 
 ### 修复
+- **原生编译后端支持 alias / goto**（M2 G2.5）：`alias 原名 as 新名` 在原生后端可用——
+  runtime 增加别名表（`call_global` 入口解析，可叠加），natgen Call lowering 编译期解析别名
+  以决定走 `rt_callv`（局部变量目标）还是 `rt_call`（全局目标）；goto（Label+Jmp）基线已覆盖，
+  本轮补用例固化
+- **`alias len as mylen` 这类「别名指向内置」的形态在原生后端原先报 H002**，
+  现可用；连带修掉一处极隐蔽的 wrapper 缺陷——别名的**原名**若从未作为调用名出现
+  （`len` 只出现在 alias 声明里）就会拿到错误的 strtab 索引，症状是报错指向一个**无关的函数名**
+- **解释器「别名指向变量」形态对齐 VM**：VM 的 `do_call` 把 `resolve_alias` 放在局部变量查找
+  之前，解释器却只在 `call_fn` 末尾查函数表 —— `alias gvar as g2; g2(1)` 解释器报 H002、
+  VM 正常。改为一律「先解析别名（可叠加）再走完整分派」，「别名即透明改名」三引擎成立
 - **原生编译后端支持运算符重载**（M2 G2.4）：`__add` / `__sub` / `__mul` / `__div` / `__mod` /
   `__eq` / `__ne` / `__lt` / `__le` / `__gt` / `__ge` / `__neg` / `__not` / `__len` / `__index`
   回退链（触发条件逐条镜像解释器：算术限「非数字/str 组合 + H001」，比较限「非数字对」，

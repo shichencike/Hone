@@ -348,9 +348,26 @@ struct ChunkLower<'x, 'f> {
     catch_blocks: Vec<((usize, usize), ClifBlock, Value)>,
     /// T6：字段名 → strtab 索引（Field lowering 经 rt_field 名分发）。
     field_str_idx: HashMap<String, usize>,
+    /// G2.5 别名表（新名 → 原名）：Call lowering 编译期解析别名，决定走 rt_callv 还是 rt_call
+    /// （镜像 Vm::do_call 把 resolve_alias 放在局部变量查找之前）。
+    alias_map: HashMap<String, String>,
 }
 
 impl<'x, 'f> ChunkLower<'x, 'f> {
+    /// 别名解析（可叠加，限轮数防环，同 vm.rs resolve_alias / interp resolve_alias_name）。
+    fn resolve_alias(&self, name: &str) -> Option<String> {
+        if !self.alias_map.contains_key(name) {
+            return None;
+        }
+        let mut cur = name.to_string();
+        for _ in 0..=self.alias_map.len() {
+            match self.alias_map.get(&cur) {
+                Some(next) => cur = next.clone(),
+                None => break,
+            }
+        }
+        Some(cur)
+    }
     fn call1(&mut self, fref: FuncRef, args: &[Value]) -> Value {
         let inst = self.bcx.ins().call(fref, args);
         self.bcx.func.dfg.first_result(inst)
@@ -610,17 +627,27 @@ impl<'x, 'f> ChunkLower<'x, 'f> {
                 let nimm = self.bcx.ins().iconst(I64, *n as i64);
                 let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
                 let pci = self.bcx.ins().iconst(I64, pc as i64);
-                let sidx = self.func_str_idx.get(func).copied().ok_or_else(|| {
-                    ZError::plain(
-                        codes::INTERNAL,
-                        format!("natgen: Call 函数名 `{func}` 缺少字符串表索引"),
-                        None::<String>,
-                    )
-                })?;
+                // G2.5：先解析别名（镜像 do_call：resolve_alias 在局部变量查找之前）。
+                // 别名指向**局部变量**（lambda 闭包 / 函数名字符串）时必须走 rt_callv，
+                // 否则 runtime 的全局分发查不到该名字（报 H002 undefined function）。
+                let resolved = self.resolve_alias(func);
+                let target = resolved.as_deref().unwrap_or(func);
+                let sidx = self
+                    .func_str_idx
+                    .get(target)
+                    .copied()
+                    .or_else(|| self.func_str_idx.get(func).copied())
+                    .ok_or_else(|| {
+                        ZError::plain(
+                            codes::INTERNAL,
+                            format!("natgen: Call 函数名 `{func}` 缺少字符串表索引"),
+                            None::<String>,
+                        )
+                    })?;
                 let s_imm = self.bcx.ins().iconst(I64, sidx as i64);
-                // func 名 ∈ 当前 chunk 局部变量 → rt_callv（运行期优先按变量值分发：
+                // target 名 ∈ 当前 chunk 局部变量 → rt_callv（运行期优先按变量值分发：
                 // lambda 闭包 / 函数名字符串，镜像 do_call 第一步）；否则 rt_call 纯全局分发。
-                let r = if let Some(&freg) = chunk.locals.get(func) {
+                let r = if let Some(&freg) = chunk.locals.get(target) {
                     let v = self.load_slot(freg);
                     let rf = self.rt.rt_callv;
                     self.call1(rf, &[v, s_imm, argptr, nimm, cii, pci])
@@ -942,6 +969,7 @@ fn lower_chunk(
     const_str_idx: &[Option<usize>],
     func_str_idx: &HashMap<String, usize>,
     field_str_idx: &HashMap<String, usize>,
+    alias_map: &HashMap<String, String>,
     catch_map: Vec<Option<(usize, usize)>>,
     ci: usize,
 ) -> Result<(), ZError> {
@@ -1105,6 +1133,7 @@ fn lower_chunk(
         catch_map,
         catch_blocks: Vec::new(),
         field_str_idx: field_str_idx.clone(),
+        alias_map: alias_map.clone(),
     };
 
     let leaders_list: Vec<usize> = leaders.iter().copied().collect();
@@ -1309,6 +1338,13 @@ pub fn gen_object(m: &Module, strtab: &[String], out: &Path) -> Result<(), ZErro
         .enumerate()
         .map(|(i, s)| (s.clone(), i))
         .collect();
+    // G2.5：别名表反向成「新名 → 原名」（Module.aliases 存的是 (original, new_name)），
+    // 供 Call lowering 编译期解析（决定 rt_callv / rt_call 与错误文案里的名字）。
+    let alias_map: HashMap<String, String> = m
+        .aliases
+        .iter()
+        .map(|(orig, new_name)| (new_name.clone(), orig.clone()))
+        .collect();
 
     // 逐 chunk define。
     for (ci, chunk) in m.chunks.iter().enumerate() {
@@ -1335,6 +1371,7 @@ pub fn gen_object(m: &Module, strtab: &[String], out: &Path) -> Result<(), ZErro
             // field_str_idx 复用 func_str_idx（strtab 全集反查；Field 字段名 / ThrowStr 文案
             // 已由 main.rs 收进 strtab）。
             &func_str_idx,
+            &alias_map,
             compute_catch_map(&chunk.code),
             ci,
         )?;
