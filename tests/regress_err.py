@@ -118,7 +118,7 @@ CASES = {
 # natgen 能力边界：lowering 阶段报 H990/H999（M2 任务组待落地），无法比对运行期错误。
 # 显式登记而非静默跳过——新增条目必须写明待落地任务号，避免「漏实现被当成通过」。
 NAT_UNSUPPORTED = {
-    "await_non_future": "H990 Await 指令未实现 → M2 G2.6 async-await",
+    "await_non_future": "H999 原生编译后端不支持 await → M2 G2.6 async-await（待 runtime 线程基础设施就绪后解除）",
 }
 
 

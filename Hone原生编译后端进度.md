@@ -259,8 +259,14 @@
 - [x] **G2.4 运算符重载**：`__add` / `__eq` / `__neg` / `__len` 等回退链（镜像 `Vm::overload` 的触发条件：仅非 native 组合 + TYPE_MISMATCH）
 - [x] **G2.5 alias / goto**：alias 表接入 runtime（`call_global` 解析）+ natgen 编译期解析（决定 rt_callv）；
       goto 经用例固化（Label+Jmp 基线已覆盖）
-- [ ] **G2.6 async-await**：`GoCall` / `Await` 线程 lowering（future 值 + wait，与 VM 线程语义对齐；跨线程值传递按 M2 边界）
-- [ ] **G2.7 H999 边界对齐**：lowering 显式全覆盖单测（`Instr` 全变体断言）+ 新后端 H999 集合 = VM H999 集合 + `.t_neg` / `examples` 全过
+- [!] **G2.6 async-await（阻塞：需先迁移 runtime rc 为原子）**：`GoCall` / `Await` 线程 lowering。
+      阻塞原因：runtime 的 `HnCell.rc` 是**非原子** `u64`（VM/interp 用 `Arc`），跨线程共享值会
+      数据竞争（实参与future 结果都要在两个线程间传递引用计数）。前置条件 = runtime rc 改
+      `AtomicU64`（COW 语义可镜像 VM 的 Arc + COW），详见决策记录
+- [x] **G2.7 H999 边界对齐**：新增 `mod instr_coverage` 单测（`Instr` 全变体必须「有 lowering 臂
+      或在 NOT_IMPLEMENTED 带理由登记」，杜绝静默落H990）；能力边界错误码由 H990(internal)
+      统一为 **H999**（与 VM / AOT / DLL 口径一致）+ 指名指令 + help；VM 不支持特性
+      （with / 字段赋值 / goto 未定义标签）三引擎逐字节一致已探针核实
 - [ ] **G2.8 默认参数（VM / 原生后端）**：`fn f(a, b = 2)` 在解释器与 AOT 可用，**VM 与 nat 省略即报 H011**（G2.4 探针发现，见实现进度）
 - [ ] **G2.9 点号内置族**：`time.*` / `random.*` / `sys.*` / `os.*` 等在原生后端完全缺失（直接调用即 H404，非alias 专属）；G2.5 探针发现
 
@@ -425,6 +431,43 @@
 - **验证**：alias 组 11 例三引擎 0 分歧；`regress3` 真实逻辑差异 = 0；`regress_ir` OK=39 BAD=0；
   `cargo test` 4/4；`regress4` **12/12**（新增 alias_goto.hn）；`regress_err` **64/64**（新增 2 例）。
 
+### G2.6 / G2.7 实现进度（2026-10-08）
+
+- **G2.7 完成（把「无静默漏实现」变成机器强制）**：
+  - **单测 `mod instr_coverage`**（`src/natgen.rs`，2 个测试）：文本提取 `src/vm.rs` 的
+    `Instr` 变体清单与 `src/natgen.rs` 里的显式引用，要求每个变体**要么有 lowering 臂 / 块级处理 /
+    catch_map 元指令，要么在 `NOT_IMPLEMENTED` 表里带理由登记**，否则测试失败并列出漏项。
+    另有一条反向校验：表里的名字必须是真实变体、理由不得为空（防「拼错变体名 / 已实现却仍登记」）。
+    为什么用读源码的方式：lowering 是 `match ins { Instr::X => … }`，Rust 无反射可查覆盖集，
+    文本提取能机械回答「新增指令是否忘了决策」——正是 G2.7 要消灭的那类缺口。
+  - **能力边界错误码统一**：catch-all 原报 `H990 internal`（文案还停留在「M0 子集外，T3/T5+ 落地」，
+    早已过时），现改报 **`H999`（功能未实现）**，文案指名指令：
+    `原生编译后端暂不支持 \`await\`（见 M2 G2.6 async-await）` + help
+    「用解释器运行同一脚本」。口径与 VM/AOT/DLL 的H999 一致（VM 对 `with` / 字段赋值同样报 H999）。
+- **G2.7 的另一半已探针核实**（VM 不支持特性在 nat 的表现）：
+  | 特性 | interp | VM | nat |
+  |---|---|---|---|
+  | `with` 上下文管理器 | ✓ 支持 | H999 同文案 | **H999 同文案（一致）** |
+  | `obj.field = x` 字段赋值 | ✓ 支持 | H999 同文案 | **H999 同文案（一致）** |
+  | `goto` 未定义标签 | H105 | H105 | **H105（一致）** |
+  | `byte` / `bytes` | ✓ 支持 | ✓ | ✓（子集内） |
+  | `await` 非future | H001运行期 | H001 运行期 | H999 编译期（**能力边界，G2.6**） |
+  | `go f()` | 后台线程执行 | 后台线程执行 | H999 编译期（**能力边界，G2.6**） |
+- **G2.6 阻塞分析（本轮未实现，已登记决策）**：
+  - VM 的 `Value` 用 `Arc`（Lambda / Enum / Future / Cow），可跨线程共享引用计数；
+    **runtime 的 `HnCell.rc` 是裸 `u64`**，`cell_release` 里 `rc -= 1` 非原子。
+  - `go f(x)` / `async fn` 必然把**值跨线程传递**（实参引用交给新线程、结果引用交回主线程），
+    而调用点的槽仍持有同一cell 的引用 —— 两个线程对同一 `rc` 字段无同步读写 = 数据竞争（UB）。
+    编译器也无法规避：`go f(x)` 之后 `x` 仍可读（槽不能置空），槽的释放必然发生在主线程。
+  - **前置条件**：runtime `rc` 迁移为 `AtomicU64`（relaxed 增减 + release/acquire 配对），
+    之后 `GoCall`/`Await` 的 lowering 与 VM 的Arc + COW 语义可逐条镜像。
+    代价是每次 retain/release 变成原子操作，需用 `bench/` 复测性能影响（M3 再决定是否调优）。
+  - **明确否决的替代方案**：把 async 做成「同步立即求值 + future 只是壳」—— 确定性脚本能骗过
+    三引擎比对，但 `time.sleep` 并行性、`go` 的完成顺序等断言必然分叉，且属**语义造假**，不采用。
+- **验证**：`cargo test` **6/6**（新增 2 条覆盖单测）；`regress3` 真实逻辑差异 = 0；
+  `regress_ir` BAD=0；`regress4` 12/12；`regress_err` 64/64（`await_non_future` 的登记理由
+  随错误码 H990→H999 更新）。
+
 ## M3 — 集成与优化（任务组）
 
 - [ ] **G3.1 import 构建期解析**：本地路径递归合并 + 远程 `~/.hone/cache/` 下载（设计 §7.3）；跨文件同名定义报错
@@ -509,3 +552,13 @@
 | interp 侧对齐方向 | 解释器改成「先解析别名再走完整分派」（对齐 VM），不改 VM | 「别名即透明改名」；VM 的顺序（resolve_alias → locals → fns → builtin）本就是更完整的那版 |
 | goto | 不动实现，只补用例 | Label+Jmp lowering 基线已覆盖，探针 4 种形态三引擎本来就一致 |
 | 点号内置（G2.9） | 单独立项，不在 G2.5 顺手做 | 涉及 time/random 等不确定输出，逐个对齐需要各自的测试口径，混进来会让 G2.5 验收失焦 |
+
+### G2.6 / G2.7 已定决策（2026-10-08）
+
+| 项 | 决策 | 理由 |
+|---|---|---|
+| 指令覆盖怎么测 | 读源码文本提取变体 + 显式引用，配NOT_IMPLEMENTED 表；不用反射 | `match ins { Instr::X => … }` 无反射可查；文本提取能机械发现「新指令忘了决策」，且新指令必然出现在 `src/vm.rs` 里 |
+| 未实现指令的错误码 | 统一 **H999**（功能未实现），不再用 H990 internal | H990 是「编译器内部错误」，而这里是**已知能力边界**；VM/AOT/DLL 对同类特性也报 H999，口径必须一致 |
+| 错误文案 | 指名指令（`await` / `go`）+ 给出替代路径（用解释器跑）+ 所属任务号 | 「未实现某条指令」对用户无信息量；指名 + 出路 + 任务号才能自解释 |
+| async 实现前置 | 先把 runtime `rc` 迁到`AtomicU64`，再做 `GoCall` / `Await` lowering | 非原子 rc 跨线程共享值是数据竞争（UB），且编译器无法规避（槽不能置空）。顺序不能反 |
+| async 的替代方案 | 否决「同步求值 + future 壳」 | 确定性脚本能骗过比对，但并行性 / 完成顺序断言必然分叉——语义造假，不做 |

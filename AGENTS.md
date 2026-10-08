@@ -23,6 +23,7 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   - 指令带**字符串操作数**（Call 名 / Field 名 / Raise 三段文本 / ThrowStr 文案 / enum 构造名等）才需 `main.rs` strtab 收集；纯数值操作数指令（如 `CondCheck` / `IsBoolVal`）不需要。
   - `Instr::Raise` 的**错误码**另有两处白名单，漏改会让 nat 静默渲染成 H990 或 IR 往返失败：`runtime/src/lib.rs` 的 `rt_raise` 码表、`vm.rs` `parse_instr` 的 `RAISE` 码表。
   - runtime 侧「解释器显式无 help」的分支必须用 `err_h_explicit_no_help`（哨兵 `Some("")`），否则渲染层 `hn_help_for` 会凭空补一行 help。
+  - **新增指令必须同步 `natgen.rs` 的 `NOT_IMPLEMENTED` 决策表**（`mod instr_coverage` 单测强制）：要么写 lowering 臂，要么带理由登记；未实现的指令报 **H999**（功能未实现，与 VM/AOT/DLL 同口径），不是 H990（internal）。当前登记项：GoCall / Await（G2.6）、Breakpoint / DebugPrint（无调试器）。
 - 运算符重载（G2.4）：`__op` 回退链**全部在 runtime**（`rt_binop` / `rt_unop` / `rt_index` /
   `call_builtin` 的 `len` 臂），字节码与 natgen 无需改动。触发条件表以 `vm.rs` exec 臂为准
   （算术：非数字/str 组合 + H001；比较：非数字对、错误码不限；一元：H001）。

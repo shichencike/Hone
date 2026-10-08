@@ -73,6 +73,8 @@
 </ul>
 <h4><span class="flag fix">修复</span></h4>
 <ul>
+<li><strong>原生编译后端的能力边界报错口径统一为 H999</strong>（M2 G2.7）：此前未实现的指令报 <code class="inline">H990 internal</code></li>
+<li><strong>新增单测强制「每个字节码指令都有显式决策」</strong>（G2.7）：<code class="inline">Instr</code> 的每个变体都必须有 lowering 臂 /</li>
 <li><strong>原生编译后端支持 alias / goto</strong>（M2 G2.5）：<code class="inline">alias 原名 as 新名</code> 在原生后端可用——</li>
 <li><strong><code class="inline">alias len as mylen</code> 这类「别名指向内置」的形态在原生后端原先报 H002</strong>，</li>
 <li><strong>解释器「别名指向变量」形态对齐 VM</strong>：VM 的 <code class="inline">do_call</code> 把 <code class="inline">resolve_alias</code> 放在局部变量查找</li>

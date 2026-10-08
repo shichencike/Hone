@@ -929,10 +929,17 @@ impl<'x, 'f> ChunkLower<'x, 'f> {
             // catch_map 查询处，运行时不留痕迹（无 setjmp），故二者 lower 为空操作。
             Instr::TryBegin(_, _) | Instr::TryPop => {}
             other => {
+                // G2.7：能走到这里的只有「已登记未实现」的指令（见下方 mod instr_coverage 的
+                // NOT_IMPLEMENTED 表，单测保证无静默漏实现）。错误码用 H999（功能未实现）
+                // 而非 H990（internal）——与 VM / AOT / DLL 的能力边界口径一致：
+                // 「这个引擎不支持该特性」不是「编译器内部错误」。
                 return Err(ZError::plain(
-                    codes::INTERNAL,
-                    format!("natgen: 指令 `{other:?}` 未实现（M0 子集外，T3/T5+ 落地）"),
-                    None::<String>,
+                    codes::NOT_IMPLEMENTED,
+                    format!(
+                        "原生编译后端暂不支持 `{}`（见 M2 G2.6 async-await）",
+                        instr_name(&other)
+                    ),
+                    Some("用解释器运行同一脚本：`hone run <file.hn>`（输出与退出码与本后端一致）"),
                 ));
             }
         }
@@ -957,6 +964,23 @@ fn compute_catch_map(code: &[Instr]) -> Vec<Option<(usize, usize)>> {
         map.push(stack.last().copied());
     }
     map
+}
+
+/// 指令变体名（用于能力边界的报错文案；G2.7 要求报错指名指令，而不是 `{other:?}` 整串）。
+fn instr_name(ins: &Instr) -> &'static str {
+    match ins {
+        Instr::GoCall(_, _, _) => "go",
+        Instr::Await(_, _) => "await",
+        Instr::Breakpoint => "breakpoint",
+        Instr::DebugPrint(_) => "debug_print",
+        Instr::Nop => "nop",
+        other => {
+            // 兜底仅供「新增指令忘了加名字」时也能编过：单测 instr_coverage 会同时失败，
+            // 提醒在 NOT_IMPLEMENTED 与此处补登记。
+            let s = format!("{other:?}");
+            Box::leak(s.into_boxed_str())
+        }
+    }
 }
 
 /// 把单个 chunk lower 为 Cranelift 函数。
@@ -1393,4 +1417,122 @@ pub fn gen_object(m: &Module, strtab: &[String], out: &Path) -> Result<(), ZErro
     }
     std::fs::write(out, &bytes).map_err(|e| internal(format!("natgen: 写入 object 失败: {e}")))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod instr_coverage {
+    //! G2.7：指令覆盖铁律——**每个 `vm::Instr` 变体都必须在 natgen 里显式出现**
+    //! （有 lowering 臂、或在 `NOT_IMPLEMENTED` 里带理由登记），不允许静默落到兜底 H990。
+    //!
+    //! 为什么用「读源码」的方式测：lowering 的分派是 `match ins { Instr::X => … }`，
+    //! Rust 没有反射可查「哪些变体有臂」。直接对 `src/natgen.rs` 与 `src/vm.rs` 做文本提取，
+    //! 能机械地回答「新增指令是否忘了决策」——这正是 G2.7 要消灭的那类静默缺口。
+
+    /// 已登记为「原生后端不支持」的指令变体 → 未实现原因（会出现在编译期 H990 里）。
+    /// 新增条目必须写清原因与所属任务号，便于回头消账。
+    const NOT_IMPLEMENTED: &[(&str, &str)] = &[
+        ("GoCall", "G2.6 async-await：需要线程 spawn + future 值（runtime 的 rc 非原子，跨线程共享值不安全）"),
+        ("Await", "G2.6 async-await：需要阻塞等待 future（依赖 GoCall 的线程基础设施）"),
+        ("Breakpoint", "解释器调试指令（`hone debug` 断点），原生后端无调试器"),
+        ("DebugPrint", "解释器调试指令（debug_print），原生后端无调试器"),
+        ("Nop", "占位指令（无副作用），lowering 无需处理即可；列此仅为覆盖声明完整"),
+    ];
+
+    fn read(rel: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("读 {rel} 失败: {e}"))
+    }
+
+    /// 提取 `pub enum Instr { ... }` 里的变体名（形如 `Name(` 或 `Name,`）。
+    fn instr_variants(vm_src: &str) -> Vec<String> {
+        let start = vm_src
+            .find("pub enum Instr {")
+            .expect("vm.rs 里找不到 `pub enum Instr`");
+        let body = &vm_src[start..];
+        let end = body.find("\n}").expect("Instr 枚举未闭合");
+        body[..end]
+            .lines()
+            .filter_map(|l| {
+                let t = l.trim();
+                // 形如 `Move(usize, usize),` / `LoadBool(usize, bool),` / `RetNull,`
+                let name: String = t.chars().take_while(|c| c.is_alphanumeric()).collect();
+                if name.is_empty() || !name.chars().next().unwrap().is_uppercase() {
+                    return None;
+                }
+                let rest = t[name.len()..].trim_start();
+                // 变体行必须以 `(` 或 `,` 开头；文档注释行以 `///` 开头（已被过滤）
+                if rest.starts_with('(') || rest.starts_with(',') {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// 提取 natgen 源码里出现的所有 `Instr::Xxx` 变体引用。
+    fn natgen_variants(nat_src: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let mut i = 0usize;
+        while i < nat_src.len() {
+            let p = match nat_src[i..].find("Instr::") {
+                Some(p) => p,
+                None => break,
+            };
+            let at = i + p + "Instr::".len();
+            let name: String = nat_src[at..]
+                .chars()
+                .take_while(|c| c.is_alphanumeric())
+                .collect();
+            if !name.is_empty() {
+                let consumed = name.len();
+                if !out.contains(&name) {
+                    out.push(name);
+                }
+                i = at + consumed;
+            } else {
+                i = at;
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn every_instr_has_explicit_decision() {
+        let vm_src = read("src/vm.rs");
+        let nat_src = read("src/natgen.rs");
+        let variants = instr_variants(&vm_src);
+        assert!(
+            variants.len() > 40,
+            "Instr 变体提取疑似失效，只拿到 {} 个",
+            variants.len()
+        );
+        // 「已决策」= 在 natgen 里有显式引用（lowering 臂 / 块级处理 / catch_map 元指令）
+        //        ∪ 在 NOT_IMPLEMENTED 里带理由登记。
+        let mut decided = natgen_variants(&nat_src);
+        for (name, _) in NOT_IMPLEMENTED {
+            decided.push(name.to_string());
+        }
+        let missing: Vec<&String> = variants.iter().filter(|v| !decided.contains(v)).collect();
+        assert!(
+            missing.is_empty(),
+            "以下 Instr 变体在 natgen.rs 里既无 lowering 臂、也不在 NOT_IMPLEMENTED 登记中：\n  {:?}\n\
+             （要么实现 lowering，要么在 NOT_IMPLEMENTED 里带理由登记，否则会静默落到 H990）",
+            missing
+        );
+    }
+
+    #[test]
+    fn not_implemented_entries_are_real_variants() {
+        let vm_src = read("src/vm.rs");
+        let variants = instr_variants(&vm_src);
+        for (name, reason) in NOT_IMPLEMENTED {
+            assert!(
+                variants.iter().any(|v| v == name),
+                "NOT_IMPLEMENTED 里的 `{}` 已不是 Instr 变体（拼写变了？）",
+                name
+            );
+            assert!(!reason.trim().is_empty(), "`{}` 的未实现原因为空", name);
+        }
+    }
 }
