@@ -7,6 +7,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Windows runner 默认 locale 为 charmap/GBK，强制 Python 以 UTF-8 读写标准流，
+  # 避免回归脚本解码 Hone 的 UTF-8 输出时崩溃（配合 regress4.py 的 encoding='utf-8'）。
+  PYTHONIOENCODING: utf-8
 
 jobs:
   test:

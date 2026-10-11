@@ -62,7 +62,7 @@ def build_native(path: str, tmp: str) -> str:
     out = os.path.join(tmp, "case_nat.exe")
     p = subprocess.run(
         [BIN, "build", "--exe", "--native", path, "-o", out],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
     )
     # 中间 object 默认落在 CWD（stem.nat.o），即删。
     obj = os.path.join(os.getcwd(), os.path.splitext(os.path.basename(path))[0] + ".nat.o")
@@ -74,17 +74,17 @@ def build_native(path: str, tmp: str) -> str:
 
 
 def run_exe(exe: str):
-    p = subprocess.run([exe], capture_output=True, text=True, timeout=30)
-    return (p.returncode, p.stdout + p.stderr)
+    p = subprocess.run([exe], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+    return (p.returncode, (p.stdout or "") + (p.stderr or ""))
 
 
 def run_engine(engine: str, path: str, nat_exe: str):
     if engine == "interp":
-        p = subprocess.run([BIN, "run", path], capture_output=True, text=True, timeout=30)
-        return (p.returncode, p.stdout + p.stderr)
+        p = subprocess.run([BIN, "run", path], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+        return (p.returncode, (p.stdout or "") + (p.stderr or ""))
     if engine == "vm":
-        p = subprocess.run([BIN, "run", "--vm", path], capture_output=True, text=True, timeout=30)
-        return (p.returncode, p.stdout + p.stderr)
+        p = subprocess.run([BIN, "run", "--vm", path], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+        return (p.returncode, (p.stdout or "") + (p.stderr or ""))
     return run_exe(nat_exe)
 
 

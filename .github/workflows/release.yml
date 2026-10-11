@@ -7,6 +7,11 @@ on:
 permissions:
   contents: write
 
+# Windows runner 默认 locale 为 charmap/GBK：强制 Python 标准流用 UTF-8，
+# 避免 build_toolchain.py / 回归脚本处理 UTF-8 文本时崩溃。
+env:
+  PYTHONIOENCODING: utf-8
+
 jobs:
   build:
     name: build ${{ matrix.name }}
