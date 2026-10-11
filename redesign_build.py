@@ -4,13 +4,13 @@
 import os, re
 
 SITE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "官网")
-VERSION = "0.7.12"
+VERSION = "0.8.0"
 
 # 分组侧栏导航： (组标题, [(文件名, 显示名), ...])
 NAV = [
     ("入门", [("index.html", "首页"), ("install.html", "安装"), ("download.html", "下载")]),
     ("学习", [("tutorial.html", "教程"), ("examples.html", "示例")]),
-    ("参考", [("docs.html", "文档"), ("language.html", "语言参考"), ("stdlib.html", "标准库"), ("perf.html", "性能")]),
+    ("参考", [("docs.html", "文档"), ("language.html", "语言参考"), ("stdlib.html", "标准库"), ("perf.html", "性能"), ("lsp.html", "LSP / 编辑器")]),
     ("项目", [("changelog.html", "更新日志"), ("faq.html", "FAQ"), ("about.html", "关于")]),
 ]
 

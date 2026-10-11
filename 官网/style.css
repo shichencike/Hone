@@ -442,6 +442,7 @@ footer .sword { color: var(--red); }
 .release h4 .flag.fix { color: var(--yellow); }
 .release h4 .flag.doc { color: var(--accent-2); }
 .release h4 .flag.chg { color: var(--purple); }
+.release h4 .flag.rem { color: var(--red); }
 .release ul { margin: 6px 0 6px 24px; }
 .release li { font-size: 14px; color: var(--text-2); margin: 5px 0; }
 .release li code { color: var(--accent-2); }

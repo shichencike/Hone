@@ -7,7 +7,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(ROOT, "CHANGELOG.md")
 DST = os.path.join(ROOT, "官网", "changelog.html")
 
-FLAG_MAP = {"新增": "add", "变更": "chg", "修复": "fix", "文档": "doc"}
+FLAG_MAP = {"新增": "add", "变更": "chg", "修复": "fix", "文档": "doc", "移除": "rem"}
 
 
 def esc(s):
@@ -51,6 +51,7 @@ def parse():
     releases = []
     cur = None
     sub = None
+    bullet_idx = None  # sub["bullets"] 里「当前 bullet」的下标（续行并入它）
     for line in lines:
         if line.startswith("## "):
             if cur:
@@ -60,21 +61,31 @@ def parse():
             date = (m.group(2) or "").strip()
             cur = {"ver": ver, "date": date, "subs": []}
             sub = None
+            bullet_idx = None
         elif line.startswith("### "):
             if cur:
                 name = line[4:].strip()
                 sub = {"name": name, "flag": FLAG_MAP.get(name, "doc"), "bullets": []}
                 cur["subs"].append(sub)
-        elif re.match(r"^\s+-\s", line):
+                bullet_idx = None
+        elif re.match(r"^\s*-\s", line):
             if sub:
                 indent = len(line) - len(line.lstrip())
-                text = re.sub(r"^\s+-\s", "", line).rstrip()
-                sub["bullets"].append((indent, text))
-        elif line.startswith("- "):
-            if sub:
-                sub["bullets"].append((0, line[2:].rstrip()))
+                text = re.sub(r"^\s*-\s", "", line).rstrip()
+                sub["bullets"].append([indent, text])
+                bullet_idx = len(sub["bullets"]) - 1
+        elif not line.strip():
+            bullet_idx = None
+        elif sub and bullet_idx is not None:
+            # CHANGELOG 里长条目折行，续行（无前导 `-`）并入当前 bullet——
+            # 丢掉续行会渲染成半句话（旧实现在此截断）。
+            sub["bullets"][bullet_idx][1] += " " + line.strip()
     if cur:
         releases.append(cur)
+    # [indent, text] → (indent, text)
+    for r in releases:
+        for s in r["subs"]:
+            s["bullets"] = [(i, t) for i, t in s["bullets"]]
     return releases
 
 
@@ -93,8 +104,15 @@ def render_release(r):
 
 def main():
     releases = parse()
+    # 「最新版本」取第一个正式版本（跳过 Unreleased），避免硬编码随版本漂移。
+    newest = next((r["ver"] for r in releases if r["ver"].lower() != "unreleased"), "")
+    if not newest and releases:
+        newest = releases[0]["ver"]
     body = ['<h2><span class="hash">#</span>更新日志</h2>']
-    body.append('<p>各版本的新增 / 变更 / 修复 / 文档汇总。最新版本见顶部 <span class="ver-tag">v0.7.12</span> 区块。</p>')
+    body.append(
+        '<p>各版本的新增 / 变更 / 修复 / 文档汇总。最新版本见顶部 '
+        '<span class="ver-tag">%s</span> 区块。</p>' % esc(newest)
+    )
     for r in releases:
         body.append(render_release(r))
     content = "\n".join(body)
@@ -108,7 +126,7 @@ def main():
     )
     with open(DST, "w", encoding="utf-8") as f:
         f.write(html)
-    print("OK changelog.html  releases=%d" % len(releases))
+    print("OK changelog.html  releases=%d  newest=%s" % (len(releases), newest))
 
 
 if __name__ == "__main__":
