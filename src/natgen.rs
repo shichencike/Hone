@@ -1121,7 +1121,10 @@ fn lower_chunk(
     for &pc in &leaders {
         blocks.insert(pc, bcx.create_block());
     }
-    let entry = blocks[&0];
+    // 函数入口块独立于 pc=0 段块：pc 0 可能是循环头（回边目标），而 Cranelift 禁止
+    // 跳转到函数 entry 块；且形参装载 / 寄存器槽初始化只能在循环外执行一次（若与循环头
+    // 同块，首次回跳会重复装载实参、破坏循环变量）。entry 只做序言，末尾跳入 blocks[0]。
+    let entry = bcx.create_block();
     bcx.switch_to_block(entry);
     // 栈槽：每 VM 寄存器一个 8B ExplicitSlot（入口初始化，递归经独立栈帧）+ 实参
     // 打包区（Call/NewList/NewDict 前连续 store，T5/M1）＋ 捕获打包区（MakeLambda，T5）。
@@ -1204,6 +1207,8 @@ fn lower_chunk(
         };
         bcx.ins().stack_store(I64, v, slots[i], 0);
     }
+    // 序言结束：跳入 pc=0 段块（此后 pc=0 段在独立块内 lower，回边目标不再是 entry）。
+    bcx.ins().jump(blocks[&0], &[]);
 
     // 4. 逐段 lower（只填充可达段；不可达段保持 pristine）。
     let mut lc = ChunkLower {

@@ -49,6 +49,7 @@ CASES = [
     "tests/m2/defaults.hn",
     "tests/m2/dotted.hn",
     "tests/m2/async_go.hn",
+    "tests/m2/imports.hn",
 ]
 
 ENGINES = ("interp", "vm", "nat")

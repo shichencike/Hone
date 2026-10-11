@@ -1452,6 +1452,10 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   · **运算符重载（G2.4）**：`__add` / `__sub` / `__mul` / `__div` / `__mod` / `__eq` / `__ne` /
     `__lt` / `__le` / `__gt` / `__ge` / `__neg` / `__not` / `__len` / `__index` 回退链，
     触发条件逐条镜像解释器（见 1.20）；native 不改 lowering，回退在 runtime 内完成
+  · **import 构建期解析（M3 G3.1）**：VM 与原生后端在**编译期**递归展开顶层 `import`
+    （本地路径相对 CWD；远程 http(s) 下载缓存到 `~/.hone/cache/`），合并为单编译单元。
+    模块函数按「模块名_」前缀注册，`as 别名` 整体替换前缀；模块顶层语句在导入位点执行一次
+    （模块作用域隔离）。循环 import 报错、同一模块去重；解释器仍走运行期 import（语义基准）
   · 内置子集：print / len / append / keys / values / has_key / to_str / to_int / to_float / is_int /
     is_float / is_bool / is_str / is_list / is_dict / is_null / type_of / abs / max / min / assert /
     assert_eq / read_file（assert 失败 H700 文案对齐）
@@ -1459,8 +1463,7 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   · 注意：`d["k"] = v` 这类dict 索引写入被类型检查器静态拒绝（索引须 int，而 dict 键恒为字符串
     字面量），故 dict 在脚本层只读，取值走 for-in / keys / values / has_key
 · 当前限制（M2/M3 逐步放开）：
-  · M0–M2 G2.4 子集外指令（alias / async-await / goto 以外的跳转 /
-    import / 切片 / byte / bytes 等）在**编译期**报 H990（internal）「指令未实现」——编译期即拒绝，
+  · 子集外指令（切片 / with / 字段赋值等）在**编译期**报 H999（功能未实现）——编译期即拒绝，
     不产出错误二进制
   · struct 字段写入 `p.x = 3` 在 VM 为编译期 H999（M2 未放开），解释器支持（含 readonly 拦截）
   · **默认参数**（`fn f(a, b = 2)`）在 VM / 原生后端未实现（省略即报 H011，见 1.14 与进度文档 G2.8）；
@@ -1840,6 +1843,9 @@ hone_lib/img.hn 中的 new → img_new、to_ppm → img_to_ppm，见 examples/te
 · 函数扁平化存在于全局符号表（不支持 :: 多层路径、不支持嵌套遮蔽），
   模块函数靠前缀隔离命名空间，避免与主脚本函数重名（重名报「already defined」）
 · import 的模块顶层语句会在加载时执行一次，可在模块顶部放常量初始化
+· 引擎差异：解释器（`hone run`）在**运行期**拉取模块；VM（`--vm`）与原生编译后端（`--native`）
+  在**编译期**展开 import（本地路径相对当前工作目录；远程 http(s) 构建期下载并缓存到
+  `~/.hone/cache/`），合并为单编译单元——远程模块首次构建失败时先 `hone get <script.hn>`
 · load 只用于 C 动态库；加载 .hn 源码一律用 import
 
 11.2 调试复杂逻辑

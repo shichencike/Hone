@@ -108,6 +108,9 @@ CASES = {
     "alias_undef": 'alias nope as nn;\nnn();\n',
     "alias_undef_builtin": 'alias nope2 as nn2;\nprint(to_str(nn2([1])));\n',
     "throw_num": 'throw 5;\n',
+    # G3.1 构建期 import：本地模块缺失 → 三引擎 H404（VM/nat 构建期、解释器运行期，
+    # 文案/定位（--> 行 + caret）一致；nat 的 [1/4] 阶段行由 strip_stage_lines 剥离）。
+    "import_missing": 'import "nope" from "./no_such_mod.hn";\nprint(1);\n',
     # G2.9 点号内置族 H999 登记（仅 nat 产生，解释器/VM 正常执行——能力边界口径）
     "dotted_h999_regex": 'print(to_str(regex.match("a+", "aaa")));\n',
     "dotted_h999_sqlite": 'db = sqlite.open(":memory:");\nprint(to_str(db != 0));\n',

@@ -20,6 +20,7 @@ mod guimod_gtk;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod guimod_x11;
 mod header;
+mod imports;
 mod interp;
 mod lexer;
 mod lsp;
@@ -249,6 +250,8 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
                     )
                 })?;
                 let program = parser::Parser::parse(other, &src)?;
+                // G3.1：反汇编走 VM 编译模型，同样需构建期展开顶层 import。
+                let program = imports::resolve_imports(program, other, &src)?;
                 let text = vm::disassemble_program(&program, other, &src)?;
                 println!("{}", text);
                 Ok(())
@@ -299,10 +302,14 @@ fn run_file_or_pkg(path: &str, debug: bool, use_vm: bool) -> Result<(), ZError> 
 /// `use_vm` 为真时走寄存器式字节码 VM（vm::run），否则走 AST 树遍历解释器（interp::run，默认）。
 fn run_script(path: &str, src: &str, debug: bool, use_vm: bool) -> Result<(), ZError> {
     let program = parser::Parser::parse(path, src)?;
-    checker::Checker::check(&program, path, src)?;
     if use_vm {
+        // G3.1：VM 是 AOT 编译模型，无法运行期抓取模块——编译期展开顶层 import（设计 §7.3）。
+        // 解释器仍走运行期 import（interp::exec_import），保持既有语义不变。
+        let program = imports::resolve_imports(program, path, src)?;
+        checker::Checker::check(&program, path, src)?;
         vm::run(&program, path, src, debug)?;
     } else {
+        checker::Checker::check(&program, path, src)?;
         interp::run(&program, path, src, debug)?;
     }
     Ok(())
@@ -1613,6 +1620,8 @@ fn build_native(
     })?;
     eprintln!("[1/4] {} 解析 + 类型检查: {}", label, path);
     let program = parser::Parser::parse(path, &src)?;
+    // G3.1：原生编译后端在构建期把顶层 import 递归展开、合并为单编译单元（设计 §7.3）。
+    let program = imports::resolve_imports(program, path, &src)?;
     let _checked = checker::Checker::check(&program, path, &src)?;
     let vm_mod = vm::compile_module(&program)?;
     // 字符串静态表（T5 起）去重全集，编入生成式 wrapper（object 经 rt_str 按索引取句柄；

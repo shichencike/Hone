@@ -32,6 +32,14 @@
     实参填错位，`base + x` 报 int+null）；AOT Windows CRLF 行尾问题（C 运行时文本模式 `\n`→CRLF 与
     Rust 侧 LF 不一致，`hn_init_line_endings()` 切二进制模式）
   - 设计 / 进度：`Hone原生编译后端设计.md`、`Hone原生编译后端进度.md`
+- **原生编译后端 M2 收尾（G2.6 async-await / G2.8 默认参数 / G2.9 点号内置族）与 M3 G3.1 import**：
+  - G3.1：VM（`--vm`）与原生后端（`--native`）在**编译期**递归展开顶层 `import`
+    （本地路径相对当前工作目录；远程 http(s) 下载缓存到 `~/.hone/cache/`），合并为单编译单元；
+    模块函数按「模块名_」前缀注册、`as 别名` 整体换前缀、模块顶层语句在导入位点执行一次；
+    同名定义报错、循环 import 报错、同一模块去重。解释器仍走运行期 import（语义基准）
+  - 修复 natgen 缺陷：函数入口块与 pc=0 段块原为同一块，当函数首语句为 `while`（循环头在 pc 0）
+    时回边跳转到 entry 块触发 Cranelift 校验失败（`invalid reference to entry block`）——
+    入口块独立为序言、末尾跳入 pc=0 段块（`math_gcd` 等 hone_lib 函数撞出）
 
 ### 修复
 - **原生编译后端的能力边界报错口径统一为 H999**（M2 G2.7）：此前未实现的指令报 `H990 internal`

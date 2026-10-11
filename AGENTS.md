@@ -38,6 +38,13 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   基于句柄）。改任一家的行为/文案必须同步另一家。外部 crate 依赖的家族（regex/sqlite/
   zlib/archive/http/ws/smtp/crypto/plugin/guipro/sys-winapi）在 runtime 登记 H999；
   未登记点号名保留 H404（load 库语义）。runtime 值模型含 **T_PTR** 标签（ptr 值）。
+- import（G3.1）：解释器**运行期**处理（`interp::exec_import`，`hone run` 语义基准）；VM（`--vm`）
+  与原生后端（`--native`）在**编译期**经 `src/imports.rs::resolve_imports` 递归展开顶层 import、
+  合并为单编译单元（本地路径相对 CWD / 远程缓存 `~/.hone/cache/`，模块前缀改名 + 顶层语句入 Block）。
+  改 import 语义需同时顾及运行期与构建期两处；`hone check`/`fmt`/LSP 不经过构建期展开。
+- natgen 入口块不变量：函数**入口块独立于 pc=0 段块**（入口只做形参装载 / 寄存器槽初始化，末尾无条件
+  跳入 pc=0 段块）。勿把两者合块——函数首语句为循环（循环头在 pc 0）时回边即「跳转到 entry 块」，
+  Cranelift 校验失败（`invalid reference to entry block`），且序言会被循环重复执行。
 - 条件与逻辑语义（改 `vm.rs` 编译臂时注意，解释器为准）：`if`/`while`/`do-while`/`for`/三元/推导式 `if` 过滤六处条件站点**运行期严格 bool**（`Instr::CondCheck`），`&&`/`||` 短路求值且右侧操作数严格 bool（`Instr::IsBoolVal` 判「恰为该布尔值」，不是 truthy）。
 
 ## 项目特有约定
