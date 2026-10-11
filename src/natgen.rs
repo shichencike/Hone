@@ -1370,9 +1370,47 @@ fn lower_chunk(
     Ok(())
 }
 
+/// G3.7：x86_64 CPU 基线预设 → Cranelift ISA 合成旗标（设计 §6.3）。
+/// 默认 `ssse3`（baseline + SSSE3，与 release 目标一致，避免 AVX 类指令在旧 CPU 非法）；
+/// `--cpu` 可指定 `baseline` / `ssse3` / `sse4.2` / `avx2`。
+fn cpu_isa_flags(cpu: &str) -> Vec<(&'static str, &'static str)> {
+    let mut f: Vec<(&'static str, &'static str)> = Vec::new();
+    let mut push = |k: &'static str| f.push((k, "true"));
+    match cpu {
+        "baseline" => {}
+        "sse4.2" => {
+            push("has_sse3");
+            push("has_ssse3");
+            push("has_sse41");
+            push("has_sse42");
+            push("has_popcnt");
+        }
+        "avx2" => {
+            push("has_sse3");
+            push("has_ssse3");
+            push("has_sse41");
+            push("has_sse42");
+            push("has_popcnt");
+            push("has_avx");
+            push("has_avx2");
+            push("has_bmi1");
+            push("has_bmi2");
+            push("has_fma");
+            push("has_lzcnt");
+        }
+        // "ssse3"（默认）及未知值：baseline + SSSE3
+        _ => {
+            push("has_sse3");
+            push("has_ssse3");
+        }
+    }
+    f
+}
+
 /// 生成 COFF object（含全部用户函数与 __hn_main 入口）。
 /// strtab 为 wrapper 侧承载的字符串静态表（全部 Const::Str 去重，M3 移入 object rodata）。
-pub fn gen_object(m: &Module, strtab: &[String], out: &Path) -> Result<(), ZError> {
+/// `cpu`：x86_64 CPU 基线预设（G3.7，设计 §6.3），见 `cpu_isa_flags`。
+pub fn gen_object(m: &Module, strtab: &[String], out: &Path, cpu: &str) -> Result<(), ZError> {
     let internal = |msg: String| ZError::plain(codes::INTERNAL, msg, None::<String>);
 
     let main_ci = m
@@ -1388,8 +1426,16 @@ pub fn gen_object(m: &Module, strtab: &[String], out: &Path) -> Result<(), ZErro
         .set("opt_level", "speed")
         .map_err(|e| internal(format!("natgen: 设置 opt_level 失败: {e}")))?;
     let flags = cranelift_codegen::settings::Flags::new(flag_builder);
-    let isa = cranelift_codegen::isa::lookup(triple)
-        .map_err(|e| internal(format!("natgen: ISA 查找失败: {e}")))?
+    // G3.7：x86_64 CPU 基线（设计 §6.3）——默认 baseline + SSSE3，`--cpu` 可覆盖。
+    // ISA 专属旗标经 IsaBuilder（settings::Configurable）设置，**不在**全局 flag builder 上。
+    let mut isa_builder = cranelift_codegen::isa::lookup(triple)
+        .map_err(|e| internal(format!("natgen: ISA 查找失败: {e}")))?;
+    for (k, v) in cpu_isa_flags(cpu) {
+        isa_builder
+            .set(k, v)
+            .map_err(|e| internal(format!("natgen: 设置 ISA 旗标 `{k}` 失败: {e}")))?;
+    }
+    let isa = isa_builder
         .finish(flags)
         .map_err(|e| internal(format!("natgen: ISA 初始化失败: {e}")))?;
 

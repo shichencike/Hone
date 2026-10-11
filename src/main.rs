@@ -498,7 +498,7 @@ fn print_help() {
     println!("  hone build --dll <file.hn> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
     println!("  hone build --exe <file.hn> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
     println!("  hone build --exe -c <file.hn> AOT 编译为原生可执行文件（脚本→C 中间文件→gcc/clang；默认删 .c，--keep-c 保留）");
-    println!("  hone build --exe --native <file.hn> 原生编译为可执行文件（Cranelift→object→内嵌运行时，需 rustc；[-o <out>]）");
+    println!("  hone build --exe --native <file.hn> 原生编译为可执行文件（Cranelift→object→内嵌运行时，需 rustc；[-o <out>] [--cpu <name>]）");
     println!("  hone build --script <file.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）");
     println!("  hone get                   读取当前目录 hone.json 清单，批量下载全部模块");
     println!("  hone get <module> <url>  下载模块依赖并缓存到 ~/.hone/cache/，并写入 hone.json 清单");
@@ -688,12 +688,17 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     let mut aot_mode = false;
     let mut keep_c = false;
     let mut native_mode = false;
+    let mut cpu: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "-c" => aot_mode = true,
             "--native" => native_mode = true,
             "--keep-c" => keep_c = true,
+            "--cpu" => {
+                i += 1;
+                cpu = args.get(i).cloned();
+            }
             "-o" => {
                 i += 1;
                 out = args.get(i).cloned();
@@ -704,11 +709,12 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
             }
             s if s.starts_with("--out=") => out = Some(s["--out=".len()..].to_string()),
             s if s.starts_with("--icon=") => icon = Some(s["--icon=".len()..].to_string()),
+            s if s.starts_with("--cpu=") => cpu = Some(s["--cpu=".len()..].to_string()),
             s if s.starts_with('-') => {
                 return Err(ZError::plain(
                     codes::SYNTAX,
                     format!("unknown build option `{}`", s),
-                    Some("options: `-c`, `--keep-c`, `--native`, `-o <out>`, `--icon <ico>`, `--version`"),
+                    Some("options: `-c`, `--keep-c`, `--native`, `--cpu <name>`, `-o <out>`, `--icon <ico>`, `--version`"),
                 ));
             }
             s => {
@@ -746,7 +752,7 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
         return cmd_build_exe_aot(&path, out, keep_c);
     }
     if native_mode {
-        return build_native(&path, out, None, "build");
+        return build_native(&path, out, None, "build", cpu);
     }
 
     // 以当前 hone 可执行文件作为内嵌运行时
@@ -1553,10 +1559,25 @@ fn rust_str_lit(s: &str) -> String {
 fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
     let mut out: Option<String> = None;
     let mut obj: Option<String> = None;
+    let mut cpu: Option<String> = None;
     let mut path: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--cpu" => {
+                cpu = Some(args.get(i + 1).cloned().ok_or_else(|| {
+                    ZError::plain(
+                        codes::SYNTAX,
+                        "missing value for --cpu: `hone natgen <file.hn> --cpu <name>`",
+                        None::<String>,
+                    )
+                })?);
+                i += 2;
+            }
+            s if s.starts_with("--cpu=") => {
+                cpu = Some(s["--cpu=".len()..].to_string());
+                i += 1;
+            }
             "-o" => {
                 out = Some(args.get(i + 1).cloned().ok_or_else(|| {
                     ZError::plain(
@@ -1581,7 +1602,7 @@ fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
                 return Err(ZError::plain(
                     codes::SYNTAX,
                     format!("unknown natgen option `{a}`"),
-                    Some("usage: hone natgen <file.hn> [-o <out>] [--obj <o>]"),
+                    Some("usage: hone natgen <file.hn> [-o <out>] [--obj <o>] [--cpu <name>]"),
                 ));
             }
             a => {
@@ -1598,7 +1619,7 @@ fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
         )
     })?;
     // T7：管线与 `hone build --exe --native` 共用（build_native）；natgen 保留为别名。
-    build_native(&path, out, obj, "natgen")
+    build_native(&path, out, obj, "natgen", cpu)
 }
 
 /// 共享原生编译管线（T7）：`hone natgen` 与 `hone build --exe --native` 共用入口。
@@ -1610,6 +1631,7 @@ fn build_native(
     out: Option<String>,
     obj: Option<String>,
     label: &str,
+    cpu: Option<String>,
 ) -> Result<(), ZError> {
     let src = std::fs::read_to_string(path).map_err(|e| {
         ZError::plain(
@@ -1722,7 +1744,7 @@ fn build_native(
         }
     });
     eprintln!("[2/4] {} 生成 object: {}（Cranelift，句柄式值模型 lowering）", label, obj);
-    natgen::gen_object(&vm_mod, &strtab, std::path::Path::new(&obj))?;
+    natgen::gen_object(&vm_mod, &strtab, std::path::Path::new(&obj), cpu.as_deref().unwrap_or("ssse3"))?;
     eprintln!("[3/4] {} 链接原生 exe: {}（rustc + 内嵌运行时）", label, out);
     // 链接管线（干净构建机自足，无需本仓库）：
     //   临时目录/

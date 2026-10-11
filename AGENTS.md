@@ -49,6 +49,9 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   `-C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--strip-all`（产物 ~1MB，设计目标 ≤3MB）；
   `HONE_NAT_FLAGS` 可临时覆盖。windows-gnu 的链接驱动是 `x86_64-w64-mingw32-gcc`，链接器参数
   必须经 `-Wl,` 传递（直接 `--gc-sections` 会被 gcc 拒绝）。
+- natgen ISA 旗标（G3.7）：x86_64 默认 baseline+SSSE3，`--cpu` 预设 baseline/ssse3/sse4.2/avx2。
+  ISA 专属旗标（`has_ssse3` 等）**必须经 `isa::lookup(triple)` 的 `IsaBuilder`（`settings::Configurable::set`）
+  设置**，不能在全局 `settings::builder()` 上设（会报 `No existing setting named`）；设完再 `finish(flags)`。
 - 条件与逻辑语义（改 `vm.rs` 编译臂时注意，解释器为准）：`if`/`while`/`do-while`/`for`/三元/推导式 `if` 过滤六处条件站点**运行期严格 bool**（`Instr::CondCheck`），`&&`/`||` 短路求值且右侧操作数严格 bool（`Instr::IsBoolVal` 判「恰为该布尔值」，不是 truthy）。
 
 ## 项目特有约定

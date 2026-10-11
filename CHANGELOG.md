@@ -46,6 +46,9 @@
   - 修复 natgen 缺陷：默认参数形参装载判据写成 `nargs < j`，漏掉 `j == nargs`（恰未提供）档——
     读到调用方未打包区的脏句柄、序言释放时 `cell_release` 段错误（原 `-O` 下靠栈布局运气掩盖）。
     改为判据 `j < nargs`、未提供时地址钳 `argptr+0` 且值取 `rt_null`
+- **原生编译后端 CPU 基线（M3 G3.7）**：x86_64 ISA 默认 baseline + SSSE3（设计 §6.3，避免 AVX 类
+  指令在旧 CPU 非法）；新增 `--cpu baseline|ssse3|sse4.2|avx2`（`build --exe --native` / `natgen`）。
+  ISA 专属旗标经 `isa::lookup` 的 `IsaBuilder`（`Configurable::set`）设置，非全局 settings builder
 
 ### 修复
 - **原生编译后端的能力边界报错口径统一为 H999**（M2 G2.7）：此前未实现的指令报 `H990 internal`

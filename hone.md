@@ -1417,6 +1417,8 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   rustc 一次链接（runtime 源码内嵌进 hone 二进制，干净机器自足）
 · 产物体积（M3 G3.3）：链接期 `-C opt-level=z -C codegen-units=1 -Wl,--gc-sections -Wl,--strip-all`，
   hello 约 1.0MB、M2 各用例约 1.1MB（设计目标 ≤3MB）；`HONE_NAT_FLAGS` 可临时覆盖链接参数
+· CPU 基线（M3 G3.7）：x86_64 ISA 默认 baseline + SSSE3（设计 §6.3，避免 AVX 类指令在旧 CPU 非法）；
+  `--cpu baseline|ssse3|sse4.2|avx2` 可选（`build --exe --native` / `hone natgen`）
 · 值模型：句柄式——寄存器持 u64 句柄指向堆上 `HnCell{rc,t,a,b,pkind,payload}`（跨 object ↔ rustc 只传 i64，
   规避 Windows x64 对 >16B 结构体的隐藏 sret 指针 ABI）；引用计数 retain/release，槽写释放旧值；
   str/err/fn 装箱，标量内联
