@@ -1,7 +1,7 @@
 # Hone 原生编译后端 — 进度清单
 
 > 配套：`Hone原生编译后端设计.md`（设计）；本文件跟踪落地进度，按可独立验收的任务拆分。
-> 更新：2026-10-07
+> 更新：2026-10-11
 > 图例：`[x]` 完成 · `[ ]` 待办 · `[~]` 进行中 · `[!]` 已按用户指令裁剪/延后
 
 ## 总览
@@ -10,13 +10,13 @@
 |---|---|---|
 | **M0 管线打通** | ✅ 完成 | T1–T10 全完成（三引擎逐字节对齐；`build --exe --native` + `natgen` 共用管线；文档已同步） |
 | **M1 核心语义** | ✅ 完成 | G1.1 RC+COW / G1.2 list / G1.3 dict / G1.4 for-in / G1.5 别名用例集 / G1.6 全量回归（三引擎）；审计暴露并修复 6 处引擎缺陷 |
-| **M2 功能对齐** | 🔵 进行中 | G2.1 struct 完成（构造 / Field / `__struct__` 全路径过滤 / 相等语义；字段写入为 VM 编译期 H999 同源）；G2.2 enum 完成（构造 / match / 显示 / 相等 / 容器传参）；G2.3 match 完成（字面量 / 变体 / 载荷绑定 / 通配 / 无匹配 H005 / 绑定作用域 / 闭包捕获）+ 连带修掉 6 处既有 interp-VM 分歧；**G2.4 运算符重载完成**（15 个 `__op` 回退链，runtime 内实现，natgen 零改动）+ 连带修掉参数个数校验文案（重载路径可达）；**G2.5 alias / goto 完成**（alias 表进 runtime + natgen 编译期解析；连带修掉解释器「别名指向变量」分叉）；**新登记 G2.8 默认参数 / G2.9 点号内置族两项缺口**；G2.6 / G2.7 待办 |
+| **M2 功能对齐** | ✅ 完成 | G2.1 struct 完成（构造 / Field / `__struct__` 全路径过滤 / 相等语义；字段写入为 VM 编译期 H999 同源）；G2.2 enum 完成（构造 / match / 显示 / 相等 / 容器传参）；G2.3 match 完成（字面量 / 变体 / 载荷绑定 / 通配 / 无匹配 H005 / 绑定作用域 / 闭包捕获）+ 连带修掉 6 处既有 interp-VM 分歧；**G2.4 运算符重载完成**（15 个 `__op` 回退链，runtime 内实现，natgen 零改动）+ 连带修掉参数个数校验文案（重载路径可达）；**G2.5 alias / goto 完成**（alias 表进 runtime + natgen 编译期解析；连带修掉解释器「别名指向变量」分叉）；G2.7 H999 边界对齐完成（`instr_coverage` 单测强制）；G2.8 默认参数完成（`emit_default_prologue` 四路一致）；**G2.9 点号内置族完成**（runtime 模块内置分发层 + 纯 std 家族移植 + 外部 crate 族 H999 登记，`tests/m2/dotted.hn` 三引擎一致）；**G2.6 async-await 完成**（rc 原子化 + future 值模型 + spawn_async/await/gocall lowering + 三引擎逐字节对齐）（M2 全任务完成）|
 | **M3 集成与优化** | ⬜ 未开始 | import 合并/交叉编译/体积裁剪/工具链打包/CI；任务组 G3.1–G3.7 |
 
-**当前可运行产物**：`tests/m1/list.hn` / `tests/m1/dict.hn` / `tests/smoke/rc_alias.test.hn` / `tests/m2/struct.hn` / `tests/m2/enum.hn` / `tests/m2/match.hn` / `tests/m2/conditions.hn` / `tests/m2/overload.hn` / `tests/m2/alias_goto.hn` → nat exe，三引擎逐字节对齐（含 list/dict 读写、for-in 迭代、别名 RC+COW 值语义、struct 构造/字段/隐藏键过滤/相等、enum 构造/match/显示/相等/容器与传参、match 全形态与绑定作用域、lambda 捕获、条件严格 bool 与 `&&`/`||` 短路、15 个 `__op` 运算符重载回退、alias 别名与 goto 跳转）。
-**复现**：`hone build --exe --native tests/m2/alias_goto.hn -o ag.exe && ./ag.exe`
-**回归入口**：`python tests/regress4.py`（正常路径三引擎，12 例全绿）、`python tests/regress_err.py`（错误诊断三引擎逐字符，64 例全绿）、`python tests/regress3.py`（interp vs VM 全 examples，真实逻辑差异 0）、`python tests/regress_ir.py`（文本 IR 往返，BAD=0）。
-**审计工具**：`python tests/tools/audit_err.py`（55 例错误文案 + help 行 nat-vs-interp 批量比对）；`python tests/tools/probe_align.py`（93 例 match / 条件 / 逻辑 / 解构 / 重载 / alias+goto 形态的 interp-VM[-nat] 逐字节比对，**G2.3 的 6 处 + G2.4 的 2 处 + G2.5 的 1 处分歧即由它扫出**；加 `--nat` 追加第三引擎）。
+**当前可运行产物**：`tests/m1/list.hn` / `tests/m1/dict.hn` / `tests/smoke/rc_alias.test.hn` / `tests/m2/struct.hn` / `tests/m2/enum.hn` / `tests/m2/match.hn` / `tests/m2/conditions.hn` / `tests/m2/overload.hn` / `tests/m2/alias_goto.hn` / `tests/m2/defaults.hn` / `tests/m2/dotted.hn` / `tests/m2/async_go.hn` → nat exe，三引擎逐字节对齐（含 list/dict 读写、for-in 迭代、别名 RC+COW 值语义、struct 构造/字段/隐藏键过滤/相等、enum 构造/match/显示/相等/容器与传参、match 全形态与绑定作用域、lambda 捕获、条件严格 bool 与 `&&`/`||` 短路、15 个 `__op` 运算符重载回退、alias 别名与 goto 跳转、默认参数序言、点号内置族 time/path/stat/matrix/csv/diff/yaml/plot/glob/env/db/log/ptr + H999 能力边界、async/await 与 go 并发）。
+**复现**：`hone build --exe --native tests/m2/dotted.hn -o dt.exe && ./dt.exe`
+**回归入口**：`python tests/regress4.py`（正常路径三引擎，15 例全绿）、`python tests/regress_err.py`（错误诊断三引擎逐字符，67 例全绿；支持 `python tests/regress_err.py dotted_` 子集过滤分批跑）、`python tests/regress3.py`（interp vs VM 全 examples，真实逻辑差异 0）、`python tests/regress_ir.py`（文本 IR 往返，BAD=0）。
+**审计工具**：`python tests/tools/audit_err.py`（55 例错误文案 + help 行 nat-vs-interp 批量比对）；`python tests/tools/probe_align.py`（152 例 match / 条件 / 逻辑 / 解构 / 重载 / alias+goto / 默认参数 / 点号内置 / **async+go** 形态的 interp-VM[-nat] 逐字节比对，**G2.3 的 6 处 + G2.4 的 2 处 + G2.5 的 1 处分歧即由它扫出**；加 `--nat` 追加第三引擎）。
 **验证前置**：改代码先 `cargo build`（`target/` 旧二进制会静默沿用），回归脚本依赖 `target/debug/hone.exe`。
 
 ---
@@ -267,8 +267,13 @@
       或在 NOT_IMPLEMENTED 带理由登记」，杜绝静默落H990）；能力边界错误码由 H990(internal)
       统一为 **H999**（与 VM / AOT / DLL 口径一致）+ 指名指令 + help；VM 不支持特性
       （with / 字段赋值 / goto 未定义标签）三引擎逐字节一致已探针核实
-- [ ] **G2.8 默认参数（VM / 原生后端）**：`fn f(a, b = 2)` 在解释器与 AOT 可用，**VM 与 nat 省略即报 H011**（G2.4 探针发现，见实现进度）
-- [ ] **G2.9 点号内置族**：`time.*` / `random.*` / `sys.*` / `os.*` 等在原生后端完全缺失（直接调用即 H404，非alias 专属）；G2.5 探针发现
+- [x] **G2.8 默认参数（VM / 原生后端）**：被调帧**序言**按实参数个数求默认值填入
+      （`emit_default_prologue`），VM / nat / 解释器 / AOT 四路一致
+- [x] **G2.9 点号内置族**：runtime 加模块内置分发层（`call_global` 点号分支：enum → 用户函数 →
+      模块内置 → H404 保留给 load 库）；纯 std 家族移植（time/random/log/path/args/env/db/uuid/
+      stat/matrix/csv/diff/glob/temp/ptr/server/plot/yaml + sys.run/get_env）；外部 crate 族按
+      G2.7 口径登记 H999（regex/sqlite/zlib/archive/http/ws/smtp/crypto/plugin/guipro/sys-winapi）；
+      `tests/m2/dotted.hn` 三引擎一致
 
 ### G2.1 实现进度（2026-10-07）—— 完成
 
@@ -431,9 +436,23 @@
 - **验证**：alias 组 11 例三引擎 0 分歧；`regress3` 真实逻辑差异 = 0；`regress_ir` OK=39 BAD=0；
   `cargo test` 4/4；`regress4` **12/12**（新增 alias_goto.hn）；`regress_err` **64/64**（新增 2 例）。
 
-### G2.6 / G2.7 实现进度（2026-10-08）
+### G2.6 实现进度（2026-10-11）—— 完成
 
-- **G2.7 完成（把「无静默漏实现」变成机器强制）**：
+- **阻塞解除**：runtime rc 迁移为 `AtomicU64`（relaxed 增减 + release/acquire 配对），跨线程共享句柄安全（cell_release 归零方 Acquire fence 再释放 payload）。
+- **future 值模型**：新增 `T_FUTURE` / `P_FUTURE` 标签 + `HnFuture{Mutex<FutureState>, Condvar}`（镜像 interp `FutureVal`：Pending/Done(result)）。Done 持**结果句柄引用**（可能 ERR cell），await 取走时 retain 新引用（镜像 VM wait 的 clone 值语义）。
+- **async 调用 lowering**：`GoCall` / `Await` 指令在 natgen 显式 lowering（已从 NOT_IMPLEMENTED 移除）；strtab 收集补 GoCall callee 名。
+- **runtime 线程设施**：
+  - `spawn_async(name, argptr, nargs, ci, pc)`：后台线程跑 chunk 函数，实参**同步拷贝**进堆 Vec（param_ss 共享槽会被主线程后续 Call 覆盖，镜像 VM `spawn_go` 的同步 clone），结果存入 future（Done），唤醒等待者。
+  - `rt_await(h, ci, pc)`：future → 阻塞等待 → retain 结果句柄返回（结果为 ERR cell 时原样返回，check_err 正常路由）；非 future → H001 + help 逐字对齐 VM。
+  - `rt_gocall(sidx, argptr, nargs)`：后台线程 fire-and-forget；实参同步拷贝；错误 err_render 打印到 stderr（主线程不影响）；恒返 null。
+  - `hn_rt_asyncs_init`：async 函数名注册表（strtab 索引），wrapper 编译期注入（`call_global` 据此把 async 调用导到 spawn_async）。
+- **VM Await 编译修复**：`Expr::Await` 编译为 `Await(dst, src)` 而非同寄存器（`src` 保留 future 值），修复 interp 允许多次 await 同一 future 而 VM 原覆盖报 H001 的分歧。
+- **用例**：`tests/m2/async_go.hn`（7 组：async/await 基础 / 直接 await 调用 / 两个 future 交错 / await 结果参与计算 / async 错误传播 try/catch / go fire-and-forget / go 子线程错误不影响主线程 / future 显示 / await 非 future H001 / 多次 await 同 future），三引擎逐字节一致。
+- **probe_align**：新增 async 组 11 例（含 `await_after_done` 固化 interp/VM 修复后的多次 await 语义），全工具 152 例 0 分歧。
+- **回归**：`regress4` 15/15（新增 async_go.hn）；`regress_err` 67/67（await_non_future 从 NAT_UNSUPPORTED 移除，nat 真跑运行期 H001 与 interp/VM 一致）。
+- **验证**：`cargo test` 6/6（instr_coverage 含 GoCall/Await 臂）；`cargo test -p honeruntime` 19/19（含 rc 原子化断言）；`regress3` 真实逻辑差异 = 0；`regress_ir` BAD=0。
+
+### G2.7 实现进度（2026-10-08）—— 完成
   - **单测 `mod instr_coverage`**（`src/natgen.rs`，2 个测试）：文本提取 `src/vm.rs` 的
     `Instr` 变体清单与 `src/natgen.rs` 里的显式引用，要求每个变体**要么有 lowering 臂 / 块级处理 /
     catch_map 元指令，要么在 `NOT_IMPLEMENTED` 表里带理由登记**，否则测试失败并列出漏项。
@@ -468,6 +487,74 @@
   `regress_ir` BAD=0；`regress4` 12/12；`regress_err` 64/64（`await_non_future` 的登记理由
   随错误码 H990→H999 更新）。
 
+### G2.8 实现进度（2026-10-09）—— 完成
+
+- **落点：被调帧序言**（不是调用方求值）。解释器在**仅含形参**的调用环境里求默认值
+  （`fn f(a, b: int = a * 10)` 可行；引用全局 / 后置形参则 H002），调用方求值会额外看见
+  调用点的局部变量，反而与解释器分叉。序言在 callee 帧内执行，作用域天然正确。
+- **字节码形态**（无新指令）：chunk 头部新增两个字段
+  - `param_defaults=[0,1,…]`：形参默认值位（与 `params` 同序）
+  - `argc=<reg>`：实参数槽寄存器号（`-1` = 无默认形参）
+  序言代码：`LoadK i` → `Le c, argc, k_i` → `JmpIfFalse Lskip` → 求默认值 → `Move 参数寄存器`
+  → `Jmp Lnext`；`Lskip/Lnext` 汇合。文本 IR 头同步输出/解析（旧 IR 缺省为全 0 / `-1`，向后兼容）。
+- **四处写入点（缺一即分叉）**：
+  | 位置 | 职责 |
+  |---|---|
+  | `vm.rs` `compile_fn` / lambda | 声明形参后立刻发序言（此时作用域只有形参 / 捕获+形参）|
+  | `vm.rs` `call_chunk` / `call_lambda` | 放宽个数校验（缺失位有默认值则放行）+ 把实参数写进 `argc` 槽 |
+  | `natgen.rs` 入口块 | `rt_i64(nargs)` 写入 `argc` 槽（其余寄存器仍是 `rt_null` 初始化）|
+  | `runtime` + wrapper | `CHUNK_PARAM_DEFAULTS` 位表（`hn_rt_param_defaults`）供 `call_chunk_idx` / `call_fn_h` 放宽校验 |
+- **探针抓到的第二处分叉（默认值引用后置形参）**：`fn f(a, b: int = c, c: int = 3)`
+  解释器运行期报 H002 undefined variable `c`，VM 原先静默取到后置形参的 null（打印 `null`）。
+  根因：VM 的 `lookup` 只看「有没有绑定」，而解释器看「绑定顺序」。改法：编译期登记
+  `形参名 → 序号`，默认表达式模式下序号 ≥ 自身的形参视为**不可见**，发射运行期
+  `Raise(H002 undefined variable, help)`（文案 / 定位逐字对齐解释器），不报编译期错误。
+- **用例**：`tests/m2/defaults.hn`（9 组 16 行：省略取默认 / 显式传参 / 默认引用前序形参 /
+  链式默认 / 多参数 / 默认里调用函数 / lambda 默认 / lambda 默认引用捕获变量 / 递归 + 默认 /
+  重载动态路径 / str+bool 默认），三引擎逐字节一致；`probe_align.py` 新增 defaults 组 13 例
+  （含动态调用与两种非法引用），全工具 **106 例**。
+- **验证**：`probe_align.py` 全量 106 例 interp-vs-VM **0 分歧**；defaults 组三引擎 0 分歧；
+  `regress3` 真实逻辑差异 = 0；`regress_ir` BAD=0；`regress4` **13/13**（新增 defaults.hn）；
+  `regress_err` **64/64**；`cargo test` 6/6；`cargo test -p honeruntime` 19/19。
+
+### G2.9 实现进度（2026-10-11）—— 完成
+
+- **分发层（唯一插入点）**：`runtime/src/lib.rs` 的 `call_global` 点号分支在 `func_lookup`
+  之后、H404 之前插入 `call_dotted`（镜像 VM `do_call` 序：enum → 用户函数 → 模块内置 →
+  H404）。**未登记的点号名保留 H404**（load 库方法调用语义不变）；已登记但不可移植的
+  点号内置报 **H999**（`原生编译后端暂不支持 \`{name}\`（见 M2 G2.9 点号内置族：依赖
+  外部 crate，无法进入 std-only runtime）` + help 指向解释器），替换原先误导性的
+  `H404 library \`time\` is not loaded`。
+- **可移植家族（runtime 内逐条镜像 `builtins.rs` / 各 `*mod.rs`，错误码/文案/help 逐字对齐）**：
+  time.*（now/sleep/format/parse/add/diff/weekday，civil 算法随迁）、random.*（xorshift64*）、
+  uuid.new、log.*（ANSI 颜色码）、path.*、args.*（wrapper 经 `hn_rt_args_init` 注入
+  `--key val` 解析对，镜像 `init_args`）、env.*、db.*（进程内 KV；`--resume` 落盘为 hone
+  CLI 特性，nat 产物无此路径）、sys.run / sys.get_env、stat.*、matrix.*、csv.*、diff.*
+  （LCS）、glob.*（**手写递归匹配器**替换 interp 侧 regex crate：`*` 单层不跨 `/`、`**`
+  跨层吞后续 `/`、`?`、`[a-z]`/`[^..]`，未闭合 `[` 按字面）、temp.*、ptr.*（分配表跟踪 +
+  新增 **T_PTR** 标签：display `0x{:x}` / type_name `ptr`）、server.*（std::net + 队列/响应
+  通道全量移植）、plot.bar/line（SVG）、yaml.parse/stringify（手写 YAML 子集）。
+- **H999 登记族**：regex.* / sqlite.* / zlib.* / archive.* / http.* / ws.request / smtp.send /
+  crypto.* / plugin.* / guipro.*（37 个）/ sys.msgbox·beep·clipboard_set·get_screen_size·
+  reg_read·reg_write（winapi）。`regress_err.py` 用 `NAT_UNSUPPORTED` 显式登记三个代表用例
+  （dotted_h999_regex/sqlite/http）， interp/VM 正常执行、nat 有意报 H999——能力边界口径。
+- **连带修复（G2.8 遗留）**：`f4(1)` 多默认形参 nat ACCESS_VIOLATION——natgen chunk 入口
+  对**全部形参**无条件从 argptr load，`nargs < nparams` 时读到 param_ss 越界陈旧句柄；
+  修复为带默认值形参按 `nargs` 运行期 select（未提供 → `rt_null`，序言覆盖）。
+  修复前 nat 在 `defaults.hn` 第 7 行后崩溃，修复后 16 行三引擎逐字节一致。
+- **wrapper**：`build_native` 生成的 wrapper `main` 开头解析 `std::env::args().skip(1)` 为
+  (key, val) 对（`--k v` / `-k v` 取值、单独标志记 `true`），经 `hn_rt_args_init` 注入。
+- **用例**：`tests/m2/dotted.hn`（time/path/stat/matrix/csv/diff/yaml/plot/glob/env/db/log/
+  ptr 22 组确定性输出，H999 族不放——正常路径回归要求三引擎一致）；`probe_align.py` 新增
+  **dotted 组 35 例**（含 `alias time.weekday as wd` 点号别名），全工具 141 例。
+- **验证**：`probe_align.py --only dotted` 35 例 0 分歧；`regress4` **14/14**（新增 dotted.hn，
+  defaults FLAKY 重试一致）；`regress_err` **67/67**（dotted_h999 三例登记跳过 nat，其余
+  interp/VM 全过 + dotted nat 口径验证）；`regress3` FAIL=0（FLAKY=5 随机/时间/端口）；
+  `regress_ir` BAD=0；`cargo test -p honeruntime` 19/19。
+- **已知边界**：random/uuid/time.now/temp/server 等不确定输出未固化进逐字节回归（口径见
+  probe_align DOTTED 组注释）；db `--resume` 落盘、ptr 与 FFI 互转、glob 病态字符类
+  （如 `[z-a]` 的 regex 报错文案）不在本轮范围。
+
 ## M3 — 集成与优化（任务组）
 
 - [ ] **G3.1 import 构建期解析**：本地路径递归合并 + 远程 `~/.hone/cache/` 下载（设计 §7.3）；跨文件同名定义报错
@@ -485,8 +572,9 @@
 - [ ] `hone build --exe hello.hn` 在无 gcc 的干净机器上产出可运行 exe（M3 完成无 rustc 依赖）
 - [ ] `hone build --exe app.hn --target x86_64-unknown-linux-musl` 在 Windows 上产出 linux exe，CI 二次验证（G3.2/G3.6）
 - [x] `regress4.py` 正常路径三引擎（interp/VM/nat）逐字节对齐——M0 三例 + M1 三例（list/dict/别名）
-      + M2 六例（struct / enum / match / conditions / overload / alias_goto）共 **12 例全绿**
-- [x] `regress_err.py` 错误诊断三引擎逐字符对齐——**64 例全绿**（nat：运行期 41 / checker 同源拒 22 / 显式登记跳过 1）
+      + M2 九例（struct / enum / match / conditions / overload / alias_goto / defaults / dotted / async_go）共 **15 例全绿**
+- [x] `regress_err.py` 错误诊断三引擎逐字符对齐——**67 例全绿**（nat：运行期 / checker 同源拒 /
+      G2.9 H999 登记跳过 3 例 dotted_h999_*）
 - [x] `tests/tools/audit_err.py` 55 例错误文案 + help 行 nat-vs-interp 一致（M1 据此修复 6 处引擎缺陷；
       G2.3 的 6 处分歧由条件/逻辑/match 探针矩阵发现，`audit_err.py` 待按新错误形态扩充用例）
 - [ ] 新后端 H999 集合与 VM 完全一致（无静默漏实现）（G2.7）
@@ -553,12 +641,27 @@
 | goto | 不动实现，只补用例 | Label+Jmp lowering 基线已覆盖，探针 4 种形态三引擎本来就一致 |
 | 点号内置（G2.9） | 单独立项，不在 G2.5 顺手做 | 涉及 time/random 等不确定输出，逐个对齐需要各自的测试口径，混进来会让 G2.5 验收失焦 |
 
-### G2.6 / G2.7 已定决策（2026-10-08）
+### G2.6 / G2.7 已定决策（2026-10-11）
 
 | 项 | 决策 | 理由 |
 |---|---|---|
-| 指令覆盖怎么测 | 读源码文本提取变体 + 显式引用，配NOT_IMPLEMENTED 表；不用反射 | `match ins { Instr::X => … }` 无反射可查；文本提取能机械发现「新指令忘了决策」，且新指令必然出现在 `src/vm.rs` 里 |
+| 指令覆盖怎么测 | 读源码文本提取变体 + 显式引用，配 NOT_IMPLEMENTED 表；不用反射 | `match ins { Instr::X => … }` 无反射可查；文本提取能机械发现「新指令忘了决策」，且新指令必然出现在 `src/vm.rs` 里 |
 | 未实现指令的错误码 | 统一 **H999**（功能未实现），不再用 H990 internal | H990 是「编译器内部错误」，而这里是**已知能力边界**；VM/AOT/DLL 对同类特性也报 H999，口径必须一致 |
 | 错误文案 | 指名指令（`await` / `go`）+ 给出替代路径（用解释器跑）+ 所属任务号 | 「未实现某条指令」对用户无信息量；指名 + 出路 + 任务号才能自解释 |
-| async 实现前置 | 先把 runtime `rc` 迁到`AtomicU64`，再做 `GoCall` / `Await` lowering | 非原子 rc 跨线程共享值是数据竞争（UB），且编译器无法规避（槽不能置空）。顺序不能反 |
+| async 实现前置 | 先把 runtime `rc` 迁到 `AtomicU64`，再做 `GoCall` / `Await` lowering | 非原子 rc 跨线程共享值是数据竞争（UB），且编译器无法规避（槽不能置空）。顺序不能反 |
 | async 的替代方案 | 否决「同步求值 + future 壳」 | 确定性脚本能骗过比对，但并行性 / 完成顺序断言必然分叉——语义造假，不做 |
+| Await 多次等待同一 future | interp 行为为准（允许，返回结果） | VM 原 `Await(r,r)` 覆盖 future 值导致二次 await 报 H001，修为 `Await(dst, src)` 保留 future |
+
+---
+
+## M3 规划（下阶段）
+
+| 任务组 | 关键目标 |
+|---|---|
+| G3.1 import | 本地路径递归合并 + 远程缓存下载；跨文件同名报错 |
+| G3.2 裸链接/交叉编译 | rust-lld + 三目标（windows-gnu / linux-musl / aarch64-musl）；`--target` 选项 |
+| G3.3 体积裁剪 | `--gc-sections` + 静态内置裁剪；目标 ≤3MB |
+| G3.4 工具链打包 | staticlib 归档 + CRT + lld 分发；`HONE_TOOLCHAIN_DIR` |
+| G3.5 静态表入 object | const blob / span 表 / 注册表移入 rodata；FNV 启动自检 |
+| G3.6 CI 自动化 | `ci.yml` 增 nat 三引擎回归；release 流水线三目标验证 |
+| G3.7 CPU 基线 | x86_64 baseline+SSSE3 + `--cpu` 选项 |

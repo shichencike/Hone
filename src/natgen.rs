@@ -91,6 +91,9 @@ struct RtImports {
     // G2.3：条件严格 bool 校验 + &&/|| 短路判定（引擎对齐）。
     rt_condcheck: FuncId,
     rt_isboolval: FuncId,
+    // G2.6：async-await / go（rt_gocall(sidx, argptr, nargs)；rt_await(h, ci, pc)）。
+    rt_gocall: FuncId,
+    rt_await: FuncId,
 }
 
 /// 本 chunk 内解析好的 FuncRef（借用 bcx.func，生命周期随本 chunk）。
@@ -131,6 +134,8 @@ struct RtRefs {
     rt_isenumvariant: FuncRef,
     rt_condcheck: FuncRef,
     rt_isboolval: FuncRef,
+    rt_gocall: FuncRef,
+    rt_await: FuncRef,
 }
 
 impl RtImports {
@@ -263,6 +268,10 @@ impl RtImports {
             // G2.3：rt_condcheck(v, kind, ci, pc)（sig4_1）；rt_isboolval(v, want)（sig2_1）。
             rt_condcheck: imp(module, "rt_condcheck", &sig4_1)?,
             rt_isboolval: imp(module, "rt_isboolval", &sig2_1)?,
+            // G2.6：rt_gocall(sidx, argptr, nargs)（sig3_1，恒返 null）；
+            // rt_await(h, ci, pc)（sig3_1，fallible——非 future H001 / 子线程错误传播）。
+            rt_gocall: imp(module, "rt_gocall", &sig3_1)?,
+            rt_await: imp(module, "rt_await", &sig3_1)?,
         })
     }
 
@@ -304,6 +313,8 @@ impl RtImports {
             rt_isenumvariant: module.declare_func_in_func(self.rt_isenumvariant, func),
             rt_condcheck: module.declare_func_in_func(self.rt_condcheck, func),
             rt_isboolval: module.declare_func_in_func(self.rt_isboolval, func),
+            rt_gocall: module.declare_func_in_func(self.rt_gocall, func),
+            rt_await: module.declare_func_in_func(self.rt_await, func),
         }
     }
 }
@@ -925,6 +936,45 @@ impl<'x, 'f> ChunkLower<'x, 'f> {
                 let r = self.call1(self.rt.rt_isenumvariant, &[x, n_sidx, v_sidx]);
                 self.store_slot(*d, r);
             }
+            Instr::GoCall(callee, base, n) => {
+                // G2.6：go 多线程（镜像 VM spawn_go）——实参 retain 后打包进 param_ss
+                //（所有权转移给子线程，主线程槽保持原引用，镜像 VM regs[i].clone()）；
+                // rt_gocall 恒返回 null 句柄 0，无需存储（Stmt::Go 不产生值）。
+                for i in 0..*n {
+                    let v = self.load_slot(*base + i);
+                    let r = self.retain(v);
+                    self.bcx
+                        .ins()
+                        .stack_store(I64, r, self.param_ss, 8 * i as i32);
+                }
+                let argptr = self.bcx.ins().stack_addr(I64, self.param_ss, Offset32::new(0));
+                let nimm = self.bcx.ins().iconst(I64, *n as i64);
+                let sidx = *self
+                    .func_str_idx
+                    .get(callee)
+                    .ok_or_else(|| {
+                        ZError::plain(
+                            codes::INTERNAL,
+                            format!("natgen: GoCall 函数名 `{callee}` 缺少字符串表索引"),
+                            None::<String>,
+                        )
+                    })? as i64;
+                let s_imm = self.bcx.ins().iconst(I64, sidx);
+                let r = self.call1(self.rt.rt_gocall, &[s_imm, argptr, nimm]);
+                // 恒返回 null 句柄 0，显式释放（同 IterCheck 口径）。
+                self.bcx.ins().call(self.rt.rt_drop, &[r]);
+            }
+            Instr::Await(d, fr) => {
+                // G2.6：await（镜像 VM 执行臂）——future → 阻塞取结果（retain 新引用）；
+                // 非 future → H001；子线程错误以 ERR cell 返回，check_err 正常路由。
+                let v = self.load_slot(*fr);
+                let x = self.retain(v);
+                let cii = self.bcx.ins().iconst(I64, i64::from(self.ci));
+                let pci = self.bcx.ins().iconst(I64, pc as i64);
+                let r = self.call1(self.rt.rt_await, &[x, cii, pci]);
+                self.check_err(r, pc);
+                self.store_slot(*d, r);
+            }
             // T6：TryBegin / TryPop 为 lowering 期元指令——catch 路由全在 check_err 的
             // catch_map 查询处，运行时不留痕迹（无 setjmp），故二者 lower 为空操作。
             Instr::TryBegin(_, _) | Instr::TryPop => {}
@@ -1118,17 +1168,34 @@ fn lower_chunk(
     // 参数按 params 名 → locals 寄存器号（与 VM call_chunk/call_lambda 一致），
     // 捕获按 captured_regs 元组寄存器号；其余寄存器 rt_null 初始化。
     let argptr = bcx.func.dfg.append_block_param(entry, I64);
-    let _nargs = bcx.func.dfg.append_block_param(entry, I64);
+    let nargs = bcx.func.dfg.append_block_param(entry, I64);
     let capsptr = bcx.func.dfg.append_block_param(entry, I64);
     let _ncap = bcx.func.dfg.append_block_param(entry, I64);
     // load 的 flags 参数为 MemFlagsData（trusted = 无 trap：实参/捕获区由调用方
     // 打包、恒可达；builder 会负责注册进 dfg.mem_flags 集合）。
     let mflags = MemFlagsData::trusted();
+    // G2.8：带默认值的形参位表——实参不足时缺失形参不得读 argptr 越界区（param_ss
+    // 只有 nargs 个有效句柄），填 rt_null 占位；若该形参无默认值则由后续参数校验报 H011，
+    // 有默认值则序言覆盖。镜像 VM call_chunk（实参 Vec 按个数填，缺失位不填）。
+    let has_defaults = chunk.param_defaults.iter().any(|&d| d);
     for i in 0..nregs {
-        let v: Value = if let Some(j) = (0..nparams).find(|&j| {
+        let v: Value = if chunk.argc_reg == i {
+            // G2.8：默认形参序言的实参数槽——写入实参数个数（镜像 VM call_chunk 填 argc 寄存器）
+            let inst = bcx.ins().call(rt.rt_i64, &[nargs]);
+            bcx.func.dfg.first_result(inst)
+        } else if let Some(j) = (0..nparams).find(|&j| {
             chunk.locals.get(&chunk.params[j]).copied() == Some(i)
         }) {
-            bcx.ins().load(I64, mflags, argptr, Offset32::new(8 * j as i32))
+            if has_defaults && chunk.param_defaults.get(j).copied().unwrap_or(false) {
+                // 带默认值形参：j < nargs 读实参，否则 null（序言按 argc 覆盖或校验拦截）
+                let provided = bcx.ins().icmp_imm(IntCC::UnsignedLessThan, nargs, j as i64);
+                let null_v = bcx.ins().call(rt.rt_null, &[]);
+                let null_r = bcx.func.dfg.first_result(null_v);
+                let loaded = bcx.ins().load(I64, mflags, argptr, Offset32::new(8 * j as i32));
+                bcx.ins().select(provided, null_r, loaded)
+            } else {
+                bcx.ins().load(I64, mflags, argptr, Offset32::new(8 * j as i32))
+            }
         } else if let Some(j) = (0..ncap).find(|&j| chunk.captured_regs[j].1 == i) {
             bcx.ins().load(I64, mflags, capsptr, Offset32::new(8 * j as i32))
         } else {
@@ -1431,8 +1498,6 @@ mod instr_coverage {
     /// 已登记为「原生后端不支持」的指令变体 → 未实现原因（会出现在编译期 H990 里）。
     /// 新增条目必须写清原因与所属任务号，便于回头消账。
     const NOT_IMPLEMENTED: &[(&str, &str)] = &[
-        ("GoCall", "G2.6 async-await：需要线程 spawn + future 值（runtime 的 rc 非原子，跨线程共享值不安全）"),
-        ("Await", "G2.6 async-await：需要阻塞等待 future（依赖 GoCall 的线程基础设施）"),
         ("Breakpoint", "解释器调试指令（`hone debug` 断点），原生后端无调试器"),
         ("DebugPrint", "解释器调试指令（debug_print），原生后端无调试器"),
         ("Nop", "占位指令（无副作用），lowering 无需处理即可；列此仅为覆盖声明完整"),

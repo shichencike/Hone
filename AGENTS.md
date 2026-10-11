@@ -11,7 +11,7 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   - `python tests/regress4.py` — 三引擎正常路径逐字节对齐（需本机 rustc）
   - `python tests/regress_ir.py` — 文本 IR 往返
   - `python tests/tools/audit_err.py` — 开发期扫雷：55 例错误文案 + help 行 nat-vs-interp 批量比对（慢，不入常规回归）
-  - `python tests/tools/probe_align.py` — 开发期扫雷：93 例 match / 条件 / 逻辑 / 解构 / 重载 / alias+goto 形态的 interp-vs-VM 逐字节比对；`--nat` 追加第三引擎（每例单独 build，慢）。动态类型值（enum/struct）下的条件与逻辑分叉、以及重载回退边界靠它扫出。
+  - `python tests/tools/probe_align.py` — 开发期扫雷：152 例 match / 条件 / 逻辑 / 解构 / 重载 / alias+goto / 默认参数 / 点号内置 / async+go 形态的 interp-vs-VM 逐字节比对；`--nat` 追加第三引擎（每例单独 build，慢）。动态类型值（enum/struct）下的条件与逻辑分叉、以及重载回退边界靠它扫出。
 - CI（.github/workflows/ci.yml）只做 `cargo build/test --locked` + hello/fib smoke；无 rustfmt/clippy 配置，格式化用语言自带 `hone fmt`（作用于 .hn，非 Rust）。
 
 ## 架构
@@ -33,6 +33,11 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   语义基准：VM `do_call`（先 resolve_alias → 再查局部变量 → 函数 → 内置）。
 - 参数个数校验三引擎统一到解释器文案（`expects at most N arguments, got M` /
   ``missing argument `c` of `f` `` + 定位 + help）——**不要**改回中文硬编码消息。
+- 点号内置族（G2.9）：三套实现——interp/VM 共用 `builtins.rs` + 各 `*mod.rs`（基于
+  `Value`），**runtime 另有一份 std-only 镜像**（`runtime/src/lib.rs` 的 `call_dotted`，
+  基于句柄）。改任一家的行为/文案必须同步另一家。外部 crate 依赖的家族（regex/sqlite/
+  zlib/archive/http/ws/smtp/crypto/plugin/guipro/sys-winapi）在 runtime 登记 H999；
+  未登记点号名保留 H404（load 库语义）。runtime 值模型含 **T_PTR** 标签（ptr 值）。
 - 条件与逻辑语义（改 `vm.rs` 编译臂时注意，解释器为准）：`if`/`while`/`do-while`/`for`/三元/推导式 `if` 过滤六处条件站点**运行期严格 bool**（`Instr::CondCheck`），`&&`/`||` 短路求值且右侧操作数严格 bool（`Instr::IsBoolVal` 判「恰为该布尔值」，不是 truthy）。
 
 ## 项目特有约定

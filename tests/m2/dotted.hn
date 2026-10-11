@@ -1,0 +1,65 @@
+// G2.9 点号内置族冒烟：可移植家族的正常路径 + 不可移植族 H999 登记口径。
+// 确定性输出（time.format/parse、path、stat、matrix、csv、diff、yaml、plot、glob.match）为主。
+// time：format/parse 往返 + add/diff/weekday（UTC 确定性）
+print(to_str(time.parse("2024-01-15T10:30:00Z")));
+print(time.format(1705314600, "YYYY-MM-DD HH:mm:SS"));
+print(to_str(time.add(1000, 500)));
+print(to_str(time.diff(1000, 400)));
+print(to_str(time.weekday(0)));
+// path
+print(path.join("a", "b", "c.txt"));
+print(path.dirname("a/b/c.txt"));
+print(path.basename("a/b/c.txt"));
+// stat
+print(to_str(stat.sum([1, 2, 3])));
+print(to_str(stat.mean([1, 2, 3, 4])));
+print(to_str(stat.median([3, 1, 2])));
+print(to_str(stat.min([3, 1, 2])));
+print(to_str(stat.max([3, 1, 2])));
+// matrix
+m = matrix.identity(2);
+print(to_str(m));
+print(to_str(matrix.transpose([[1, 2, 3], [4, 5, 6]])));
+print(to_str(matrix.add([[1, 2], [3, 4]], [[10, 20], [30, 40]])));
+print(to_str(matrix.scale([[1, 2], [3, 4]], 2)));
+// csv
+print(csv.parse("a,b\n1,2\n"));
+print(csv.stringify([["x", "y"], ["1", "2"]]));
+// diff
+d = diff.lines("a\nb\nc", "a\nx\nc");
+for it in d {
+    {op, line} = it;
+    print(op);
+    print(line);
+}
+// yaml
+y = yaml.parse("name: hone\nver: 7\nok: true\n");
+{name: yn, ver, ok} = y;
+print(yn);
+print(ver);
+print(to_str(ok));
+print(yaml.stringify({"a": 1, "b": "x"}));
+// plot（确定性 SVG）
+svg = plot.bar([1, 2], ["a", "b"]);
+print(len(svg) > 100);
+// glob 匹配（纯模式，无文件系统）
+print(to_str(glob.match("*.hn", "main.hn")));
+print(to_str(glob.match("src/**/*.rs", "src/sub/a.rs")));
+print(to_str(glob.match("?.txt", "ab.txt")));
+// env / db / log
+env.set("HONE_T39", "v39");
+print(env.get("HONE_T39"));
+db.set("k1", "d1");
+print(db.get("k1"));
+print(to_str(db.get("nope")));
+log.info("info line");
+// ptr
+p = ptr.alloc(16);
+ptr.write_int(p, 0, 4242);
+print(to_str(ptr.read_int(p, 0)));
+print(to_str(ptr.size(p)));
+print(to_str(ptr.is_valid(p)));
+print(to_str(ptr.free(p)));
+print(to_str(ptr.is_null(0)));
+// H999 登记族（regex/sqlite/http/crypto/...）的错误口径由 tests/regress_err.py 承担，
+// 此处不放：正常路径回归要求三引擎输出一致，而 H999 仅 nat 产生（设计如此）。

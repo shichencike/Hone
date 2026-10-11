@@ -51,6 +51,8 @@ const T_FN: u64 = 8;
 const T_LIST: u64 = 9;
 const T_DICT: u64 = 10;
 const T_ENUM: u64 = 11;
+const T_PTR: u64 = 12; // G2.9：ptr 值（a=地址；镜像 interp Value::Ptr）
+const T_FUTURE: u64 = 13; // G2.6：async 调用的 future（镜像 interp Value::Future）
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -106,6 +108,7 @@ const P_FN: u64 = 3;   // payload=*mut HnFnBox（T5：lambda 值，a=chunk 索�
 const P_LIST: u64 = 4; // payload=*mut HnList（M1：list 值，元素为句柄引用）
 const P_DICT: u64 = 5; // payload=*mut HnDict（M1：dict 值，键 String + 句柄值）
 const P_ENUM: u64 = 6; // payload=*mut HnEnum（G2.2：enum 值，a=枚举名 sidx，b=变体 sidx，载荷句柄）
+const P_FUTURE: u64 = 7; // payload=*mut HnFuture（G2.6：async 值，Done 持结果/错误句柄引用）
 
 /// lambda 值（T5）：chunk 索引 + 捕获句柄数组（每项 retain 引用，按值捕获语义）。
 struct HnFnBox {
@@ -122,6 +125,20 @@ struct HnList {
 /// 载荷为句柄数组（每项 retain 引用，cell 拥有）。
 struct HnEnum {
     payload: Vec<u64>,
+}
+
+/// async future（G2.6，镜像 interp FutureVal）：后台线程执行函数体，await 阻塞等待。
+/// Done 持**结果句柄引用**（可能是 ERR cell——镜像 VM wait 的 Err 分支，await 原样
+/// 传播、由 check_err 路由 catch / 跨帧）。多次 await 各自拿到 retain 新引用
+/// （镜像 VM wait 的 Value clone 值语义）。
+struct HnFuture {
+    state: std::sync::Mutex<FutureState>,
+    cv: std::sync::Condvar,
+}
+
+enum FutureState {
+    Pending,
+    Done(u64),
 }
 
 /// dict 值（M1）：键 String（Hone dict 键恒为 str/int 转串，镜像 v_index 的 Dict 臂）+ 句柄值。
@@ -160,15 +177,31 @@ fn leak_check_inc() {
 fn leak_check_inc() {}
 
 /// 释放一个句柄（减引用；归零时释放 payload 与 cell 本体）。
+/// G2.6：rc 为**原子**操作——go/async 把值句柄跨线程传递后，两个线程可能同时
+/// retain/release 同一 cell（HnCell 保持 Copy 便于快照读取，原子性经指针转型
+/// AtomicU64 实现：std AtomicU64 与 u64 布局/对齐一致，字段仅经原子指令访问）。
+/// 协议：减为 fetch_sub(Release)，归零方先 Acquire fence 再释放（与 Arc 同型）。
+fn rc_ptr_of(h: u64) -> *mut std::sync::atomic::AtomicU64 {
+    let p = h as *mut HnCell;
+    unsafe { &mut (*p).rc as *mut u64 as *mut std::sync::atomic::AtomicU64 }
+}
+
+/// 原子读 rc（cow 门 / 调试用；直接值读会与并发增减竞争）。
+fn rc_load(h: u64) -> u64 {
+    unsafe { (*rc_ptr_of(h)).load(std::sync::atomic::Ordering::Relaxed) }
+}
+
 fn cell_release(h: u64) {
     if h == 0 {
         return;
     }
-    let p = h as *mut HnCell;
     unsafe {
-        let c = *p;
-        (*p).rc -= 1;
-        if c.rc == 1 {
+        let p = h as *mut HnCell;
+        let rp = rc_ptr_of(h);
+        let prev = (*rp).fetch_sub(1, std::sync::atomic::Ordering::Release);
+        if prev == 1 {
+            std::sync::atomic::fence(std::sync::atomic::Ordering::Acquire);
+            let c = *p;
             match c.pkind {
                 P_STR => {
                     let cap = c.payload as usize;
@@ -203,6 +236,14 @@ fn cell_release(h: u64) {
                         cell_release(*h);
                     }
                 }
+                P_FUTURE => {
+                    // 释放已完成的 future 所持结果引用（取走后置回 Pending 防双释）。
+                    let b = Box::from_raw(c.payload as *mut HnFuture);
+                    let mut s = b.state.lock().unwrap();
+                    if let FutureState::Done(h) = std::mem::replace(&mut *s, FutureState::Pending) {
+                        cell_release(h);
+                    }
+                }
                 _ => {}
             }
             drop(Box::from_raw(p));
@@ -220,8 +261,7 @@ pub extern "C" fn rt_drop(h: u64) {
 pub extern "C" fn rt_retain(h: u64) -> u64 {
     if h != 0 {
         unsafe {
-            let p = h as *mut HnCell;
-            (*p).rc += 1;
+            (*rc_ptr_of(h)).fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
     h
@@ -316,7 +356,7 @@ fn is_hidden_key(k: &str) -> bool {
 /// 其余持有者（如别名变量）rc 守恒。str 不可变，写路径不经过此门。
 fn cow_handle(h: u64) -> u64 {
     let c = cell(h);
-    if c.rc <= 1 {
+    if rc_load(h) <= 1 {
         return h;
     }
     match c.pkind {
@@ -367,6 +407,8 @@ pub fn handle_display(h: u64) -> String {
             let inner: Vec<String> = b.payload.iter().map(|&e| handle_display(e)).collect();
             return format!("{name}.{variant}({})", inner.join(", "));
         }
+        // G2.6：future 显示（镜像 interp/vm value_to_str 的 Future 臂，恒 "<future>"）。
+        P_FUTURE => return "<future>".to_string(),
         _ => {}
     }
     hnv_display(c.hnv())
@@ -735,6 +777,7 @@ fn type_name(t: u64) -> &'static str {
         T_LIST => "list",
         T_DICT => "dict",
         T_ENUM => "enum",
+        T_FUTURE => "future",
         _ => "?",
     }
 }
@@ -1226,6 +1269,9 @@ static CHUNK_NPARAMS: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::ne
 // G2.4：每 chunk 形参**名**（strtab 索引序列）——缺参报错要指名道姓（镜像解释器
 // 「missing argument `c` of `f`」）。CHUNK_NPARAMS 只有个数，这里补名字。
 static CHUNK_PARAM_NAMES: std::sync::Mutex<Vec<Vec<u32>>> = std::sync::Mutex::new(Vec::new());
+// G2.8：每 chunk 形参默认值位（第 i 位=1 表示第 i 个形参带默认值）——参数个数校验据此
+// 放宽（省略的形参由 chunk 序言求默认值填入，镜像 VM call_chunk 的 has_default）。
+static CHUNK_PARAM_DEFAULTS: std::sync::Mutex<Vec<Vec<bool>>> = std::sync::Mutex::new(Vec::new());
 static FN_PTRS: std::sync::Mutex<Vec<FnPtr>> = std::sync::Mutex::new(Vec::new());
 // G2.1：struct 定义表 structs[i] = (strtab_idx, 字段数)，字段名按定义序存
 // STRUCT_FIELDS[i]（strtab 索引）。与 vm.rs struct_defs 对应（构造时字段名序列
@@ -1306,6 +1352,32 @@ pub extern "C" fn hn_rt_param_names(names: *const u32, counts: *const u32, nchun
         }
         t.push(v);
     }
+}
+
+/// G2.8：每 chunk 形参默认值位（wrapper 传 0/1 序列 + 每 chunk 形参个数）。
+#[no_mangle]
+pub extern "C" fn hn_rt_param_defaults(bits: *const u32, counts: *const u32, nchunks: usize) {
+    let mut t = CHUNK_PARAM_DEFAULTS.lock().unwrap();
+    t.clear();
+    let mut off = 0usize;
+    for i in 0..nchunks {
+        let cnt = unsafe { *counts.add(i) } as usize;
+        let mut v = Vec::with_capacity(cnt);
+        for _ in 0..cnt {
+            v.push(unsafe { *bits.add(off) } != 0);
+            off += 1;
+        }
+        t.push(v);
+    }
+}
+
+/// chunk i 的第 i 个形参是否带默认值（无该形参 → false）。
+fn param_has_default(ci: u32, i: usize) -> bool {
+    let t = CHUNK_PARAM_DEFAULTS.lock().unwrap();
+    t.get(ci as usize)
+        .and_then(|v| v.get(i))
+        .copied()
+        .unwrap_or(false)
 }
 
 /// chunk i 的第 j 个形参名（缺失时返回空串——调用方只在报错文案里用它）。
@@ -1514,7 +1586,9 @@ fn call_chunk_idx(
     ci: u32,
     pc: u32,
 ) -> u64 {
-    if nargs != nparams as u64 {
+    // G2.8：实参不足且缺失位带默认值 → 放行（chunk 序言会求默认值填入）。
+    let missing_required = nargs < nparams as u64 && !param_has_default(fci, nargs as usize);
+    if nargs > nparams as u64 || missing_required {
         drop_args(argptr, nargs);
         // G2.4：消息 / 定位 / help 对齐解释器（原先中文硬编码、无定位无 help，
         // 经运算符重载路径可达）。
@@ -1532,7 +1606,9 @@ fn call_fn_h(h: u64, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
     let b = unsafe { &*(c.payload as *const HnFnBox) };
     let fci = b.ci;
     let nparams = CHUNK_NPARAMS.lock().unwrap()[fci as usize];
-    if nargs != nparams as u64 {
+    // G2.8：同 call_chunk_idx——带默认值的形参省略不算参数错误。
+    let missing_required = nargs < nparams as u64 && !param_has_default(fci, nargs as usize);
+    if nargs > nparams as u64 || missing_required {
         drop_args(argptr, nargs);
         // G2.4：消息 / 定位 / help 对齐解释器 call_lambda。
         return make_cell(arg_count_err(
@@ -1560,6 +1636,11 @@ fn call_global(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
     let resolved = resolve_alias_name(name);
     let resolved_ref = resolved.as_deref();
     let name = resolved_ref.unwrap_or(name);
+    // G2.6：async 函数调用（镜像 VM do_call 序：locals 之后、点号分发之前）——
+    // 后台线程执行函数体，立即返回 future；等待由 Await 指令完成。
+    if is_async_fn(name) {
+        return spawn_async(name, argptr, nargs, ci, pc);
+    }
     // 点号名：G2.2 枚举构造（Color.Red，镜像 VM do_call 序：enum → 函数 → 内置 → 库未加载）。
     if let Some((head, tail)) = name.split_once('.') {
         if let Some((_, name_sidx, vs)) = enum_lookup(head) {
@@ -1576,6 +1657,11 @@ fn call_global(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
         }
         if let Some((fci, np)) = func_lookup(name) {
             return call_chunk_idx(fci, np, argptr, nargs, name, ci, pc);
+        }
+        // G2.9：点号内置族（time.*/random.*/... 可移植实现 + 不可移植族 H999 登记）。
+        // 返回 None = 未知点号名（load 库方法调用）→ 保留 H404（与 VM/interp 一致）。
+        if let Some(r) = call_dotted(name, argptr, nargs, ci, pc) {
+            return r;
         }
         let lib = &name[..name.rfind('.').unwrap_or(name.len())];
         drop_args(argptr, nargs);
@@ -1602,6 +1688,161 @@ fn call_global(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
     }
     drop_args(argptr, nargs);
     make_cell(err_h("H002", &format!("undefined function `{}`", name), ci, pc))
+}
+
+// ── G2.6：async-await / go 多线程 ──
+// 镜像 VM spawn_async / spawn_go / Await 执行臂（vm.rs 2673–2728 / 2288–2312）。
+// 前置条件（本轮已落地）：rc 已原子化（rc_ptr_of / rc_load），跨线程共享句柄安全。
+
+/// async 函数名注册表（strtab 索引；wrapper 经 hn_rt_asyncs_init 注入）。
+static ASYNC_FNS: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+
+#[no_mangle]
+pub extern "C" fn hn_rt_asyncs_init(names: *const u32, n: usize) {
+    let mut t = ASYNC_FNS.lock().unwrap();
+    t.clear();
+    for i in 0..n {
+        t.push(unsafe { *names.add(i) });
+    }
+}
+
+fn is_async_fn(name: &str) -> bool {
+    ASYNC_FNS
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|&s| strtab_name_eq(s, name))
+}
+
+/// 建 future 值句柄（rc=1，初始 Pending）。
+fn make_cell_future() -> u64 {
+    let boxed = Box::into_raw(Box::new(HnFuture {
+        state: std::sync::Mutex::new(FutureState::Pending),
+        cv: std::sync::Condvar::new(),
+    }));
+    let c = Box::into_raw(Box::new(HnCell {
+        rc: 1,
+        t: T_FUTURE,
+        a: 0,
+        b: 0,
+        pkind: P_FUTURE,
+        payload: boxed as u64,
+    }));
+    leak_check_inc();
+    c as u64
+}
+
+/// async 函数调用（镜像 VM spawn_async）：后台线程跑 chunk 函数，实参所有权转移给
+/// 子线程（Call lowering 打包的 retain 产物即 callee 引用）；结果（含 ERR cell）存入
+/// future，由 rt_await 取出。函数不存在 → H002（同步返回，实参在此释放——
+/// VM 侧 checker 已静态拒绝，防御性对齐）。
+fn spawn_async(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
+    let (fci, _np) = match func_lookup(name) {
+        Some(x) => x,
+        None => {
+            drop_args(argptr, nargs);
+            return make_cell(err_h_help(
+                "H002",
+                &format!("undefined function `{}`", name),
+                ci,
+                pc,
+                Some("check the spelling".to_string()),
+            ));
+        }
+    };
+    let fut = make_cell_future();
+    // 实参在 spawn 前**同步**拷入堆缓冲：lowering 的 param_ss 是 per-chunk 共享槽，
+    // 子线程延迟读取会被主线程下一次 Call 打包覆盖（镜像 VM spawn_go 的同步 clone）。
+    // 句柄所有权随 Vec 移入子线程（callee 帧接管）。
+    let args: Vec<u64> = (0..nargs as usize).map(|i| arg_at(argptr, i)).collect();
+    // 裸指针不可直接跨线程（*mut HnFuture !Send）：以 u64 传递、线程内还原
+    //（cell 的 payload 指针布局即 u64，还原安全）。
+    let fp = cell(fut).payload;
+    std::thread::spawn(move || {
+        // 子线程独立执行（FN_PTRS / PROG / strtab 均为静态表，线程安全）。
+        // 无 arity 预检：镜像 VM（校验发生在 call_chunk 内，错误经 future 传播到 await）。
+        let argptr = args.as_ptr() as u64;
+        let nargs = args.len() as u64;
+        let r = unsafe { ((*FN_PTRS.lock().unwrap())[fci as usize])(argptr, nargs, 0, 0) };
+        let f = fp as *mut HnFuture;
+        let mut s = unsafe { (*f).state.lock().unwrap() };
+        *s = FutureState::Done(r);
+        unsafe { (*f).cv.notify_one() };
+    });
+    fut
+}
+
+/// Await（镜像 VM 执行臂）：future → 阻塞等待并返回结果句柄的 retain 新引用
+/// （结果为 ERR cell 时原样返回，由 check_err 路由 catch / 跨帧传播）；
+/// 非 future → H001（文案 / help 逐字对齐 VM mk_err_with）。
+#[no_mangle]
+pub extern "C" fn rt_await(h: u64, ci: u64, pc: u64) -> u64 {
+    let (ci, pc) = (ci as u32, pc as u32);
+    let c = cell(h);
+    if c.t != T_FUTURE {
+        return make_cell(err_h_help(
+            "H001",
+            &format!(
+                "`await` requires an async function call result (future), got `{}`",
+                type_name(c.t)
+            ),
+            ci,
+            pc,
+            Some("await an async function call: `await fetch_data()`".to_string()),
+        ));
+    }
+    let f = unsafe { &*(c.payload as *const HnFuture) };
+    let mut s = f.state.lock().unwrap();
+    loop {
+        if let FutureState::Done(_) = *s {
+            break;
+        }
+        s = f.cv.wait(s).unwrap();
+    }
+    match *s {
+        FutureState::Done(v) => rt_retain(v),
+        FutureState::Pending => unreachable!("future 已完成"),
+    }
+}
+
+/// GoCall（镜像 VM spawn_go）：后台线程 fire-and-forget；错误经 err_render 打印到
+/// stderr（不影响主线程）。callee 不存在 → 打印渲染后的 H002（line 0 = plain 分支）。
+/// 恒返回 null 句柄 0（Stmt::Go 不产生值）。
+#[no_mangle]
+pub extern "C" fn rt_gocall(sidx: u64, argptr: u64, nargs: u64) -> u64 {
+    let name = strtab_name(sidx as u32);
+    let (fci, _np) = match func_lookup(&name) {
+        Some(x) => x,
+        None => {
+            let (file, src, _) = PROG.lock().unwrap().clone();
+            eprintln!(
+                "{}",
+                render_error_with_help(
+                    "H002",
+                    &format!("undefined function `{}`", name),
+                    &file,
+                    &src,
+                    Some((0, 0, 0)),
+                    Some("check the spelling"),
+                )
+            );
+            drop_args(argptr, nargs);
+            return 0;
+        }
+    };
+    // 实参在 spawn 前**同步**拷入堆缓冲（同 spawn_async：param_ss 共享槽会被
+    // 主线程后续 Call 打包覆盖；镜像 VM spawn_go 的同步 clone）。
+    let args: Vec<u64> = (0..nargs as usize).map(|i| arg_at(argptr, i)).collect();
+    std::thread::spawn(move || {
+        let argptr = args.as_ptr() as u64;
+        let nargs = args.len() as u64;
+        let r = unsafe { ((*FN_PTRS.lock().unwrap())[fci as usize])(argptr, nargs, 0, 0) };
+        if cell(r).t == T_ERR {
+            eprintln!("{}", err_render(r));
+        }
+        cell_release(r);
+    });
+    0
 }
 
 /// struct 定义表按名查找 → (表下标, 字段数)。
@@ -2199,6 +2440,2582 @@ fn call_builtin(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> u64 {
     };
     drop_args(argptr, nargs);
     make_cell(r)
+}
+
+// ── G2.9 点号内置族（可移植实现） ──
+// 逐条镜像 src/builtins.rs / src/*mod.rs 的运行期行为（checker 已静态校验参数个数/
+// 类型，这里只复刻运行期语义与错误文案）。std-only：需外部 crate 的家族在此登记 H999
+// （见 call_dotted 尾部）。所有权协议与 call_builtin 一致：借用实参，末尾统一 drop_args。
+//
+// 静态状态（镜像 builtins.rs 的 LazyLock 静态）：
+static DOTTED_CLI_ARGS: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+static DOTTED_KV: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+static DOTTED_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// CLI 参数初始化（wrapper main 调用，镜像 builtins::init_args 的解析规则）：
+/// `--key val` / `-k val` 取值，单独 `--key`/`-k` 记 "true"，位置参数忽略。
+/// name 为空串时值 = "true"（布尔标志），否则 (key, val)。
+#[no_mangle]
+pub extern "C" fn hn_rt_args_init(keys: *const u8, key_lens: *const usize, vals: *const u8, val_lens: *const usize, n: usize) {
+    let mut m = DOTTED_CLI_ARGS.lock().unwrap();
+    m.clear();
+    for i in 0..n {
+        let kb = unsafe { std::slice::from_raw_parts(keys.add(i), key_lens.add(i).read()) };
+        let vb = unsafe { std::slice::from_raw_parts(vals.add(i), val_lens.add(i).read()) };
+        m.push((
+            String::from_utf8_lossy(kb).into_owned(),
+            String::from_utf8_lossy(vb).into_owned(),
+        ));
+    }
+}
+
+/// 实际解析按 init_args 语义在 wrapper 侧由 hone 生成（避开在 runtime 重写 UTF-8 参数遍历）：
+/// hone 的 build_native 把 std::env::args().skip(1) 解析成 (key, val) 对后传入。
+fn dotted_args_get(key: &str) -> Option<String> {
+    let m = DOTTED_CLI_ARGS.lock().unwrap();
+    m.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+}
+
+fn dotted_args_has(key: &str) -> bool {
+    let m = DOTTED_CLI_ARGS.lock().unwrap();
+    m.iter().any(|(k, _)| k == key)
+}
+
+// xorshift64*（镜像 builtins.rs RNG：线程本地，种子 = 纳秒 ^ 栈地址）。
+thread_local! {
+    static DOTTED_RNG: std::cell::RefCell<u64> = std::cell::RefCell::new(dotted_seed_rng());
+}
+
+fn dotted_seed_rng() -> u64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0x9E37_79B9_7F4A_7C15);
+    let addr = (&nanos as *const u64) as usize as u64;
+    (nanos ^ addr).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1
+}
+
+fn dotted_next_u64() -> u64 {
+    DOTTED_RNG.with(|r| {
+        let mut x = r.borrow_mut();
+        *x ^= *x >> 12;
+        *x ^= *x << 25;
+        *x ^= *x >> 27;
+        *x = x.wrapping_mul(0x2545_F491_4F6C_DD1D);
+        *x
+    })
+}
+
+// ── 点号内置实参读取（错误文案逐字镜像 builtins.rs as_str/as_int/as_num 与各 mod） ──
+
+/// builtins.rs 风格 str 参数（"`{name}` expects a string for argument {n}, got `{ty}`" + help）。
+fn d_str(h: u64, name: &str, arg: usize, ci: u32, pc: u32) -> Result<String, Hnv> {
+    let c = cell(h);
+    if c.t == T_STR {
+        Ok(String::from_utf8_lossy(str_bytes(h)).into_owned())
+    } else {
+        Err(err_h_help(
+            "H001",
+            &format!("`{}` expects a string for argument {}, got `{}`", name, arg + 1, type_name(c.t)),
+            ci,
+            pc,
+            Some("pass a string value".to_string()),
+        ))
+    }
+}
+
+/// builtins.rs 风格 int 参数（"`{name}` expects an integer for argument {n}, got `{ty}`" + help）。
+fn d_int(h: u64, name: &str, arg: usize, ci: u32, pc: u32) -> Result<i64, Hnv> {
+    let c = cell(h);
+    if c.t == T_INT {
+        Ok(c.a as i64)
+    } else {
+        Err(err_h_help(
+            "H001",
+            &format!("`{}` expects an integer for argument {}, got `{}`", name, arg + 1, type_name(c.t)),
+            ci,
+            pc,
+            Some("pass an `int` value".to_string()),
+        ))
+    }
+}
+
+/// builtins.rs 风格 number 参数（int/float 提升，"`{name}` expects a number for argument {n}" + help）。
+fn d_num(h: u64, name: &str, arg: usize, ci: u32, pc: u32) -> Result<f64, Hnv> {
+    let c = cell(h);
+    match c.t {
+        T_INT => Ok(c.a as i64 as f64),
+        T_FLOAT => Ok(f64::from_bits(c.a)),
+        _ => Err(err_h_help(
+            "H001",
+            &format!("`{}` expects a number for argument {}, got `{}`", name, arg + 1, type_name(c.t)),
+            ci,
+            pc,
+            Some("pass an `int` or `float` value".to_string()),
+        )),
+    }
+}
+
+/// 借用 list 元素句柄（非 list 返回 None，由调用方按各 mod 文案报错）。
+fn d_list(h: u64) -> Option<Vec<u64>> {
+    let c = cell(h);
+    if c.pkind == P_LIST {
+        let l = unsafe { &*(c.payload as *const HnList) };
+        Some(l.items.clone())
+    } else {
+        None
+    }
+}
+
+/// statmod / plotmod 风格 what 前缀报错（"`{what}` expects a number, got `{ty}`"，无 help）。
+fn stat_as_num(h: u64, what: &str, ci: u32, pc: u32) -> Result<f64, Hnv> {
+    let c = cell(h);
+    match c.t {
+        T_INT => Ok(c.a as i64 as f64),
+        T_FLOAT => Ok(f64::from_bits(c.a)),
+        _ => Err(err_h(
+            "H001",
+            &format!("`{}` expects a number, got `{}`", what, type_name(c.t)),
+            ci,
+            pc,
+        )),
+    }
+}
+
+/// statmod num_list（元素错误带 "`{what} element {n}`" 前缀）。
+fn stat_num_list(h: u64, what: &str, ci: u32, pc: u32) -> Result<Vec<f64>, Hnv> {
+    let items = match d_list(h) {
+        Some(it) => it,
+        None => {
+            let ty = type_name(cell(h).t);
+            return Err(err_h("H001", &format!("`{}` expects a list of numbers, got `{}`", what, ty), ci, pc));
+        }
+    };
+    let mut out = Vec::with_capacity(items.len());
+    for (i, &x) in items.iter().enumerate() {
+        out.push(stat_as_num(x, &format!("{} element {}", what, i + 1), ci, pc)?);
+    }
+    Ok(out)
+}
+
+/// statmod 矩阵提取（矩形校验文案逐字镜像）。
+fn stat_matrix(h: u64, what: &str, ci: u32, pc: u32) -> Result<Vec<Vec<f64>>, Hnv> {
+    let rows = match d_list(h) {
+        Some(r) => r,
+        None => {
+            let ty = type_name(cell(h).t);
+            return Err(err_h("H001", &format!("`{}` expects a list of lists (matrix), got `{}`", what, ty), ci, pc));
+        }
+    };
+    let mut out: Vec<Vec<f64>> = Vec::with_capacity(rows.len());
+    for (ri, &row) in rows.iter().enumerate() {
+        out.push(stat_num_list(row, &format!("{} row {}", what, ri + 1), ci, pc)?);
+    }
+    if let Some(first) = out.first() {
+        let cols = first.len();
+        for (ri, row) in out.iter().enumerate() {
+            if row.len() != cols {
+                return Err(err_h_help(
+                    "H001",
+                    &format!(
+                        "`{}` requires a rectangular matrix: row 1 has {} columns but row {} has {}",
+                        what,
+                        cols,
+                        ri + 1,
+                        row.len()
+                    ),
+                    ci,
+                    pc,
+                    Some("pad or trim rows to the same length".to_string()),
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// statmod to_value（整数 f64 → int 句柄，否则 float 句柄）。
+fn stat_to_value(x: f64) -> Hnv {
+    if x.fract() == 0.0 && x.abs() < 9.007_199_254_740_992e15 {
+        Hnv::int(x as i64)
+    } else {
+        Hnv::float(x)
+    }
+}
+
+/// 矩阵 → list 句柄（逐行 list，元素 stat_to_value）。
+fn stat_matrix_to_cell(m: &[Vec<f64>]) -> u64 {
+    let rows: Vec<u64> = m
+        .iter()
+        .map(|row| {
+            let items: Vec<u64> = row.iter().map(|&x| make_cell(stat_to_value(x))).collect();
+            let c = make_cell_list(&items);
+            for &it in &items {
+                cell_release(it);
+            }
+            c
+        })
+        .collect();
+    let c = make_cell_list(&rows);
+    for &r in &rows {
+        cell_release(r);
+    }
+    c
+}
+
+// ── time 辅助（逐字镜像 builtins.rs format_timestamp / civil_from_days / parse_timestamp） ──
+
+fn dotted_civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m as u32, d as u32)
+}
+
+fn dotted_days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (m as i64 + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+fn dotted_format_timestamp(secs: i64, fmt: &str) -> String {
+    let days = secs.div_euclid(86400);
+    let sod = secs.rem_euclid(86400);
+    let (y, mo, d) = dotted_civil_from_days(days);
+    let h = sod / 3600;
+    let mi = (sod % 3600) / 60;
+    let s = sod % 60;
+
+    let mut out = String::new();
+    let chars: Vec<char> = fmt.chars().collect();
+    let n = chars.len();
+    let mut i = 0;
+    while i < n {
+        if i + 4 <= n && chars[i..i + 4] == ['Y', 'Y', 'Y', 'Y'] {
+            out.push_str(&format!("{:04}", y));
+            i += 4;
+            continue;
+        }
+        if i + 2 <= n {
+            let seg: String = chars[i..i + 2].iter().collect();
+            match seg.as_str() {
+                "MM" => {
+                    out.push_str(&format!("{:02}", mo));
+                    i += 2;
+                    continue;
+                }
+                "DD" => {
+                    out.push_str(&format!("{:02}", d));
+                    i += 2;
+                    continue;
+                }
+                "HH" => {
+                    out.push_str(&format!("{:02}", h));
+                    i += 2;
+                    continue;
+                }
+                "mm" => {
+                    out.push_str(&format!("{:02}", mi));
+                    i += 2;
+                    continue;
+                }
+                "SS" => {
+                    out.push_str(&format!("{:02}", s));
+                    i += 2;
+                    continue;
+                }
+                "WW" => {
+                    let days = secs.div_euclid(86400);
+                    out.push_str(&(((days + 3).rem_euclid(7)) + 1).to_string());
+                    i += 2;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+fn dotted_parse_timestamp(s: &str) -> Option<i64> {
+    let b = s.as_bytes();
+    let n = b.len();
+    let digit = |c: u8| c.is_ascii_digit();
+    if n < 10
+        || !digit(b[0]) || !digit(b[1]) || !digit(b[2]) || !digit(b[3])
+        || b[4] != b'-'
+        || !digit(b[5]) || !digit(b[6])
+        || b[7] != b'-'
+        || !digit(b[8]) || !digit(b[9])
+    {
+        return None;
+    }
+    let y = (b[0] - b'0') as i64 * 1000 + (b[1] - b'0') as i64 * 100 + (b[2] - b'0') as i64 * 10 + (b[3] - b'0') as i64;
+    let mo = (b[5] - b'0') as i64 * 10 + (b[6] - b'0') as i64;
+    let d = (b[8] - b'0') as i64 * 10 + (b[9] - b'0') as i64;
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return None;
+    }
+    if n == 10 {
+        return Some(dotted_days_from_civil(y, mo as u32, d as u32) * 86400);
+    }
+    let sep = b[10];
+    if sep != b'T' && sep != b' ' {
+        return None;
+    }
+    let two = |i: usize| -> Option<i64> {
+        if i + 1 < n && digit(b[i]) && digit(b[i + 1]) {
+            Some((b[i] - b'0') as i64 * 10 + (b[i + 1] - b'0') as i64)
+        } else {
+            None
+        }
+    };
+    let h = two(11)?;
+    if n < 14 || b[13] != b':' {
+        return None;
+    }
+    let mi = two(14)?;
+    let mut i = 16;
+    let mut sec = 0i64;
+    if i < n && b[i] == b':' {
+        sec = two(i + 1)?;
+        i += 3;
+    }
+    if h > 23 || mi > 59 || sec > 60 {
+        return None;
+    }
+    if i < n && b[i] == b'.' {
+        while i < n && digit(b[i]) {
+            i += 1;
+        }
+    }
+    let mut offset = 0i64;
+    if i < n {
+        match b[i] {
+            b'Z' | b'z' => i += 1,
+            b'+' | b'-' => {
+                let sign = if b[i] == b'-' { -1 } else { 1 };
+                let oh = two(i + 1)?;
+                let mut om = 0i64;
+                let mut j = i + 3;
+                if j < n && b[j] == b':' {
+                    om = two(j + 1)?;
+                    j += 3;
+                }
+                if oh > 23 || om > 59 {
+                    return None;
+                }
+                offset = sign * (oh * 3600 + om * 60);
+                i = j;
+            }
+            _ => return None,
+        }
+    }
+    if i != n {
+        return None;
+    }
+    Some(dotted_days_from_civil(y, mo as u32, d as u32) * 86400 + h * 3600 + mi * 60 + sec - offset)
+}
+
+/// 点号内置分发（G2.9）。返回 Some(cell)：已处理（含 H999 登记，实参已释放）；
+/// None：未知点号名 → 调用方保留 H404（load 库方法调用，实参由调用方释放）。
+fn call_dotted(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> Option<u64> {
+    let a0 = || arg_at(argptr, 0);
+    let a1 = || arg_at(argptr, 1);
+    let a2 = || arg_at(argptr, 2);
+    // 可移植族逐臂实现；尾部统一 drop_args + make_cell。
+    let r: Option<Hnv> = match name {
+        // ---------- time ----------
+        "time.now" => {
+            let secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            Some(Hnv::int(secs))
+        }
+        "time.sleep" => {
+            let secs = match d_num(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            match std::time::Duration::try_from_secs_f64(secs) {
+                Ok(d) => {
+                    std::thread::sleep(d);
+                    Some(Hnv::null())
+                }
+                Err(_) => {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h("H001", "`time.sleep` duration must be a non-negative number", ci, pc)));
+                }
+            }
+        }
+        "time.format" => {
+            let ts = match d_int(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let fmt = match d_str(a1(), name, 1, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let out = dotted_format_timestamp(ts, &fmt);
+            drop_args(argptr, nargs);
+            return Some(make_cell_str(out.into_bytes()));
+        }
+        "time.parse" => {
+            let s = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            match dotted_parse_timestamp(&s) {
+                Some(secs) => Some(Hnv::int(secs)),
+                None => {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h_help(
+                        "H001",
+                        &format!("cannot parse `{}` as a timestamp", s),
+                        ci,
+                        pc,
+                        Some("supported formats: `YYYY-MM-DDTHH:MM:SSZ`, `YYYY-MM-DD HH:MM:SS`, optional `+08:00` offset".to_string()),
+                    )));
+                }
+            }
+        }
+        "time.add" => {
+            let ts = match d_int(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let secs = match d_int(a1(), name, 1, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            match ts.checked_add(secs) {
+                Some(v) => Some(Hnv::int(v)),
+                None => {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h("H010", "time.add: timestamp overflow", ci, pc)));
+                }
+            }
+        }
+        "time.diff" => {
+            let a = match d_int(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let b = match d_int(a1(), name, 1, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            match a.checked_sub(b) {
+                Some(v) => Some(Hnv::int(v)),
+                None => {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h("H010", "time.diff: timestamp overflow", ci, pc)));
+                }
+            }
+        }
+        "time.weekday" => {
+            let ts = match d_int(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let days = ts.div_euclid(86400);
+            Some(Hnv::int(((days + 3).rem_euclid(7)) + 1))
+        }
+        // ---------- random ----------
+        "random.int" => {
+            let min = match d_int(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let max = match d_int(a1(), name, 1, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            if min > max {
+                drop_args(argptr, nargs);
+                return Some(make_cell(err_h_help(
+                    "H001",
+                    &format!("`random.int` range is invalid: min ({}) > max ({})", min, max),
+                    ci,
+                    pc,
+                    Some("swap the two arguments".to_string()),
+                )));
+            }
+            // 闭区间 [min, max]（镜像 builtins.rs random_int）
+            let span = (max as u64).wrapping_sub(min as u64).wrapping_add(1);
+            let v = if span == 0 {
+                dotted_next_u64() as i64
+            } else {
+                (min as u64).wrapping_add(dotted_next_u64() % span) as i64
+            };
+            Some(Hnv::int(v))
+        }
+        "random.float" => Some(Hnv::float((dotted_next_u64() >> 11) as f64 / (1u64 << 53) as f64)),
+        // ---------- uuid ----------
+        "uuid.new" => {
+            let hi = dotted_next_u64();
+            let lo = dotted_next_u64();
+            let mut b = [0u8; 16];
+            b[..8].copy_from_slice(&hi.to_be_bytes());
+            b[8..].copy_from_slice(&lo.to_be_bytes());
+            b[6] = (b[6] & 0x0f) | 0x40;
+            b[8] = (b[8] & 0x3f) | 0x80;
+            let s = format!(
+                "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+                b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+            );
+            drop_args(argptr, nargs);
+            return Some(make_cell_str(s.into_bytes()));
+        }
+        // ---------- log（stderr，镜像 builtins.rs 颜色码） ----------
+        "log.info" | "log.warn" | "log.error" | "log.debug" => {
+            let msg = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let tag = match name {
+                "log.info" => "\x1b[34m[INFO]\x1b[0m",
+                "log.warn" => "\x1b[33m[WARN]\x1b[0m",
+                "log.error" => "\x1b[31m[ERROR]\x1b[0m",
+                _ => "\x1b[32m[DEBUG]\x1b[0m",
+            };
+            eprintln!("{} {}", tag, msg);
+            Some(Hnv::null())
+        }
+        // ---------- path ----------
+        "path.join" => {
+            let mut parts: Vec<String> = Vec::new();
+            for i in 0..nargs as usize {
+                match d_str(arg_at(argptr, i), name, i, ci, pc) {
+                    Ok(s) => parts.push(s),
+                    Err(e) => return Some(make_cell(e)),
+                }
+            }
+            let p: std::path::PathBuf = parts.iter().collect();
+            drop_args(argptr, nargs);
+            return Some(make_cell_str(p.to_string_lossy().to_string().into_bytes()));
+        }
+        "path.dirname" => {
+            let p = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let parent = std::path::Path::new(&p)
+                .parent()
+                .filter(|d| !d.as_os_str().is_empty())
+                .map(|d| d.to_string_lossy().to_string())
+                .unwrap_or_else(|| ".".to_string());
+            drop_args(argptr, nargs);
+            return Some(make_cell_str(parent.into_bytes()));
+        }
+        "path.basename" => {
+            let p = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let base = std::path::Path::new(&p)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            drop_args(argptr, nargs);
+            return Some(make_cell_str(base.into_bytes()));
+        }
+        // ---------- args ----------
+        "args.get" => {
+            let key = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            match dotted_args_get(&key) {
+                Some(v) => {
+                    if nargs >= 2 {
+                        let ty = match d_str(a1(), name, 1, ci, pc) {
+                            Ok(t) => t,
+                            Err(e) => return Some(make_cell(e)),
+                        };
+                        let t = v.trim();
+                        match ty.as_str() {
+                            "int" => match t.parse::<i64>() {
+                                Ok(i) => Some(Hnv::int(i)),
+                                Err(_) => {
+                                    drop_args(argptr, nargs);
+                                    return Some(make_cell(err_h_help(
+                                        "H006",
+                                        &format!("`args.get(\"{}\", int)` cannot parse `{}` as an integer", key, v),
+                                        ci,
+                                        pc,
+                                        Some("pass a valid integer on the command line".to_string()),
+                                    )));
+                                }
+                            },
+                            "float" => match t.parse::<f64>() {
+                                Ok(f) => Some(Hnv::float(f)),
+                                Err(_) => {
+                                    drop_args(argptr, nargs);
+                                    return Some(make_cell(err_h_help(
+                                        "H007",
+                                        &format!("`args.get(\"{}\", float)` cannot parse `{}` as a float", key, v),
+                                        ci,
+                                        pc,
+                                        Some("pass a valid number on the command line".to_string()),
+                                    )));
+                                }
+                            },
+                            "bool" => match t {
+                                "true" | "1" => Some(Hnv::bool_(true)),
+                                "false" | "0" => Some(Hnv::bool_(false)),
+                                _ => {
+                                    drop_args(argptr, nargs);
+                                    return Some(make_cell(err_h_help(
+                                        "H001",
+                                        &format!("`args.get(\"{}\", bool)` cannot parse `{}` as a boolean", key, v),
+                                        ci,
+                                        pc,
+                                        Some("use `true`/`false` or `1`/`0`".to_string()),
+                                    )));
+                                }
+                            },
+                            "str" => {
+                                drop_args(argptr, nargs);
+                                return Some(make_cell_str(v.into_bytes()));
+                            }
+                            _ => {
+                                drop_args(argptr, nargs);
+                                return Some(make_cell(err_h_help(
+                                    "H001",
+                                    &format!("unknown type `{}` for `args.get`", ty),
+                                    ci,
+                                    pc,
+                                    Some("expected one of `int`, `float`, `bool`, `str`".to_string()),
+                                )));
+                            }
+                        }
+                    } else {
+                        drop_args(argptr, nargs);
+                        return Some(make_cell_str(v.into_bytes()));
+                    }
+                }
+                None => {
+                    // 键不存在：有默认值参数（第 3 个）则返回默认值，否则 null。
+                    if nargs >= 3 {
+                        let h = rt_retain(a2());
+                        drop_args(argptr, nargs);
+                        return Some(h);
+                    }
+                    Some(Hnv::null())
+                }
+            }
+        }
+        "args.has" => {
+            let key = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            Some(Hnv::bool_(dotted_args_has(&key)))
+        }
+        // ---------- env ----------
+        "env.get" | "sys.get_env" => {
+            let key = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let v = std::env::var(&key).unwrap_or_default();
+            drop_args(argptr, nargs);
+            return Some(make_cell_str(v.into_bytes()));
+        }
+        "env.set" => {
+            let key = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let val = match d_str(a1(), name, 1, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            std::env::set_var(&key, &val);
+            Some(Hnv::null())
+        }
+        // ---------- db（进程内 KV，镜像 builtins.rs KV_STORE；--resume 落盘为 hone CLI 特性，nat 产物无此路径） ----------
+        "db.set" => {
+            let key = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let val = match d_str(a1(), name, 1, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let mut store = DOTTED_KV.lock().unwrap();
+            match store.iter_mut().find(|(k, _)| *k == key) {
+                Some(entry) => entry.1 = val,
+                None => store.push((key, val)),
+            }
+            Some(Hnv::null())
+        }
+        "db.get" => {
+            let key = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let store = DOTTED_KV.lock().unwrap();
+            match store.iter().find(|(k, _)| *k == key) {
+                Some((_, v)) => {
+                    let out = v.clone();
+                    drop(store);
+                    drop_args(argptr, nargs);
+                    return Some(make_cell_str(out.into_bytes()));
+                }
+                None => Some(Hnv::null()),
+            }
+        }
+        // ---------- sys.run（镜像 run_shell：cmd /C 或 sh -c，stdout+stderr 合并） ----------
+        "sys.run" => {
+            let cmd = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let output = if cfg!(windows) {
+                std::process::Command::new("cmd").args(["/C", &cmd]).output()
+            } else {
+                std::process::Command::new("sh").args(["-c", &cmd]).output()
+            };
+            match output {
+                Ok(o) => {
+                    let mut out = String::from_utf8_lossy(&o.stdout).into_owned();
+                    out.push_str(&String::from_utf8_lossy(&o.stderr));
+                    drop_args(argptr, nargs);
+                    return Some(make_cell_str(out.into_bytes()));
+                }
+                Err(e) => {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h_help(
+                        "H200",
+                        &format!("cannot run command `{}`: {}", cmd, e),
+                        ci,
+                        pc,
+                        Some("check the command".to_string()),
+                    )));
+                }
+            }
+        }
+        // ---------- stat ----------
+        "stat.sum" => {
+            let nums = match stat_num_list(a0(), "stat.sum", ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            Some(stat_to_value(nums.iter().sum()))
+        }
+        "stat.mean" => {
+            let nums = match stat_num_list(a0(), "stat.mean", ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            if nums.is_empty() {
+                drop_args(argptr, nargs);
+                return Some(make_cell(err_h_help("H001", "stat.mean: empty list", ci, pc, Some("pass at least one number".to_string()))));
+            }
+            Some(Hnv::float(nums.iter().sum::<f64>() / nums.len() as f64))
+        }
+        "stat.median" => {
+            let mut nums = match stat_num_list(a0(), "stat.median", ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            if nums.is_empty() {
+                drop_args(argptr, nargs);
+                return Some(make_cell(err_h_help("H001", "stat.median: empty list", ci, pc, Some("pass at least one number".to_string()))));
+            }
+            nums.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let mid = nums.len() / 2;
+            let med = if nums.len() % 2 == 1 { nums[mid] } else { (nums[mid - 1] + nums[mid]) / 2.0 };
+            Some(Hnv::float(med))
+        }
+        "stat.variance" | "stat.stddev" => {
+            let nums = match stat_num_list(a0(), name, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            if nums.len() < 2 {
+                drop_args(argptr, nargs);
+                return Some(make_cell(err_h_help(
+                    "H001",
+                    &format!("{}: need at least 2 numbers", name),
+                    ci,
+                    pc,
+                    Some("pass at least two numbers".to_string()),
+                )));
+            }
+            let mean = nums.iter().sum::<f64>() / nums.len() as f64;
+            let var: f64 = nums.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / nums.len() as f64;
+            Some(Hnv::float(if name == "stat.variance" { var } else { var.sqrt() }))
+        }
+        "stat.min" | "stat.max" => {
+            let nums = match stat_num_list(a0(), name, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            if nums.is_empty() {
+                drop_args(argptr, nargs);
+                return Some(make_cell(err_h_help("H001", &format!("{}: empty list", name), ci, pc, Some("pass at least one number".to_string()))));
+            }
+            let cmp = |a: &f64, b: &f64| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal);
+            let v = if name == "stat.min" {
+                nums.iter().copied().min_by(cmp).unwrap()
+            } else {
+                nums.iter().copied().max_by(cmp).unwrap()
+            };
+            Some(stat_to_value(v))
+        }
+        // ---------- matrix ----------
+        "matrix.identity" => {
+            let n = match cell(a0()).t {
+                T_INT if (cell(a0()).a as i64) >= 0 => cell(a0()).a as usize,
+                _ => {
+                    let ty = type_name(cell(a0()).t);
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h(
+                        "H001",
+                        &format!("matrix.identity expects a non-negative int, got `{}`", ty),
+                        ci,
+                        pc,
+                    )));
+                }
+            };
+            let mut m = vec![vec![0.0f64; n]; n];
+            for i in 0..n {
+                m[i][i] = 1.0;
+            }
+            drop_args(argptr, nargs);
+            return Some(stat_matrix_to_cell(&m));
+        }
+        "matrix.transpose" => {
+            let m = match stat_matrix(a0(), "matrix.transpose", ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            if m.is_empty() {
+                drop_args(argptr, nargs);
+                return Some(make_cell_list(&[]));
+            }
+            let (rows, cols) = (m.len(), m[0].len());
+            let mut t = vec![vec![0.0f64; rows]; cols];
+            for i in 0..rows {
+                for j in 0..cols {
+                    t[j][i] = m[i][j];
+                }
+            }
+            drop_args(argptr, nargs);
+            return Some(stat_matrix_to_cell(&t));
+        }
+        "matrix.add" => {
+            let ma = match stat_matrix(a0(), "matrix.add", ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let mb = match stat_matrix(a1(), "matrix.add", ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            if ma.len() != mb.len()
+                || (ma.first().map(|r| r.len()).unwrap_or(0) != mb.first().map(|r| r.len()).unwrap_or(0))
+            {
+                drop_args(argptr, nargs);
+                return Some(make_cell(err_h_help(
+                    "H001",
+                    "matrix.add: shapes must match",
+                    ci,
+                    pc,
+                    Some("both matrices must have the same rows and columns".to_string()),
+                )));
+            }
+            let (rows, cols) = (ma.len(), ma.first().map(|r| r.len()).unwrap_or(0));
+            let mut c = vec![vec![0.0f64; cols]; rows];
+            for i in 0..rows {
+                for j in 0..cols {
+                    c[i][j] = ma[i][j] + mb[i][j];
+                }
+            }
+            drop_args(argptr, nargs);
+            return Some(stat_matrix_to_cell(&c));
+        }
+        "matrix.mul" => {
+            let ma = match stat_matrix(a0(), "matrix.mul", ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let mb = match stat_matrix(a1(), "matrix.mul", ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            if ma.is_empty() || mb.is_empty() {
+                drop_args(argptr, nargs);
+                return Some(make_cell(err_h("H001", "matrix.mul: empty matrix", ci, pc)));
+            }
+            let (ar, ac) = (ma.len(), ma[0].len());
+            let (br, bc) = (mb.len(), mb[0].len());
+            if ac != br {
+                drop_args(argptr, nargs);
+                return Some(make_cell(err_h_help(
+                    "H001",
+                    &format!("matrix.mul: shapes mismatch ({}x{} @ {}x{})", ar, ac, br, bc),
+                    ci,
+                    pc,
+                    Some("matrix A columns must equal matrix B rows".to_string()),
+                )));
+            }
+            let mut c = vec![vec![0.0f64; bc]; ar];
+            for i in 0..ar {
+                for j in 0..bc {
+                    let mut s = 0.0;
+                    for k in 0..ac {
+                        s += ma[i][k] * mb[k][j];
+                    }
+                    c[i][j] = s;
+                }
+            }
+            drop_args(argptr, nargs);
+            return Some(stat_matrix_to_cell(&c));
+        }
+        "matrix.scale" => {
+            let m = match stat_matrix(a0(), "matrix.scale", ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let k = match stat_as_num(a1(), "matrix.scale scalar", ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let (rows, cols) = (m.len(), m.first().map(|r| r.len()).unwrap_or(0));
+            let mut c = vec![vec![0.0f64; cols]; rows];
+            for i in 0..rows {
+                for j in 0..cols {
+                    c[i][j] = m[i][j] * k;
+                }
+            }
+            drop_args(argptr, nargs);
+            return Some(stat_matrix_to_cell(&c));
+        }
+        _ => return dotted_dispatch2(name, argptr, nargs, ci, pc),
+    };
+    drop_args(argptr, nargs);
+    r.map(make_cell)
+}
+
+// ── csv（逐字镜像 datamod.rs parse_csv / escape_field / field_str） ──
+
+fn dotted_parse_csv(text: &str) -> Vec<Vec<String>> {
+    let b: Vec<char> = text.chars().collect();
+    let n = b.len();
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut row: Vec<String> = Vec::new();
+    let mut field = String::new();
+    let mut i = 0usize;
+    let mut in_quotes = false;
+    while i < n {
+        let c = b[i];
+        if in_quotes {
+            if c == '"' {
+                if i + 1 < n && b[i + 1] == '"' {
+                    field.push('"');
+                    i += 2;
+                    continue;
+                }
+                in_quotes = false;
+                i += 1;
+                continue;
+            }
+            field.push(c);
+            i += 1;
+            continue;
+        }
+        match c {
+            '"' => {
+                in_quotes = true;
+                i += 1;
+            }
+            ',' => {
+                row.push(std::mem::take(&mut field));
+                i += 1;
+            }
+            '\r' => {
+                if i + 1 < n && b[i + 1] == '\n' {
+                    i += 1;
+                }
+                row.push(std::mem::take(&mut field));
+                rows.push(std::mem::take(&mut row));
+                i += 1;
+            }
+            '\n' => {
+                row.push(std::mem::take(&mut field));
+                rows.push(std::mem::take(&mut row));
+                i += 1;
+            }
+            _ => {
+                field.push(c);
+                i += 1;
+            }
+        }
+    }
+    if !field.is_empty() || !row.is_empty() || in_quotes {
+        row.push(field);
+        rows.push(row);
+    }
+    rows
+}
+
+fn dotted_escape_field(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// csv.stringify 单元格字符串化（镜像 datamod.rs field_str：标量直转，容器走 display）。
+fn dotted_field_str(h: u64) -> String {
+    let c = cell(h);
+    match c.t {
+        T_STR => String::from_utf8_lossy(str_bytes(h)).into_owned(),
+        _ => handle_display(h),
+    }
+}
+
+// ── diff（逐字镜像 textmod.rs split_lines / lcs_diff） ──
+
+fn dotted_split_lines(text: &str) -> Vec<String> {
+    let mut lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
+    if lines.last().map(|s| s.is_empty()).unwrap_or(false) {
+        lines.pop();
+    }
+    lines
+}
+
+fn dotted_lcs_diff(a: &[String], b: &[String]) -> Vec<(char, String)> {
+    let n = a.len();
+    let m = b.len();
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            dp[i][j] = if a[i] == b[j] {
+                dp[i + 1][j + 1] + 1
+            } else {
+                dp[i + 1][j].max(dp[i][j + 1])
+            };
+        }
+    }
+    let mut out = Vec::new();
+    let (mut i, mut j) = (0usize, 0usize);
+    while i < n && j < m {
+        if a[i] == b[j] {
+            out.push((' ', a[i].clone()));
+            i += 1;
+            j += 1;
+        } else if dp[i + 1][j] >= dp[i][j + 1] {
+            out.push(('-', a[i].clone()));
+            i += 1;
+        } else {
+            out.push(('+', b[j].clone()));
+            j += 1;
+        }
+    }
+    while i < n {
+        out.push(('-', a[i].clone()));
+        i += 1;
+    }
+    while j < m {
+        out.push(('+', b[j].clone()));
+        j += 1;
+    }
+    out
+}
+
+// ── glob（手写匹配器替换 regex：* 单层 / ** 跨层 / ? 单字符 / [a-z] 字符类） ──
+// 语义镜像 sysutilmod.rs glob_to_regex 的翻译结果（全路径匹配，'/' 不被 * 跨越）。
+
+/// 匹配一个字符类 [spec]（spec 含 [、可能 ^ 前缀、字符与 a-z 区间）。
+fn dotted_glob_class(spec: &[char], c: char) -> bool {
+    // spec = 类内字符序列（已去掉外层方括号与 '^' 前缀）
+    let negated = spec.first() == Some(&'^');
+    let body = if negated { &spec[1..] } else { spec };
+    let mut hit = false;
+    let mut i = 0;
+    while i < body.len() {
+        if i + 2 < body.len() && body[i + 1] == '-' {
+            if c >= body[i] && c <= body[i + 2] {
+                hit = true;
+            }
+            i += 3;
+        } else {
+            if c == body[i] {
+                hit = true;
+            }
+            i += 1;
+        }
+    }
+    hit != negated
+}
+
+/// 递归 glob 匹配（p/s 为字符切片）：* 单层（不跨 '/'）、** 跨目录（跳过后续 '/'）、
+/// ? 单字符（不含 '/'）、[a-z]/[^abc] 字符类（未闭合 '[' 按字面）。递归深度 = 星号数×匹配长度，
+/// glob 模式短，无爆栈风险。
+fn dotted_glob_match(p: &[char], s: &[char]) -> bool {
+    if p.is_empty() {
+        return s.is_empty();
+    }
+    match p[0] {
+        '*' => {
+            if p.len() > 1 && p[1] == '*' {
+                // ** ：跳过多余 '/' 后匹配任意字符序列（含空）
+                let mut np = 2;
+                while np < p.len() && p[np] == '/' {
+                    np += 1;
+                }
+                let rest = &p[np..];
+                for k in 0..=s.len() {
+                    if dotted_glob_match(rest, &s[k..]) {
+                        return true;
+                    }
+                }
+                false
+            } else {
+                // 单层 * ：匹配本层任意字符序列（含空，不跨 '/'）
+                let rest = &p[1..];
+                for k in 0..=s.len() {
+                    if k > 0 && s[k - 1] == '/' {
+                        break;
+                    }
+                    if dotted_glob_match(rest, &s[k..]) {
+                        return true;
+                    }
+                }
+                false
+            }
+        }
+        '?' => s.first() != Some(&'/') && dotted_glob_match(&p[1..], &s[1..]),
+        '[' => {
+            if s.is_empty() {
+                return false;
+            }
+            // 找闭合 ']'（首 ']' 视为字面量，镜像 glob_to_regex）
+            let mut j = 1;
+            if j < p.len() && (p[j] == '^' || p[j] == '!') {
+                j += 1;
+            }
+            if j < p.len() && p[j] == ']' {
+                j += 1;
+            }
+            while j < p.len() && p[j] != ']' {
+                j += 1;
+            }
+            if j < p.len() {
+                dotted_glob_class(&p[1..j], s[0]) && dotted_glob_match(&p[j + 1..], &s[1..])
+            } else {
+                // 未闭合：按字面 '[' 匹配
+                s[0] == '[' && dotted_glob_match(&p[1..], &s[1..])
+            }
+        }
+        lc => s.first() == Some(&lc) && dotted_glob_match(&p[1..], &s[1..]),
+    }
+}
+
+fn dotted_glob_base(pattern: &str) -> String {
+    let pat = pattern.replace('\\', "/");
+    let cut = pat
+        .char_indices()
+        .find(|(_, c)| matches!(c, '*' | '?' | '['))
+        .map(|(i, _)| i)
+        .unwrap_or(pat.len());
+    let prefix = &pat[..cut];
+    match prefix.rfind('/') {
+        Some(i) => {
+            let base = &prefix[..i];
+            if base.is_empty() {
+                ".".to_string()
+            } else {
+                base.to_string()
+            }
+        }
+        None => ".".to_string(),
+    }
+}
+
+/// 递归收集 base 下所有文件的相对路径（/ 分隔，文件名排序——镜像 collect_files）。
+fn dotted_collect_files(base: &std::path::Path, dir: &std::path::Path, out: &mut Vec<String>) -> std::io::Result<()> {
+    let rd = std::fs::read_dir(dir)?;
+    let mut entries: Vec<_> = rd.filter_map(|e| e.ok()).collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            dotted_collect_files(base, &path, out)?;
+        } else if path.is_file() {
+            if let Ok(rel) = path.strip_prefix(base) {
+                out.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    Ok(())
+}
+
+// ── ptr（逐字镜像 ptrmod.rs 分配表模型） ──
+
+static DOTTED_ALLOCS: std::sync::Mutex<Vec<(usize, usize)>> = std::sync::Mutex::new(Vec::new());
+
+fn dotted_alloc_bytes(size: usize) -> usize {
+    if size == 0 {
+        return 0;
+    }
+    let layout = match std::alloc::Layout::from_size_align(size, 8) {
+        Ok(l) => l,
+        Err(_) => return 0,
+    };
+    let p = unsafe { std::alloc::alloc(layout) };
+    if p.is_null() {
+        return 0;
+    }
+    DOTTED_ALLOCS.lock().unwrap().push((p as usize, size));
+    p as usize
+}
+
+fn dotted_free_bytes(addr: usize) -> bool {
+    let mut all = DOTTED_ALLOCS.lock().unwrap();
+    if let Some(pos) = all.iter().position(|(a, _)| *a == addr) {
+        let size = all.remove(pos).1;
+        if let Ok(layout) = std::alloc::Layout::from_size_align(size, 8) {
+            unsafe { std::alloc::dealloc(addr as *mut u8, layout) };
+        }
+        true
+    } else {
+        false
+    }
+}
+
+/// ptr 句柄读取（Value::Ptr / 非负 int，镜像 ptrmod.rs as_addr）。
+fn dotted_addr(h: u64, arg: usize, ci: u32, pc: u32) -> Result<usize, Hnv> {
+    let c = cell(h);
+    match c.t {
+        T_PTR => Ok(c.a as usize),
+        T_INT if (c.a as i64) >= 0 => Ok(c.a as usize),
+        _ => Err(err_h_help(
+            "H001",
+            &format!("`ptr.*` expects a `ptr` for argument {}, got `{}`", arg + 1, type_name(c.t)),
+            ci,
+            pc,
+            Some("pass a `ptr` value (from ptr.alloc or an FFI call) or `0` for NULL".to_string()),
+        )),
+    }
+}
+
+/// 校验可访问区间 [addr, addr+width)（镜像 ptrmod.rs check_range 文案）。
+fn dotted_check_range(addr: usize, width: usize, offset: i64, what: &str, ci: u32, pc: u32) -> Result<usize, Hnv> {
+    if addr == 0 {
+        return Err(err_h_help(
+            "H304",
+            &format!("`{}`: cannot access a null pointer (0)", what),
+            ci,
+            pc,
+            Some("check the pointer with `ptr.is_null` before dereferencing".to_string()),
+        ));
+    }
+    if offset < 0 {
+        return Err(err_h_help(
+            "H304",
+            &format!("`{}`: negative offset `{}`", what, offset),
+            ci,
+            pc,
+            Some("offsets must be non-negative".to_string()),
+        ));
+    }
+    let all = DOTTED_ALLOCS.lock().unwrap();
+    let entry = all.iter().find(|(a, _)| *a == addr);
+    let size = match entry {
+        Some((_, s)) => *s,
+        None => {
+            return Err(err_h_help(
+                "H304",
+                &format!(
+                    "`{}`: pointer 0x{:x} is not allocated by `ptr.alloc` (already freed, never allocated, or an external FFI handle)",
+                    what, addr
+                ),
+                ci,
+                pc,
+                Some("only pointers returned by `ptr.alloc` can be read/written/freed".to_string()),
+            ));
+        }
+    };
+    let end = match (offset as usize).checked_add(width) {
+        Some(e) => e,
+        None => return Err(err_h("H304", &format!("`{}`: offset overflow", what), ci, pc)),
+    };
+    if end > size {
+        return Err(err_h_help(
+            "H305",
+            &format!("`{}`: out of bounds (block size {}, offset {} + {} bytes)", what, size, offset, width),
+            ci,
+            pc,
+            Some("check the offset against `ptr.size(p)`".to_string()),
+        ));
+    }
+    Ok(addr + offset as usize)
+}
+
+// ── server（逐字镜像 srvmod.rs：队列 + 响应通道） ──
+
+struct DottedReq {
+    id: u64,
+    method: String,
+    path: String,
+    body: String,
+}
+struct DottedResp {
+    status: u16,
+    body: String,
+}
+static DOTTED_QUEUE: std::sync::Mutex<Vec<DottedReq>> = std::sync::Mutex::new(Vec::new());
+static DOTTED_RESPONDERS: std::sync::Mutex<Vec<(u64, std::sync::mpsc::SyncSender<DottedResp>)>> =
+    std::sync::Mutex::new(Vec::new());
+static DOTTED_NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn dotted_json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn dotted_content_type(path: &str) -> String {
+    let p = path.split('?').next().unwrap_or("");
+    let ext = p.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    let base = match ext.as_str() {
+        "html" | "htm" => "text/html",
+        "js" | "mjs" => "text/javascript",
+        "css" => "text/css",
+        "json" => "application/json",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "ico" => "image/x-icon",
+        "txt" => "text/plain",
+        _ => "text/html",
+    };
+    if base.starts_with("text/") || base.contains("json") || base.contains("svg") {
+        format!("{}; charset=utf-8", base)
+    } else {
+        base.to_string()
+    }
+}
+
+fn dotted_write_resp(stream: &mut std::net::TcpStream, status: u16, ctype: &str, body: &str) -> std::io::Result<()> {
+    use std::io::{Read as _, Write as _};
+    let reason = match status {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        301 => "Moved Permanently",
+        302 => "Found",
+        304 => "Not Modified",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        409 => "Conflict",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        501 => "Not Implemented",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ => "Status",
+    };
+    let head = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
+        status,
+        reason,
+        ctype,
+        body.len()
+    );
+    stream.write_all(head.as_bytes())?;
+    stream.write_all(body.as_bytes())?;
+    stream.flush()
+}
+
+fn dotted_read_request(stream: &mut std::net::TcpStream) -> Option<(String, String, String)> {
+    use std::io::Read as _;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let header_end = loop {
+        match stream.read(&mut chunk) {
+            Ok(0) => return None,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break pos + 4;
+                }
+                if buf.len() > 64 * 1024 {
+                    return None;
+                }
+            }
+            Err(_) => return None,
+        }
+    };
+    let head = String::from_utf8_lossy(&buf[..header_end]).to_string();
+    let mut lines = head.split("\r\n");
+    let req_line: Vec<&str> = lines.next()?.split_whitespace().collect();
+    if req_line.len() < 2 {
+        return None;
+    }
+    let method = req_line[0].to_string();
+    let path = req_line[1].to_string();
+    let mut clen = 0usize;
+    for line in lines {
+        if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+            clen = v.trim().parse().ok()?;
+        }
+    }
+    let mut body = buf[header_end..].to_vec();
+    while body.len() < clen {
+        match stream.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => body.extend_from_slice(&chunk[..n]),
+            Err(_) => break,
+        }
+    }
+    body.truncate(clen);
+    let body_str = String::from_utf8_lossy(&body).to_string();
+    Some((method, path, body_str))
+}
+
+fn dotted_handle_conn(mut stream: std::net::TcpStream) {
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+    let (method, path, body) = match dotted_read_request(&mut stream) {
+        Some(r) => r,
+        None => {
+            let _ = dotted_write_resp(&mut stream, 400, "text/plain; charset=utf-8", "bad request");
+            return;
+        }
+    };
+    let id = DOTTED_NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (tx, rx) = std::sync::mpsc::sync_channel::<DottedResp>(1);
+    DOTTED_RESPONDERS.lock().unwrap().push((id, tx));
+    {
+        let mut q = DOTTED_QUEUE.lock().unwrap();
+        if q.len() >= 1024 {
+            q.remove(0);
+        }
+        q.push(DottedReq { id, method, path: path.clone(), body });
+    }
+    let wait = match rx.recv_timeout(std::time::Duration::from_secs(120)) {
+        Ok(r) => (r.status, r.body),
+        Err(_) => {
+            DOTTED_RESPONDERS.lock().unwrap().retain(|(i, _)| *i != id);
+            let _ = dotted_write_resp(&mut stream, 504, "text/plain; charset=utf-8", "no response from script");
+            return;
+        }
+    };
+    let ctype = dotted_content_type(&path);
+    if dotted_write_resp(&mut stream, wait.0, &ctype, &wait.1).is_err() {
+        DOTTED_RESPONDERS.lock().unwrap().retain(|(i, _)| *i != id);
+    }
+}
+
+// ── yaml（逐字镜像 plotmod.rs YAML 子集解析/序列化） ──
+
+fn dotted_strip_comment(line: &str) -> String {
+    let mut in_single = false;
+    let mut in_double = false;
+    for (i, c) in line.char_indices() {
+        match c {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '#' if !in_single && !in_double => return line[..i].to_string(),
+            _ => {}
+        }
+    }
+    line.to_string()
+}
+
+/// YAML 标量解析（镜像 plotmod.rs parse_scalar：数值 / 布尔 / null / 引号字符串 / 裸串）。
+/// 返回句柄（str 直接建 cell）。
+fn dotted_yaml_scalar(s: &str) -> u64 {
+    let t = s.trim();
+    if t.is_empty() {
+        return make_cell(Hnv::null());
+    }
+    if (t.starts_with('"') && t.ends_with('"') && t.len() >= 2)
+        || (t.starts_with('\'') && t.ends_with('\'') && t.len() >= 2)
+    {
+        return make_cell_str(t[1..t.len() - 1].as_bytes().to_vec());
+    }
+    match t {
+        "true" | "True" | "TRUE" => return make_cell(Hnv::bool_(true)),
+        "false" | "False" | "FALSE" => return make_cell(Hnv::bool_(false)),
+        "null" | "Null" | "NULL" | "~" => return make_cell(Hnv::null()),
+        _ => {}
+    }
+    if let Ok(i) = t.parse::<i64>() {
+        return make_cell(Hnv::int(i));
+    }
+    if let Ok(f) = t.parse::<f64>() {
+        return make_cell(Hnv::float(f));
+    }
+    make_cell_str(t.as_bytes().to_vec())
+}
+
+/// 点号内置分发第二段（G2.9）：csv / diff / temp / ptr / glob / server / plot / yaml
+/// + 需外部 crate 的 H999 登记族。
+fn dotted_dispatch2(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> Option<u64> {
+    let a0 = || arg_at(argptr, 0);
+    let a1 = || arg_at(argptr, 1);
+    let a2 = || arg_at(argptr, 2);
+    let r: Option<Hnv> = match name {
+        // ---------- csv ----------
+        "csv.parse" => {
+            let text = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let rows = dotted_parse_csv(&text);
+            let row_cells: Vec<u64> = rows
+                .iter()
+                .map(|r| {
+                    let items: Vec<u64> = r.iter().map(|f| make_cell_str(f.as_bytes().to_vec())).collect();
+                    let c = make_cell_list(&items);
+                    for &it in &items {
+                        cell_release(it);
+                    }
+                    c
+                })
+                .collect();
+            let c = make_cell_list(&row_cells);
+            for &rc in &row_cells {
+                cell_release(rc);
+            }
+            drop_args(argptr, nargs);
+            return Some(c);
+        }
+        "csv.parse_dict" => {
+            let text = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let rows = dotted_parse_csv(&text);
+            let mut it = rows.into_iter();
+            let headers = match it.next() {
+                Some(h) => h,
+                None => {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell_list(&[]));
+                }
+            };
+            let mut out_rows: Vec<u64> = Vec::new();
+            for row in it {
+                let pairs: Vec<(String, u64)> = headers
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, h)| (h.clone(), make_cell_str(row.get(idx).cloned().unwrap_or_default().into_bytes())))
+                    .collect();
+                let dc = make_cell_dict(&pairs);
+                for (_, v) in &pairs {
+                    cell_release(*v);
+                }
+                out_rows.push(dc);
+            }
+            let c = make_cell_list(&out_rows);
+            for &rc in &out_rows {
+                cell_release(rc);
+            }
+            drop_args(argptr, nargs);
+            return Some(c);
+        }
+        "csv.stringify" => {
+            let rows_h = a0();
+            let row_items = match d_list(rows_h) {
+                Some(it) => it,
+                None => {
+                    let ty = type_name(cell(rows_h).t);
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h_help(
+                        "H001",
+                        &format!("`csv.stringify` expects a list of rows, got `{}`", ty),
+                        ci,
+                        pc,
+                        Some("pass [[\"a\", 1], [\"b\", 2]] or a list of dicts".to_string()),
+                    )));
+                }
+            };
+            let mut out = String::new();
+            for (ri, &row) in row_items.iter().enumerate() {
+                let rc = cell(row);
+                match rc.pkind {
+                    P_LIST => {
+                        let l = unsafe { &*(rc.payload as *const HnList) };
+                        let cells: Vec<String> = l.items.iter().map(|&h| dotted_escape_field(&dotted_field_str(h))).collect();
+                        out.push_str(&cells.join(","));
+                        out.push('\n');
+                    }
+                    P_DICT => {
+                        let d = unsafe { &*(rc.payload as *const HnDict) };
+                        let cells: Vec<String> = d
+                            .pairs
+                            .iter()
+                            .filter(|(k, _)| !is_hidden_key(k))
+                            .map(|(_, v)| dotted_escape_field(&dotted_field_str(*v)))
+                            .collect();
+                        out.push_str(&cells.join(","));
+                        out.push('\n');
+                    }
+                    _ => {
+                        let ty = type_name(rc.t);
+                        drop_args(argptr, nargs);
+                        return Some(make_cell(err_h(
+                            "H001",
+                            &format!("`csv.stringify` row {} must be a list or dict, got `{}`", ri + 1, ty),
+                            ci,
+                            pc,
+                        )));
+                    }
+                }
+            }
+            drop_args(argptr, nargs);
+            return Some(make_cell_str(out.into_bytes()));
+        }
+        // ---------- diff ----------
+        "diff.lines" => {
+            let sa = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let sb = match d_str(a1(), name, 1, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let ops = dotted_lcs_diff(&dotted_split_lines(&sa), &dotted_split_lines(&sb));
+            let items: Vec<u64> = ops
+                .into_iter()
+                .map(|(op, line)| {
+                    let pairs = vec![
+                        ("op".to_string(), make_cell_str(op.to_string().into_bytes())),
+                        ("line".to_string(), make_cell_str(line.into_bytes())),
+                    ];
+                    let dc = make_cell_dict(&pairs);
+                    for (_, v) in &pairs {
+                        cell_release(*v);
+                    }
+                    dc
+                })
+                .collect();
+            let c = make_cell_list(&items);
+            for &it in &items {
+                cell_release(it);
+            }
+            drop_args(argptr, nargs);
+            return Some(c);
+        }
+        "diff.unified" => {
+            let sa = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let sb = match d_str(a1(), name, 1, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let ops = dotted_lcs_diff(&dotted_split_lines(&sa), &dotted_split_lines(&sb));
+            let mut out = String::new();
+            let (mut adds, mut dels) = (0i64, 0i64);
+            for (op, line) in &ops {
+                match op {
+                    '+' => {
+                        adds += 1;
+                        out.push_str(&format!("+{}\n", line));
+                    }
+                    '-' => {
+                        dels += 1;
+                        out.push_str(&format!("-{}\n", line));
+                    }
+                    _ => out.push_str(&format!(" {}\n", line)),
+                }
+            }
+            let header = format!("@@ -1,{} +1,{} @@\n", dels.max(1), adds.max(1));
+            let mut result = String::new();
+            result.push_str(&header);
+            result.push_str(&out);
+            drop_args(argptr, nargs);
+            return Some(make_cell_str(result.into_bytes()));
+        }
+        // ---------- temp（镜像 sysutilmod.rs：pid-纳秒-序号） ----------
+        "temp.dir" | "temp.file" => {
+            // 可选 prefix（null/缺省 → "hone-"）；checker 保证类型
+            let prefix = if nargs >= 1 && cell(a0()).t == T_STR {
+                match d_str(a0(), name, 0, ci, pc) {
+                    Ok(v) => v,
+                    Err(e) => return Some(make_cell(e)),
+                }
+            } else {
+                "hone-".to_string()
+            };
+            let seq = DOTTED_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let fname = format!(
+                "{}{}-{}-{}",
+                prefix,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0),
+                seq
+            );
+            let path = std::env::temp_dir().join(fname);
+            let res = if name == "temp.dir" {
+                std::fs::create_dir_all(&path).map(|_| path.clone())
+            } else {
+                std::fs::File::create(&path).map(|_| path.clone())
+            };
+            match res {
+                Ok(p) => {
+                    let out = p.to_string_lossy().to_string();
+                    drop_args(argptr, nargs);
+                    return Some(make_cell_str(out.into_bytes()));
+                }
+                Err(e) => {
+                    let kind = if name == "temp.dir" { "dir" } else { "file" };
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h(
+                        "H300",
+                        &format!("cannot create temp {} `{}`: {}", kind, path.display(), e),
+                        ci,
+                        pc,
+                    )));
+                }
+            }
+        }
+        "temp.remove" => {
+            let path = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let p = std::path::Path::new(&path);
+            let ok = if p.is_dir() {
+                std::fs::remove_dir_all(p).is_ok()
+            } else {
+                std::fs::remove_file(p).is_ok()
+            };
+            Some(Hnv::bool_(ok))
+        }
+        // ---------- glob ----------
+        "glob.match" => {
+            let pattern = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let path = match d_str(a1(), name, 1, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let pchars: Vec<char> = pattern.chars().collect();
+            let schars: Vec<char> = path.replace('\\', "/").chars().collect();
+            Some(Hnv::bool_(dotted_glob_match(&pchars, &schars)))
+        }
+        "glob.list" => {
+            let pattern = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let base = dotted_glob_base(&pattern);
+            let mut rels: Vec<String> = Vec::new();
+            if let Err(e) = dotted_collect_files(std::path::Path::new(&base), std::path::Path::new(&base), &mut rels) {
+                drop_args(argptr, nargs);
+                return Some(make_cell(err_h(
+                    "H300",
+                    &format!("cannot scan `{}`: {}", base, e),
+                    ci,
+                    pc,
+                )));
+            }
+            let pchars: Vec<char> = pattern.chars().collect();
+            let mut matched: Vec<String> = rels.into_iter().filter(|rel| {
+                let schars: Vec<char> = rel.chars().collect();
+                dotted_glob_match(&pchars, &schars)
+            }).collect();
+            matched.sort();
+            let items: Vec<u64> = matched.iter().map(|s| make_cell_str(s.as_bytes().to_vec())).collect();
+            let c = make_cell_list(&items);
+            for &it in &items {
+                cell_release(it);
+            }
+            drop_args(argptr, nargs);
+            return Some(c);
+        }
+        // ---------- ptr ----------
+        "ptr.alloc" => {
+            let size = match d_int(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let addr = dotted_alloc_bytes(size.max(0) as usize);
+            Some(Hnv { t: T_PTR, a: addr as u64, b: 0 })
+        }
+        "ptr.free" => {
+            let addr = match dotted_addr(a0(), 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            if dotted_free_bytes(addr) {
+                Some(Hnv::bool_(true))
+            } else {
+                drop_args(argptr, nargs);
+                let msg = if addr == 0 {
+                    "`ptr.free`: freeing a null pointer (no-op)".to_string()
+                } else {
+                    format!("`ptr.free`: pointer 0x{:x} was not allocated by `ptr.alloc` (double free, or an external FFI handle)", addr)
+                };
+                return Some(make_cell(err_h_help(
+                    "H304",
+                    &msg,
+                    ci,
+                    pc,
+                    Some("call `ptr.free` once per `ptr.alloc`; external FFI handles are owned by the library".to_string()),
+                )));
+            }
+        }
+        "ptr.is_null" => {
+            let addr = match dotted_addr(a0(), 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            Some(Hnv::bool_(addr == 0))
+        }
+        "ptr.is_valid" => {
+            let addr = match dotted_addr(a0(), 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let valid = addr != 0 && DOTTED_ALLOCS.lock().unwrap().iter().any(|(a, _)| *a == addr);
+            Some(Hnv::bool_(valid))
+        }
+        "ptr.size" => {
+            let addr = match dotted_addr(a0(), 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            match DOTTED_ALLOCS.lock().unwrap().iter().find(|(a, _)| *a == addr) {
+                Some((_, s)) => Some(Hnv::int(*s as i64)),
+                None => {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h_help(
+                        "H304",
+                        &format!("`ptr.size`: pointer 0x{:x} is not allocated by `ptr.alloc`", addr),
+                        ci,
+                        pc,
+                        Some("only pointers returned by `ptr.alloc` have a tracked size".to_string()),
+                    )));
+                }
+            }
+        }
+        "ptr.read_int" | "ptr.read_float" | "ptr.read_byte" => {
+            let addr = match dotted_addr(a0(), 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let off = match d_int(a1(), name, 1, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let (width, what) = if name == "ptr.read_byte" { (1usize, "ptr.read_byte") } else { (8usize, name) };
+            let p = match dotted_check_range(addr, width, off, what, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            if name == "ptr.read_int" {
+                Some(Hnv::int(unsafe { std::ptr::read_unaligned(p as *const i64) }))
+            } else if name == "ptr.read_float" {
+                Some(Hnv::float(unsafe { std::ptr::read_unaligned(p as *const f64) }))
+            } else {
+                Some(Hnv::int(unsafe { *(p as *const u8) } as i64))
+            }
+        }
+        "ptr.write_int" | "ptr.write_float" | "ptr.write_byte" => {
+            let addr = match dotted_addr(a0(), 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let off = match d_int(a1(), name, 1, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let c2 = cell(a2());
+            let (width, what) = if name == "ptr.write_byte" { (1usize, "ptr.write_byte") } else { (8usize, name) };
+            if name == "ptr.write_int" || name == "ptr.write_byte" {
+                if c2.t != T_INT {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h_help(
+                        "H001",
+                        &format!("`ptr.*` expects an integer for argument 3, got `{}`", type_name(c2.t)),
+                        ci,
+                        pc,
+                        Some("pass an `int` value".to_string()),
+                    )));
+                }
+            } else if c2.t != T_FLOAT && c2.t != T_INT {
+                drop_args(argptr, nargs);
+                return Some(make_cell(err_h_help(
+                    "H001",
+                    &format!("`ptr.*` expects a float for argument 3, got `{}`", type_name(c2.t)),
+                    ci,
+                    pc,
+                    Some("pass a `float` value".to_string()),
+                )));
+            }
+            let val = c2.a;
+            if name == "ptr.write_byte" && (val as i64) < 0 || name == "ptr.write_byte" && (val as i64) > 255 {
+                drop_args(argptr, nargs);
+                return Some(make_cell(err_h_help(
+                    "H304",
+                    &format!("`ptr.write_byte`: value {} out of range 0..=255", val as i64),
+                    ci,
+                    pc,
+                    Some("bytes are unsigned 8-bit values".to_string()),
+                )));
+            }
+            let p = match dotted_check_range(addr, width, off, what, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            match name {
+                "ptr.write_int" => unsafe { std::ptr::write_unaligned(p as *mut i64, val as i64) },
+                "ptr.write_float" => unsafe {
+                    let f = if c2.t == T_FLOAT { f64::from_bits(val) } else { c2.a as i64 as f64 };
+                    std::ptr::write_unaligned(p as *mut f64, f)
+                },
+                _ => unsafe { *(p as *mut u8) = val as u8 },
+            }
+            Some(Hnv::null())
+        }
+        // ---------- server（镜像 srvmod.rs call） ----------
+        "server.listen" => {
+            let port = match cell(a0()).t {
+                T_INT => cell(a0()).a as i64,
+                other => {
+                    let ty = type_name(other);
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h_help(
+                        "H001",
+                        &format!("`server.listen` expects an integer port, got `{}`", ty),
+                        ci,
+                        pc,
+                        Some("pass `0` to auto-assign a free port".to_string()),
+                    )));
+                }
+            };
+            if !(0..=65535).contains(&port) {
+                drop_args(argptr, nargs);
+                return Some(make_cell(err_h_help(
+                    "H300",
+                    &format!("invalid port `{}`", port),
+                    ci,
+                    pc,
+                    Some("port must be in 0..=65535".to_string()),
+                )));
+            }
+            let addr = format!("127.0.0.1:{}", port);
+            match std::net::TcpListener::bind(&addr) {
+                Ok(listener) => {
+                    let actual = match listener.local_addr() {
+                        Ok(a) => a.port(),
+                        Err(e) => {
+                            drop_args(argptr, nargs);
+                            return Some(make_cell(err_h("H300", &format!("cannot resolve bound address: {}", e), ci, pc)));
+                        }
+                    };
+                    std::thread::spawn(move || {
+                        for stream in listener.incoming() {
+                            if let Ok(s) = stream {
+                                std::thread::spawn(move || dotted_handle_conn(s));
+                            }
+                        }
+                    });
+                    Some(Hnv::int(actual as i64))
+                }
+                Err(e) => {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h_help(
+                        "H300",
+                        &format!("cannot bind {}: {}", addr, e),
+                        ci,
+                        pc,
+                        Some("check the port is not already in use".to_string()),
+                    )));
+                }
+            }
+        }
+        "server.poll" => {
+            let mut q = DOTTED_QUEUE.lock().unwrap();
+            if q.is_empty() {
+                drop_args(argptr, nargs);
+                return Some(make_cell_str(b"[]".to_vec()));
+            }
+            let mut out = String::from("[");
+            let mut first = true;
+            while let Some(r) = q.pop() {
+                if !first {
+                    out.push(',');
+                }
+                first = false;
+                out.push_str(&format!(
+                    "{{\"id\":{},\"method\":{},\"path\":{},\"body\":{}}}",
+                    r.id,
+                    dotted_json_escape(&r.method),
+                    dotted_json_escape(&r.path),
+                    dotted_json_escape(&r.body)
+                ));
+            }
+            out.push(']');
+            drop(q);
+            drop_args(argptr, nargs);
+            return Some(make_cell_str(out.into_bytes()));
+        }
+        "server.respond" => {
+            let id = match cell(a0()).t {
+                T_INT => cell(a0()).a as i64,
+                other => {
+                    let ty = type_name(other);
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h_help(
+                        "H001",
+                        &format!("`server.respond` expects an integer request id, got `{}`", ty),
+                        ci,
+                        pc,
+                        Some("pass the `id` from `server.poll`".to_string()),
+                    )));
+                }
+            };
+            let body = match d_str(a1(), name, 1, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let status = if nargs >= 3 {
+                let c3 = cell(a2());
+                if c3.t != T_INT {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h_help(
+                        "H001",
+                        &format!("`server.respond` expects an integer status code, got `{}`", type_name(c3.t)),
+                        ci,
+                        pc,
+                        Some("pass the status code as the 3rd argument, e.g. `server.respond(id, body, 404)`".to_string()),
+                    )));
+                }
+                let s = c3.a as i64;
+                if !(100..=599).contains(&s) {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h_help(
+                        "H001",
+                        &format!("`server.respond` expects an HTTP status code in 100..=599, got `{}`", s),
+                        ci,
+                        pc,
+                        Some("common codes: 200, 404, 500".to_string()),
+                    )));
+                }
+                s as u16
+            } else {
+                200u16
+            };
+            let mut resp = DOTTED_RESPONDERS.lock().unwrap();
+            if let Some(pos) = resp.iter().position(|(i, _)| *i == id as u64) {
+                let (i, tx) = resp.remove(pos);
+                drop(i);
+                let _ = tx.send(DottedResp { status, body });
+                Some(Hnv::bool_(true))
+            } else {
+                Some(Hnv::bool_(false))
+            }
+        }
+        // ---------- plot / yaml ----------
+        "plot.bar" | "plot.line" => {
+            let is_bar = name == "plot.bar";
+            let vals = match stat_num_list(a0(), if is_bar { "plot.bar" } else { "plot.line xs" }, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            let labels: Vec<String> = if is_bar {
+                if nargs > 1 {
+                    let items = match d_list(a1()) {
+                        Some(it) => it,
+                        None => {
+                            let ty = type_name(cell(a1()).t);
+                            drop_args(argptr, nargs);
+                            return Some(make_cell(err_h(
+                                "H001",
+                                &format!("`plot.bar labels` expects a list of strings, got `{}`", ty),
+                                ci,
+                                pc,
+                            )));
+                        }
+                    };
+                    let mut ls = Vec::with_capacity(items.len());
+                    for (i, &x) in items.iter().enumerate() {
+                        match d_str(x, name, i, ci, pc) {
+                            Ok(s) => ls.push(s),
+                            Err(e) => return Some(make_cell(e)),
+                        }
+                    }
+                    ls
+                } else {
+                    (0..vals.len()).map(|i| i.to_string()).collect()
+                }
+            } else {
+                Vec::new()
+            };
+            let ys = if is_bar { Vec::new() } else {
+                match stat_num_list(a1(), "plot.line ys", ci, pc) {
+                    Ok(v) => v,
+                    Err(e) => return Some(make_cell(e)),
+                }
+            };
+            let out = if is_bar {
+                dotted_plot_bar(&vals, &labels)
+            } else {
+                dotted_plot_line(&vals, &ys)
+            };
+            match out {
+                Ok(s) => {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell_str(s.into_bytes()));
+                }
+                Err(msg) => {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h_help(msg.0, &msg.1, ci, pc, msg.2.map(|s| s.to_string()))));
+                }
+            }
+        }
+        "yaml.parse" => {
+            let text = match d_str(a0(), name, 0, ci, pc) {
+                Ok(v) => v,
+                Err(e) => return Some(make_cell(e)),
+            };
+            match dotted_parse_yaml(&text) {
+                Ok(c) => {
+                    drop_args(argptr, nargs);
+                    return Some(c);
+                }
+                Err(msg) => {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h_help(
+                        "H005",
+                        &format!("yaml: expected `key: value` at line `{}`", msg),
+                        ci,
+                        pc,
+                        Some("map entries must be `key: value`".to_string()),
+                    )));
+                }
+            }
+        }
+        "yaml.stringify" => {
+            let out = match dotted_stringify_yaml(a0(), 0) {
+                Ok(s) => s,
+                Err(()) => {
+                    drop_args(argptr, nargs);
+                    return Some(make_cell(err_h("H001", &format!("`yaml.stringify` cannot serialize `{}`", type_name(cell(a0()).t)), ci, pc)));
+                }
+            };
+            drop_args(argptr, nargs);
+            return Some(make_cell_str(out.into_bytes()));
+        }
+        // ---------- H999 登记：需外部 crate / 平台 API 的家族（std-only runtime 不可移植） ----------
+        "regex.match" | "regex.replace" | "regex.find" | "regex.groups" | "regex.split"
+        | "sqlite.open" | "sqlite.close" | "sqlite.exec" | "sqlite.query" | "sqlite.query_one"
+        | "sqlite.escape" | "sqlite.last_insert_id" | "sqlite.changes"
+        | "zlib.compress" | "zlib.decompress" | "zlib.gzip" | "zlib.gunzip"
+        | "archive.zip_list" | "archive.zip_read" | "archive.zip_extract" | "archive.zip_create"
+        | "archive.tgz_list" | "archive.tgz_read" | "archive.tgz_extract" | "archive.tgz_create"
+        | "http.request" | "http.sse_open" | "http.sse_next" | "http.sse_close"
+        | "smtp.send" | "ws.request"
+        | "crypto.md5" | "crypto.sha1" | "crypto.sha256" | "crypto.hmac_sha256"
+        | "crypto.base64_encode" | "crypto.base64_decode"
+        | "plugin.load" | "plugin.has" | "plugin.list" | "plugin.unload"
+        | "guipro.available" | "guipro.window" | "guipro.add" | "guipro.poll"
+        | "guipro.set_text" | "guipro.get_text" | "guipro.set_value" | "guipro.get_value"
+        | "guipro.close" | "guipro.msgbox"
+        | "guipro.table_add_row" | "guipro.table_clear" | "guipro.table_count"
+        | "guipro.table_get" | "guipro.table_get_row" | "guipro.table_set"
+        | "guipro.tree_add" | "guipro.tree_clear" | "guipro.tree_get"
+        | "guipro.canvas_clear" | "guipro.canvas_line" | "guipro.canvas_rect"
+        | "guipro.canvas_ellipse" | "guipro.canvas_text" | "guipro.canvas_repaint"
+        | "guipro.tray_add" | "guipro.tray_tip" | "guipro.tray_remove" | "guipro.menu"
+        | "guipro.pet_window" | "guipro.pet_frame" | "guipro.pet_text" | "guipro.pet_move"
+        | "guipro.pet_pos" | "guipro.pet_cursor" | "guipro.pet_menu" | "guipro.pet_close"
+        | "sys.msgbox" | "sys.beep" | "sys.clipboard_set" | "sys.get_screen_size" | "sys.reg_read" | "sys.reg_write" => {
+            drop_args(argptr, nargs);
+            return Some(make_cell(err_h_help(
+                "H999",
+                &format!("原生编译后端暂不支持 `{}`（见 M2 G2.9 点号内置族：依赖外部 crate，无法进入 std-only runtime）", name),
+                ci,
+                pc,
+                Some("用解释器运行同一脚本：`hone run <file.hn>`（输出与退出码与本后端一致）".to_string()),
+            )));
+        }
+        _ => return None,
+    };
+    drop_args(argptr, nargs);
+    r.map(make_cell)
+}
+
+/// plot.bar SVG（逐字镜像 plotmod.rs：60px 柱宽、#4c6ef5、基线）。
+fn dotted_plot_bar(values: &[f64], labels: &[String]) -> Result<String, (&'static str, String, Option<&'static str>)> {
+    if values.is_empty() {
+        return Err(("H001", "plot.bar: empty values".to_string(), Some("pass at least one value")));
+    }
+    let n = values.len();
+    let max_v = values.iter().cloned().fold(0.0f64, |a, b| a.max(b)).max(1.0);
+    let w = (n as f64) * 60.0 + 80.0;
+    let h = 320.0f64;
+    let pad = 40.0f64;
+    let chart_h = h - pad - 30.0;
+    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    let fmt_num = |x: f64| -> String {
+        if x.fract() == 0.0 && x.abs() < 9.007_199_254_740_992e15 {
+            format!("{}", x as i64)
+        } else {
+            format!("{:.2}", x)
+        }
+    };
+    let mut out = String::new();
+    out.push_str(&format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\">\n",
+        w, h, w, h
+    ));
+    out.push_str(&format!("<rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" fill=\"#f8f9fa\"/>\n", w, h));
+    let bar_w = 60.0f64;
+    for (i, v) in values.iter().enumerate() {
+        let bh = (v / max_v * chart_h).abs();
+        let x = pad + i as f64 * 60.0;
+        let y = pad + chart_h - bh;
+        out.push_str(&format!(
+            "<rect x=\"{:.1}\" y=\"{:.1}\" width=\"{:.1}\" height=\"{:.1}\" fill=\"#4c6ef5\" rx=\"2\"/>\n",
+            x, y, bar_w - 8.0, bh
+        ));
+        out.push_str(&format!(
+            "<text x=\"{:.1}\" y=\"{:.1}\" font-size=\"12\" fill=\"#333\" text-anchor=\"middle\">{}</text>\n",
+            x + (bar_w - 8.0) / 2.0,
+            y - 5.0,
+            fmt_num(*v)
+        ));
+        if i < labels.len() {
+            out.push_str(&format!(
+                "<text x=\"{:.1}\" y=\"{:.1}\" font-size=\"11\" fill=\"#555\" text-anchor=\"middle\">{}</text>\n",
+                x + (bar_w - 8.0) / 2.0,
+                h - 10.0,
+                esc(&labels[i])
+            ));
+        }
+    }
+    out.push_str(&format!(
+        "<line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#999\" stroke-width=\"1\"/>\n",
+        pad, pad + chart_h, pad + n as f64 * 60.0, pad + chart_h
+    ));
+    out.push_str("</svg>\n");
+    Ok(out)
+}
+
+/// plot.line SVG（逐字镜像 plotmod.rs：640x320、4 条网格线、polyline + 数据点）。
+fn dotted_plot_line(xs: &[f64], ys: &[f64]) -> Result<String, (&'static str, String, Option<&'static str>)> {
+    if xs.len() != ys.len() || xs.is_empty() {
+        return Err((
+            "H001",
+            "plot.line: xs and ys must be non-empty lists of equal length".to_string(),
+            Some("pass two lists of the same length"),
+        ));
+    }
+    let n = xs.len();
+    let w = 640.0f64;
+    let h = 320.0f64;
+    let pad = 40.0f64;
+    let chart_w = w - pad * 2.0;
+    let chart_h = h - pad * 2.0;
+    let min_x = xs.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max_x = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let min_y = ys.iter().cloned().fold(f64::INFINITY, f64::min);
+    let max_y = ys.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let sx = if max_x > min_x { (max_x - min_x) / chart_w } else { 1.0 };
+    let syy = if max_y > min_y { (max_y - min_y) / chart_h } else { 1.0 };
+    let syoff = min_y;
+    let px = |x: f64| pad + (x - min_x) / sx;
+    let py = |y: f64| pad + chart_h - (y - syoff) / syy;
+    let fmt_num = |x: f64| -> String {
+        if x.fract() == 0.0 && x.abs() < 9.007_199_254_740_992e15 {
+            format!("{}", x as i64)
+        } else {
+            format!("{:.2}", x)
+        }
+    };
+    let mut out = String::new();
+    out.push_str(&format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{}\" height=\"{}\" viewBox=\"0 0 {} {}\">\n",
+        w, h, w, h
+    ));
+    out.push_str(&format!("<rect x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" fill=\"#f8f9fa\"/>\n", w, h));
+    for i in 0..=4 {
+        let gy = pad + chart_h * i as f64 / 4.0;
+        let val = max_y - (max_y - min_y) * i as f64 / 4.0;
+        out.push_str(&format!(
+            "<line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#ddd\" stroke-width=\"1\"/>\n",
+            pad, gy, w - pad, gy
+        ));
+        out.push_str(&format!(
+            "<text x=\"{:.1}\" y=\"{:.1}\" font-size=\"11\" fill=\"#666\" text-anchor=\"end\">{}</text>\n",
+            pad - 6.0,
+            gy + 4.0,
+            fmt_num(val)
+        ));
+    }
+    let mut pts = String::new();
+    for i in 0..n {
+        pts.push_str(&format!("{:.1},{:.1} ", px(xs[i]), py(ys[i])));
+    }
+    out.push_str(&format!(
+        "<polyline points=\"{}\" fill=\"none\" stroke=\"#4c6ef5\" stroke-width=\"2\"/>\n",
+        pts.trim()
+    ));
+    for i in 0..n {
+        out.push_str(&format!(
+            "<circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"3\" fill=\"#4c6ef5\"/>\n",
+            px(xs[i]),
+            py(ys[i])
+        ));
+    }
+    out.push_str("</svg>\n");
+    Ok(out)
+}
+
+/// YAML 行预处理（去注释/空行，记缩进）。
+fn dotted_yaml_lines(text: &str) -> Vec<(usize, String)> {
+    let mut lines: Vec<(usize, String)> = Vec::new();
+    for raw in text.lines() {
+        let stripped = dotted_strip_comment(raw);
+        if stripped.trim().is_empty() {
+            continue;
+        }
+        let indent = stripped.chars().take_while(|c| *c == ' ').count();
+        lines.push((indent, stripped.trim_end().to_string()));
+    }
+    lines
+}
+
+/// 拆分 `key: value`（引号感知，镜像 split_key_value）。
+fn dotted_split_key_value(line: &str) -> Option<(String, String)> {
+    let mut in_single = false;
+    let mut in_double = false;
+    let chars: Vec<char> = line.chars().collect();
+    for (i, c) in chars.iter().enumerate() {
+        match c {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            ':' if !in_single && !in_double => {
+                let key = line[..i].trim().to_string();
+                if key.is_empty() {
+                    return None;
+                }
+                let val = line[i + 1..].trim_start().to_string();
+                return Some((key, val));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// 解析一个块（map 或 list），返回句柄；Err(line) = 缺 `key: value` 的行内容。
+fn dotted_yaml_block(lines: &[(usize, String)], idx: &mut usize, indent: usize) -> Result<u64, String> {
+    if *idx >= lines.len() {
+        return Ok(make_cell(Hnv::null()));
+    }
+    let (first_indent, first) = &lines[*idx];
+    if *first_indent < indent {
+        return Ok(make_cell(Hnv::null()));
+    }
+    if first.trim_start().starts_with("-") && first.trim_start().len() > 1 {
+        let mut items: Vec<u64> = Vec::new();
+        while *idx < lines.len() {
+            let (ind, line) = &lines[*idx];
+            if *ind < indent {
+                break;
+            }
+            let content = line.trim_start();
+            if !content.starts_with('-') {
+                break;
+            }
+            let rest = content[1..].trim_start().to_string();
+            *idx += 1;
+            if rest.is_empty() {
+                let item = dotted_yaml_block(lines, idx, indent + 1)?;
+                items.push(item);
+            } else if let Some((k, v)) = dotted_split_key_value(&rest) {
+                let mut pairs: Vec<(String, u64)> = Vec::new();
+                if v.trim().is_empty() {
+                    let child = dotted_yaml_block(lines, idx, *ind + 1)?;
+                    pairs.push((k, child));
+                } else {
+                    pairs.push((k, dotted_yaml_scalar(&v)));
+                }
+                let dc = make_cell_dict(&pairs);
+                for (_, v) in &pairs {
+                    cell_release(*v);
+                }
+                items.push(dc);
+            } else {
+                items.push(dotted_yaml_scalar(&rest));
+            }
+        }
+        let c = make_cell_list(&items);
+        for &it in &items {
+            cell_release(it);
+        }
+        return Ok(c);
+    }
+    let mut pairs: Vec<(String, u64)> = Vec::new();
+    while *idx < lines.len() {
+        let (ind, line) = &lines[*idx];
+        if *ind < indent {
+            break;
+        }
+        let content = line.trim_start();
+        if content.is_empty() || content.starts_with('-') {
+            break;
+        }
+        let (k, v) = match dotted_split_key_value(content) {
+            Some(pair) => pair,
+            None => return Err(content.clone().to_string()),
+        };
+        *idx += 1;
+        if v.trim().is_empty() {
+            let child = dotted_yaml_block(lines, idx, *ind + 1)?;
+            pairs.push((k, child));
+        } else {
+            pairs.push((k, dotted_yaml_scalar(&v)));
+        }
+    }
+    let dc = make_cell_dict(&pairs);
+    for (_, v) in &pairs {
+        cell_release(*v);
+    }
+    Ok(dc)
+}
+
+fn dotted_parse_yaml(text: &str) -> Result<u64, String> {
+    let lines = dotted_yaml_lines(text);
+    if lines.is_empty() {
+        return Ok(make_cell(Hnv::null()));
+    }
+    let mut idx = 0usize;
+    let base = lines[0].0;
+    dotted_yaml_block(&lines, &mut idx, base)
+}
+
+/// yaml_quote（镜像 plotmod.rs：含 :/#/前导-/首尾空白/空 → 双引号包裹并转义 "）。
+fn dotted_yaml_quote(s: &str) -> String {
+    if s.contains(':') || s.contains('#') || s.starts_with('-') || s.trim() != s || s.is_empty() {
+        format!("\"{}\"", s.replace('"', "\\\""))
+    } else {
+        s.to_string()
+    }
+}
+
+/// 标量字符串化（str/int/float/bool/null；容器 None）。
+fn dotted_yaml_scalar_str(h: u64) -> Option<String> {
+    let c = cell(h);
+    match c.t {
+        T_STR => Some(String::from_utf8_lossy(str_bytes(h)).into_owned()),
+        T_INT => Some((c.a as i64).to_string()),
+        T_FLOAT => Some(f64::from_bits(c.a).to_string()),
+        T_BOOL_TRUE => Some("true".to_string()),
+        T_BOOL_FALSE => Some("false".to_string()),
+        T_NULL => Some("null".to_string()),
+        _ => None,
+    }
+}
+
+/// yaml.stringify（镜像 plotmod.rs stringify_yaml；Err(()) = 不可序列化类型）。
+fn dotted_stringify_yaml(h: u64, depth: usize) -> Result<String, ()> {
+    let pad = "  ".repeat(depth);
+    let c = cell(h);
+    match c.pkind {
+        P_DICT => {
+            let d = unsafe { &*(c.payload as *const HnDict) };
+            let visible: Vec<&(String, u64)> = d.pairs.iter().filter(|(k, _)| !is_hidden_key(k)).collect();
+            if visible.is_empty() {
+                return Ok(format!("{}null", pad));
+            }
+            let mut out = String::new();
+            for (k, val) in visible {
+                match dotted_yaml_scalar_str(*val) {
+                    Some(s) => out.push_str(&format!("{}{}: {}\n", pad, dotted_yaml_quote(k), s)),
+                    None => {
+                        out.push_str(&format!("{}{}:\n", pad, dotted_yaml_quote(k)));
+                        out.push_str(&dotted_stringify_yaml(*val, depth + 1)?);
+                        if !out.ends_with('\n') {
+                            out.push('\n');
+                        }
+                    }
+                }
+            }
+            Ok(out)
+        }
+        P_LIST => {
+            let l = unsafe { &*(c.payload as *const HnList) };
+            if l.items.is_empty() {
+                return Ok(format!("{}[]", pad));
+            }
+            let mut out = String::new();
+            for &item in &l.items {
+                match dotted_yaml_scalar_str(item) {
+                    Some(s) => out.push_str(&format!("{}- {}\n", pad, s)),
+                    None => {
+                        let sub = dotted_stringify_yaml(item, depth + 1)?;
+                        let sub_lines: Vec<&str> = sub.lines().collect();
+                        out.push_str(&format!("{}- {}", pad, sub_lines.first().unwrap_or(&"").trim()));
+                        for l2 in &sub_lines[1..] {
+                            out.push('\n');
+                            out.push_str(&format!("{}  {}", pad, l2.trim_start()));
+                        }
+                        out.push('\n');
+                    }
+                }
+            }
+            Ok(out)
+        }
+        _ => {
+            let s = dotted_yaml_scalar_str(h).ok_or(())?;
+            Ok(format!("{}{}", pad, s))
+        }
+    }
 }
 
 // ── FFI 入口（全 u64 进出） ──
@@ -3193,7 +6010,7 @@ mod tests {
         assert_eq!(cell(a).t, T_LIST);
         // b = a（Move retain）：rc=2。
         let b = rt_retain(a);
-        assert_eq!(cell(a).rc, 2);
+        assert_eq!(rc_load(a), 2);
         // a[0] = 100：cow 拷贝（rc=2>1），槽替换后 a 独占、b 原值不变。
         let (h0, h100) = (rt_i64(0), rt_i64(100));
         let new_a = rt_indexset(a, h0, h100, 0, 0);
@@ -3201,7 +6018,7 @@ mod tests {
         assert_eq!(handle_display(new_a), "[100, 2, 3]");
         assert_eq!(handle_display(b), "[1, 2, 3]");
         // cow 拷贝不修改原 cell rc：a 槽 + b 槽 = 2（拷贝时仅值 retain 进新 cell）。
-        assert_eq!(cell(a).rc, 2, "原句柄仍由 a/b 两槽持有");
+        assert_eq!(rc_load(a), 2, "原句柄仍由 a/b 两槽持有");
         cell_release(new_a);
         cell_release(b);
         cell_release(a);
@@ -3220,7 +6037,7 @@ mod tests {
         let base = heap_live();
         let (h1, h2) = (rt_i64(1), rt_i64(2));
         let a = rt_newlist([h1, h2].as_ptr() as u64, 2, 0, 0);
-        assert_eq!(cell(a).rc, 1);
+        assert_eq!(rc_load(a), 1);
         let (h0, h9) = (rt_i64(0), rt_i64(9));
         let r = rt_indexset(a, h0, h9, 0, 0);
         assert_eq!(r, a, "独占写返回原句柄");

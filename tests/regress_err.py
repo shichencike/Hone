@@ -108,6 +108,10 @@ CASES = {
     "alias_undef": 'alias nope as nn;\nnn();\n',
     "alias_undef_builtin": 'alias nope2 as nn2;\nprint(to_str(nn2([1])));\n',
     "throw_num": 'throw 5;\n',
+    # G2.9 点号内置族 H999 登记（仅 nat 产生，解释器/VM 正常执行——能力边界口径）
+    "dotted_h999_regex": 'print(to_str(regex.match("a+", "aaa")));\n',
+    "dotted_h999_sqlite": 'db = sqlite.open(":memory:");\nprint(to_str(db != 0));\n',
+    "dotted_h999_http": 'print(http_get("http://127.0.0.1:1/x"));\n',
     # try/catch 上下文
     "try_catch_ctx": (
         'fn risky(x) { return 10 / x; }\n'
@@ -118,7 +122,11 @@ CASES = {
 # natgen 能力边界：lowering 阶段报 H990/H999（M2 任务组待落地），无法比对运行期错误。
 # 显式登记而非静默跳过——新增条目必须写明待落地任务号，避免「漏实现被当成通过」。
 NAT_UNSUPPORTED = {
-    "await_non_future": "H999 原生编译后端不支持 await → M2 G2.6 async-await（待 runtime 线程基础设施就绪后解除）",
+    # G2.9 点号内置族 H999 登记（std-only runtime 无法承载外部 crate 依赖的家族）：
+    # interp/VM 正常执行、nat 有意报 H999——能力边界口径，跳过 nat 比对而非静默漏测。
+    "dotted_h999_regex": "H999 原生编译后端暂不支持 regex.*（见 M2 G2.9 点号内置族：需 regex crate）",
+    "dotted_h999_sqlite": "H999 原生编译后端暂不支持 sqlite.*（见 M2 G2.9 点号内置族：需 FFI libsqlite3）",
+    "dotted_h999_http": "H999 原生编译后端暂不支持 http_get（见 M2 G2.9 点号内置族：需 rustls/TLS 栈）",
 }
 
 
@@ -157,12 +165,16 @@ def main():
     have_nat = shutil.which("rustc") is not None
     if not have_nat:
         print("nat: 无 rustc，跳过第三引擎（仅比对 interp / VM）", file=sys.stderr)
+    # 可选子集过滤：python tests/regress_err.py dotted_ 只跑名字含该子串的用例
+    cases = CASES
+    if len(sys.argv) > 1:
+        cases = {k: v for k, v in CASES.items() if any(s in k for s in sys.argv[1:])}
     tmp = tempfile.mkdtemp(prefix="hone_err_")
     passed = failed = 0
     fails = []
     counts = {"ok": 0, "build_reject": 0, "unsupported": 0, "off": 0}
     try:
-        for name, src in CASES.items():
+        for name, src in cases.items():
             path = os.path.join(tmp, name + ".hn")
             with open(path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(src)

@@ -1646,6 +1646,11 @@ fn build_native(
             if let vm::Instr::Field(_, _, field) = ins {
                 push_str(field);
             }
+            // G2.6：GoCall callee 名进 strtab（rt_gocall 名分发用；go 目标可能从不作为
+            // Call 名出现，漏收集会静默解析成 strtab[0]）。
+            if let vm::Instr::GoCall(func, _, _) = ins {
+                push_str(func);
+            }
             if let vm::Instr::ThrowStr(s) = ins {
                 push_str(s);
             }
@@ -1813,6 +1818,27 @@ fn build_native(
         nparams_items.len(),
         nparams_items.join(",")
     ));
+    // G2.8：每 chunk 形参默认值位（0/1 扁平数组 + 每 chunk 形参个数）——参数个数校验
+    // 据此放宽（省略带默认值的形参不算错误，由 chunk 序言求默认值填入）。
+    let mut param_def_bits: Vec<String> = Vec::new();
+    let mut param_def_counts: Vec<String> = Vec::new();
+    for c in &vm_mod.chunks {
+        param_def_counts.push(c.params.len().to_string());
+        for i in 0..c.params.len() {
+            let has = c.param_defaults.get(i).copied().unwrap_or(false);
+            param_def_bits.push(if has { "1" } else { "0" }.to_string());
+        }
+    }
+    wrapper.push_str(&format!(
+        "static NAT_PARAM_DEF_BITS: [u32; {}] = [{}];\n",
+        param_def_bits.len(),
+        param_def_bits.join(",")
+    ));
+    wrapper.push_str(&format!(
+        "static NAT_PARAM_DEF_COUNTS: [u32; {}] = [{}];\n",
+        param_def_counts.len(),
+        param_def_counts.join(",")
+    ));
     // G2.4：每 chunk 形参**名**表（strtab 索引扁平数组 + 每 chunk 条目数）——
     // 缺参报错要指名道姓（镜像解释器「missing argument `c` of `f`」）。
     let mut param_name_items: Vec<String> = Vec::new();
@@ -1931,6 +1957,36 @@ fn build_native(
     ));
     wrapper.push_str("#[allow(non_camel_case_types)]\n");
     wrapper.push_str("fn main() {\n");
+    // G2.9：CLI 参数初始化（镜像 builtins::init_args 的解析规则，传 (key, val) 对给
+    // runtime 的 args.get / args.has）。`--key val` / `-k val` 取值；单独标志记 "true"。
+    wrapper.push_str("    let raw_args: Vec<String> = std::env::args().skip(1).collect();\n");
+    wrapper.push_str("    let mut ak: Vec<&str> = Vec::new();\n");
+    wrapper.push_str("    let mut av: Vec<&str> = Vec::new();\n");
+    wrapper.push_str("    let mut i = 0usize;\n");
+    wrapper.push_str("    while i < raw_args.len() {\n");
+    wrapper.push_str("        let a = &raw_args[i];\n");
+    wrapper.push_str("        if let Some(key) = a.strip_prefix(\"--\") {\n");
+    wrapper.push_str("            if i + 1 < raw_args.len() && !raw_args[i + 1].starts_with('-') {\n");
+    wrapper.push_str("                ak.push(key); av.push(raw_args[i + 1].as_str()); i += 2;\n");
+    wrapper.push_str("            } else {\n");
+    wrapper.push_str("                ak.push(key); av.push(\"true\"); i += 1;\n");
+    wrapper.push_str("            }\n");
+    wrapper.push_str("        } else if a.len() == 2 && a.starts_with('-') {\n");
+    wrapper.push_str("            let key = &a[1..];\n");
+    wrapper.push_str("            if i + 1 < raw_args.len() && !raw_args[i + 1].starts_with('-') {\n");
+    wrapper.push_str("                ak.push(key); av.push(raw_args[i + 1].as_str()); i += 2;\n");
+    wrapper.push_str("            } else {\n");
+    wrapper.push_str("                ak.push(key); av.push(\"true\"); i += 1;\n");
+    wrapper.push_str("            }\n");
+    wrapper.push_str("        } else {\n");
+    wrapper.push_str("            i += 1;\n");
+    wrapper.push_str("        }\n");
+    wrapper.push_str("    }\n");
+    wrapper.push_str("    let akb: Vec<u8> = ak.concat().into_bytes();\n");
+    wrapper.push_str("    let avb: Vec<u8> = av.concat().into_bytes();\n");
+    wrapper.push_str("    let akl: Vec<usize> = ak.iter().map(|s| s.len()).collect();\n");
+    wrapper.push_str("    let avl: Vec<usize> = av.iter().map(|s| s.len()).collect();\n");
+    wrapper.push_str("    hn_rt_args_init(akb.as_ptr(), akl.as_ptr(), avb.as_ptr(), avl.as_ptr(), ak.len());\n");
     wrapper.push_str("    let ptrs: Vec<*const u8> = NAT_STRS.iter().map(|s| s.as_ptr()).collect();\n");
     wrapper.push_str("    let lens: Vec<usize> = NAT_STRS.iter().map(|s| s.len()).collect();\n");
     wrapper.push_str(&format!(
@@ -1961,6 +2017,10 @@ fn build_native(
     wrapper.push_str(&format!(
         "    hn_rt_param_names(NAT_PARAM_NAMES.as_ptr(), NAT_PARAM_NAME_COUNTS.as_ptr(), NAT_PARAM_NAME_COUNTS.len());\n"
     ));
+    // G2.8：形参默认值位表（参数个数校验据此放宽）。
+    wrapper.push_str(&format!(
+        "    hn_rt_param_defaults(NAT_PARAM_DEF_BITS.as_ptr(), NAT_PARAM_DEF_COUNTS.as_ptr(), NAT_PARAM_DEF_COUNTS.len());\n"
+    ));
     wrapper.push_str(&format!(
         "    hn_rt_locals_init(NAT_LOCS.as_ptr(), NAT_LOC_COUNTS.as_ptr(), NAT_LOC_COUNTS.len());\n"
     ));
@@ -1973,6 +2033,21 @@ fn build_native(
     // G2.5：别名表（内置 / 点号内置 / struct 构造目标的别名解析）。
     wrapper.push_str(&format!(
         "    hn_rt_aliases_init(NAT_ALIASES.as_ptr(), NAT_ALIASES.len() / 2);\n"
+    ));
+    // G2.6：async 函数名表（strtab 索引；call_global 据此把 async 调用导到 spawn_async）。
+    let mut async_items: Vec<String> = vm_mod
+        .async_fns
+        .iter()
+        .map(|n| strtab_idx.get(n).copied().unwrap_or(0).to_string())
+        .collect();
+    async_items.sort();
+    wrapper.push_str(&format!(
+        "static NAT_ASYNC_FNS: [u32; {}] = [{}];\n",
+        async_items.len(),
+        async_items.join(",")
+    ));
+    wrapper.push_str(&format!(
+        "    hn_rt_asyncs_init(NAT_ASYNC_FNS.as_ptr(), NAT_ASYNC_FNS.len());\n"
     ));
     wrapper.push_str("    std::process::exit(hn_entry() as i32);\n");
     wrapper.push_str("    // hn_entry：ERR → rt_unwind（渲染 → stderr → exit(1)）；否则退出码 0。\n");

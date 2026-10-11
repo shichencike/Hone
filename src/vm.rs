@@ -122,6 +122,11 @@ pub struct Chunk {
     pub labels: HashMap<String, usize>,
     pub nregs: usize,
     pub params: Vec<String>,
+    /// 形参默认值位（与 `params` 同序）：`true` = 该形参带默认表达式。
+    /// G2.8：调用侧据此放宽参数个数校验（省略的形参由 chunk 序言求默认值填入）。
+    pub param_defaults: Vec<bool>,
+    /// 实参数寄存器号：chunk 序言读它判断哪些形参被省略；无默认形参时为 `usize::MAX`。
+    pub argc_reg: usize,
     /// lambda chunk 专用：被捕获变量 (名字, 寄存器号)，调用时先把这些寄存器填回捕获值。
     pub captured_regs: Vec<(String, usize)>,
     /// 本 chunk 声明的局部变量名 → 寄存器号（编译期收集，运行时供 do_call 做 lambda/前向引用解析）。
@@ -156,6 +161,16 @@ struct Compiler {
     loop_labels: Vec<(String, String)>, // (continue_label, break_label)
     label_seq: usize,
     syn_seq: usize,
+    /// G2.8：当前 chunk 的形参默认值位 / 实参数寄存器（finish_chunk 取走并复位）。
+    cur_param_defaults: Vec<bool>,
+    cur_argc_reg: usize,
+    /// G2.8：正在编译某个默认表达式（值 = 该形参序号）。此模式下变量解析失败不报编译期
+    /// 「未定义变量」，而发射运行期 Raise(H002)——镜像解释器：默认值在**仅含形参**的调用
+    /// 环境里求值（`fn f(a, b: int = c, c: int = 3)` 解释器运行期报 H002 undefined
+    /// variable `c`，而 VM 原先静默取到后置形参的 null）。
+    in_default_expr: Option<usize>,
+    /// G2.8：当前 chunk 形参名 → 序号（默认表达式里序号 ≥ 当前默认形参的形参视为不可见）。
+    cur_param_index: HashMap<String, usize>,
     err: Option<ZError>,
 }
 
@@ -184,6 +199,10 @@ impl Compiler {
             loop_labels: Vec::new(),
             label_seq: 0,
             syn_seq: 0,
+            cur_param_defaults: Vec::new(),
+            cur_argc_reg: usize::MAX,
+            in_default_expr: None,
+            cur_param_index: HashMap::new(),
             err: None,
         }
     }
@@ -284,6 +303,25 @@ impl Compiler {
         }
         r
     }
+    /// G2.8：当前是否在编译「序号为 n 的形参的默认表达式」，且 `name` 是序号 ≥ n 的形参
+    /// （后置形参在解释器的调用环境里尚未绑定 → 运行期 H002）。
+    fn hidden_by_default(&self, name: &str) -> bool {
+        match self.in_default_expr {
+            Some(limit) => self.cur_param_index.get(name).map_or(false, |&i| i >= limit),
+            None => false,
+        }
+    }
+    /// 分配一个**常驻**寄存器（推进 `var_next`，不会被 `reset_tmp` 回收）：G2.8 序言的
+    /// 实参数槽用它——序言在函数体之前执行，槽必须活到整个 chunk 结束。
+    fn alloc_pinned(&mut self) -> usize {
+        let r = self.var_next;
+        self.var_next += 1;
+        if r > self.max_reg {
+            self.max_reg = r;
+        }
+        self.tmp_next = self.var_next;
+        r
+    }
     fn reset_tmp(&mut self) {
         self.tmp_next = self.var_next;
     }
@@ -378,6 +416,7 @@ impl Compiler {
     }
 
     fn finish_chunk(&mut self, name: &str, params: Vec<String>) -> usize {
+        self.cur_param_index.clear();
         self.resolve();
         let nregs = self.max_reg + 1;
         let chunk = Chunk {
@@ -388,6 +427,8 @@ impl Compiler {
             labels: std::mem::take(&mut self.labels),
             nregs,
             params,
+            param_defaults: std::mem::take(&mut self.cur_param_defaults),
+            argc_reg: std::mem::replace(&mut self.cur_argc_reg, usize::MAX),
             captured_regs: Vec::new(),
             locals: std::mem::take(&mut self.cur_locals),
         };
@@ -479,22 +520,74 @@ impl Compiler {
         Ok(())
     }
 
-    fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
+    /// G2.8：默认形参序言——被调用时按「实参数 ≤ 形参序号」逐个求默认值填入形参寄存器。
+///
+/// 放在 chunk 体最前面（而非调用方求值）的原因：解释器在**仅含形参**的调用环境里求默认值
+/// （`fn f(a, b: a * 2)` 可行，引用全局 / 后置形参则被 checker 静态拒），调用方求值会
+/// 额外看见调用点的局部变量，与解释器分叉。序言在 callee 帧内执行，作用域天然正确。
+///
+/// 实参数经 `argc_reg` 传入（VM 的 call_chunk / call_lambda 与 natgen 生成的 chunk 序言
+/// 都写这个寄存器）。返回该寄存器号；无默认形参时返回 `usize::MAX`。
+fn emit_default_prologue(&mut self, params: &[Param], preg: &[usize]) -> usize {
+    if !params.iter().any(|p| p.default.is_some()) {
+        return usize::MAX;
+    }
+    // 序言专用寄存器：必须是「常驻」槽（reset_tmp 会回收 tmp_next 之后的槽）。
+    let argc = self.alloc_pinned();
+    self.cur_argc_reg = argc;
+    self.cur_param_defaults = params.iter().map(|p| p.default.is_some()).collect();
+    for (i, p) in params.iter().enumerate() {
+        let Some(def) = &p.default else { continue };
+        let lskip = self.new_label("Lnodflt");
+        let lnext = self.new_label("Ldfltnext");
+        let ki = self.tmp();
+        let kidx = self.const_idx(Const::Int(i as i64));
+        self.emit(Instr::LoadK(ki, kidx));
+        let c = self.tmp();
+        // 实参数 ≤ i ⇔ 第 i 个形参未被提供 ⇔ 需要求默认值
+        self.emit(Instr::Le(c, argc, ki));
+        self.jif(c, &lskip);
+        let saved = self.cur_span.clone();
+        let saved_mode = self.in_default_expr.replace(i);
+        self.cur_span = p.span;
+        let rv = self.compile_expr(def);
+        self.in_default_expr = saved_mode;
+        self.cur_span = saved;
+        self.emit(Instr::Move(preg[i], rv));
+        self.jmp(&lnext);
+        self.emit_label(&lskip);
+        self.emit_label(&lnext);
+        self.reset_tmp();
+    }
+    argc
+}
+
+fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
         self.enter();
         let mut pnames = Vec::new();
+        let mut preg = Vec::new();
         for p in params {
             if p.cow {
                 self.fail(codes::NOT_IMPLEMENTED, "VM: `cow` 形参暂不支持");
                 return;
             }
-            self.decl(&p.name);
+            preg.push(self.decl(&p.name));
             pnames.push(p.name.clone());
         }
+        // G2.8：登记形参序号（默认表达式里后置形参不可见）+ 默认形参序言
+        // （必须在函数体之前，此时作用域里只有形参）
+        self.cur_param_index = pnames
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.clone(), i))
+            .collect();
+        self.emit_default_prologue(params, &preg);
         for s in body {
             self.compile_stmt(s);
             self.reset_tmp();
         }
         self.emit(Instr::RetNull);
+        self.in_default_expr = None;
         self.exit();
         self.finish_chunk(name, pnames);
     }
@@ -1023,8 +1116,30 @@ impl Compiler {
                 self.fail(codes::NOT_IMPLEMENTED, "VM: `type` 实例暂不支持");
                 0
             }
+            Expr::Ident { name, .. } if self.hidden_by_default(name) => {
+                // G2.8：默认表达式只能看见序号更小的形参（后置形参在解释器里未绑定）
+                let r = self.tmp();
+                self.emit(Instr::Raise(
+                    codes::UNDEFINED,
+                    format!("undefined variable `{name}`"),
+                    Some("declare the variable before reading it".to_string()),
+                ));
+                self.emit(Instr::LoadNull(r));
+                r
+            }
             Expr::Ident { name, .. } => match self.lookup(name) {
                 Some(r) => r,
+                None if self.in_default_expr.is_some() => {
+                    // G2.8：默认表达式求值失败 → 运行期 H002（文案 / help / 定位对齐解释器）。
+                    let r = self.tmp();
+                    self.emit(Instr::Raise(
+                        codes::UNDEFINED,
+                        format!("undefined variable `{name}`"),
+                        Some("declare the variable before reading it".to_string()),
+                    ));
+                    self.emit(Instr::LoadNull(r));
+                    r
+                }
                 None => {
                     self.fail(codes::UNDEFINED, format!("VM: 未定义变量 `{}`", name));
                     0
@@ -1355,10 +1470,19 @@ impl Compiler {
                     cap_regs.push((name.clone(), r));
                 }
                 let mut pnames = Vec::new();
+                let mut preg = Vec::new();
                 for p in params {
-                    self.decl(&p.name);
+                    preg.push(self.decl(&p.name));
                     pnames.push(p.name.clone());
                 }
+                // G2.8：默认形参序言（在 lambda chunk 内，作用域 = 捕获变量 + 形参，
+                // 与解释器 exec_lambda 的调用环境一致）+ 形参序号登记
+                self.cur_param_index = pnames
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| (n.clone(), i))
+                    .collect();
+                self.emit_default_prologue(params, &preg);
                 for s in body {
                     self.compile_stmt(s);
                     self.reset_tmp();
@@ -1389,9 +1513,10 @@ impl Compiler {
                 r
             }
             Expr::Await { expr, .. } => {
-                let r = self.compile_expr(expr);
-                self.emit(Instr::Await(r, r));
-                r
+                let src = self.compile_expr(expr);
+                let dst = self.tmp();
+                self.emit(Instr::Await(dst, src));
+                dst
             }
         }
     }
@@ -2392,9 +2517,17 @@ impl Vm {
 
     fn call_chunk(&mut self, ci: usize, args: Vec<Value>, span: &Span) -> Result<Value, Value> {
         let expected = self.chunks[ci].params.len();
-        if args.len() != expected {
-            // G2.4：消息 / 定位 / help 对齐解释器 call_fn（原先是中文硬编码、无定位无 help，
-            // 经运算符重载路径可达——`fn __add(a)` 被 `d + 1` 以 2 实参调用）。
+        // G2.8：默认形参放宽个数校验——实参过多报错；实参不足时，缺失位置若带默认值则
+        // 交由 chunk 序言填值（否则报「missing argument」，文案对齐解释器）。
+        let has_default = |i: usize| {
+            self.chunks[ci]
+                .param_defaults
+                .get(i)
+                .copied()
+                .unwrap_or(false)
+        };
+        let missing_required = args.len() < expected && !has_default(args.len());
+        if args.len() > expected || missing_required {
             let name = self.chunks[ci].name.clone();
             let (msg, help) = if args.len() > expected {
                 (
@@ -2424,6 +2557,11 @@ impl Vm {
         }
         let nregs = self.chunks[ci].nregs;
         let mut regs = vec![Value::Null; nregs];
+        // 实参数写入序言槽（G2.8）：序言按它决定哪些形参需要求默认值。
+        let argc_reg = self.chunks[ci].argc_reg;
+        if argc_reg != usize::MAX && argc_reg < nregs {
+            regs[argc_reg] = Value::Int(args.len() as i64);
+        }
         for (i, a) in args.iter().enumerate() {
             if i < nregs {
                 regs[i] = a.clone();
@@ -2457,7 +2595,14 @@ impl Vm {
         };
         let chunk = &self.chunks[ci];
         let expected = chunk.params.len();
-        if args.len() != expected {
+        // G2.8：默认形参放宽个数校验（与 call_chunk 同口径）。
+        let missing_required = args.len() < expected
+            && !chunk
+                .param_defaults
+                .get(args.len())
+                .copied()
+                .unwrap_or(false);
+        if args.len() > expected || missing_required {
             // G2.4：消息 / help 对齐解释器 call_lambda（原先中文硬编码、无 help）。
             let (msg, help) = if args.len() > expected {
                 (
@@ -2479,6 +2624,10 @@ impl Vm {
         }
         let nregs = chunk.nregs;
         let mut regs = vec![Value::Null; nregs];
+        // 实参数写入序言槽（G2.8）。
+        if chunk.argc_reg != usize::MAX && chunk.argc_reg < nregs {
+            regs[chunk.argc_reg] = Value::Int(args.len() as i64);
+        }
         for (name, r) in &chunk.captured_regs {
             if let Some(v) = lam.captured.get(name) {
                 regs[*r] = v.clone();
@@ -3427,13 +3576,26 @@ fn chunk_text(chunk: &Chunk) -> String {
         chunk.locals.iter().map(|(k, v)| (k.clone(), *v)).collect();
     locals.sort_by_key(|(_, r)| *r);
     let mut out = String::new();
+    let defaults_text = chunk
+        .param_defaults
+        .iter()
+        .map(|b| if *b { "1" } else { "0" })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let argc_text = if chunk.argc_reg == usize::MAX {
+        "-1".to_string()
+    } else {
+        chunk.argc_reg.to_string()
+    };
     out.push_str(&format!(
-        "; chunk {}  (nregs={}, params=[{}], captures=[{}], locals=[{}])\n",
+        "; chunk {}  (nregs={}, params=[{}], captures=[{}], locals=[{}], defaults=[{}], argc={})\n",
         chunk.name,
         chunk.nregs,
         chunk.params.join(", "),
         fmt_pairs(&chunk.captured_regs),
-        fmt_pairs(&locals)
+        fmt_pairs(&locals),
+        defaults_text,
+        argc_text
     ));
     for (i, k) in chunk.consts.iter().enumerate() {
         out.push_str(&format!("  .const {} = {}\n", i, const_text(k)));
@@ -3824,6 +3986,8 @@ fn parse_chunk_header(rest: &str) -> Result<Chunk, String> {
     let mut params: Vec<String> = Vec::new();
     let mut captured: Vec<(String, usize)> = Vec::new();
     let mut locals: Vec<(String, usize)> = Vec::new();
+    let mut param_defaults: Vec<bool> = Vec::new();
+    let mut argc_reg = usize::MAX;
     for field in split_top(inner, ',') {
         let f = field.trim();
         if let Some(v) = f.strip_prefix("nregs=") {
@@ -3835,6 +3999,20 @@ fn parse_chunk_header(rest: &str) -> Result<Chunk, String> {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
+        } else if let Some(v) = f.strip_prefix("defaults=[") {
+            let v = v.strip_suffix(']').ok_or("defaults 缺少 ]")?;
+            param_defaults = v
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s == "1")
+                .collect();
+        } else if let Some(v) = f.strip_prefix("argc=") {
+            // -1 = 无默认形参（无序言）
+            argc_reg = match v.trim() {
+                "-1" => usize::MAX,
+                t => t.parse().map_err(|_| "argc 不是整数".to_string())?,
+            };
         } else if let Some(v) = f.strip_prefix("captures=[") {
             let v = v.strip_suffix(']').ok_or("captures 缺少 ]")?;
             captured = parse_pairs(v)?;
@@ -3851,6 +4029,8 @@ fn parse_chunk_header(rest: &str) -> Result<Chunk, String> {
         labels: HashMap::new(),
         nregs,
         params,
+        param_defaults,
+        argc_reg,
         captured_regs: captured,
         locals: locals.into_iter().collect(),
     })

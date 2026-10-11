@@ -163,17 +163,95 @@ ALIAS = {
     "goto_out_loop": 'for (i = 0; i < 5; i = i + 1) {\n  if (i == 2) { goto out; }\n  print(to_str(i));\n}\nout:\nprint("out");\n',
     "goto_nested": 'j = 0;\nfor (a = 0; a < 3; a = a + 1) {\n  for (b = 0; b < 3; b = b + 1) {\n    j = j + 1;\n    if (b == 1) { goto done; }\n  }\n}\ndone:\nprint(to_str(j));\n',
     "goto_in_try": 'try {\n  goto skip;\n  print("nope");\n} catch e {\n  print("caught");\n}\nskip:\nprint("after");\n',
-    # 注：`alias time.now as t`（点号内置别名）不固化——runtime 尚无点号内置实现（G2.9），
-    # 直接写 time.now() 也是 H404，与 alias 无关。
+    # G2.9 后点号内置别名已可用（runtime + natgen 均有实现），见下方 DOTTED 组的 alias_dotted。
+}
+
+# ── 点号内置（G2.9）：time/path/stat/matrix/csv/diff/yaml/plot/glob/env/db/ptr/args ──
+# 确定性输出为主（time.parse/format、纯计算、纯文本）；random/uuid/temp/server 等不确定
+# 输出不固化（各自口径见进度文档 G2.9）。
+DOTTED = {
+    "time_parse": 'print(to_str(time.parse("2024-01-15T10:30:00Z")));\n',
+    "time_format": 'print(time.format(1705314600, "YYYY-MM-DD HH:mm:SS"));\n',
+    "time_add_diff": 'print(to_str(time.add(1000, 500)));\nprint(to_str(time.diff(1000, 400)));\n',
+    "time_weekday": 'print(to_str(time.weekday(0)));\nprint(to_str(time.weekday(1705314600)));\n',
+    "path_join": 'print(path.join("a", "b", "c.txt"));\n',
+    "path_dirbase": 'print(path.dirname("a/b/c.txt"));\nprint(path.basename("a/b/c.txt"));\n',
+    "path_nosep": 'print(path.dirname("file.txt"));\nprint(to_str(path.basename("/")));\n',
+    "stat_int": 'print(to_str(stat.sum([1, 2, 3])));\nprint(to_str(stat.mean([1, 2, 3, 4])));\n',
+    "stat_median": 'print(to_str(stat.median([3, 1, 2])));\nprint(to_str(stat.min([3, 1, 2])));\nprint(to_str(stat.max([3, 1, 2])));\n',
+    "stat_var": 'print(to_str(stat.variance([1, 2, 3])));\nprint(to_str(stat.stddev([1, 2, 3])));\n',
+    "stat_float": 'print(to_str(stat.sum([1.5, 2.5])));\n',
+    "matrix_identity": 'print(to_str(matrix.identity(2)));\n',
+    "matrix_transpose": 'print(to_str(matrix.transpose([[1, 2, 3], [4, 5, 6]])));\n',
+    "matrix_add_scale": 'print(to_str(matrix.add([[1, 2], [3, 4]], [[10, 20], [30, 40]])));\nprint(to_str(matrix.scale([[1, 2], [3, 4]], 2)));\n',
+    "matrix_mul": 'print(to_str(matrix.mul([[1, 2], [3, 4]], [[1, 0], [0, 1]])));\n',
+    "csv_parse": 'print(csv.parse("a,b\n1,2\n"));\n',
+    "csv_parse_dict": 'd = csv.parse_dict("h1,h2\nv1,v2\n");\nfor r in d { {h1, h2} = r; print(h1); print(h2); }\n',
+    "csv_stringify": 'print(csv.stringify([["x", "y"], ["1", "2"]]));\n',
+    "csv_quote": 'print(csv.stringify([["a,b", "c"]]));\n',
+    "diff_lines": 'd = diff.lines("a\nb\nc", "a\nx\nc");\nfor it in d { {op, line} = it; print(op); }\n',
+    "diff_unified": 'print(diff.unified("a\nb", "a\nx"));\n',
+    "yaml_parse": 'y = yaml.parse("name: hone\nver: 7\nok: true\n");\n{name: n, ver, ok} = y;\nprint(n);\nprint(ver);\nprint(to_str(ok));\n',
+    "yaml_stringify": 'print(yaml.stringify({"a": 1, "b": "x"}));\n',
+    "plot_bar_len": 'svg = plot.bar([1, 2], ["a", "b"]);\nprint(len(svg) > 100);\n',
+    "plot_line_len": 'svg = plot.line([1, 2, 3], [4, 5, 6]);\nprint(len(svg) > 100);\n',
+    "glob_match": 'print(to_str(glob.match("*.hn", "main.hn")));\nprint(to_str(glob.match("src/**/*.rs", "src/sub/a.rs")));\nprint(to_str(glob.match("?.txt", "ab.txt")));\nprint(to_str(glob.match("[a-c].txt", "b.txt")));\n',
+    "glob_nomatch": 'print(to_str(glob.match("*.hn", "a/b/main.hn")));\nprint(to_str(glob.match("[^a].txt", "a.txt")));\n',
+    "env_set_get": 'env.set("HONE_PROBE", "v1");\nprint(env.get("HONE_PROBE"));\n',
+    "env_get_missing": 'print(env.get("HONE_PROBE_MISSING_39"));\n',
+    "db_set_get": 'db.set("k", "v");\nprint(db.get("k"));\n',
+    "db_get_missing": 'print(to_str(db.get("missing39")));\n',
+    "ptr_roundtrip": 'p = ptr.alloc(16);\nptr.write_int(p, 0, 4242);\nprint(to_str(ptr.read_int(p, 0)));\nprint(to_str(ptr.size(p)));\nprint(to_str(ptr.is_valid(p)));\nprint(to_str(ptr.free(p)));\n',
+    "ptr_null": 'print(to_str(ptr.is_null(0)));\nprint(to_str(ptr.is_valid(0)));\n',
+    "args_missing": 'print(to_str(args.has("nope39")));\nprint(to_str(args.get("nope39")));\nprint(to_str(args.get("nope39", "str", "dflt")));\n',
+    "alias_dotted": 'alias time.weekday as wd;\nprint(to_str(wd(0)));\n',
+}
+
+# ── 默认参数（G2.8）：被调帧序言求默认值 ──
+DEFAULTS = {
+    "dflt_omit": 'fn f(a, b: int = 2) { return to_str(a + b); }\nprint(f(1));\n',
+    "dflt_given": 'fn f(a, b: int = 2) { return to_str(a + b); }\nprint(f(1, 5));\n',
+    "dflt_ref_prev": 'fn f(a, b: int = a * 10) { return to_str(a + b); }\nprint(f(2));\n',
+    "dflt_chain": 'fn f(a, b: int = 2, c: int = b * 3) { return to_str(a + b + c); }\nprint(f(1));\nprint(f(1, 10));\n',
+    "dflt_call": 'fn mk() { return 5; }\nfn f(a, b: int = mk()) { return to_str(a + b); }\nprint(f(1));\n',
+    "dflt_lambda": 'l = fn(x, y: int = 7) { return to_str(x * y); };\nprint(l(3));\n',
+    "dflt_capture": 'fn o() {\n  k = 4;\n  l = fn(x, y: int = k) { return to_str(x + y); };\n  return l(1);\n}\nprint(o());\n',
+    "dflt_recursive": 'fn fib(n: int, m: int = 1) { if (n < 2) { return m; } return fib(n - 1, fib(n - 2, m)); }\nprint(to_str(fib(10)));\n',
+    "dflt_types": 'fn f(a: str = "x", b: bool = false) { return a + to_str(b); }\nprint(f());\nprint(f("y", true));\n',
+    # 动态调用路径（运算符重载）——绕过 checker 的静态参数检查
+    "dflt_dynamic": 'fn __add(a, b: int = 2) { return "ov-add"; }\nd = {"a": 1};\nprint(to_str(d + 1));\n',
+    "dflt_dynamic_missing": 'fn __add(a, b, c) { return to_str(c); }\nd = {"a": 1};\nprint(d + 1);\n',
+    # 默认值引用全局 / 后置形参：checker 静态拒（三引擎同源）
+    "dflt_ref_global": 'g = 5;\nfn f(a, b: int = g) { return to_str(b); }\nprint(f(1));\n',
+    "dflt_ref_later": 'fn f(a, b: int = c, c: int = 3) { return to_str(b); }\nprint(f(1));\n',
+}
+
+# ── async-await / go 多线程（G2.6）────────────────────────────
+# 确定性口径：单 go 线程（多线程输出顺序不确定）；子线程先睡先打、主线程睡更久保序。
+ASYNC = {
+    "async_await": 'async fn f(x) { return x * 2; }\nf = f(21);\nprint("before");\nprint(await f);\n',
+    "async_call_direct": 'async fn g(n) { return n + 1; }\nprint(await g(5));\n',
+    "async_two_futures": 'async fn add(x, k) { return x + k; }\na = add(1, 10);\nb = add(2, 20);\nprint(to_str(await a) + "," + to_str(await b));\n',
+    "async_nested_fn": 'async fn s(x) { return x * x; }\nfn t() {\n  a = s(3);\n  return await a;\n}\nprint(t());\n',
+    "async_err_propagate": 'async fn bad() { return 1 / 0; }\ntry {\n  r = await bad();\n  print("no");\n} catch e {\n  print(e.code + ":" + e.message);\n}\n',
+    "async_throw_str": 'async fn t() { throw "boom"; }\ntry {\n  await t();\n} catch e {\n  print(e.message);\n}\n',
+    "go_fire_forget": 'fn bg(n) { time.sleep(0.05); print("bg:" + to_str(n)); }\ngo bg(7);\ntime.sleep(0.3);\nprint("main");\n',
+    "go_child_error": 'fn boom() { x = [1]; return x[9]; }\ngo boom();\ntime.sleep(0.2);\nprint("survived");\n',
+    "future_display": 'async fn f() { return 1; }\nfut = f();\ntime.sleep(0.2);\nprint(to_str(fut));\n',
+    "await_non_future": 'x = 5;\ny = await x;\nprint(y);\n',
+    "await_after_done": 'async fn f() { return 3; }\nfut = f();\ntime.sleep(0.2);\nprint(await fut);\nprint(await fut);\n',
 }
 
 GROUPS = {
+    "defaults": DEFAULTS,
     "match": MATCH,
     "cond": COND,
     "logic": LOGIC,
     "destruct": DESTRUCT,
     "overload": OVERLOAD,
     "alias": ALIAS,
+    "dotted": DOTTED,
+    "async": ASYNC,
 }
 
 def run(cmd, timeout=30):
