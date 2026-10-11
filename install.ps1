@@ -125,10 +125,37 @@ if (Test-Path $Out) {
   }
 }
 
-# 3) 下载 + sha256 校验
-Get-ReleaseFile $Asset $Tmp
-$actual = (Get-FileHash -Algorithm SHA256 $Tmp).Hash.ToLower()
-if ($actual -ne $Expected) { throw "sha256 校验失败：期望 $Expected，实际 $actual" }
+# 3) 优先下载完整工具链包（hone.exe + targets\ 运行时归档：build --exe --native 无 rustc 可用）；
+#    退回裸二进制
+$FullZip = "hone-windows-x86_64-full.zip"
+$ExpectedFull = (Get-Content $ChecksTmp | Where-Object { $_ -match "\s$([regex]::Escape($FullZip))\s*$" } |
+  ForEach-Object { ($_ -split "\s+")[0] } | Select-Object -First 1)
+if ($ExpectedFull) {
+  $FullTmp = Join-Path $Dir "hone_full.zip.tmp"
+  Get-ReleaseFile $FullZip $FullTmp
+  $actual = (Get-FileHash -Algorithm SHA256 $FullTmp).Hash.ToLower()
+  if ($actual -ne $ExpectedFull) { throw "sha256 校验失败（full 工具链包）：期望 $ExpectedFull，实际 $actual" }
+  $ExtDir = Join-Path $Dir "hone_full_ext.tmp"
+  if (Test-Path $ExtDir) { Remove-Item -Recurse -Force $ExtDir }
+  Expand-Archive -Path $FullTmp -DestinationPath $ExtDir -Force
+  if (-not (Test-Path (Join-Path $ExtDir "hone.exe"))) { throw "工具链包缺少 hone.exe" }
+  Move-Item -Force (Join-Path $ExtDir "hone.exe") $Tmp
+  # targets\ 落在 hone.exe 同目录（toolchain_dir() 按 <exe 目录>\targets\ 解析）
+  $tgtSrc = Join-Path $ExtDir "targets"
+  if (Test-Path $tgtSrc) {
+    $tgtDst = Join-Path $Dir "targets"
+    if (Test-Path $tgtDst) { Remove-Item -Recurse -Force $tgtDst }
+    Move-Item -Force $tgtSrc $tgtDst
+    Write-Host "==> 已安装原生编译工具链（$tgtDst，build --exe --native 无需 rustc）"
+  }
+  Remove-Item -Recurse -Force $ExtDir -ErrorAction SilentlyContinue
+  Remove-Item -Force $FullTmp -ErrorAction SilentlyContinue
+} else {
+  # 下载 + sha256 校验
+  Get-ReleaseFile $Asset $Tmp
+  $actual = (Get-FileHash -Algorithm SHA256 $Tmp).Hash.ToLower()
+  if ($actual -ne $Expected) { throw "sha256 校验失败：期望 $Expected，实际 $actual" }
+}
 
 # 4) 原子安装（先临时名再 Move 覆盖）
 Move-Item -Force $Tmp $Out

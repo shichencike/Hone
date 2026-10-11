@@ -139,7 +139,7 @@ Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.7.12）
     推导式、切片、to_str/to_json/内置函数均按内层值工作，报错文案与普通值一致
   · 回收：无追踪式垃圾回收；Arc 引用计数归零自动释放（含独占/共享路径）
   · cow 形参：fn f(cow z) { ... }（实参为 cow 值时共享绑定；实参为普通值时按值语义隔离）
-  · 仅解释器支持：VM（--vm）/ AOT（build --exe -c）/ DLL（build --dll）遇 cow 声明或形参报 H999
+  · 仅解释器支持：VM（--vm）/ DLL（build --dll）遇 cow 声明或形参报 H999
 
 1.4 控制流
 
@@ -470,9 +470,9 @@ print(add5(10));       // 15
   · 参数个数检查：最少 = 必选参数个数，最多 = 总参数个数
   · lambda 参数同样支持默认值
 · 限制：hone build --dll 暂不支持默认参数（报错提示改用解释模式）
-· **引擎边界（M2 待补）**：默认参数目前**仅解释器与 AOT（`build --exe -c`）支持**；
-  VM（`--vm`）与原生编译后端（`--native`）尚未实现——省略带默认值的参数时报
-  `H011 missing argument \`b\` of \`f\``（而非取默认值）。详见《Hone原生编译后端进度》G2.8
+· **引擎边界**：默认参数目前**仅解释器支持**；VM（`--vm`）与原生编译后端（`--native`）
+  尚未实现——省略带默认值的参数时报 `H011 missing argument \`b\` of \`f\``（而非取默认值）。
+  详见《Hone原生编译后端进度》G2.8
 · 示例：
 
 fn greet(name, greeting = "Hello") {
@@ -663,7 +663,7 @@ print(10 + 20);        // 30（int 内建不受影响）
   · 多个 async 并行启动、依次 await，总耗时约等于最慢者
   · 错误传播：async 函数体内 throw / 运行时错误存入 future，await 时原样抛出（可 try/catch 捕获）
   · future 可存储/传递；type_of 为 future；未 await 的 future 随脚本结束回收
-· 限制：AOT 原生编译与 hone build --dll 对 async/await 报「暂不支持」（单线程模型），请用解释器运行
+· 限制：hone build --dll 对 async/await 报「暂不支持」（单线程模型），请用解释器运行
 · 示例（完整见 examples/async_demo.hn）：
 
 async fn compute(n) {
@@ -760,8 +760,7 @@ hone check <file.hn|目录> [--json] 仅静态检查（解析 + 类型检查，�
 hone watch <script.hn> 监控脚本文件变更自动重跑（跨平台轮询 mtime+大小，[--interval=N] 毫秒，默认 500，Ctrl+C 退出）
 hone build --dll <script.hn> 将脚本打包成 C ABI 动态库（DLL / SO / DYLIB）
 hone build --exe <script.hn> 打包独立可执行文件（解释器 + 脚本自释放，[-o <out>] [--icon <ico>]）
-hone build --exe -c <script.hn> AOT 编译原生可执行文件（脚本 → C 中间文件 → gcc/clang → 原生 exe；默认删除 .c，--keep-c 保留）
-hone build --exe --native <script.hn> 原生编译可执行文件（脚本 → Cranelift 机器码 → rustc 链接；需本机 Rust 工具链，见 4.7）
+hone build --exe --native <script.hn> 原生编译可执行文件（脚本 → Cranelift 机器码 → rustc 链接；需本机 Rust 工具链，见 4.6）
 hone natgen <script.hn> build --exe --native 的别名（[-o <out>] [--obj] 保留中间 object）
 hone build --script <script.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）
 hone bind <header.h> 从 C 头文件生成 typed load 签名块（FFI 自动绑定）
@@ -772,7 +771,9 @@ hone self-update [url] 从 URL 下载最新 hone 二进制并替换当前程序�
 hone explain <code> 查看错误码解释与修复建议（如 hone explain H201）
 hone lsp 启动语言服务器（诊断、补全、hover、跳转定义 / 类型定义、引用查找 references、
 重命名 rename、签名帮助 signatureHelp、折叠 foldingRange、文档 / 全局符号大纲、
-代码格式化 formatting、语义高亮 semantic tokens；LSP over stdio，无额外依赖）
+代码格式化 formatting、语义高亮 semantic tokens；LSP over stdio，无额外依赖。
+各编辑器（VS Code / Neovim / Helix / Emacs / Kakoune）接入配置见官网
+「LSP / 编辑器」页：官网/lsp.html）
 hone prof <script.hn> 以剖析模式运行脚本，输出函数级热点报告（总耗时 / 调用次数 / 平均耗时，按总耗时降序）
 hone poop <file.hn> 屎山检测（if 嵌套深度 + 圈复杂度）
 hone --help / --version 帮助信息 / 版本信息
@@ -909,10 +910,6 @@ print(r);                   // 0.873245
 · char_is_digit(c) → bool：是否为十进制数字字符（'5' → true）
 · char_is_alpha(c) → bool：是否为字母字符（含中文等 Unicode 字母）
 · char_is_space(c) → bool：是否为空白字符（空格、Tab、换行等）
-
-> ⚠️ AOT 限制：`char` 类型（字面量、声明、以及返回 `char` 的 `char()` / `char_at()` /
-> `char_upper()` / `char_lower()`）在 `hone build --exe -c` 原生编译下报 `H999`，
-> 仅解释器与 `hone run --vm` 支持。`ord()` 返回 int，不受影响。
 
 示例：
 
@@ -1374,41 +1371,11 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · 调用系统 C 编译器（查找顺序：`CC` 环境变量 > gcc > clang > cc），需用户自行安装工具链
 · 生成的动态库自包含，不依赖 Hone 解释器（内嵌微型运行时）
 · 类型映射：int → int，float → double，bool → bool，str → const char*
-· 与 AOT 共用 `src/cgen_util.rs` 中的机械转义层（字符串字面量转义等）。
-  两者值模型不同（`--dll` 用 C 原生类型对接 C ABI，AOT 统一装箱 `HnValue`），
-  **代码生成主体不共用**；共用层只收敛与值模型无关、易漂移的机械部分
+· C 字符串转义等机械逻辑集中在 `src/cgen_util.rs`（原与已移除的 AOT 后端共用，
+  现由 `--dll` 单一使用），避免转义实现漂移
 · 错误时返回错误码，并写入错误缓冲区
 
-4.6 AOT 原生编译（hone build --exe -c）
-
-· 将 .hn 脚本编译为 C 中间文件，再用系统 C 编译器（gcc / clang / cc，可用 CC 环境变量指定）生成原生可执行文件
-· 生成前先做语法与类型检查（parse + checker），错误不产出中间文件
-· 编译参数：-Os -ffunction-sections -fdata-sections + 链接期死代码消除，未用到的内置函数不占体积，常见脚本约 50~70 KB
-· 默认删除中间 .c 文件，--keep-c 保留便于检查；输出名用 [-o <out>]
-· 入口：顶层语句编译进 main()；无顶层语句且有 main 函数时调用之
-· 值语义与解释器一致：列表/字典为值类型（读取/传参深拷贝），lambda 按值捕获，索引赋值克隆写回
-· 支持：函数/递归/类方法/结构体/lambda/异常（setjmp+longjmp）/推导式/解构/多返回值/match/可选链/复合赋值等
-· 内置函数支持核心集（print/len/to_str/集合操作/字符串/文件/时间/随机等）
-· 编译期报"暂不支持"（附定位与建议）的特性，完整清单：
-  · 非核心内置函数（http/crypto/sqlite/guipro 等重内置）——建议改用 print/len/to_str 等核心函数，或用解释器运行
-  · `import` 模块——AOT 编译为单文件；请先手动下载模块并合并脚本，或用解释器运行
-  · `load` 动态库（FFI）——AOT 模式不支持 FFI，请用解释器运行
-  · `go` 并发调用——AOT 模式为单线程，请用解释器运行并发脚本
-  · `async` 异步函数与 `await` 表达式——AOT 模式为单线程，请用解释器运行
-  · `char` 类型（字面量与声明）——仅解释器 / VM 支持
-  · `byte` / `bytes` 类型（字面量、声明与 byte/to_bytes/hex/unhex 内置）——仅解释器支持
-  · `type` 实例类 / `with` 上下文 / 字段赋值 `obj.f = x`——解释器特性，请用 `hone run` 运行
-  · 切片 `a[i:j]`（list / bytes）——解释器特性，请用 `hone run` 运行
-  · `goto` 标签跳转——请用 `hone run`（解释器）或 `hone run --vm`（字节码 VM）运行
-· 已知限制：
-  · 错误对象无 file/line/col/context 源码定位（运行时错误只带错误码与消息）
-  · throw 字符串消息在 C 端简化
-  · 函数返回时不显式释放局部变量（int/float/bool 零泄漏；str/list/dict 密集的递归脚本可能累积）
-  · 需系统安装 C 编译器（如 Windows 的 MinGW-w64 / LLVM，Linux/macOS 自带 gcc/clang）
-  · **热循环性能**：生成的 C 对每次整数运算都做装箱 + 深拷贝 + 释放（见下），
-    故纯计算密集代码比等价 Rust/C 慢约一个数量级；对 I/O、脚本编排类负载影响可忽略
-
-4.7 原生编译后端（hone build --exe --native）
+4.6 原生编译后端（hone build --exe --native）
 
 · 与 AOT（-c，经 C 中间文件）并列的第二条原生后端：`hone build --exe --native <script.hn>`
   直接用 Cranelift 把 VM 字节码 lower 为机器码（object），再经生成式 wrapper + rustc 链接成原生可执行文件
@@ -1498,33 +1465,6 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   改代码后先 `cargo build`（target/ 旧二进制会静默沿用），
   再跑 `python tests/regress4.py` 与 `python tests/regress_err.py`
 
-4.8 AOT 性能实测
-
-· 环境：MinGW-w64 gcc 16.2.0（`CC` 指向 `gcc.exe`），Windows x86_64；预热后取多轮最快值
-· 产物体积：约 58.6 KB
-
-  | 用例 | AOT | 解释器 | 加速比 | rustc -O |
-  |---|---|---|---|---|
-  | `fib(26)` 递归 | 267 ms | 2530 ms | 9.5× | — |
-  | 循环累加 200 万次 | 514 ms | 6203 ms | 12.1× | — |
-  | 循环累加 2000 万次 | 2962 ms | — | — | 274 ms |
-
-· 结论：AOT 相对解释器有**接近一个数量级**的稳定收益，值得保留与投入
-· **性能短板（如实说明）**：生成的热循环并非原生整数运算。以递归 fib 为例，
-  生成的 C 形如：
-
-  ```c
-  HnValue v0 = nargs > 0 ? hn_copy(args[0]) : hn_null();       // 装箱 + 深拷贝
-  if (hn_truthy(hn_le_v(hn_copy(v0), hn_int(1)))) { ... }      // 再次拷贝 + 装箱比较
-  return hn_add_v(...);                                        // 装箱加法
-  ```
-
-  每次运算都伴随 `hn_int()` 装箱、`hn_copy()` 深拷贝、`hn_free_value()` 释放，
-  gcc 无法将其优化为寄存器运算——这是「列表/字典值语义 + 统一装箱 `HnValue`」的
-  必然代价，**不是编译器参数问题**，调 `-O3` 也无效。
-  因此不宜对外宣称 AOT「接近 C 的性能」；其真实定位是「比解释器快一个数量级、
-  体积几十 KB、零运行时依赖」的分发方案。
-
 五、错误处理与报错风格
 
 5.1 报错风格
@@ -1595,7 +1535,7 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 6.1 体积目标
 
 · 单文件可执行程序 < 10 MB
-· 实测约 3.7 MB（release：fat LTO + opt-level z + strip；无内置 C 编译器，`--dll` / AOT 均调用系统工具链）
+· 实测约 3.7 MB（release：fat LTO + opt-level z + strip；无内置 C 编译器，`--dll` 调用系统工具链）
 
 6.2 编译优化
 

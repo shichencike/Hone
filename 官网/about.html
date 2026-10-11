@@ -15,7 +15,7 @@
   <span class="logo"><span class="mark">&#9889;</span> Hone</span>
   <span class="spacer"></span>
   <span class="right">
-    <span class="ver">v0.7.12</span>
+    <span class="ver">v0.8.0</span>
     <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">&#9728;</span><span class="ti-dark">&#127769;</span></button>
   </span>
 </header>
@@ -39,6 +39,7 @@
       <a href="language.html">语言参考</a>
       <a href="stdlib.html">标准库</a>
       <a href="perf.html">性能</a>
+      <a href="lsp.html">LSP / 编辑器</a>
     </div>
     <div class="nav-group">
       <div class="nav-title">项目</div>
@@ -74,7 +75,7 @@
     <tr><th>项目</th><th>信息</th></tr>
     <tr><td>源码仓库</td><td><a href="https://github.com/shichencike/Hone">github.com/shichencike/Hone</a></td></tr>
     <tr><td>许可证</td><td>MIT</td></tr>
-    <tr><td>当前版本</td><td>v0.7.12（<a href="changelog.html">更新日志</a>）</td></tr>
+    <tr><td>当前版本</td><td>v0.8.0（<a href="changelog.html">更新日志</a>）</td></tr>
     <tr><td>实现语言</td><td>Rust（解释器 / 静态检查 / 代码生成 / LSP / FFI 均原生实现）</td></tr>
     <tr><td>支持平台</td><td>Windows x86_64、Linux x86_64、Termux（Android aarch64）</td></tr>
     <tr><td>设计规范</td><td><code class="mono">hone.md</code>（v1.3）</td></tr>
@@ -93,7 +94,7 @@
     <li>✅ 阶段 9：struct 结构体、match 模式匹配、<code>|&gt;</code> 管道操作符、hone test 测试框架、build --script 仅脚本包、self-update 自动更新</li>
     <li>✅ 阶段 10：crypto 扩展（sha1/HMAC/base64）、archive 压缩归档（zip/tar.gz）、ptr 指针类（防野指针）、plugin 插件系统</li>
     <li>✅ 阶段 11：hone repl 交互式解释器（Python 式回显/多行续行）、hone prof 函数级性能剖析</li>
-    <li>✅ 阶段 12：goto / 标签（H105）与 macro 宏（H106），共享预处理阶段做编译期校验，三个后端行为一致（AOT 暂不支持 goto，报 H999）</li>
+    <li>✅ 阶段 12：goto / 标签（H105）与 macro 宏（H106），共享预处理阶段做编译期校验，各后端行为一致</li>
   </ul>
 
   <p class="note">想参与？欢迎到 <a href="https://github.com/shichencike/Hone">GitHub</a> 提交 issue、PR，或在社区交流使用心得。</p>
@@ -101,7 +102,7 @@
 </main>
 
 <footer>
-  Hone v0.7.12 &middot; MIT License &middot; <span class="sword">&#128481;</span> Hone &ndash; 为效率而生，为乐趣而造
+  Hone v0.8.0 &middot; MIT License &middot; <span class="sword">&#128481;</span> Hone &ndash; 为效率而生，为乐趣而造
   &middot; <a href="https://github.com/shichencike/Hone">GitHub</a>
 </footer>
 

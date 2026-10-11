@@ -7,8 +7,6 @@ stdout+stderr+退出码 逐字节比对。
   - 用例集 = M0 基线三例（examples/fib.hn、examples/hello.hn、examples/err_divzero.hn）
     + M1 新增用例集（tests/m1/list.hn、tests/m1/dict.hn、tests/smoke/rc_alias.test.hn）。
     M2 任务组落地后按进度文档继续扩容。
-    （AOT-C 后端 build --exe -c 暂不纳入本回归：其错误渲染为简化一行，
-    与 interp/VM 的完整 ZError 渲染无法逐字节对齐；待 AOT 错误渲染对齐后另立比对。）
   - 错误诊断逐字符对齐由 tests/regress_err.py 承担（含 nat 第三引擎）；
     本脚本聚焦正常路径 + 单例错误渲染。
   - 每用例单独编译 nat 产物（产物内含该脚本，不可跨用例复用）；
@@ -27,7 +25,11 @@ os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from regress_common import should_skip  # noqa: E402
 
-BIN = "./target/debug/hone.exe"
+# 待测二进制：默认 target/debug 下按平台取 hone.exe / hone；HONE_BIN 可覆盖（CI）。
+BIN = os.environ.get(
+    "HONE_BIN",
+    "./target/debug/hone.exe" if os.name == "nt" else "./target/debug/hone",
+)
 
 # 三引擎对齐用例集：M0 基线三例 + M1 新增用例集（G1.2 list / G1.3 dict+G1.4 迭代 /
 # G1.5 别名 RC+COW）+ M2 新增（G2.1 struct 构造/字段/隐藏键过滤/相等语义、

@@ -295,14 +295,6 @@ impl Value {
         matches!(self, Value::Cow(_))
     }
 
-    /// 借用 COW 内层值（非 COW 返回 None）。
-    pub fn as_cow_inner(&self) -> Option<&Value> {
-        match self {
-            Value::Cow(c) => Some(&c.data),
-            _ => None,
-        }
-    }
-
     /// 透明读：COW 容器返回内层值的借用，非 COW 返回自身。
     /// 用于索引/迭代/len/相等/内置函数等所有读点，使 `cow` 值对其底层类型透明。
     pub fn as_plain(&self) -> &Value {

@@ -352,29 +352,6 @@ fn diagnostic_from_error(e: &ZError) -> Value {
     obj
 }
 
-/// 诊断去重：同 (line, col, code) 只保留第一条；按位置排序（编辑器展示顺序稳定）。
-fn dedup_diagnostics(diags: Vec<Value>) -> Vec<Value> {
-    let mut seen: HashSet<(u64, u64, String)> = HashSet::new();
-    let mut out: Vec<Value> = diags
-        .into_iter()
-        .filter(|d| {
-            let key = (
-                d["range"]["start"]["line"].as_u64().unwrap_or(0),
-                d["range"]["start"]["character"].as_u64().unwrap_or(0),
-                d["code"].as_str().unwrap_or("").to_string(),
-            );
-            seen.insert(key)
-        })
-        .collect();
-    out.sort_by(|a, b| {
-        (a["range"]["start"]["line"].as_u64().unwrap_or(0),
-         a["range"]["start"]["character"].as_u64().unwrap_or(0))
-            .cmp(&(b["range"]["start"]["line"].as_u64().unwrap_or(0),
-                   b["range"]["start"]["character"].as_u64().unwrap_or(0)))
-    });
-    out
-}
-
 // ---------- 文档扫描辅助 ----------
 
 const KEYWORDS: &[&str] = &[

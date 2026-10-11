@@ -57,6 +57,24 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   （rustc 自动带 `-flavor gnu`）+ 裸 `--gc-sections`/`--strip-all`（lld 不认 `-Wl,`）+ `-no-pie`
   （Cranelift 产非 PIC 对象，musl 默认 PIE 会重定位失败）。aarch64 需 cranelift-codegen 开 `arm64` 特性。
   交叉产物在 Windows 上不可运行，靠 CI 验证（G3.6）。
+- 静态表入 object（G3.5）：程序静态表（strtab blob / file / src / span 表 / 全部注册表 /
+  函数指针表）由 natgen `emit_static_tables` 编为 script.o 导出数据符号（`HN_*`，24 个，
+  `HN_LENS` 为字节长度目录），runtime `hn_boot`（`#[cfg(hone_boot)]`，链接产物路径才编译，
+  cargo test 不定义该 cfg）在 `hn_entry` 首行自举注册 + FNV 自检；wrapper 已固定为 5 行
+  （无脚本信息）。改 blob 布局必须两端同步：`natgen.rs HN_BLOBS` 与 `runtime hn_boot`。
+- 无 rustc 链接（G3.4）：本机无 rustc 时 `build_native` 自动走打包工具链
+  （`targets/<triple>/libhoneruntime.a` + `targets/lld/rust-lld.exe` + `targets/crt/<triple>/`，
+  `HONE_TOOLCHAIN_DIR` 覆盖；打包脚本 `tests/tools/build_toolchain.py`，CRT 取
+  **各目标** rustlib 的 self-contained 目录）。链接 flavor 按目标环境分派：Windows→COFF
+  （lld-link + 显式归档路径，`-defaultlib` 不认 `.a`；CRT 清单含 libntdll.a / libuserenv.a），
+  其余→GNU/ELF（`crt1/crti/crtbegin … libunwind -lc -lm crtend/crtn` + `-no-pie
+  --gc-sections --strip-all`）。lld 的依赖 DLL（libgcc_s_seh-1 / libwinpthread-1）须随包分发；
+  rustc 可用时维持 rustc 链接路径（逐字节回归基准）。runtime 有改动后需重跑打包脚本。
+- CI/发布（G3.6）：`ci.yml` test job 含 `regress4.py`（二进制定位支持 `HONE_BIN` 覆盖）；
+  `release.yml` 构建三目标工具链并产出 full 包（linux tar.gz / windows zip，hone + targets/
+  同目录），`verify-nat` job 在 ubuntu runner 上运行 x86_64-musl 产物 + aarch64 ELF 头校验，
+  publish 等待验证通过。安装脚本（install.sh / install.ps1）优先下载 full 包，解压到
+  hone 同目录即启用原生编译工具链。
 - 条件与逻辑语义（改 `vm.rs` 编译臂时注意，解释器为准）：`if`/`while`/`do-while`/`for`/三元/推导式 `if` 过滤六处条件站点**运行期严格 bool**（`Instr::CondCheck`），`&&`/`||` 短路求值且右侧操作数严格 bool（`Instr::IsBoolVal` 判「恰为该布尔值」，不是 truthy）。
 
 ## 项目特有约定
@@ -64,7 +82,6 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
 - struct 实例内部携带 `__struct__` 隐藏键（`Value::Str` 标记）：新增/改动任何用户可见 dict 路径（display/len/keys/values/has_key/for-in/推导式/解构/==/json）必须过滤该键，否则泄漏。
 - 无 null 字面量（null 仅 void 占位，用 `""` 哨兵）；变量块级作用域。
 - `match` 绑定变量**仅在分支体内可见**（编译期用 `decl_tmp` + 分支作用域，不推进 `var_next`）；lambda 捕获按**内层优先**（与 `lookup` 同序）。改这两处前先跑 `tests/tools/probe_align.py`。
-- AOT `build --exe -c` 在 Windows 的 `-o` 必须显式带 `.exe`，否则产物校验误报失败。
 - `d["k"]` 形式的 dict 索引**读**在 checker 层被拒（索引须 int）；dict 取值只能走 for-in / `keys` / `values` / `has_key` / 解构。别按JS/Python 直觉写 dict 读写。
 - 新功能需同步：`hone.md`（语言规格）、`CHANGELOG.md`、`官网/` 站点页、README。
 

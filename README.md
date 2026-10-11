@@ -38,25 +38,9 @@ python tests/regress_ir.py     # 文本 IR 往返
 原地赋值更新（免每轮迭代的堆分配）、字符串拼接预分配容量（免 O(n²) 整串复制）。
 二进制体积约 3.7MB（strip + fat LTO + opt-level z）。基准脚本见 `bench/` 目录。
 
-### AOT 原生编译（`hone build --exe -c`）
-
-相对解释器有**接近一个数量级**的稳定加速（MinGW-w64 gcc 16.2.0，预热后取多轮最快值）：
-
-| 基准 | AOT | 解释器 | 加速比 |
-|------|-----|--------|--------|
-| 递归 fib(26) | 267 ms | 2530 ms | 9.5× |
-| 循环累加 200 万次 | 514 ms | 6203 ms | 12.1× |
-
-产物体积约 58.6 KB，零运行时依赖。作为对照，等价的 `rustc -O` 跑 2000 万次循环约 274 ms，
-AOT 版约 2962 ms——**慢约 10 倍**：AOT 生成的 C 对每次整数运算都做装箱
-（`hn_int()`）、深拷贝（`hn_copy()`）与释放，gcc 无法优化成寄存器运算。
-这是「列表/字典值语义 + 统一装箱 `HnValue`」的必然代价，调高优化级别无效。
-AOT 的真实定位是「比解释器快一个数量级、几十 KB、零依赖」的分发方案，
-不是「接近 C 的性能」。
-
 ### 原生编译后端（`hone build --exe --native`）
 
-与 AOT（经 C 中间文件）并列的第二条原生路径：Cranelift 把 VM 字节码直接 lower 为机器码，
+Cranelift 把 VM 字节码直接 lower 为机器码，
 再经生成式 wrapper + rustc 链接成原生可执行文件。`hone natgen` 是等价别名（保留 `--obj` 调试中间物）。
 
 - 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码**逐字节一致**，
@@ -71,7 +55,7 @@ AOT 的真实定位是「比解释器快一个数量级、几十 KB、零依赖�
   无匹配分支 H005）、**条件严格 bool 与 `&&`/`||` 短路求值**、**运算符重载（15 个 `__op` 回退）**、**alias 别名 / goto 标签跳转**、
   **别名值语义（RC+COW，O(1) 拷贝）**、内置子集（print/len/append/keys/values/has_key/to_str/
   to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq/read_file）；struct 字段写入与 VM 一致
-  编译期 H999；**默认参数**在 VM / 原生后端尚未实现（解释器与 AOT 支持），其余子集外指令编译期报
+  编译期 H999；**默认参数**在 VM / 原生后端尚未实现（仅解释器支持），其余子集外指令编译期报
   H990「未实现」（M2 逐步放开）
 - 依赖本机 rustc（M3 起改为随 hone 分发的预编译工具链）；与 `-c` 互斥（H005 显式报错）
 
@@ -88,7 +72,6 @@ hone fmt [-w] <file.hn>   # 代码格式化（Tab 缩进/运算符空格/大括�
 hone check <file.hn|目录> [--json] # 仅静态检查（解析+类型检查，不执行）；目录递归扫全部 .hn，--json 输出诊断 JSON，退出码 0/1
 hone build --dll <file.hn> # 打包 C ABI 动态库（int/float/bool/str 类型映射，需系统 C 编译器）
 hone build --exe <file.hn> # 将脚本与解释器打包为自释放独立可执行文件（[-o <out>] [--icon <ico>]）
-hone build --exe -c <file.hn> # AOT 原生编译：脚本 → C 中间文件 → gcc/clang → 原生可执行文件（--keep-c 保留中间 .c）
 hone build --exe --native <file.hn> # 原生编译后端：脚本 → Cranelift 机器码 → rustc 链接 → 原生可执行文件（需本机 Rust 工具链；hone natgen 为等价别名）
 hone explain <code>       # 查询错误码含义（如 hone explain H201）
 hone get                  # 读取当前目录 hone.json 清单，批量下载全部模块（类似 package.json / Cargo.toml）
@@ -558,17 +541,14 @@ help: Hone types are locked after inference; no implicit conversion is allowed
 - `try/catch/throw` 错误处理：捕获可恢复错误；catch 绑定的 `error` 类型变量含
   `code`/`message`/`file`/`line`/`col`/`context` 字段；`throw str` 构造 H600 用户错误，
   `throw error` 重抛
-- `goto` / 标签（H105）与 `macro`（H106）已实现：`goto` 在解释器与字节码 VM 下均支持
-  （AOT 原生编译暂不支持 `goto`，会给出 H999 提示）；宏在解析后的预处理阶段做纯 AST 展开，
+- `goto` / 标签（H105）与 `macro`（H106）已实现：`goto` 在解释器与字节码 VM 下均支持，
+  原生编译后端（`--native`）亦支持标签跳转；宏在解析后的预处理阶段做纯 AST 展开，
   三个后端行为完全一致。安全规则（同函数唯一 / 不跳进内层块 / 不跳过声明 / 宏体无环且不越界）
   见 `hone.md` 1.4.1、1.4.2，示例见 `examples/goto_demo.hn`、`examples/macro_demo.hn`
 - `hone run --restart=N` / `--backoff=a,b,c` / `--restart-on=Hxxx` 自动重启策略
   （重启仅对可重入错误生效；默认最多 3 次，间隔 1/3/10 秒）
 - `hone run --resume` 检查点恢复（`db` 自动落盘，脚本变更后自动失效）
 - `hone build --exe` 将解释器与脚本打包为自释放独立可执行文件（`[-o <out>] [--icon <ico>]`）
-- `hone build --exe -c` AOT 原生编译：脚本 → C 中间文件 → 系统 C 编译器 → 原生可执行文件
-  （`-Os` + 函数节 + 链接期死代码消除，常见脚本约 50~70 KB；默认删除 .c，`--keep-c` 保留；
-  需系统 C 编译器，可用 `CC` 环境变量指定）
 - `hone explain <code>` 查询错误码含义与修复建议
 - `tmp fn` 临时函数在编译时自动忽略，仅开发阶段使用
 - `debug_print(expr)` 调试输出仅在 `hone debug` 模式生效，普通模式自动跳过

@@ -66,3 +66,7 @@ src/bin/
 
 # 功能需求草稿（设计规范文档，同 ka.md）
 增加with，字节类型，只读类型,仔细问我.md
+
+# 打包好的原生编译工具链（libhoneruntime.a + rust-lld + CRT，约 300MB；
+# 由 tests/tools/build_toolchain.py / release 流水线生成，随发行包分发，可再生，不入库）
+targets/

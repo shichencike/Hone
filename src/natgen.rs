@@ -1,5 +1,5 @@
 // Hone 原生编译后端（natgen）：VM 字节码 Module → Cranelift object 生成。
-// 与 AOT（src/aot.rs 文本 IR）并列的第二个编译后端，见《Hone原生编译后端设计》：
+// 见《Hone原生编译后端设计》：
 // checker 后的 Program 经 vm::compile_module 得到字节码 Module，本模块把每个
 // chunk（函数 / 顶层 main）lowering 为 Cranelift 目标代码（COFF object），
 // 与 runtime（crate honeruntime，经 include! 内联进生成式 wrapper）一起由
@@ -42,7 +42,7 @@ use cranelift_codegen::ir::{
 use cranelift_codegen::settings::{builder, Configurable};
 use cranelift_codegen::Context;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-use cranelift_module::{default_libcall_names, FuncId, Linkage, Module as ClifModule};
+use cranelift_module::{default_libcall_names, DataDescription, FuncId, Linkage, Module as ClifModule};
 use cranelift_object::{ObjectBuilder, ObjectModule};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::Path;
@@ -62,7 +62,6 @@ struct RtImports {
     rt_drop: FuncId,
     rt_binop: FuncId,
     rt_unop: FuncId,
-    rt_print: FuncId,
     rt_truthy: FuncId,
     rt_is_err: FuncId,
     rt_call: FuncId,
@@ -79,7 +78,6 @@ struct RtImports {
     rt_destructget: FuncId,
     rt_len: FuncId,
     rt_keys: FuncId,
-    rt_islist: FuncId,
     rt_isdict: FuncId,
     rt_isnull: FuncId,
     rt_itercheck: FuncId,
@@ -108,7 +106,6 @@ struct RtRefs {
     rt_drop: FuncRef,
     rt_binop: FuncRef,
     rt_unop: FuncRef,
-    rt_print: FuncRef,
     rt_truthy: FuncRef,
     rt_is_err: FuncRef,
     rt_call: FuncRef,
@@ -124,7 +121,6 @@ struct RtRefs {
     rt_destructget: FuncRef,
     rt_len: FuncRef,
     rt_keys: FuncRef,
-    rt_islist: FuncRef,
     rt_isdict: FuncRef,
     rt_isnull: FuncRef,
     rt_itercheck: FuncRef,
@@ -230,7 +226,6 @@ impl RtImports {
             rt_drop: imp(module, "rt_drop", &sig1_0)?,
             rt_binop: imp(module, "rt_binop", &sig5_1)?,
             rt_unop: imp(module, "rt_unop", &sig4_1)?,
-            rt_print: imp(module, "rt_print", &sig1_0)?,
             rt_truthy: imp(module, "rt_truthy", &sig1)?,
             rt_is_err: imp(module, "rt_is_err", &sig1)?,
             rt_call: imp(module, "rt_call", &sig5_1)?,
@@ -243,7 +238,7 @@ impl RtImports {
             rt_field: imp(module, "rt_field", &sig4_1)?,
             // M1：rt_newlist/rt_newdict(ptr, n, ci, pc)；rt_index/rt_destructget(obj, key, ci, pc)；
             // rt_indexset(obj, key, val, ci, pc)（sig5_1）；rt_len/rt_keys(v, ci, pc)；
-            // rt_itercheck(src, is_comp, ci, pc)；rt_islist/rt_isdict/rt_isnull(h)。
+            // rt_itercheck(src, is_comp, ci, pc)；rt_isdict/rt_isnull(h)。
             rt_newlist: imp(module, "rt_newlist", &sig4_1)?,
             rt_newdict: imp(module, "rt_newdict", &sig4_1)?,
             rt_index: imp(module, "rt_index", &sig4_1)?,
@@ -252,7 +247,6 @@ impl RtImports {
             rt_destructget: imp(module, "rt_destructget", &sig6_1)?,
             rt_len: imp(module, "rt_len", &sig3_1)?,
             rt_keys: imp(module, "rt_keys", &sig3_1)?,
-            rt_islist: imp(module, "rt_islist", &sig1)?,
             rt_isdict: imp(module, "rt_isdict", &sig1)?,
             rt_isnull: imp(module, "rt_isnull", &sig1)?,
             rt_itercheck: imp(module, "rt_itercheck", &sig4_1)?,
@@ -287,7 +281,6 @@ impl RtImports {
             rt_drop: module.declare_func_in_func(self.rt_drop, func),
             rt_binop: module.declare_func_in_func(self.rt_binop, func),
             rt_unop: module.declare_func_in_func(self.rt_unop, func),
-            rt_print: module.declare_func_in_func(self.rt_print, func),
             rt_truthy: module.declare_func_in_func(self.rt_truthy, func),
             rt_is_err: module.declare_func_in_func(self.rt_is_err, func),
             rt_call: module.declare_func_in_func(self.rt_call, func),
@@ -303,7 +296,6 @@ impl RtImports {
             rt_destructget: module.declare_func_in_func(self.rt_destructget, func),
             rt_len: module.declare_func_in_func(self.rt_len, func),
             rt_keys: module.declare_func_in_func(self.rt_keys, func),
-            rt_islist: module.declare_func_in_func(self.rt_islist, func),
             rt_isdict: module.declare_func_in_func(self.rt_isdict, func),
             rt_isnull: module.declare_func_in_func(self.rt_isnull, func),
             rt_itercheck: module.declare_func_in_func(self.rt_itercheck, func),
@@ -981,7 +973,7 @@ impl<'x, 'f> ChunkLower<'x, 'f> {
             other => {
                 // G2.7：能走到这里的只有「已登记未实现」的指令（见下方 mod instr_coverage 的
                 // NOT_IMPLEMENTED 表，单测保证无静默漏实现）。错误码用 H999（功能未实现）
-                // 而非 H990（internal）——与 VM / AOT / DLL 的能力边界口径一致：
+                // 而非 H990（internal）——与 VM / DLL 的能力边界口径一致：
                 // 「这个引擎不支持该特性」不是「编译器内部错误」。
                 return Err(ZError::plain(
                     codes::NOT_IMPLEMENTED,
@@ -1411,7 +1403,272 @@ fn cpu_isa_flags(cpu: &str) -> Vec<(&'static str, &'static str)> {
 /// strtab 为 wrapper 侧承载的字符串静态表（全部 Const::Str 去重，M3 移入 object rodata）。
 /// `target`：目标三元组（G3.2，如 `x86_64-pc-windows-gnu` / `x86_64-unknown-linux-musl`）。
 /// `cpu`：x86_64 CPU 基线预设（G3.7，设计 §6.3），见 `cpu_isa_flags`。
-pub fn gen_object(m: &Module, strtab: &[String], out: &Path, target: &str, cpu: &str) -> Result<(), ZError> {
+// ── G3.5：静态表入 object rodata（设计 §4.7）──
+//
+// 全部程序静态表（strtab / file / src / span 表 / 函数与 struct/enum/alias/async
+// 注册表 / 函数指针表）编为 script.o 里的导出数据符号（HN_*），由 runtime 侧
+// `hn_boot`（cfg hone_boot，链接期存在 script.o 时才编译）读取并注册。
+// HN_LENS 是字节长度目录（槽位数 = HN_BLOBS，与 runtime 侧常量一致）；
+// HN_FNV 是 strblob+file+src+spans 的 FNV-1a 自检值（hn_boot 启动时校验）。
+// 空表仍声明符号（补 1 个 0 字节保地址有效），长度记 0。
+const HN_BLOBS: usize = 24;
+
+/// u32 数组 → 小端字节流。
+fn u32_bytes(v: &[u32]) -> Vec<u8> {
+    let mut b = Vec::with_capacity(v.len() * 4);
+    for x in v {
+        b.extend_from_slice(&x.to_le_bytes());
+    }
+    b
+}
+
+/// FNV-1a 64：对多段字节流依次滚动（runtime hn_boot 侧同算法）。
+fn fnv1a64(parts: &[&[u8]]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for d in parts {
+        for &b in *d {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x100000001b3);
+        }
+    }
+    h
+}
+
+/// 声明并定义一个导出数据符号（空表补 1 字节 0 保符号地址有效）。
+fn declare_blob(
+    module: &mut ObjectModule,
+    name: &str,
+    bytes: Vec<u8>,
+    align: u64,
+) -> Result<(), ZError> {
+    let internal =
+        |msg: String| ZError::plain(codes::INTERNAL, msg, None::<String>);
+    let mut d = DataDescription::new();
+    if bytes.is_empty() {
+        d.define(vec![0u8].into_boxed_slice());
+    } else {
+        d.define(bytes.into_boxed_slice());
+    }
+    d.align = Some(align);
+    let id = module
+        .declare_data(name, Linkage::Export, false, false)
+        .map_err(|e| internal(format!("natgen: 声明数据 `{name}` 失败: {e}")))?;
+    module
+        .define_data(id, &d)
+        .map_err(|e| internal(format!("natgen: 定义数据 `{name}` 失败: {e}")))?;
+    Ok(())
+}
+
+/// G3.5：把全部程序静态表编入 object（设计 §4.7）。
+/// blob 顺序即 HN_LENS 槽序，必须与 runtime hn_boot 侧的读取顺序逐位一致。
+fn emit_static_tables(
+    module: &mut ObjectModule,
+    m: &Module,
+    strtab: &[String],
+    file: &str,
+    src: &str,
+    fn_ids: &[FuncId],
+) -> Result<(), ZError> {
+    let internal =
+        |msg: String| ZError::plain(codes::INTERNAL, msg, None::<String>);
+    let strtab_idx: HashMap<&str, usize> =
+        strtab.iter().enumerate().map(|(i, s)| (s.as_str(), i)).collect();
+
+    // span 表：每 chunk (line,col,len) 三元组扁平 + chunk 偏移（u32 单位）。
+    let mut spans: Vec<u32> = Vec::new();
+    let mut span_offs: Vec<u32> = vec![0];
+    for c in &m.chunks {
+        for s in &c.spans {
+            spans.push(s.line as u32);
+            spans.push(s.col as u32);
+            spans.push(s.len as u32);
+        }
+        span_offs.push(spans.len() as u32);
+    }
+    // 全局函数表：func_map → (strtab_idx, ci, nparams)，按 ci 排序保证确定性。
+    let mut func_entries: Vec<(usize, usize)> = m
+        .func_map
+        .iter()
+        .map(|(k, &v)| (strtab_idx[k.as_str()], v))
+        .collect();
+    func_entries.sort_by_key(|&(_, ci)| ci);
+    let mut funcs: Vec<u32> = Vec::new();
+    for &(s, ci) in &func_entries {
+        funcs.push(s as u32);
+        funcs.push(ci as u32);
+        funcs.push(m.chunks[ci].params.len() as u32);
+    }
+    let nparams: Vec<u32> = m
+        .chunks
+        .iter()
+        .map(|c| c.params.len() as u32)
+        .collect();
+    // G2.8：形参默认值位（0/1）+ 计数。
+    let mut def_bits: Vec<u32> = Vec::new();
+    let mut def_counts: Vec<u32> = Vec::new();
+    for c in &m.chunks {
+        def_counts.push(c.params.len() as u32);
+        for i in 0..c.params.len() {
+            def_bits.push(if c.param_defaults.get(i).copied().unwrap_or(false) {
+                1
+            } else {
+                0
+            });
+        }
+    }
+    // G2.4：形参名（strtab 索引扁平 + 每 chunk 计数）。
+    let mut param_names: Vec<u32> = Vec::new();
+    let mut param_name_counts: Vec<u32> = Vec::new();
+    for c in &m.chunks {
+        param_name_counts.push(c.params.len() as u32);
+        for p in &c.params {
+            param_names.push(strtab_idx.get(p.as_str()).copied().unwrap_or(0) as u32);
+        }
+    }
+    // 局部变量表：(strtab_idx, reg) 对按 sidx 排序 + 每 chunk 计数。
+    let mut locs: Vec<u32> = Vec::new();
+    let mut loc_counts: Vec<u32> = Vec::new();
+    for c in &m.chunks {
+        let mut pairs: Vec<(usize, usize)> =
+            c.locals.iter().map(|(k, &r)| (strtab_idx[k.as_str()], r)).collect();
+        pairs.sort_by_key(|&(s, _)| s);
+        loc_counts.push(pairs.len() as u32);
+        for (s, r) in pairs {
+            locs.push(s as u32);
+            locs.push(r as u32);
+        }
+    }
+    // struct 定义表（G2.1）：(名 sidx, 字段数) + 字段名 sidx 按定义序 + 计数。
+    let mut struct_defs: Vec<u32> = Vec::new();
+    let mut struct_fields: Vec<u32> = Vec::new();
+    let mut struct_field_counts: Vec<u32> = Vec::new();
+    for (name, fields) in m.struct_defs.iter() {
+        struct_defs.push(strtab_idx[name.as_str()] as u32);
+        struct_defs.push(fields.len() as u32);
+        struct_field_counts.push(fields.len() as u32);
+        for f in fields {
+            struct_fields.push(strtab_idx[f.as_str()] as u32);
+        }
+    }
+    // alias 表（G2.5）：(新名 sidx, 原名 sidx) 对。
+    let mut aliases: Vec<u32> = Vec::new();
+    for (orig, new_name) in &m.aliases {
+        aliases.push(strtab_idx.get(new_name.as_str()).copied().unwrap_or(0) as u32);
+        aliases.push(strtab_idx.get(orig.as_str()).copied().unwrap_or(0) as u32);
+    }
+    // enum 定义表（G2.2）：(名 sidx, 变体数) + (变体名 sidx, 载荷数) + 计数。
+    let mut enum_defs: Vec<u32> = Vec::new();
+    let mut enum_variants: Vec<u32> = Vec::new();
+    let mut enum_variant_counts: Vec<u32> = Vec::new();
+    for (name, variants) in m.enum_defs.iter() {
+        enum_defs.push(strtab_idx[name.as_str()] as u32);
+        enum_defs.push(variants.len() as u32);
+        enum_variant_counts.push(variants.len() as u32);
+        for (v, payload) in variants {
+            enum_variants.push(strtab_idx[v.as_str()] as u32);
+            enum_variants.push(*payload as u32);
+        }
+    }
+    // async 函数名 sidx（按 sidx 排序保证确定性）。
+    let mut async_fns: Vec<u32> = m
+        .async_fns
+        .iter()
+        .map(|n| strtab_idx.get(n.as_str()).copied().unwrap_or(0) as u32)
+        .collect();
+    async_fns.sort_unstable();
+
+    // strtab blob：去重全集拼接 + 偏移表（n+1 项）。
+    let mut strblob: Vec<u8> = Vec::new();
+    let mut str_offs: Vec<u32> = vec![0];
+    for s in strtab {
+        strblob.extend_from_slice(s.as_bytes());
+        str_offs.push(strblob.len() as u32);
+    }
+
+    // FNV 自检值：strblob + file + src + spans（hn_boot 启动时逐字节校验）。
+    let fnv = fnv1a64(&[&strblob, file.as_bytes(), src.as_bytes(), &u32_bytes(&spans)]);
+    let fnv_bytes = fnv.to_le_bytes().to_vec();
+
+    // 逐 blob 声明；槽序与 runtime hn_boot 读取顺序一致（HN_BLOBS=24）。
+    declare_blob(module, "HN_STRBLOB", strblob.clone(), 1)?;
+    declare_blob(module, "HN_STROFFS", u32_bytes(&str_offs), 4)?;
+    declare_blob(module, "HN_FILE", file.as_bytes().to_vec(), 1)?;
+    declare_blob(module, "HN_SRC", src.as_bytes().to_vec(), 1)?;
+    declare_blob(module, "HN_SPANS", u32_bytes(&spans), 4)?;
+    declare_blob(module, "HN_SPANCHUNKOFFS", u32_bytes(&span_offs), 4)?;
+    declare_blob(module, "HN_FUNCS", u32_bytes(&funcs), 4)?;
+    declare_blob(module, "HN_NPARAMS", u32_bytes(&nparams), 4)?;
+    declare_blob(module, "HN_PARAMNAMES", u32_bytes(&param_names), 4)?;
+    declare_blob(module, "HN_PARAMNAMECOUNTS", u32_bytes(&param_name_counts), 4)?;
+    declare_blob(module, "HN_PARAMDEFBITS", u32_bytes(&def_bits), 4)?;
+    declare_blob(module, "HN_PARAMDEFCOUNTS", u32_bytes(&def_counts), 4)?;
+    declare_blob(module, "HN_LOCS", u32_bytes(&locs), 4)?;
+    declare_blob(module, "HN_LOCCOUNTS", u32_bytes(&loc_counts), 4)?;
+    declare_blob(module, "HN_STRUCTDEFS", u32_bytes(&struct_defs), 4)?;
+    declare_blob(module, "HN_STRUCTFIELDS", u32_bytes(&struct_fields), 4)?;
+    declare_blob(module, "HN_STRUCTFIELDCOUNTS", u32_bytes(&struct_field_counts), 4)?;
+    declare_blob(module, "HN_ENUMDEFS", u32_bytes(&enum_defs), 4)?;
+    declare_blob(module, "HN_ENUMVARIANTS", u32_bytes(&enum_variants), 4)?;
+    declare_blob(module, "HN_ENUMVARIANTCOUNTS", u32_bytes(&enum_variant_counts), 4)?;
+    declare_blob(module, "HN_ALIASES", u32_bytes(&aliases), 4)?;
+    declare_blob(module, "HN_ASYNC", u32_bytes(&async_fns), 4)?;
+    // 函数指针表：每 chunk 一项（main chunk = __hn_main），经 function_relocs
+    // 写入绝对地址（链接期重定位）。COFF 下数据符号是裸名，与 runtime 侧一致。
+    let mut fpd = DataDescription::new();
+    fpd.define(vec![0u8; m.chunks.len() * 8].into_boxed_slice());
+    fpd.align = Some(8);
+    for (i, fid) in fn_ids.iter().enumerate() {
+        let fr = module.declare_func_in_data(*fid, &mut fpd);
+        fpd.function_relocs.push(((i * 8) as u32, fr));
+    }
+    let fpid = module
+        .declare_data("HN_FNPTRS", Linkage::Export, false, false)
+        .map_err(|e| internal(format!("natgen: 声明数据 HN_FNPTRS 失败: {e}")))?;
+    module
+        .define_data(fpid, &fpd)
+        .map_err(|e| internal(format!("natgen: 定义数据 HN_FNPTRS 失败: {e}")))?;
+    declare_blob(module, "HN_FNV", fnv_bytes, 8)?;
+    // HN_LENS：字节长度目录（最后声明，槽序 = 上面的 blob 顺序）。
+    let lens: [u32; HN_BLOBS] = [
+        strblob.len() as u32,
+        (str_offs.len() * 4) as u32,
+        file.len() as u32,
+        src.len() as u32,
+        (spans.len() * 4) as u32,
+        (span_offs.len() * 4) as u32,
+        (funcs.len() * 4) as u32,
+        (nparams.len() * 4) as u32,
+        (param_names.len() * 4) as u32,
+        (param_name_counts.len() * 4) as u32,
+        (def_bits.len() * 4) as u32,
+        (def_counts.len() * 4) as u32,
+        (locs.len() * 4) as u32,
+        (loc_counts.len() * 4) as u32,
+        (struct_defs.len() * 4) as u32,
+        (struct_fields.len() * 4) as u32,
+        (struct_field_counts.len() * 4) as u32,
+        (enum_defs.len() * 4) as u32,
+        (enum_variants.len() * 4) as u32,
+        (enum_variant_counts.len() * 4) as u32,
+        (aliases.len() * 4) as u32,
+        (async_fns.len() * 4) as u32,
+        (m.chunks.len() * 8) as u32,
+        8,
+    ];
+    declare_blob(module, "HN_LENS", u32_bytes(&lens), 4)?;
+    Ok(())
+}
+
+/// `file` / `src`：脚本路径与全文（G3.5：编入 object rodata 供错误渲染定位）。
+pub fn gen_object(
+    m: &Module,
+    strtab: &[String],
+    file: &str,
+    src: &str,
+    out: &Path,
+    target: &str,
+    cpu: &str,
+) -> Result<(), ZError> {
     let internal = |msg: String| ZError::plain(codes::INTERNAL, msg, None::<String>);
 
     let main_ci = m
@@ -1544,6 +1801,9 @@ pub fn gen_object(m: &Module, strtab: &[String], out: &Path, target: &str, cpu: 
             .define_function(fid, &mut ctx)
             .map_err(|e| internal(format!("natgen: 定义函数 `hn_f{ci}` 失败: {e:?}")))?;
     }
+
+    // G3.5：静态表入 object rodata（须在 finish 前 define）。
+    emit_static_tables(&mut module, m, strtab, file, src, &fn_ids)?;
 
     let prod = module.finish();
     let bytes = prod

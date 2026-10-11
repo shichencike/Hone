@@ -30,6 +30,13 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then BIN=./target/debug/hone.exe; else BIN=./target/debug/hone; fi
           "$BIN" examples/hello.hn
           "$BIN" examples/fib.hn
+      # G3.6：原生编译后端三引擎回归（interp / VM / nat 逐字节；nat 每例单独
+      # rustc 链接，16 例约数分钟）。
+      - name: nat 三引擎回归 (regress4)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN=target/debug/hone.exe; else BIN=target/debug/hone; fi
+          HONE_BIN="$BIN" python tests/regress4.py
 
   termux:
     name: cross-compile aarch64 (Termux / musl)

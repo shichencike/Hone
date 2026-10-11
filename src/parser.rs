@@ -2587,7 +2587,7 @@ impl Parser {
                 // 字典字面量 {"key": value, ...} 或字典推导式 {key: value for k, v in iter [if cond]}
                 // 空字典字面量 `{}`：与空列表 `[]` 对称，直接产出无条目的 DictLit。
                 // 各后端对空 entries 均安全（interp → Value::Dict(vec![])、vm → NewDict(r, base, 0)、
-                // aot → hn_dict_new() 后不加 set、checker → 空循环返回 Ty::Unknown）。
+                // checker → 空循环返回 Ty::Unknown）。
                 if self.at(&Tok::RBrace) {
                     self.next();
                     return Ok(Expr::DictLit(Vec::new(), span));

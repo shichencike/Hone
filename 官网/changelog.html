@@ -55,7 +55,7 @@
 <h2><span class="hash">#</span>更新日志</h2>
 <p>各版本的新增 / 变更 / 修复 / 文档汇总。最新版本见顶部 <span class="ver-tag">v0.7.12</span> 区块。</p>
 <div class="release">
-<span class="ver-tag">Unreleased</span> <span class="badge-new">开发中</span>
+<span class="ver-tag">v0.8.0</span>
 <h4><span class="flag add">新增</span></h4>
 <ul>
 <li><strong>原生编译后端（<code class="inline">hone build --exe --native</code> / <code class="inline">hone natgen</code>）</strong>：第四条执行路径——用<ul>
@@ -70,6 +70,15 @@
 <li>顺手修复：VM lambda 捕获实参寄存器绑定 bug（原按 <code class="inline">ncap+i</code> 偏移，捕获/参数寄存器不从 0 起排时</li>
 <li>设计 / 进度：<code class="inline">Hone原生编译后端设计.md</code>、<code class="inline">Hone原生编译后端进度.md</code></li>
 </ul></li>
+<li><strong>原生编译后端 M2 收尾（G2.6 async-await / G2.8 默认参数 / G2.9 点号内置族）与 M3 G3.1 import</strong>：<ul>
+<li>G3.1：VM（<code class="inline">--vm</code>）与原生后端（<code class="inline">--native</code>）在<strong>编译期</strong>递归展开顶层 <code class="inline">import</code></li>
+<li>修复 natgen 缺陷：函数入口块与 pc=0 段块原为同一块，当函数首语句为 <code class="inline">while</code>（循环头在 pc 0）</li>
+</ul></li>
+<li><strong>原生编译后端产物体积裁剪（M3 G3.3）</strong>：链接期 <code class="inline">-C opt-level=z</code> + <code class="inline">-C codegen-units=1</code> +<ul>
+<li>修复 natgen 缺陷：默认参数形参装载判据写成 <code class="inline">nargs &lt; j</code>，漏掉 <code class="inline">j == nargs</code>（恰未提供）档——</li>
+</ul></li>
+<li><strong>原生编译后端 CPU 基线（M3 G3.7）</strong>：x86_64 ISA 默认 baseline + SSSE3（设计 §6.3，避免 AVX 类</li>
+<li><strong>原生编译后端交叉编译（M3 G3.2）</strong>：新增 <code class="inline">--target &lt;triple&gt;</code>（<code class="inline">build --exe --native</code> / <code class="inline">natgen</code>），</li>
 </ul>
 <h4><span class="flag fix">修复</span></h4>
 <ul>
@@ -96,6 +105,17 @@
 <ul>
 <li><strong>新增两条字节码指令</strong>：<code class="inline">Instr::CondCheck(reg, kind)</code>（条件严格 bool 校验，kind 区分</li>
 <li><strong><code class="inline">Instr::DestructGet</code> 增字段</strong>：签名由 <code class="inline">(dst, obj, key)</code> 扩为 <code class="inline">(dst, obj, key, nvars, is_dict)</code>，</li>
+</ul>
+<h4><span class="flag doc">移除</span></h4>
+<ul>
+<li><strong>移除 AOT 原生编译后端（<code class="inline">hone build --exe -c</code>）</strong>：整条「脚本 → C 中间文件 → gcc/clang →<ul>
+<li>删除 <code class="inline">src/aot.rs</code>（AOT 的 C 代码生成与内嵌 C 运行时，约 2900 行）；删除 <code class="inline">src/main.rs</code> 中</li>
+<li><code class="inline">hone build --exe</code> 现只保留两条路径：默认的<strong>自释放打包</strong>（解释器 + 脚本）与 <code class="inline">--native</code></li>
+<li><strong><code class="inline">--dll</code> 相关配置与参数完全未改动</strong>：<code class="inline">hone build --dll</code> 的 C 代码生成（<code class="inline">src/codegen.rs</code>）、</li>
+<li>与值模型无关、两个 C 后端原先共用的机械层 <code class="inline">src/cgen_util.rs</code>（C 字符串转义）<strong>保留</strong>，</li>
+<li><code class="inline">--dll</code> 依赖的 C 编译器查找 <code class="inline">find_cc()</code>（<code class="inline">CC</code> 环境变量 &gt; gcc &gt; clang &gt; cc）与调用 <code class="inline">run_cc()</code></li>
+<li>文档同步：<code class="inline">README.md</code>、<code class="inline">hone.md</code>（原 4.6「AOT 原生编译」与 4.8「AOT 性能实测」两节删除，</li>
+</ul></li>
 </ul>
 </div>
 <div class="release">
@@ -139,6 +159,7 @@
 <li><strong>typeDefinition</strong>（<code class="inline">textDocument/typeDefinition</code>）：类型定义跳转（struct / enum / type / class）</li>
 <li>协议错误遵循 LSP 规范：<code class="inline">-32700</code> Parse error、<code class="inline">-32601</code> Method not found、</li>
 <li>端到端冒烟测试见 <code class="inline">tests/lsp_smoke.py</code>（stdio 启动服务器，验证全部能力 + 协议错误码）</li>
+<li>各编辑器（VS Code / Neovim / Helix / Emacs / Kakoune）接入配置见官网「LSP / 编辑器」页（官网/lsp.html）</li>
 </ul></li>
 <li><strong>hone check 静态检查命令</strong>：<code class="inline">hone check &lt;file.hn|目录&gt; [--json]</code> 只做解析 + 类型检查、<ul>
 <li>单文件：通过输出 <code class="inline">check OK: &lt;file&gt;</code>（退出码 0）；失败输出诊断到 stderr，退出码非 0</li>

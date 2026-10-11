@@ -15,7 +15,7 @@
   <span class="logo"><span class="mark">&#9889;</span> Hone</span>
   <span class="spacer"></span>
   <span class="right">
-    <span class="ver">v0.7.12</span>
+    <span class="ver">v0.8.0</span>
     <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">&#9728;</span><span class="ti-dark">&#127769;</span></button>
   </span>
 </header>
@@ -39,6 +39,7 @@
       <a href="language.html">语言参考</a>
       <a href="stdlib.html">标准库</a>
       <a href="perf.html">性能</a>
+      <a href="lsp.html">LSP / 编辑器</a>
     </div>
     <div class="nav-group">
       <div class="nav-title">项目</div>
@@ -183,7 +184,7 @@ flag = <span class="n">1</span>;
 
   <div class="example">
     <div class="title">2.6 宏</div>
-    <div class="note">解析期纯 AST 替换，运行期无实体，解释器 / 字节码 VM / AOT 三后端行为一致（期望输出：9 / hello macro / 12）</div>
+    <div class="note">解析期纯 AST 替换，运行期无实体，解释器 / 字节码 VM / 原生编译三后端行为一致（期望输出：9 / hello macro / 12）</div>
 <pre><code><span class="k">macro</span> <span class="f">SQ</span>(x) =&gt; x * x;
 <span class="k">macro</span> <span class="f">SAY</span>(msg) { <span class="f">print</span>(msg); }
 <span class="k">macro</span> <span class="f">INC</span>(x) { x = x + <span class="n">1</span>; }   <span class="c">// 形参作赋值目标：实参须为裸变量名</span>
@@ -903,7 +904,7 @@ i = <span class="n">0</span>;
 </main>
 
 <footer>
-  Hone v0.7.12 &middot; MIT License &middot; <span class="sword">&#128481;</span> Hone &ndash; 为效率而生，为乐趣而造
+  Hone v0.8.0 &middot; MIT License &middot; <span class="sword">&#128481;</span> Hone &ndash; 为效率而生，为乐趣而造
   &middot; <a href="https://github.com/shichencike/Hone">GitHub</a>
 </footer>
 

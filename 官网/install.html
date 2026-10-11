@@ -15,7 +15,7 @@
   <span class="logo"><span class="mark">&#9889;</span> Hone</span>
   <span class="spacer"></span>
   <span class="right">
-    <span class="ver">v0.7.12</span>
+    <span class="ver">v0.8.0</span>
     <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">&#9728;</span><span class="ti-dark">&#127769;</span></button>
   </span>
 </header>
@@ -39,6 +39,7 @@
       <a href="language.html">语言参考</a>
       <a href="stdlib.html">标准库</a>
       <a href="perf.html">性能</a>
+      <a href="lsp.html">LSP / 编辑器</a>
     </div>
     <div class="nav-group">
       <div class="nav-title">项目</div>
@@ -75,7 +76,7 @@
     <h3>Windows（PowerShell 5.1+）</h3>
 <pre><code>irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex</code></pre>
     <p>优先使用系统自带的 <code class="inline">curl.exe</code> 下载（更快、支持续传与重试），强制 TLS 1.2，安装到 <code class="inline">%LOCALAPPDATA%\hone\bin</code> 并幂等加入用户 PATH（新开的终端生效）；<code class="inline">HONE_UNINSTALL=1</code> 可卸载。</p>
-    <p>指定版本：<code class="inline">HONE_VERSION=v0.7.12 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code>（Windows 同理，先 <code class="inline">$env:HONE_VERSION = "v0.7.12"</code>）。</p>
+    <p>指定版本：<code class="inline">HONE_VERSION=v0.8.0 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh</code>（Windows 同理，先 <code class="inline">$env:HONE_VERSION = "v0.8.0"</code>）。</p>
     <p><strong>镜像源（国内加速）</strong>：脚本默认先走<strong>ghproxy.net 前缀代理</strong>，失败自动回退官方 GitHub，无需任何配置。
       也可用环境变量 <code class="inline">HONE_MIRROR</code> 指定其他镜像，或设 <code class="inline">HONE_MIRROR=off</code> 强制只用官方源：</p>
 <pre><code><span class="c"># 直接从镜像拉取脚本（国内直连，无需加速器）</span>
@@ -123,7 +124,7 @@ hone hello.hn    <span class="c">// Hello, Hone!</span></code></pre>
 </main>
 
 <footer>
-  Hone v0.7.12 &middot; MIT License &middot; <span class="sword">&#128481;</span> Hone &ndash; 为效率而生，为乐趣而造
+  Hone v0.8.0 &middot; MIT License &middot; <span class="sword">&#128481;</span> Hone &ndash; 为效率而生，为乐趣而造
   &middot; <a href="https://github.com/shichencike/Hone">GitHub</a>
 </footer>
 

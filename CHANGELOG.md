@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v0.8.0] — 2026-10-11
 
 ### 新增
 - **原生编译后端（`hone build --exe --native` / `hone natgen`）**：第四条执行路径——用
@@ -117,6 +117,25 @@
 - **`Instr::DestructGet` 增字段**：签名由 `(dst, obj, key)` 扩为 `(dst, obj, key, nvars, is_dict)`，
   供 VM 侧复现解释器的解构报错文案（文本 IR 往返格式同步为 `DESTRUCTGET r{d} r{o} r{k} {n} {list|dict}`）
 
+### 移除
+- **移除 AOT 原生编译后端（`hone build --exe -c`）**：整条「脚本 → C 中间文件 → gcc/clang →
+  原生可执行文件」的编译路径从此不再提供。移除内容与边界如下：
+  - 删除 `src/aot.rs`（AOT 的 C 代码生成与内嵌 C 运行时，约 2900 行）；删除 `src/main.rs` 中
+    `-c` / `--keep-c` 的参数解析、`cmd_build_exe_aot()` 与 `run_cc_exe()` 两个函数，以及
+    `--help` 与选项错误提示中的 `-c` / `--keep-c` 文案
+  - `hone build --exe` 现只保留两条路径：默认的**自释放打包**（解释器 + 脚本）与 `--native`
+    （Cranelift 原生编译）；原先「`-c` 与 `--native` 互斥」的 H005 校验随 AOT 一并移除。
+    对已写死 `-c` 的旧命令，现按「未知选项」显式报错，不再静默产生 AOT 产物
+  - **`--dll` 相关配置与参数完全未改动**：`hone build --dll` 的 C 代码生成（`src/codegen.rs`）、
+    类型映射（int→int64_t / float→double / bool→bool / str→const char*）、`@export` 导出、
+    动态库扩展名分派（dll / so / dylib）行为均保持原样
+  - 与值模型无关、两个 C 后端原先共用的机械层 `src/cgen_util.rs`（C 字符串转义）**保留**，
+    现由 `--dll` 单一使用（含 4 个单元测试，锁死控制字符转义回归）
+  - `--dll` 依赖的 C 编译器查找 `find_cc()`（`CC` 环境变量 > gcc > clang > cc）与调用 `run_cc()`
+    逻辑不变——这两个函数是 `--dll` 与 AOT 共用，移除 AOT 后仍由 `--dll` 使用，故保留
+  - 文档同步：`README.md`、`hone.md`（原 4.6「AOT 原生编译」与 4.8「AOT 性能实测」两节删除，
+    章节号顺延）、`AGENTS.md`、官网相关页
+
 ## [v0.7.12] - 2026-09-25
 
 ### 新增
@@ -165,6 +184,7 @@
   - 协议错误遵循 LSP 规范：`-32700` Parse error、`-32601` Method not found、
     `-32602` Invalid params；未实现能力（如 documentHighlight）返回 `-32601`
   - 端到端冒烟测试见 `tests/lsp_smoke.py`（stdio 启动服务器，验证全部能力 + 协议错误码）
+  - 各编辑器（VS Code / Neovim / Helix / Emacs / Kakoune）接入配置见官网「LSP / 编辑器」页（官网/lsp.html）
 - **hone check 静态检查命令**：`hone check <file.hn|目录> [--json]` 只做解析 + 类型检查、
   不执行代码
   - 单文件：通过输出 `check OK: <file>`（退出码 0）；失败输出诊断到 stderr，退出码非 0

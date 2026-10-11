@@ -5693,10 +5693,178 @@ pub extern "C" fn rt_append(list: u64, val: u64, ci: u64, pc: u64) -> u64 {
     make_cell_list(&items)
 }
 
+// ── G3.5：静态表自举（script.o rodata → 运行时注册表） ──
+// 仅在产物链接路径编译（rustc/wrapper 传 --cfg hone_boot）；cargo test 不定义该
+// cfg（测试用各 hn_rt_*_init 手工建表），extern static 不参与链接。
+#[cfg(hone_boot)]
+mod hn_boot {
+    use super::*;
+
+    /// 与 natgen 侧 HN_BLOBS 一致（HN_LENS 槽位数）。
+    const HN_BLOBS: usize = 24;
+
+    // script.o 导出的静态数据符号（natgen emit_static_tables 同名声明）。
+    extern "C" {
+        static HN_LENS: u32;
+        static HN_STRBLOB: u8;
+        static HN_STROFFS: u32;
+        static HN_FILE: u8;
+        static HN_SRC: u8;
+        static HN_SPANS: u32;
+        static HN_SPANCHUNKOFFS: u32;
+        static HN_FUNCS: u32;
+        static HN_NPARAMS: u32;
+        static HN_PARAMNAMES: u32;
+        static HN_PARAMNAMECOUNTS: u32;
+        static HN_PARAMDEFBITS: u32;
+        static HN_PARAMDEFCOUNTS: u32;
+        static HN_LOCS: u32;
+        static HN_LOCCOUNTS: u32;
+        static HN_STRUCTDEFS: u32;
+        static HN_STRUCTFIELDS: u32;
+        static HN_STRUCTFIELDCOUNTS: u32;
+        static HN_ENUMDEFS: u32;
+        static HN_ENUMVARIANTS: u32;
+        static HN_ENUMVARIANTCOUNTS: u32;
+        static HN_ALIASES: u32;
+        static HN_ASYNC: u32;
+        static HN_FNPTRS: u64;
+        static HN_FNV: u64;
+    }
+
+    fn u32s(p: &u32, byte_len: usize) -> Vec<u32> {
+        if byte_len == 0 {
+            return Vec::new();
+        }
+        unsafe { std::slice::from_raw_parts(p as *const u32, byte_len / 4).to_vec() }
+    }
+
+    fn bytes_of(p: &u8, byte_len: usize) -> &'static [u8] {
+        if byte_len == 0 {
+            return &[];
+        }
+        unsafe { std::slice::from_raw_parts(p as *const u8, byte_len) }
+    }
+
+    fn fnv1a64(parts: &[&[u8]]) -> u64 {
+        let mut h: u64 = 0xcbf29ce484222325;
+        for d in parts {
+            for &b in *d {
+                h ^= b as u64;
+                h = h.wrapping_mul(0x100000001b3);
+            }
+        }
+        h
+    }
+
+    /// 自举：读 HN_* 静态表并注册到各运行时注册表（设计 §4.7）。
+    /// FNV 自检失败 → stderr 报错 exit 2（静态表被篡改/版本错配）。
+    pub fn boot_tables() {
+        unsafe {
+            let lens = u32s(&HN_LENS, HN_BLOBS * 4);
+            let bl = |i: usize| lens[i] as usize;
+            let strblob = bytes_of(&HN_STRBLOB, bl(0));
+            let offs = u32s(&HN_STROFFS, bl(1));
+            let file = bytes_of(&HN_FILE, bl(2));
+            let src = bytes_of(&HN_SRC, bl(3));
+            let spans = u32s(&HN_SPANS, bl(4));
+            let span_offs = u32s(&HN_SPANCHUNKOFFS, bl(5));
+            // FNV 自检（设计 §4.7）：strblob+file+src+spans 逐字节校验。
+            let mut span_bytes = Vec::with_capacity(spans.len() * 4);
+            for x in &spans {
+                span_bytes.extend_from_slice(&x.to_le_bytes());
+            }
+            let expect = u64::from_le_bytes(
+                std::slice::from_raw_parts(&HN_FNV as *const u64 as *const u8, 8)
+                    .try_into()
+                    .unwrap(),
+            );
+            if fnv1a64(&[strblob, file, src, &span_bytes]) != expect {
+                eprintln!("hone nat: 静态表 FNV 自检失败（产物不完整或被篡改）");
+                std::process::exit(2);
+            }
+            // CLI 参数初始化（原 wrapper main 的解析规则，镜像 builtins::init_args）。
+            let raw_args: Vec<String> = std::env::args().skip(1).collect();
+            let mut ak: Vec<&str> = Vec::new();
+            let mut av: Vec<&str> = Vec::new();
+            let mut i = 0usize;
+            while i < raw_args.len() {
+                let a = &raw_args[i];
+                if let Some(key) = a.strip_prefix("--") {
+                    if i + 1 < raw_args.len() && !raw_args[i + 1].starts_with('-') {
+                        ak.push(key);
+                        av.push(raw_args[i + 1].as_str());
+                        i += 2;
+                    } else {
+                        ak.push(key);
+                        av.push("true");
+                        i += 1;
+                    }
+                } else if a.len() == 2 && a.starts_with('-') {
+                    let key = &a[1..];
+                    if i + 1 < raw_args.len() && !raw_args[i + 1].starts_with('-') {
+                        ak.push(key);
+                        av.push(raw_args[i + 1].as_str());
+                        i += 2;
+                    } else {
+                        ak.push(key);
+                        av.push("true");
+                        i += 1;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            let akb: Vec<u8> = ak.concat().into_bytes();
+            let avb: Vec<u8> = av.concat().into_bytes();
+            let akl: Vec<usize> = ak.iter().map(|s| s.len()).collect();
+            let avl: Vec<usize> = av.iter().map(|s| s.len()).collect();
+            hn_rt_args_init(akb.as_ptr(), akl.as_ptr(), avb.as_ptr(), avl.as_ptr(), ak.len());
+            // strtab：blob + 偏移 → (ptr,len) 表（hn_rt_strtab_init 内部拷贝建 cell）。
+            let mut ptrs: Vec<*const u8> = Vec::with_capacity(offs.len().saturating_sub(1));
+            let mut slens: Vec<usize> = Vec::with_capacity(offs.len().saturating_sub(1));
+            if offs.len() >= 2 {
+                for w in offs.windows(2) {
+                    let (s, e) = (w[0] as usize, w[1] as usize);
+                    ptrs.push(strblob[s..e].as_ptr());
+                    slens.push(e - s);
+                }
+            }
+            hn_rt_strtab_init(ptrs.as_ptr(), slens.as_ptr(), ptrs.len());
+            // 程序静态表：file/src + 每 chunk span 三元组。
+            let nchunks = span_offs.len().saturating_sub(1);
+            let mut sp: Vec<*const u32> = Vec::with_capacity(nchunks);
+            let mut sln: Vec<usize> = Vec::with_capacity(nchunks);
+            if nchunks > 0 {
+                for w in span_offs.windows(2) {
+                    let (s, e) = (w[0] as usize, w[1] as usize);
+                    sp.push(spans[s..e].as_ptr());
+                    sln.push((e - s) / 3);
+                }
+            }
+            hn_rt_prog_init(file.as_ptr(), file.len(), src.as_ptr(), src.len(), sp.as_ptr(), sln.as_ptr(), nchunks);
+            // 函数指针表（HN_FNPTRS 内为链接期重定位好的绝对地址）。
+            hn_rt_fn_ptrs_init(&HN_FNPTRS as *const u64 as *const usize, nchunks);
+            hn_rt_funcs_init(u32s(&HN_FUNCS, bl(6)).as_ptr(), bl(6) / 12);
+            hn_rt_chunk_nparams(u32s(&HN_NPARAMS, bl(7)).as_ptr(), bl(7) / 4);
+            hn_rt_param_names(u32s(&HN_PARAMNAMES, bl(8)).as_ptr(), u32s(&HN_PARAMNAMECOUNTS, bl(9)).as_ptr(), bl(9) / 4);
+            hn_rt_param_defaults(u32s(&HN_PARAMDEFBITS, bl(10)).as_ptr(), u32s(&HN_PARAMDEFCOUNTS, bl(11)).as_ptr(), bl(11) / 4);
+            hn_rt_locals_init(u32s(&HN_LOCS, bl(12)).as_ptr(), u32s(&HN_LOCCOUNTS, bl(13)).as_ptr(), bl(13) / 4);
+            hn_rt_structs_init(u32s(&HN_STRUCTDEFS, bl(14)).as_ptr(), u32s(&HN_STRUCTFIELDS, bl(15)).as_ptr(), u32s(&HN_STRUCTFIELDCOUNTS, bl(16)).as_ptr(), bl(16) / 4);
+            hn_rt_enums_init(u32s(&HN_ENUMDEFS, bl(17)).as_ptr(), u32s(&HN_ENUMVARIANTS, bl(18)).as_ptr(), u32s(&HN_ENUMVARIANTCOUNTS, bl(19)).as_ptr(), bl(19) / 4);
+            hn_rt_aliases_init(u32s(&HN_ALIASES, bl(20)).as_ptr(), bl(20) / 8);
+            hn_rt_asyncs_init(u32s(&HN_ASYNC, bl(21)).as_ptr(), bl(21) / 4);
+        }
+    }
+}
+
 /// 产物入口：ERR → rt_unwind；否则 drop 后退出码 0（与 hone run 一致）。
 /// main chunk 为统一签名（argptr, nargs, capsptr, ncap），顶层无参无捕获 → 全 0。
 #[no_mangle]
 pub extern "C" fn hn_entry() -> i32 {
+    // G3.5：链接产物路径下先从 script.o rodata 自举静态表（测试构建无此 cfg）。
+    #[cfg(hone_boot)]
+    hn_boot::boot_tables();
     let r = unsafe { __hn_main(0, 0, 0, 0) };
     if cell(r).t == T_ERR {
         rt_unwind(r);
