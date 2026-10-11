@@ -52,6 +52,11 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
 - natgen ISA 旗标（G3.7）：x86_64 默认 baseline+SSSE3，`--cpu` 预设 baseline/ssse3/sse4.2/avx2。
   ISA 专属旗标（`has_ssse3` 等）**必须经 `isa::lookup(triple)` 的 `IsaBuilder`（`settings::Configurable::set`）
   设置**，不能在全局 `settings::builder()` 上设（会报 `No existing setting named`）；设完再 `finish(flags)`。
+- 交叉编译（G3.2）：natgen 目标三元组参数化（默认宿主），`--target` 选目标。交叉链接走 rustc 驱动 +
+  `-C link-self-contained=yes`（用 sysroot 自带 musl CRT）+ `-C linker=<sysroot>/lib/rustlib/<host>/bin/rust-lld`
+  （rustc 自动带 `-flavor gnu`）+ 裸 `--gc-sections`/`--strip-all`（lld 不认 `-Wl,`）+ `-no-pie`
+  （Cranelift 产非 PIC 对象，musl 默认 PIE 会重定位失败）。aarch64 需 cranelift-codegen 开 `arm64` 特性。
+  交叉产物在 Windows 上不可运行，靠 CI 验证（G3.6）。
 - 条件与逻辑语义（改 `vm.rs` 编译臂时注意，解释器为准）：`if`/`while`/`do-while`/`for`/三元/推导式 `if` 过滤六处条件站点**运行期严格 bool**（`Instr::CondCheck`），`&&`/`||` 短路求值且右侧操作数严格 bool（`Instr::IsBoolVal` 判「恰为该布尔值」，不是 truthy）。
 
 ## 项目特有约定

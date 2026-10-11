@@ -1407,10 +1407,11 @@ fn cpu_isa_flags(cpu: &str) -> Vec<(&'static str, &'static str)> {
     f
 }
 
-/// 生成 COFF object（含全部用户函数与 __hn_main 入口）。
+/// 生成目标 object（含全部用户函数与 __hn_main 入口；格式由 `target` 决定：COFF / ELF）。
 /// strtab 为 wrapper 侧承载的字符串静态表（全部 Const::Str 去重，M3 移入 object rodata）。
+/// `target`：目标三元组（G3.2，如 `x86_64-pc-windows-gnu` / `x86_64-unknown-linux-musl`）。
 /// `cpu`：x86_64 CPU 基线预设（G3.7，设计 §6.3），见 `cpu_isa_flags`。
-pub fn gen_object(m: &Module, strtab: &[String], out: &Path, cpu: &str) -> Result<(), ZError> {
+pub fn gen_object(m: &Module, strtab: &[String], out: &Path, target: &str, cpu: &str) -> Result<(), ZError> {
     let internal = |msg: String| ZError::plain(codes::INTERNAL, msg, None::<String>);
 
     let main_ci = m
@@ -1419,21 +1420,34 @@ pub fn gen_object(m: &Module, strtab: &[String], out: &Path, cpu: &str) -> Resul
         .copied()
         .ok_or_else(|| ZError::plain(codes::INTERNAL, "natgen: 模块缺少 main chunk", None::<String>))?;
 
-    let triple = target_lexicon::Triple::from_str("x86_64-pc-windows-gnu")
-        .map_err(|e| internal(format!("natgen: 目标三元组解析失败: {e}")))?;
+    let triple = target_lexicon::Triple::from_str(target).map_err(|e| {
+        ZError::plain(
+            codes::SYNTAX,
+            format!("natgen: 目标三元组解析失败 `{target}`: {e}"),
+            None::<String>,
+        )
+    })?;
+    let is_x86 = matches!(triple.architecture, target_lexicon::Architecture::X86_64);
     let mut flag_builder = builder();
     flag_builder
         .set("opt_level", "speed")
         .map_err(|e| internal(format!("natgen: 设置 opt_level 失败: {e}")))?;
     let flags = cranelift_codegen::settings::Flags::new(flag_builder);
-    // G3.7：x86_64 CPU 基线（设计 §6.3）——默认 baseline + SSSE3，`--cpu` 可覆盖。
+    let mut isa_builder = cranelift_codegen::isa::lookup(triple).map_err(|e| {
+        ZError::plain(
+            codes::NOT_IMPLEMENTED,
+            format!("原生编译后端暂不支持目标 `{target}`：{e}（Cranelift 未启用该架构）"),
+            Some("当前启用架构：x86_64；aarch64 需启用 cranelift-codegen 的 `arm64` 特性（随 G3.4 工具链一并落地）"),
+        )
+    })?;
+    // G3.7：CPU 基线预设是 x86_64 专属旗标（`has_*`），仅对 x86_64 目标设置。
     // ISA 专属旗标经 IsaBuilder（settings::Configurable）设置，**不在**全局 flag builder 上。
-    let mut isa_builder = cranelift_codegen::isa::lookup(triple)
-        .map_err(|e| internal(format!("natgen: ISA 查找失败: {e}")))?;
-    for (k, v) in cpu_isa_flags(cpu) {
-        isa_builder
-            .set(k, v)
-            .map_err(|e| internal(format!("natgen: 设置 ISA 旗标 `{k}` 失败: {e}")))?;
+    if is_x86 {
+        for (k, v) in cpu_isa_flags(cpu) {
+            isa_builder
+                .set(k, v)
+                .map_err(|e| internal(format!("natgen: 设置 ISA 旗标 `{k}` 失败: {e}")))?;
+        }
     }
     let isa = isa_builder
         .finish(flags)

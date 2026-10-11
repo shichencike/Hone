@@ -498,7 +498,7 @@ fn print_help() {
     println!("  hone build --dll <file.hn> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
     println!("  hone build --exe <file.hn> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
     println!("  hone build --exe -c <file.hn> AOT 编译为原生可执行文件（脚本→C 中间文件→gcc/clang；默认删 .c，--keep-c 保留）");
-    println!("  hone build --exe --native <file.hn> 原生编译为可执行文件（Cranelift→object→内嵌运行时，需 rustc；[-o <out>] [--cpu <name>]）");
+    println!("  hone build --exe --native <file.hn> 原生编译为可执行文件（Cranelift→object→内嵌运行时，需 rustc；[-o <out>] [--cpu <name>] [--target <triple>]）");
     println!("  hone build --script <file.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）");
     println!("  hone get                   读取当前目录 hone.json 清单，批量下载全部模块");
     println!("  hone get <module> <url>  下载模块依赖并缓存到 ~/.hone/cache/，并写入 hone.json 清单");
@@ -689,6 +689,7 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     let mut keep_c = false;
     let mut native_mode = false;
     let mut cpu: Option<String> = None;
+    let mut target: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -698,6 +699,10 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
             "--cpu" => {
                 i += 1;
                 cpu = args.get(i).cloned();
+            }
+            "--target" => {
+                i += 1;
+                target = args.get(i).cloned();
             }
             "-o" => {
                 i += 1;
@@ -710,11 +715,12 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
             s if s.starts_with("--out=") => out = Some(s["--out=".len()..].to_string()),
             s if s.starts_with("--icon=") => icon = Some(s["--icon=".len()..].to_string()),
             s if s.starts_with("--cpu=") => cpu = Some(s["--cpu=".len()..].to_string()),
+            s if s.starts_with("--target=") => target = Some(s["--target=".len()..].to_string()),
             s if s.starts_with('-') => {
                 return Err(ZError::plain(
                     codes::SYNTAX,
                     format!("unknown build option `{}`", s),
-                    Some("options: `-c`, `--keep-c`, `--native`, `--cpu <name>`, `-o <out>`, `--icon <ico>`, `--version`"),
+                    Some("options: `-c`, `--keep-c`, `--native`, `--cpu <name>`, `--target <triple>`, `-o <out>`, `--icon <ico>`, `--version`"),
                 ));
             }
             s => {
@@ -752,7 +758,7 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
         return cmd_build_exe_aot(&path, out, keep_c);
     }
     if native_mode {
-        return build_native(&path, out, None, "build", cpu);
+        return build_native(&path, out, None, "build", cpu, target);
     }
 
     // 以当前 hone 可执行文件作为内嵌运行时
@@ -1560,6 +1566,7 @@ fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
     let mut out: Option<String> = None;
     let mut obj: Option<String> = None;
     let mut cpu: Option<String> = None;
+    let mut target: Option<String> = None;
     let mut path: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
@@ -1576,6 +1583,20 @@ fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
             }
             s if s.starts_with("--cpu=") => {
                 cpu = Some(s["--cpu=".len()..].to_string());
+                i += 1;
+            }
+            "--target" => {
+                target = Some(args.get(i + 1).cloned().ok_or_else(|| {
+                    ZError::plain(
+                        codes::SYNTAX,
+                        "missing value for --target: `hone natgen <file.hn> --target <triple>`",
+                        None::<String>,
+                    )
+                })?);
+                i += 2;
+            }
+            s if s.starts_with("--target=") => {
+                target = Some(s["--target=".len()..].to_string());
                 i += 1;
             }
             "-o" => {
@@ -1602,7 +1623,7 @@ fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
                 return Err(ZError::plain(
                     codes::SYNTAX,
                     format!("unknown natgen option `{a}`"),
-                    Some("usage: hone natgen <file.hn> [-o <out>] [--obj <o>] [--cpu <name>]"),
+                    Some("usage: hone natgen <file.hn> [-o <out>] [--obj <o>] [--cpu <name>] [--target <triple>]"),
                 ));
             }
             a => {
@@ -1619,7 +1640,32 @@ fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
         )
     })?;
     // T7：管线与 `hone build --exe --native` 共用（build_native）；natgen 保留为别名。
-    build_native(&path, out, obj, "natgen", cpu)
+    build_native(&path, out, obj, "natgen", cpu, target)
+}
+
+/// 定位 rustc 自带的 rust-lld（G3.2 交叉目标裸链接用；位于 `<sysroot>/lib/rustlib/<host>/bin/`）。
+fn rust_lld_path() -> Option<std::path::PathBuf> {
+    let out = std::process::Command::new("rustc")
+        .args(["--print", "sysroot"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let sysroot = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let host = target_lexicon::Triple::host().to_string();
+    let exe = if cfg!(windows) { "rust-lld.exe" } else { "rust-lld" };
+    let p = std::path::Path::new(&sysroot)
+        .join("lib")
+        .join("rustlib")
+        .join(&host)
+        .join("bin")
+        .join(exe);
+    if p.exists() {
+        Some(p)
+    } else {
+        None
+    }
 }
 
 /// 共享原生编译管线（T7）：`hone natgen` 与 `hone build --exe --native` 共用入口。
@@ -1632,7 +1678,22 @@ fn build_native(
     obj: Option<String>,
     label: &str,
     cpu: Option<String>,
+    target: Option<String>,
 ) -> Result<(), ZError> {
+    // G3.2：目标三元组——默认宿主目标；`--target` 指定交叉目标（交叉产物需目标 std/运行时，见 G3.4）。
+    let host = target_lexicon::Triple::host();
+    let triple = match &target {
+        Some(t) => t.parse::<target_lexicon::Triple>().map_err(|e| {
+            ZError::plain(
+                codes::SYNTAX,
+                format!("无效的 --target `{t}`: {e}"),
+                Some("例如 x86_64-pc-windows-gnu / x86_64-unknown-linux-musl"),
+            )
+        })?,
+        None => host.clone(),
+    };
+    let triple_s = triple.to_string();
+    let cross = triple_s != host.to_string();
     let src = std::fs::read_to_string(path).map_err(|e| {
         ZError::plain(
             codes::FILE_NOT_FOUND,
@@ -1737,15 +1798,27 @@ fn build_native(
         .unwrap_or_else(|| path.to_string());
     let obj = obj.unwrap_or_else(|| format!("{}.nat.o", base));
     let out = out.unwrap_or_else(|| {
-        if cfg!(windows) {
+        if cross {
+            // 交叉产物默认名带目标后缀（设计 §7.1）。
+            let ext = if matches!(triple.operating_system, target_lexicon::OperatingSystem::Windows) {
+                ".exe"
+            } else {
+                ""
+            };
+            format!("{base}-{triple_s}{ext}")
+        } else if cfg!(windows) {
             format!("{}.exe", base)
         } else {
             base
         }
     });
-    eprintln!("[2/4] {} 生成 object: {}（Cranelift，句柄式值模型 lowering）", label, obj);
-    natgen::gen_object(&vm_mod, &strtab, std::path::Path::new(&obj), cpu.as_deref().unwrap_or("ssse3"))?;
-    eprintln!("[3/4] {} 链接原生 exe: {}（rustc + 内嵌运行时）", label, out);
+    eprintln!("[2/4] {} 生成 object: {}（Cranelift，目标 {}）", label, obj, triple_s);
+    natgen::gen_object(&vm_mod, &strtab, std::path::Path::new(&obj), &triple_s, cpu.as_deref().unwrap_or("ssse3"))?;
+    if cross {
+        eprintln!("[3/4] {} 链接原生 exe: {}（rustc + 内嵌运行时，交叉目标 {}）", label, out, triple_s);
+    } else {
+        eprintln!("[3/4] {} 链接原生 exe: {}（rustc + 内嵌运行时）", label, out);
+    }
     // 链接管线（干净构建机自足，无需本仓库）：
     //   临时目录/
     //     rt.rs    内嵌运行时（NAT_RUNTIME_SRC，含 rt_* 与 hn_entry 入口）
@@ -2089,11 +2162,31 @@ fn build_native(
     let obj_s = obj.to_string();
     // G3.3 体积裁剪：opt-level=2（速度优先）+ 单 codegen unit + 链接期 --gc-sections
     // （去未引用段）+ --strip-all（去符号表）。可用 HONE_NAT_FLAGS 覆盖（调试/实验用）。
-    let default_flags = "-C opt-level=z -C codegen-units=1 \
-                         -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--strip-all";
-    let flags = std::env::var("HONE_NAT_FLAGS").unwrap_or_else(|_| default_flags.to_string());
+    let default_flags = {
+        let core = "-C opt-level=z -C codegen-units=1";
+        // windows-gnu 宿主经 gcc 驱动链接，参数须 `-Wl,`；交叉目标直接调 rust-lld，用裸参数。
+        let link = if cross {
+            "-C link-arg=--gc-sections -C link-arg=--strip-all -C link-arg=-no-pie"
+        } else {
+            "-C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--strip-all"
+        };
+        format!("{core} {link}")
+    };
+    let flags = std::env::var("HONE_NAT_FLAGS").unwrap_or(default_flags);
     let mut rustc_args: Vec<String> = vec!["--edition".into(), "2021".into()];
     rustc_args.extend(flags.split_whitespace().map(str::to_string));
+    // 交叉目标：显式传 --target（宿主目标不传，保持既有行为逐字节不变），并用 rustc
+    // 自带 CRT（link-self-contained）+ rust-lld 裸链接（设计 §5.1/5.2）。
+    if cross {
+        rustc_args.push("--target".into());
+        rustc_args.push(triple_s.clone());
+        rustc_args.push("-C".into());
+        rustc_args.push("link-self-contained=yes".into());
+        if let Some(lld) = rust_lld_path() {
+            rustc_args.push("-C".into());
+            rustc_args.push(format!("linker={}", lld.display()));
+        }
+    }
     rustc_args.push("-o".into());
     rustc_args.push(out_s.clone());
     rustc_args.push(main_rs.to_str().unwrap().to_string());
@@ -2112,11 +2205,12 @@ fn build_native(
     let _ = std::fs::remove_dir_all(&tmpdir);
     if !p.status.success() {
         let err = String::from_utf8_lossy(&p.stderr);
-        return Err(ZError::plain(
-            codes::INTERNAL,
-            format!("链接失败:\n{err}"),
-            Some("检查 rustc 工具链与 object 目标三元组一致性"),
-        ));
+        let hint = if cross {
+            format!("交叉目标 `{triple_s}` 需对应目标的 std/运行时归档（M3 G3.4 未落地）；本机仅宿主目标可用")
+        } else {
+            "检查 rustc 工具链与 object 目标三元组一致性".to_string()
+        };
+        return Err(ZError::plain(codes::INTERNAL, format!("链接失败:\n{err}"), Some(hint)));
     }
     if !std::path::Path::new(&out).is_file() {
         return Err(ZError::plain(

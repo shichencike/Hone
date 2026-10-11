@@ -1419,6 +1419,9 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   hello 约 1.0MB、M2 各用例约 1.1MB（设计目标 ≤3MB）；`HONE_NAT_FLAGS` 可临时覆盖链接参数
 · CPU 基线（M3 G3.7）：x86_64 ISA 默认 baseline + SSSE3（设计 §6.3，避免 AVX 类指令在旧 CPU 非法）；
   `--cpu baseline|ssse3|sse4.2|avx2` 可选（`build --exe --native` / `hone natgen`）
+· 交叉编译（M3 G3.2）：`--target <triple>` 可选（`build --exe --native` / `hone natgen`）；支持
+  `x86_64-pc-windows-gnu`（宿主）/ `x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl`，
+  经 rustc `link-self-contained` 自带 musl CRT + rust-lld 裸链接产出；产物名默认带目标后缀
 · 值模型：句柄式——寄存器持 u64 句柄指向堆上 `HnCell{rc,t,a,b,pkind,payload}`（跨 object ↔ rustc 只传 i64，
   规避 Windows x64 对 >16B 结构体的隐藏 sret 指针 ABI）；引用计数 retain/release，槽写释放旧值；
   str/err/fn 装箱，标量内联
@@ -1482,7 +1485,8 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   · 依赖外部 crate 的点号内置（regex / sqlite / http / ws / smtp / crypto / zlib / archive /
     plugin / guipro / sys-winapi）在原生后端报 H999（见 G2.9）
   · 依赖本机 rustc（rustc 与 Rust std 的链接期依赖）；M3 G3.4 起改随 hone 分发的预编译工具链，
-    移除 rustc 依赖；交叉编译（G3.2）尚未落地——原生后端目前仅支持本机 windows-gnu 目标
+    移除 rustc 依赖；交叉产物（linux-musl / aarch64-musl）**无法在 Windows 构建机运行**，
+    其可运行性由 CI 的 Linux job 二次验证（G3.6）
   · `cow` 声明 / 形参与 VM 一致按引擎边界处理（解释器特性，见 1.3）
 · 与 AOT（-c）的分工：AOT 走 C 中间文件 + gcc/clang，体积几十 KB、零运行时依赖，但错误渲染为简化一行；
   native 走 Cranelift 机器码 + rustc，错误渲染与双引擎逐字节一致，语义对齐是它的首要目标。

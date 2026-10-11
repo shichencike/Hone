@@ -44,7 +44,7 @@ rustls-rustcrypto = "0.0.2-alpha"
 # 证书链构建（自定义验证器注入中间证书用；与 rustls 同版本树）
 rustls-webpki = "0.103"
 webpki-roots = "0.26"
-cranelift-codegen = "0.136.2"
+cranelift-codegen = { version = "0.136.2", features = ["arm64"] }
 cranelift-frontend = "0.136.2"
 cranelift-module = "0.136.2"
 cranelift-object = "0.136.2"

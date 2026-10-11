@@ -49,6 +49,11 @@
 - **原生编译后端 CPU 基线（M3 G3.7）**：x86_64 ISA 默认 baseline + SSSE3（设计 §6.3，避免 AVX 类
   指令在旧 CPU 非法）；新增 `--cpu baseline|ssse3|sse4.2|avx2`（`build --exe --native` / `natgen`）。
   ISA 专属旗标经 `isa::lookup` 的 `IsaBuilder`（`Configurable::set`）设置，非全局 settings builder
+- **原生编译后端交叉编译（M3 G3.2）**：新增 `--target <triple>`（`build --exe --native` / `natgen`），
+  默认宿主目标；支持 `x86_64-pc-windows-gnu` / `x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl`。
+  交叉经 rustc `-C link-self-contained=yes`（自带 musl CRT）+ `-C linker=<sysroot rust-lld>` + 裸
+  `--gc-sections`/`--strip-all` + `-no-pie`（Cranelift 产非 PIC 对象）产出；aarch64 需 cranelift-codegen
+  开 `arm64` 特性。产物名默认带目标后缀
 
 ### 修复
 - **原生编译后端的能力边界报错口径统一为 H999**（M2 G2.7）：此前未实现的指令报 `H990 internal`
