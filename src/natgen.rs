@@ -1190,12 +1190,20 @@ fn lower_chunk(
             chunk.locals.get(&chunk.params[j]).copied() == Some(i)
         }) {
             if has_defaults && chunk.param_defaults.get(j).copied().unwrap_or(false) {
-                // 带默认值形参：j < nargs 读实参，否则 null（序言按 argc 覆盖或校验拦截）
-                let provided = bcx.ins().icmp_imm(IntCC::UnsignedLessThan, nargs, j as i64);
+                // 带默认值形参：j < nargs 读实参，否则填 null（随后序言按 argc 覆盖，或参数
+                // 个数校验拦截）。**判据必须是 j < nargs**（j == nargs 属「未提供」）：
+                // 调用方只打包了 nargs 个句柄，未提供时既不能读 argptr[8*j]（越界读相邻栈，
+                // 读到脏句柄会在序言 store_slot 时被 cell_release 释放 → 段错误），
+                // 也不能把脏值当实参——用偏移 select 把地址钳到 argptr+0、并把值选成 null。
+                let provided = bcx.ins().icmp_imm(IntCC::UnsignedGreaterThan, nargs, j as i64);
                 let null_v = bcx.ins().call(rt.rt_null, &[]);
                 let null_r = bcx.func.dfg.first_result(null_v);
-                let loaded = bcx.ins().load(I64, mflags, argptr, Offset32::new(8 * j as i32));
-                bcx.ins().select(provided, null_r, loaded)
+                let off_real = bcx.ins().iconst(I64, 8 * j as i64);
+                let off_zero = bcx.ins().iconst(I64, 0);
+                let off = bcx.ins().select(provided, off_real, off_zero);
+                let addr = bcx.ins().iadd(argptr, off);
+                let loaded = bcx.ins().load(I64, mflags, addr, Offset32::new(0));
+                bcx.ins().select(provided, loaded, null_r)
             } else {
                 bcx.ins().load(I64, mflags, argptr, Offset32::new(8 * j as i32))
             }

@@ -1415,6 +1415,8 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · 命令形态：`hone natgen` 是 `build --exe --native` 的等价别名（额外保留 `--obj` 输出中间 object 供调试）
 · 管线：解析 + 类型检查 → VM 字节码 → Cranelift object（每 chunk 一个函数，main 为 `__hn_main`）→
   rustc 一次链接（runtime 源码内嵌进 hone 二进制，干净机器自足）
+· 产物体积（M3 G3.3）：链接期 `-C opt-level=z -C codegen-units=1 -Wl,--gc-sections -Wl,--strip-all`，
+  hello 约 1.0MB、M2 各用例约 1.1MB（设计目标 ≤3MB）；`HONE_NAT_FLAGS` 可临时覆盖链接参数
 · 值模型：句柄式——寄存器持 u64 句柄指向堆上 `HnCell{rc,t,a,b,pkind,payload}`（跨 object ↔ rustc 只传 i64，
   规避 Windows x64 对 >16B 结构体的隐藏 sret 指针 ABI）；引用计数 retain/release，槽写释放旧值；
   str/err/fn 装箱，标量内联

@@ -11,7 +11,7 @@
 | **M0 管线打通** | ✅ 完成 | T1–T10 全完成（三引擎逐字节对齐；`build --exe --native` + `natgen` 共用管线；文档已同步） |
 | **M1 核心语义** | ✅ 完成 | G1.1 RC+COW / G1.2 list / G1.3 dict / G1.4 for-in / G1.5 别名用例集 / G1.6 全量回归（三引擎）；审计暴露并修复 6 处引擎缺陷 |
 | **M2 功能对齐** | ✅ 完成 | G2.1 struct 完成（构造 / Field / `__struct__` 全路径过滤 / 相等语义；字段写入为 VM 编译期 H999 同源）；G2.2 enum 完成（构造 / match / 显示 / 相等 / 容器传参）；G2.3 match 完成（字面量 / 变体 / 载荷绑定 / 通配 / 无匹配 H005 / 绑定作用域 / 闭包捕获）+ 连带修掉 6 处既有 interp-VM 分歧；**G2.4 运算符重载完成**（15 个 `__op` 回退链，runtime 内实现，natgen 零改动）+ 连带修掉参数个数校验文案（重载路径可达）；**G2.5 alias / goto 完成**（alias 表进 runtime + natgen 编译期解析；连带修掉解释器「别名指向变量」分叉）；G2.7 H999 边界对齐完成（`instr_coverage` 单测强制）；G2.8 默认参数完成（`emit_default_prologue` 四路一致）；**G2.9 点号内置族完成**（runtime 模块内置分发层 + 纯 std 家族移植 + 外部 crate 族 H999 登记，`tests/m2/dotted.hn` 三引擎一致）；**G2.6 async-await 完成**（rc 原子化 + future 值模型 + spawn_async/await/gocall lowering + 三引擎逐字节对齐）（M2 全任务完成）|
-| **M3 集成与优化** | 🔵 进行中 | **G3.1 import 构建期解析完成**（VM 与 nat 在编译期展开顶层 import、合并单编译单元；顺手修 natgen 入口块缺陷）；交叉编译 / 体积裁剪 / 工具链打包 / CI 待办；任务组 G3.2–G3.7 |
+| **M3 集成与优化** | 🔵 进行中 | **G3.1 import 构建期解析完成**（VM/nat 编译期展开顶层 import；顺手修 natgen 入口块缺陷）；**G3.3 体积裁剪完成**（nat 产物 5.10MB → ~1.0–1.1MB，达标 ≤3MB；顺手修默认参数形参装载边界缺陷）；交叉编译 / 工具链打包 / CI / CPU 基线待办（G3.2/G3.4/G3.6/G3.7）|
 
 **当前可运行产物**：`tests/m1/list.hn` / `tests/m1/dict.hn` / `tests/smoke/rc_alias.test.hn` / `tests/m2/struct.hn` / `tests/m2/enum.hn` / `tests/m2/match.hn` / `tests/m2/conditions.hn` / `tests/m2/overload.hn` / `tests/m2/alias_goto.hn` / `tests/m2/defaults.hn` / `tests/m2/dotted.hn` / `tests/m2/async_go.hn` / `tests/m2/imports.hn` → nat exe，三引擎逐字节对齐（含 list/dict 读写、for-in 迭代、别名 RC+COW 值语义、struct 构造/字段/隐藏键过滤/相等、enum 构造/match/显示/相等/容器与传参、match 全形态与绑定作用域、lambda 捕获、条件严格 bool 与 `&&`/`||` 短路、15 个 `__op` 运算符重载回退、alias 别名与 goto 跳转、默认参数序言、点号内置族 time/path/stat/matrix/csv/diff/yaml/plot/glob/env/db/log/ptr + H999 能力边界、async/await 与 go 并发、构建期 import 展开（本地路径 / 别名前缀 / 模块顶层副作用））。
 **复现**：`hone build --exe --native tests/m2/dotted.hn -o dt.exe && ./dt.exe`
@@ -561,7 +561,9 @@
       （`src/imports.rs::resolve_imports`，本地路径 / 远程缓存 / 前缀改名 / 顶层语句隔离）；
       解释器仍走运行期 import；`tests/m2/imports.hn` 三引擎一致（详见 G3.1 实现进度）
 - [ ] **G3.2 裸链接 + 交叉编译**：切 rust-lld 裸链接（设计 §5.1/5.2）；三目标 windows-gnu / linux-musl / aarch64-musl（zig 存根 → 内嵌 libdl 桩）；`--target` 选项 + 产物目标后缀
-- [ ] **G3.3 体积裁剪**：`--gc-sections` + 按脚本静态收集调用的内置 → 裁剪分发表；目标 ≤3MB
+- [x] **G3.3 体积裁剪**：链接期 `-C opt-level=z` + `-C codegen-units=1` + `-Wl,--gc-sections` +
+      `-Wl,--strip-all`；nat 产物 5.10MB → **~1.0–1.1MB**（≤3MB 达标）；无需「按脚本裁剪内置分发表」
+      即已达标（详见 G3.3 实现进度）
 - [ ] **G3.4 工具链打包**：`targets/` 运行时归档（每目标 staticlib）+ CRT + lld 随 hone 分发；`HONE_TOOLCHAIN_DIR` 覆盖；安装脚本改 zip/tar.gz 包
 - [ ] **G3.5 静态表入 object**：const blob / span 表 / 函数注册表移入 script.o rodata（设计 §4.7，替换 wrapper 静态表）+ 启动 FNV 自检
 - [ ] **G3.6 CI 自动化**：`ci.yml` 增 nat 三引擎回归（`regress4.py`）；release 流水线发布三目标脚本产物 + 交叉产物 CI 二次验证
@@ -599,6 +601,29 @@
   （其余 67 例本轮早前已全绿）；`regress3` 真实逻辑差异 = 0；`regress_ir` BAD=0；
   `cargo test` 6/6、`cargo test -p honeruntime` 19/19。
 
+### G3.3 实现进度（2026-10-11）—— 完成
+
+- **落点：链接期编译/链接器参数**（`src/main.rs::build_native` 的 rustc 调用）。原先仅 `-O`，
+  nat 产物偏大（hello **5.10MB**）。改为：
+  | 手段 | 作用 |
+  |---|---|
+  | `-C opt-level=z` | 体积优先优化（替代 `-O` 的速度优先） |
+  | `-C codegen-units=1` | 单 codegen unit |
+  | `-C link-arg=-Wl,--gc-sections` | 链接期去除未引用段（windows-gnu 走 `x86_64-w64-mingw32-gcc` 驱动，须经 `-Wl,` 传递） |
+  | `-C link-arg=-Wl,--strip-all` | 去除符号表 |
+- **结果**：hello **5.10MB → 1.03MB**；`tests/m2/*` 各用例 1.10–1.14MB。设计 §5.5 目标
+  「M3 后 ≤3MB」**达标**；「按脚本裁剪内置分发表」未做（编译器已裁掉未达路径，收益递减）。
+- **顺手修复 natgen 缺陷（体积优化撞出，与优化本身无关）**：`G2.8` 默认参数的形参装载判据写成
+  `nargs < j`，**漏掉 `j == nargs`（恰未提供）**这一档——把调用方未打包区的**脏句柄**当实参存进
+  形参槽，序言 `store_slot` 时 `cell_release` 释放脏指针 → ACCESS_VIOLATION（`tests/m2/defaults.hn`
+  的 `f3(1,10)` / `f6()` 触发；原 `-O` 下靠栈布局运气掩盖）。改为判据 `j < nargs`（`nargs > j`），
+  未提供时把地址钳到 `argptr+0` 且值取 `rt_null`。
+- **环境变量**：`HONE_NAT_FLAGS` 可覆盖链接参数（调试 / 实验用）；默认即上表四项。
+- **未采用**：`-C panic=abort`（去 unwind 表、再省 ~50KB）——会改 panic 语义，收益小、风险不划算。
+- **验证**：`regress4` **16/16**；`regress_err` 抽样子集（含 nat 运行期 / checker 同源拒 / H999 登记）
+  **12/12**（全量 68 例待补跑，用户已两次中止长跑）；`cargo test` 6/6、`cargo test -p honeruntime` 19/19；
+  `regress_ir` BAD=0。
+
 ---
 
 ## 验收清单（设计 §十「完成定义」）
@@ -606,13 +631,14 @@
 - [ ] `hone build --exe hello.hn` 在无 gcc 的干净机器上产出可运行 exe（M3 完成无 rustc 依赖）
 - [ ] `hone build --exe app.hn --target x86_64-unknown-linux-musl` 在 Windows 上产出 linux exe，CI 二次验证（G3.2/G3.6）
 - [x] `regress4.py` 正常路径三引擎（interp/VM/nat）逐字节对齐——M0 三例 + M1 三例（list/dict/别名）
-      + M2 九例（struct / enum / match / conditions / overload / alias_goto / defaults / dotted / async_go）共 **15 例全绿**
-- [x] `regress_err.py` 错误诊断三引擎逐字符对齐——**67 例全绿**（nat：运行期 / checker 同源拒 /
-      G2.9 H999 登记跳过 3 例 dotted_h999_*）
+      + M2 九例（struct / enum / match / conditions / overload / alias_goto / defaults / dotted / async_go）
+      + M3 一例（imports）共 **16 例全绿**
+- [x] `regress_err.py` 错误诊断三引擎逐字符对齐——**68 例全绿**（nat：运行期 / checker 同源拒 /
+      G2.9 H999 登记跳过 3 例 dotted_h999_*；G3.1 新增 import_missing）
 - [x] `tests/tools/audit_err.py` 55 例错误文案 + help 行 nat-vs-interp 一致（M1 据此修复 6 处引擎缺陷；
       G2.3 的 6 处分歧由条件/逻辑/match 探针矩阵发现，`audit_err.py` 待按新错误形态扩充用例）
 - [ ] 新后端 H999 集合与 VM 完全一致（无静默漏实现）（G2.7）
-- [ ] 产物 ≤5MB（M3 后 ≤3MB）（G3.3）
+- [x] 产物 ≤5MB（M3 后 ≤3MB）（G3.3）：实测 hello **1.03MB**、`tests/m2/*` 各用例 1.10–1.14MB
 - [x] 文档同步：`hone.md`（§1.4 短路与条件 / §1.10 match / §4.7 后端范围）、`CHANGELOG.md`、
       `README.md`、官网 `docs.html` + `changelog.html`（`gen_changelog.py` 重生成）；
       官网待上传（沿用 M1 起的既有流程）

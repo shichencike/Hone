@@ -45,6 +45,10 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
 - natgen 入口块不变量：函数**入口块独立于 pc=0 段块**（入口只做形参装载 / 寄存器槽初始化，末尾无条件
   跳入 pc=0 段块）。勿把两者合块——函数首语句为循环（循环头在 pc 0）时回边即「跳转到 entry 块」，
   Cranelift 校验失败（`invalid reference to entry block`），且序言会被循环重复执行。
+- 原生后端产物体积（G3.3）：`build_native` 链接期固定 `-C opt-level=z -C codegen-units=1`
+  `-C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--strip-all`（产物 ~1MB，设计目标 ≤3MB）；
+  `HONE_NAT_FLAGS` 可临时覆盖。windows-gnu 的链接驱动是 `x86_64-w64-mingw32-gcc`，链接器参数
+  必须经 `-Wl,` 传递（直接 `--gc-sections` 会被 gcc 拒绝）。
 - 条件与逻辑语义（改 `vm.rs` 编译臂时注意，解释器为准）：`if`/`while`/`do-while`/`for`/三元/推导式 `if` 过滤六处条件站点**运行期严格 bool**（`Instr::CondCheck`），`&&`/`||` 短路求值且右侧操作数严格 bool（`Instr::IsBoolVal` 判「恰为该布尔值」，不是 truthy）。
 
 ## 项目特有约定

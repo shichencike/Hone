@@ -2065,10 +2065,20 @@ fn build_native(
         .map_err(|e| ZError::plain(codes::INTERNAL, format!("写 wrapper: {e}"), None::<String>))?;
     let out_s = out.to_string();
     let obj_s = obj.to_string();
+    // G3.3 体积裁剪：opt-level=2（速度优先）+ 单 codegen unit + 链接期 --gc-sections
+    // （去未引用段）+ --strip-all（去符号表）。可用 HONE_NAT_FLAGS 覆盖（调试/实验用）。
+    let default_flags = "-C opt-level=z -C codegen-units=1 \
+                         -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--strip-all";
+    let flags = std::env::var("HONE_NAT_FLAGS").unwrap_or_else(|_| default_flags.to_string());
+    let mut rustc_args: Vec<String> = vec!["--edition".into(), "2021".into()];
+    rustc_args.extend(flags.split_whitespace().map(str::to_string));
+    rustc_args.push("-o".into());
+    rustc_args.push(out_s.clone());
+    rustc_args.push(main_rs.to_str().unwrap().to_string());
+    rustc_args.push("-C".into());
+    rustc_args.push(format!("link-arg={}", obj_s));
     let p = std::process::Command::new("rustc")
-        .args(["--edition", "2021", "-O", "-o", &out_s, main_rs.to_str().unwrap()])
-        .arg("-C")
-        .arg(format!("link-arg={}", obj_s))
+        .args(&rustc_args)
         .output()
         .map_err(|e| {
             ZError::plain(

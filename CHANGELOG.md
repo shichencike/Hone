@@ -40,6 +40,12 @@
   - 修复 natgen 缺陷：函数入口块与 pc=0 段块原为同一块，当函数首语句为 `while`（循环头在 pc 0）
     时回边跳转到 entry 块触发 Cranelift 校验失败（`invalid reference to entry block`）——
     入口块独立为序言、末尾跳入 pc=0 段块（`math_gcd` 等 hone_lib 函数撞出）
+- **原生编译后端产物体积裁剪（M3 G3.3）**：链接期 `-C opt-level=z` + `-C codegen-units=1` +
+  `-Wl,--gc-sections` + `-Wl,--strip-all`，nat 产物 hello 5.10MB → **1.03MB**（`tests/m2/*` 各 1.1MB 量级，
+  达标 ≤3MB）；`HONE_NAT_FLAGS` 可覆盖链接参数
+  - 修复 natgen 缺陷：默认参数形参装载判据写成 `nargs < j`，漏掉 `j == nargs`（恰未提供）档——
+    读到调用方未打包区的脏句柄、序言释放时 `cell_release` 段错误（原 `-O` 下靠栈布局运气掩盖）。
+    改为判据 `j < nargs`、未提供时地址钳 `argptr+0` 且值取 `rt_null`
 
 ### 修复
 - **原生编译后端的能力边界报错口径统一为 H999**（M2 G2.7）：此前未实现的指令报 `H990 internal`
