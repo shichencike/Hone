@@ -59,8 +59,8 @@
 <span class="ver-tag">v0.8.0</span>
 <h4><span class="flag add">新增</span></h4>
 <ul>
-<li><strong>原生编译后端（<code class="inline">hone build --exe --native</code> / <code class="inline">hone natgen</code>）</strong>：第四条执行路径——用 Cranelift 把 VM 字节码直接 lower 为机器码，再经生成式 wrapper + rustc 链接成原生可执行文件<ul>
-<li>与既有 AOT（<code class="inline">build --exe -c</code>，C 中间文件 + gcc/clang）并列；<code class="inline">-c</code> 与 <code class="inline">--native</code> 互斥（H005 显式报错）</li>
+<li><strong>原生编译后端（<code class="inline">hone build --exe --native</code> / <code class="inline">hone natgen</code>）</strong>：第三条执行路径——用 Cranelift 把 VM 字节码直接 lower 为机器码，再经生成式 wrapper + rustc 链接成原生可执行文件<ul>
+<li>不依赖系统 C 编译器（直接由 Cranelift 出机器码 + rustc 链接；<code class="inline">--dll</code> 才需要 C 编译器）</li>
 <li>值模型：句柄式（寄存器持 u64 句柄指向堆上 <code class="inline">HnCell</code>，跨 object ↔ rustc 只传 i64，规避 Windows x64 隐藏 sret 指针 ABI）；引用计数 retain/release，槽写释放旧值</li>
 <li>调用模型：统一 <code class="inline">rt_call</code> 名分发（用户函数 / lambda / 内置表），lambda 按值捕获；错误经 ERR 句柄 跨帧传播 + 静态 catch 映射（无 setjmp），Throw/ThrowStr 归一 H600</li>
 <li>语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码逐字节一致，含完整错误渲染 （<code class="inline">--&gt; 文件:行:列</code> / 行号行 / caret / help）</li>
@@ -68,7 +68,7 @@
 <li>语义对齐修正：native 后端 <code class="inline">==</code>/<code class="inline">!=</code> 对 dict 的隐藏 <code class="inline">__struct__</code> 标记键原按「过滤后比较」处理， 异名 struct 同值误判相等（VM/interp 均判 false）——改为「双侧标记键均存在 → 同名且可见字段 逐对相等」，三引擎对齐</li>
 <li>依赖本机 rustc（M3 起改预编译工具链移除）；runtime 源码内嵌进 hone 二进制，干净机器自足</li>
 <li>回归：<code class="inline">tests/regress4.py</code>（正常路径三引擎）、<code class="inline">tests/regress_err.py</code>（错误诊断三引擎逐字符）； 开发期扫雷工具 <code class="inline">tests/tools/audit_err.py</code>（55 例错误文案 + help 行批量比对）</li>
-<li>顺手修复：VM lambda 捕获实参寄存器绑定 bug（原按 <code class="inline">ncap+i</code> 偏移，捕获/参数寄存器不从 0 起排时 实参填错位，<code class="inline">base + x</code> 报 int+null）；AOT Windows CRLF 行尾问题（C 运行时文本模式 <code class="inline">\n</code>→CRLF 与 Rust 侧 LF 不一致，<code class="inline">hn_init_line_endings()</code> 切二进制模式）</li>
+<li>顺手修复：VM lambda 捕获实参寄存器绑定 bug（原按 <code class="inline">ncap+i</code> 偏移，捕获/参数寄存器不从 0 起排时 实参填错位，<code class="inline">base + x</code> 报 int+null）</li>
 <li>设计 / 进度：<code class="inline">Hone原生编译后端设计.md</code>、<code class="inline">Hone原生编译后端进度.md</code></li>
 </ul></li>
 <li><strong>原生编译后端 M2 收尾（G2.6 async-await / G2.8 默认参数 / G2.9 点号内置族）与 M3 G3.1 import</strong>：<ul>
@@ -83,7 +83,7 @@
 </ul>
 <h4><span class="flag fix">修复</span></h4>
 <ul>
-<li><strong>原生编译后端的能力边界报错口径统一为 H999</strong>（M2 G2.7）：此前未实现的指令报 <code class="inline">H990 internal</code> 「指令未实现（M0 子集外，T3/T5+ 落地）」（文案早已过时），现报 <code class="inline">H999 原生编译后端暂不支持 \</code>await\<code class="inline">（见 M2 G2.6 async-await）</code> + help「用解释器运行同一脚本」， 与 VM / AOT / DLL 对同类特性（<code class="inline">with</code>、字段赋值）的 H999 口径一致</li>
+<li><strong>原生编译后端的能力边界报错口径统一为 H999</strong>（M2 G2.7）：此前未实现的指令报 <code class="inline">H990 internal</code> 「指令未实现（M0 子集外，T3/T5+ 落地）」（文案早已过时），现报 <code class="inline">H999 原生编译后端暂不支持 \</code>await\<code class="inline">（见 M2 G2.6 async-await）</code> + help「用解释器运行同一脚本」， 与 VM / DLL 对同类特性（<code class="inline">with</code>、字段赋值）的 H999 口径一致</li>
 <li><strong>新增单测强制「每个字节码指令都有显式决策」</strong>（G2.7）：<code class="inline">Instr</code> 的每个变体都必须有 lowering 臂 / 块级处理，或在 <code class="inline">NOT_IMPLEMENTED</code> 表里带理由登记——新增指令若漏决策，测试直接失败并列出漏项， 不再静默落到兜底 H990</li>
 <li><strong>原生编译后端支持 alias / goto</strong>（M2 G2.5）：<code class="inline">alias 原名 as 新名</code> 在原生后端可用—— runtime 增加别名表（<code class="inline">call_global</code> 入口解析，可叠加），natgen Call lowering 编译期解析别名 以决定走 <code class="inline">rt_callv</code>（局部变量目标）还是 <code class="inline">rt_call</code>（全局目标）；goto（Label+Jmp）基线已覆盖， 本轮补用例固化</li>
 <li><strong><code class="inline">alias len as mylen</code> 这类「别名指向内置」的形态在原生后端原先报 H002</strong>， 现可用；连带修掉一处极隐蔽的 wrapper 缺陷——别名的<strong>原名</strong>若从未作为调用名出现 （<code class="inline">len</code> 只出现在 alias 声明里）就会拿到错误的 strtab 索引，症状是报错指向一个<strong>无关的函数名</strong></li>

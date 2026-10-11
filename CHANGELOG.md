@@ -3,9 +3,9 @@
 ## [v0.8.0] — 2026-10-11
 
 ### 新增
-- **原生编译后端（`hone build --exe --native` / `hone natgen`）**：第四条执行路径——用
+- **原生编译后端（`hone build --exe --native` / `hone natgen`）**：第三条执行路径——用
   Cranelift 把 VM 字节码直接 lower 为机器码，再经生成式 wrapper + rustc 链接成原生可执行文件
-  - 与既有 AOT（`build --exe -c`，C 中间文件 + gcc/clang）并列；`-c` 与 `--native` 互斥（H005 显式报错）
+  - 不依赖系统 C 编译器（直接由 Cranelift 出机器码 + rustc 链接；`--dll` 才需要 C 编译器）
   - 值模型：句柄式（寄存器持 u64 句柄指向堆上 `HnCell`，跨 object ↔ rustc 只传 i64，规避 Windows x64
     隐藏 sret 指针 ABI）；引用计数 retain/release，槽写释放旧值
   - 调用模型：统一 `rt_call` 名分发（用户函数 / lambda / 内置表），lambda 按值捕获；错误经 ERR 句柄
@@ -29,8 +29,7 @@
   - 回归：`tests/regress4.py`（正常路径三引擎）、`tests/regress_err.py`（错误诊断三引擎逐字符）；
     开发期扫雷工具 `tests/tools/audit_err.py`（55 例错误文案 + help 行批量比对）
   - 顺手修复：VM lambda 捕获实参寄存器绑定 bug（原按 `ncap+i` 偏移，捕获/参数寄存器不从 0 起排时
-    实参填错位，`base + x` 报 int+null）；AOT Windows CRLF 行尾问题（C 运行时文本模式 `\n`→CRLF 与
-    Rust 侧 LF 不一致，`hn_init_line_endings()` 切二进制模式）
+    实参填错位，`base + x` 报 int+null）
   - 设计 / 进度：`Hone原生编译后端设计.md`、`Hone原生编译后端进度.md`
 - **原生编译后端 M2 收尾（G2.6 async-await / G2.8 默认参数 / G2.9 点号内置族）与 M3 G3.1 import**：
   - G3.1：VM（`--vm`）与原生后端（`--native`）在**编译期**递归展开顶层 `import`
@@ -59,7 +58,7 @@
 - **原生编译后端的能力边界报错口径统一为 H999**（M2 G2.7）：此前未实现的指令报 `H990 internal`
   「指令未实现（M0 子集外，T3/T5+ 落地）」（文案早已过时），现报
   `H999 原生编译后端暂不支持 \`await\`（见 M2 G2.6 async-await）` + help「用解释器运行同一脚本」，
-  与 VM / AOT / DLL 对同类特性（`with`、字段赋值）的 H999 口径一致
+  与 VM / DLL 对同类特性（`with`、字段赋值）的 H999 口径一致
 - **新增单测强制「每个字节码指令都有显式决策」**（G2.7）：`Instr` 的每个变体都必须有 lowering 臂 /
   块级处理，或在 `NOT_IMPLEMENTED` 表里带理由登记——新增指令若漏决策，测试直接失败并列出漏项，
   不再静默落到兜底 H990
