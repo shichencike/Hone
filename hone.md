@@ -1428,7 +1428,7 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   `--> 文件名:行:列` / 行号行 / caret / help / 结尾空行）。回归入口两条：
   `tests/regress4.py`（正常路径三引擎）与 `tests/regress_err.py`（错误诊断三引擎逐字符）；
   开发期另有扫雷工具 `tests/tools/audit_err.py`（55 例错误文案 + help 行批量比对）
-· 当前支持范围（M0 + M1 + M2 G2.1–G2.3）：
+· 当前支持范围（M0–M2 全量 G2.1–G2.9 + M3 G3.1/G3.3/G3.7）：
   · 标量全类型：int / float / bool / char / str / null 常量、算术 / 比较 / 一元运算、str 拼接与 ==/!=
   · 控制流：if-else / while / 标签跳转（Label+Jmp 覆盖 goto）
   · 函数与 lambda：递归、向前引用、lambda 直调与作参、捕获（值语义）、闭包嵌套
@@ -1460,30 +1460,36 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
     （本地路径相对 CWD；远程 http(s) 下载缓存到 `~/.hone/cache/`），合并为单编译单元。
     模块函数按「模块名_」前缀注册，`as 别名` 整体替换前缀；模块顶层语句在导入位点执行一次
     （模块作用域隔离）。循环 import 报错、同一模块去重；解释器仍走运行期 import（语义基准）
+  · **alias / goto（G2.5）**：`alias 原名 as 新名`（可叠加，可指向内置 / struct 构造 / 局部变量），
+    goto + 标签跳转
+  · **async / await 与 go（G2.6）**：`async fn` / `await`（future 值模型，runtime 引用计数原子化）
+    与 `go f()` 后台线程；与解释器 / VM 逐字节一致（含跨线程错误传播、多次 await 同一 future）
+  · **默认参数（G2.8）**：`fn f(a, b: int = 2)`——被调帧序言按实参数个数求默认值，
+    VM / nat / 解释器 / AOT 四路一致
+  · **点号内置族（G2.9）**：time / path / stat / matrix / csv / diff / yaml / plot / glob / env / db / log /
+    ptr / random / uuid / temp / server / sys.run 等纯 std 家族移植；依赖外部 crate 的家族（regex /
+    sqlite / http / ws / smtp / crypto / zlib / archive / plugin / guipro / sys-winapi）报 H999 能力边界
   · 内置子集：print / len / append / keys / values / has_key / to_str / to_int / to_float / is_int /
     is_float / is_bool / is_str / is_list / is_dict / is_null / type_of / abs / max / min / assert /
     assert_eq / read_file（assert 失败 H700 文案对齐）
   · 错误码对齐 VM：H001 / H002 / H006 / H007 / H009 / H010 / H011 / H401–H404 / H600 / H700
   · 注意：`d["k"] = v` 这类dict 索引写入被类型检查器静态拒绝（索引须 int，而 dict 键恒为字符串
     字面量），故 dict 在脚本层只读，取值走 for-in / keys / values / has_key
-· 当前限制（M2/M3 逐步放开）：
-  · 子集外指令（切片 / with / 字段赋值等）在**编译期**报 H999（功能未实现）——编译期即拒绝，
+· 当前限制（M3 起逐步放开）：
+  · 深层子集（切片写 / with 上下文 / 结构体·dict 字段赋值等）在**编译期**报 H999（功能未实现），
     不产出错误二进制
-  · struct 字段写入 `p.x = 3` 在 VM 为编译期 H999（M2 未放开），解释器支持（含 readonly 拦截）
-  · **默认参数**（`fn f(a, b = 2)`）在 VM / 原生后端未实现（省略即报 H011，见 1.14 与进度文档 G2.8）；
-    解释器与 AOT 支持
-  · **async / await 与 go 多线程**在原生后端未实现：脚本用到 `await` / `go` 时编译期报
-    `H999 原生编译后端暂不支持 \`await\`（见 M2 G2.6 async-await）`（VM 与解释器支持，
-    见 1.21 与 §1.4.1）；根因是原生运行时引用计数非原子，无法跨线程共享值（G2.6）
-  · 依赖本机 rustc（rustc 与 Rust std 的链接期依赖）；M3 起改为随 hone 分发的预编译工具链，移除 rustc 依赖
+  · struct 字段写入 `p.x = 3` 在 VM 与原生后端为编译期 H999，解释器支持（含 readonly 拦截）
+  · 依赖外部 crate 的点号内置（regex / sqlite / http / ws / smtp / crypto / zlib / archive /
+    plugin / guipro / sys-winapi）在原生后端报 H999（见 G2.9）
+  · 依赖本机 rustc（rustc 与 Rust std 的链接期依赖）；M3 G3.4 起改随 hone 分发的预编译工具链，
+    移除 rustc 依赖；交叉编译（G3.2）尚未落地——原生后端目前仅支持本机 windows-gnu 目标
   · `cow` 声明 / 形参与 VM 一致按引擎边界处理（解释器特性，见 1.3）
 · 与 AOT（-c）的分工：AOT 走 C 中间文件 + gcc/clang，体积几十 KB、零运行时依赖，但错误渲染为简化一行；
   native 走 Cranelift 机器码 + rustc，错误渲染与双引擎逐字节一致，语义对齐是它的首要目标。
   二者互斥：`-c` 与 `--native` 同用报 H005 显式错误
-· 验证基线：`tests/m1/list.hn`（list 承载 13 组断言）、`tests/m1/dict.hn`（dict + 迭代 12 组断言）、
-  `tests/smoke/rc_alias.test.hn`（别名 RC+COW 11 组断言）、`tests/m2/struct.hn`、
-  `tests/m2/enum.hn`、`tests/m2/match.hn`、`tests/m2/conditions.hn`（match 全形态 + 条件/短路）、
-  `tests/m2/overload.hn`（15 个 `__op` 回退 + native 不回退）
+· 验证基线：`tests/m1/list.hn`、`tests/m1/dict.hn`、`tests/smoke/rc_alias.test.hn`、
+  `tests/m2/{struct,enum,match,conditions,overload,alias_goto,defaults,dotted,async_go,imports}.hn`
+  共 **16 例**（`regress4.py`）与 **68 例**错误用例（`regress_err.py`）三引擎逐字节一致
   经 `hone build --exe --native <file>` 复现，interp / VM / nat 三引擎逐字节一致；
   改代码后先 `cargo build`（target/ 旧二进制会静默沿用），
   再跑 `python tests/regress4.py` 与 `python tests/regress_err.py`
