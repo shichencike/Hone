@@ -134,8 +134,8 @@ NAT_UNSUPPORTED = {
 
 
 def run_hone(args, timeout=20):
-    p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-    return (p.stdout + p.stderr, p.returncode)
+    p = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    return ((p.stdout or "") + (p.stderr or ""), p.returncode)
 
 
 def strip_stage_lines(text: str) -> str:

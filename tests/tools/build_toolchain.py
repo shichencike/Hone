@@ -31,17 +31,17 @@ COMMON_TARGETS = [
 
 
 def rustc_sysroot() -> str:
-    out = subprocess.run(["rustc", "--print", "sysroot"], capture_output=True, text=True)
+    out = subprocess.run(["rustc", "--print", "sysroot"], capture_output=True, text=True, encoding="utf-8", errors="replace")
     if out.returncode != 0:
         sys.exit("rustc 不可用：工具链打包需要 rustc（打包一次，分发后目标机无需）")
-    return out.stdout.strip()
+    return (out.stdout or "").strip()
 
 
 def build_staticlib(target: str, sysroot: str) -> Path:
     out_dir = ROOT / "targets" / target
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / "libhoneruntime.a"
-    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True).stdout
+    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     host_triple = next(l.split(": ")[1].strip() for l in host.splitlines() if l.startswith("host:"))
     cmd = ["rustc", "--edition", "2021", "--cfg", "hone_boot",
            "--crate-type", "staticlib",
@@ -50,14 +50,14 @@ def build_staticlib(target: str, sysroot: str) -> Path:
         cmd += ["--target", target]
     cmd += [str(NAT_MAIN), "-o", str(out)]
     print(f"[staticlib] {target} -> {out}")
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if r.returncode != 0:
-        sys.exit(f"staticlib 编译失败 ({target}):\n{r.stderr[-3000:]}")
+        sys.exit(f"staticlib 编译失败 ({target}):\n{(r.stderr or "")[-3000:]}")
     return out
 
 
 def package_lld(sysroot: str) -> Path:
-    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True).stdout
+    host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     host_triple = next(l.split(": ")[1].strip() for l in host.splitlines() if l.startswith("host:"))
     lld_dir = ROOT / "targets" / "lld"
     lld_dir.mkdir(parents=True, exist_ok=True)
@@ -100,7 +100,7 @@ def main() -> None:
     package_lld(sysroot)
     targets = COMMON_TARGETS if args.all_common else args.target
     if not targets:
-        host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True).stdout
+        host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
         targets = [next(l.split(": ")[1].strip() for l in host.splitlines() if l.startswith("host:"))]
     for t in targets:
         build_staticlib(t, sysroot)

@@ -15,8 +15,8 @@ def skip(base):
 def run_once(f, vm):
     args = [BIN, "run"] + (["--vm"] if vm else []) + [f]
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=15)
-        return r.stdout + r.stderr
+        r = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15)
+        return (r.stdout or "") + (r.stderr or "")
     except subprocess.TimeoutExpired as e:
         return (e.stdout or "") + (e.stderr or "") + "[TIMEOUT]"
 

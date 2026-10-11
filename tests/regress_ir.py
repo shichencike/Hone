@@ -31,8 +31,8 @@ def skip(base):
 # 其余示例正常在 1 秒内结束，20 秒是宽松上限。
 def run(args, timeout=20):
     try:
-        p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-        return p.returncode, p.stdout + p.stderr
+        p = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        return p.returncode, (p.stdout or "") + (p.stderr or "")
     except subprocess.TimeoutExpired as e:
         def _txt(x):
             if x is None:

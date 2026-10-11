@@ -256,10 +256,10 @@ GROUPS = {
 
 def run(cmd, timeout=30):
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
         return "<HANG: 死循环>", 99
-    return p.stdout + p.stderr, p.returncode
+    return (p.stdout or "") + (p.stderr or ""), p.returncode
 
 
 def strip_stage_lines(text: str) -> str:

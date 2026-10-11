@@ -87,8 +87,8 @@ CASES = {
 
 
 def run(args, t=30):
-    p = subprocess.run(args, capture_output=True, text=True, timeout=t)
-    return (p.stdout + p.stderr, p.returncode)
+    p = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=t)
+    return ((p.stdout or "") + (p.stderr or ""), p.returncode)
 
 
 def strip_stage(text):
