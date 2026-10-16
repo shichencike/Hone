@@ -60,8 +60,12 @@ ENGINES = ("interp", "vm", "nat")
 def build_native(path: str, tmp: str) -> str:
     """nat 编译 → 临时目录 exe（阶段行走 stderr，不污染比对输出）。"""
     out = os.path.join(tmp, "case_nat.exe")
+    cmd = [BIN, "build", "--exe", "--native", path, "-o", out]
+    # Linux 宿主显式指定 musl 目标：默认探测可能落到 gnu，而工具链没有对应 CRT。
+    if sys.platform == "linux":
+        cmd += ["--target", "x86_64-unknown-linux-musl"]
     p = subprocess.run(
-        [BIN, "build", "--exe", "--native", path, "-o", out],
+        cmd,
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
     )
     # 中间 object 默认落在 CWD（stem.nat.o），即删。
