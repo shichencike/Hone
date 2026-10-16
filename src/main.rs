@@ -1824,18 +1824,35 @@ fn build_native(
         .map_err(|e| ZError::plain(codes::INTERNAL, format!("写 wrapper: {e}"), None::<String>))?;
     let out_s = out.to_string();
     let obj_s = obj.to_string();
-    // G3.3 体积裁剪：opt-level=2（速度优先）+ 单 codegen unit + 链接期 --gc-sections
+    // G3.3 体积裁剪：opt-level=z（体积优先）+ 单 codegen unit + 链接期 --gc-sections
     // （去未引用段）+ --strip-all（去符号表）。可用 HONE_NAT_FLAGS 覆盖（调试/实验用）。
+    // 参数形态按**目标 + 链接器驱动**分派，而不是按「是否交叉」——宿主 Linux（glibc）
+    // 与交叉 musl 同属 ELF，同为「Cranelift 非 PIC 对象 + 平台默认 PIE」这一组合。
+    let is_elf = matches!(triple.operating_system, target_lexicon::OperatingSystem::Linux);
+    let is_msvc = matches!(triple.environment, target_lexicon::Environment::Msvc);
     let default_flags = {
         let core = "-C opt-level=z -C codegen-units=1";
-        // windows-gnu 宿主经 gcc 驱动链接，参数须 `-Wl,`；交叉目标直接调 rust-lld，用裸参数。
         let link = if cross {
+            // 交叉：rustc 直接调 rust-lld（裸参数，lld 不认 gcc 驱动的 `-Wl,` 前缀）。
             "-C link-arg=--gc-sections -C link-arg=--strip-all -C link-arg=-no-pie"
+        } else if is_msvc {
+            // msvc 宿主：链接驱动是 link.exe，GNU/ld 风格参数（`-Wl,--gc-sections`）不适用。
+            // 用 link.exe 自己的等价开关去未引用段 / 折叠相同函数。
+            "-C link-arg=/OPT:REF -C link-arg=/OPT:ICF"
+        } else if is_elf {
+            // 宿主 ELF（Linux gnu / musl）：cc 驱动 + GNU ld，参数经 `-Wl,` 传；且 **必须** 非 PIE
+            // ——Cranelift 产非 PIC 对象（含 R_X86_64_64/32S 绝对重定位），而 Linux 目标默认按
+            // PIE 链接，会报 `relocation R_X86_64_32S ... can not be used when making a PIE
+            // object; recompile with -fPIC`。`relocation-model=static` 让 rustc 自身不再追加
+            // `-pie`，`link-arg=-no-pie` 再明确交给 cc（双保险，与 `-pie` 出现顺序无关）。
+            "-C relocation-model=static -C link-arg=-no-pie -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--strip-all"
         } else {
+            // windows-gnu 宿主：经 MinGW gcc 驱动链接，参数须 `-Wl,`。
             "-C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--strip-all"
         };
         format!("{core} {link}")
     };
+
     let flags = std::env::var("HONE_NAT_FLAGS").unwrap_or(default_flags);
     let mut rustc_args: Vec<String> = vec!["--edition".into(), "2021".into(), "--cfg".into(), "hone_boot".into()];
     rustc_args.extend(flags.split_whitespace().map(str::to_string));
@@ -1888,7 +1905,13 @@ fn build_native(
     if !p.status.success() {
         let err = String::from_utf8_lossy(&p.stderr);
         let hint = if cross {
-            format!("交叉目标 `{triple_s}` 需对应目标的 std/运行时归档（M3 G3.4 未落地）；本机仅宿主目标可用")
+            // 交叉失败的常见三类原因分开说：缺目标 std（rustup 组件未装）/ 缺 rust-lld /
+            // glibc 目标不支持 `link-self-contained`（Linux 交叉只支持 musl，见设计 §一 非目标）。
+            format!(
+                "交叉目标 `{triple_s}` 需要该目标的 Rust std 与自带 CRT（`rustup target add {triple_s}`）\
+                 ，以及 sysroot 内的 rust-lld；Linux 侧交叉请用 musl 目标（glibc 目标不在 CRT 分发矩阵内），\
+                 或改用随 hone 分发的打包工具链（G3.4）"
+            )
         } else {
             "检查 rustc 工具链与 object 目标三元组一致性".to_string()
         };

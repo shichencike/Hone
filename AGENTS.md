@@ -8,11 +8,11 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
 - 回归脚本依赖 `target/debug/hone.exe`，先 build 再跑：
   - `python tests/regress3.py` — 解释器 vs VM 输出逐字节对齐
   - `python tests/regress_err.py` — 三引擎（interp/VM/nat）错误诊断逐字符对齐（行/列/文案/help）
-  - `python tests/regress4.py` — 三引擎正常路径逐字节对齐（需本机 rustc）
+  - `python tests/regress4.py` — 三引擎正常路径逐字节对齐（需本机 rustc）；nat 目标：Linux 侧首选 musl 交叉目标（需 `rustup target add x86_64-unknown-linux-musl`，未装则用宿主目标），首选目标编译失败时退回宿主目标重试并打印 `FALLBACK`，不静默。
   - `python tests/regress_ir.py` — 文本 IR 往返
   - `python tests/tools/audit_err.py` — 开发期扫雷：55 例错误文案 + help 行 nat-vs-interp 批量比对（慢，不入常规回归）
   - `python tests/tools/probe_align.py` — 开发期扫雷：152 例 match / 条件 / 逻辑 / 解构 / 重载 / alias+goto / 默认参数 / 点号内置 / async+go 形态的 interp-vs-VM 逐字节比对；`--nat` 追加第三引擎（每例单独 build，慢）。动态类型值（enum/struct）下的条件与逻辑分叉、以及重载回退边界靠它扫出。
-- CI（.github/workflows/ci.yml）只做 `cargo build/test --locked` + hello/fib smoke；无 rustfmt/clippy 配置，格式化用语言自带 `hone fmt`（作用于 .hn，非 Rust）。
+- CI（.github/workflows/ci.yml）：ubuntu/windows 两个 test job 做 `cargo build --locked` + `cargo test --locked` + hello/fib smoke + `tests/regress4.py`（Linux job 先 `rustup target add x86_64-unknown-linux-musl`，供 nat 回归的 musl 目标）；无 rustfmt/clippy 配置，格式化用语言自带 `hone fmt`（作用于 .hn，非 Rust）。
 
 ## 架构
 
@@ -57,6 +57,14 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   （rustc 自动带 `-flavor gnu`）+ 裸 `--gc-sections`/`--strip-all`（lld 不认 `-Wl,`）+ `-no-pie`
   （Cranelift 产非 PIC 对象，musl 默认 PIE 会重定位失败）。aarch64 需 cranelift-codegen 开 `arm64` 特性。
   交叉产物在 Windows 上不可运行，靠 CI 验证（G3.6）。
+  - 链接参数**按目标 + 链接驱动分派**，不是按「是否交叉」（`main.rs::build_native`）：交叉 → rust-lld 裸参数；
+    宿主 Linux（ELF，gnu/musl 同理）→ cc 驱动 `-Wl,` 参数 **且必须非 PIE**
+    （`-C relocation-model=static -C link-arg=-no-pie`；缺了会让非 PIC 对象在默认 PIE 链接下报
+    `relocation R_X86_64_32S ... recompile with -fPIC`，CI 的 Linux nat 回归曾因此全灭）；宿主 msvc →
+    链接器是 link.exe，GNU 风格参数不适用（用 `/OPT:REF /OPT:ICF`）。
+  - Linux 只支持 musl 交叉目标：glibc 目标（含 `x86_64-unknown-linux-gnu`）不在 CRT 分发矩阵内，
+    rustc 直接报 `option -C link-self-contained is not supported on this target`；宿主 glibc 路径不传
+    `link-self-contained`，故不受此限。
 - 静态表入 object（G3.5）：程序静态表（strtab blob / file / src / span 表 / 全部注册表 /
   函数指针表）由 natgen `emit_static_tables` 编为 script.o 导出数据符号（`HN_*`，24 个，
   `HN_LENS` 为字节长度目录），runtime `hn_boot`（`#[cfg(hone_boot)]`，链接产物路径才编译，
@@ -70,7 +78,9 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   其余→GNU/ELF（`crt1/crti/crtbegin … libunwind -lc -lm crtend/crtn` + `-no-pie
   --gc-sections --strip-all`）。lld 的依赖 DLL（libgcc_s_seh-1 / libwinpthread-1）须随包分发；
   rustc 可用时维持 rustc 链接路径（逐字节回归基准）。runtime 有改动后需重跑打包脚本。
-- CI/发布（G3.6）：`ci.yml` test job 含 `regress4.py`（二进制定位支持 `HONE_BIN` 覆盖）；
+- CI/发布（G3.6）：`ci.yml` test job 含 `regress4.py`（二进制定位支持 `HONE_BIN` 覆盖；Linux job 跑
+  nat 回归前 `rustup target add x86_64-unknown-linux-musl`——**漏装时 rustc 报 E0463
+  `can't find crate for std`，16 例全 BUILD-FAIL**）；
   `release.yml` 构建三目标工具链并产出 full 包（linux tar.gz / windows zip，hone + targets/
   同目录），`verify-nat` job 在 ubuntu runner 上运行 x86_64-musl 产物 + aarch64 ELF 头校验，
   publish 等待验证通过。安装脚本（install.sh / install.ps1）优先下载 full 包，解压到

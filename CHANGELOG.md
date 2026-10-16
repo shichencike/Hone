@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### 修复
+- **CI 的 nat 三引擎回归（Linux job）16 例全灭**：回归脚本在 Linux 上强制
+  `--target x86_64-unknown-linux-musl`，而 runner 未装该目标的 Rust std，rustc 报
+  `E0463: can't find crate for 'std'`。三处一起修：
+  - `ci.yml`：nat 回归步骤在 Linux 上先 `rustup target add x86_64-unknown-linux-musl`（Linux 侧
+    回归口径为 musl，见设计 §6.3；glibc 目标不在 CRT 分发矩阵内）
+  - `regress4.py`：nat 目标改为「已装 musl 用 musl，否则用宿主目标」，且首选目标编译失败时
+    退回宿主目标重试一次并打印 `FALLBACK`（不静默；摘要行新增 `FALLBACK(退回宿主目标)`）
+  - `build_native`（`src/main.rs`）：链接参数改按**目标 + 链接驱动**分派，而非「是否交叉」——
+    宿主 Linux（ELF）此前漏了非 PIE 处理，Cranelift 产出的非 PIC 对象在平台默认 PIE 链接下会报
+    `relocation R_X86_64_32S ... can not be used when making a PIE object; recompile with -fPIC`
+    （musl 交叉路径早已带 `-no-pie`，宿主路径漏了）。宿主 ELF 现用
+    `-C relocation-model=static -C link-arg=-no-pie`；宿主 msvc 不再收到链接器不认识的
+    GNU/ld 风格参数（改用 link.exe 的 `/OPT:REF /OPT:ICF`）
+  - 交叉链接失败的 help 行不再说「本机仅宿主目标可用」（误导），改为指名三条出路：
+    `rustup target add <triple>`、sysroot 内的 rust-lld、glibc 目标不在 CRT 矩阵内（改用 musl 或
+    G3.4 打包工具链）
+
 ## [v0.8.0] — 2026-10-11
 
 ### 新增

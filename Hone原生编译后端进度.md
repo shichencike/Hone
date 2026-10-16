@@ -666,6 +666,33 @@
   type=2(ET_EXEC) / machine（x86_64=62、aarch64=183）；`regress4` **16/16**（宿主路径逐字节不变）；
   `natgen --target=` 形式可用。
 
+### CI nat 回归修复（2026-10-17）—— 完成
+
+- **现象**：`ci.yml` 的 ubuntu job 上 `regress4.py` **16 例全 BUILD-FAIL**，均为
+  `error[E0463]: can't find crate for \`std\` / the x86_64-unknown-linux-musl target may not be installed`。
+- **根因**：上一版为绕开 Linux 侧的 gnu 目标问题，在回归脚本里**无条件**加了
+  `--target x86_64-unknown-linux-musl`（`sys.platform == "linux"`），但 runner 只装了宿主 std
+  ——该目标一旦显式指定即成**交叉编译**，rustc 直接找不到 musl std。另外，宿主 Linux（glibc）路径
+  本身也缺一块：Cranelift 产非 PIC 对象，而 Linux 目标默认按 PIE 链接，会报
+  `relocation R_X86_64_32S ... recompile with -fPIC`（musl 交叉路径早带 `-no-pie`，宿主路径漏了）。
+- **修法（三处协同）**：
+  1. `src/main.rs::build_native` 链接参数改按**目标 + 链接驱动**分派（不再只看 `cross`）：
+     交叉 → rust-lld 裸参数；宿主 ELF（Linux gnu/musl）→ cc 驱动 `-Wl,` 参数 **且
+     `-C relocation-model=static -C link-arg=-no-pie`**（rustc 自身不再追加 `-pie`，双保险）；
+     宿主 msvc → `/OPT:REF /OPT:ICF`（link.exe 不认 GNU 风格参数）；宿主 windows-gnu 不变。
+  2. `ci.yml`：nat 回归步骤在 Linux 上先 `rustup target add x86_64-unknown-linux-musl`
+     （Linux 侧回归口径取 musl 是设计 §6.3 的既定选择；glibc 目标不在 CRT 分发矩阵内，
+     `-C link-self-contained` 在 `x86_64-unknown-linux-gnu` 上直接报 not supported）。
+  3. `tests/regress4.py`：目标选择改为「已装 musl → 首选 musl，否则宿主目标」；首选目标
+     BUILD-FAIL 时退回宿主目标重试一次并打印 `FALLBACK`（摘要另列），不静默、不整轮变红。
+     配套：交叉链接失败的 help 行改为指名三条出路（`rustup target add <triple>` / sysroot 内的
+     rust-lld / glibc 目标不在 CRT 矩阵内）。
+- **验证（本机 windows-gnu）**：`cargo build` 通过（无新增警告）；`regress4` **16/16**（宿主 COFF
+  路径逐字节不变，确认新分派未误伤）；交叉 musl 产物仍产出 ELF（`7F 45 4C 46` / ET_EXEC /
+  machine=62）；`regress_err.py enum_` 子集 **4/4**（nat 运行期 3 + checker 同源拒 1）；
+  `FALLBACK` 分支用桩验证：musl 编译失败 → 打印 FALLBACK → 宿主目标重试 → PASS（rc=0）。
+  Linux 侧（musl 交叉 / 宿主 ELF）须由 CI 二次确认。
+
 ---
 
 ## 验收清单（设计 §十「完成定义」）

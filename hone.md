@@ -1388,7 +1388,12 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   `--cpu baseline|ssse3|sse4.2|avx2` 可选（`build --exe --native` / `hone natgen`）
 · 交叉编译（M3 G3.2）：`--target <triple>` 可选（`build --exe --native` / `hone natgen`）；支持
   `x86_64-pc-windows-gnu`（宿主）/ `x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl`，
-  经 rustc `link-self-contained` 自带 musl CRT + rust-lld 裸链接产出；产物名默认带目标后缀
+  经 rustc `link-self-contained` 自带 musl CRT + rust-lld 裸链接产出；产物名默认带目标后缀。
+  链接参数按「目标 + 链接驱动」分派：宿主 Linux（ELF）需**非 PIE**
+  （`-C relocation-model=static -C link-arg=-no-pie`——Cranelift 产非 PIC 对象，平台默认 PIE
+  链接会报 `relocation R_X86_64_32S ... recompile with -fPIC`）、宿主 windows-gnu 经 MinGW gcc
+  （`-Wl,` 前缀）、宿主 msvc 经 link.exe（`/OPT:REF /OPT:ICF`）。Linux 侧交叉只支持 musl 目标
+  （glibc 目标不在 CRT 分发矩阵内，rustc 会报 `link-self-contained is not supported on this target`）
 · 值模型：句柄式——寄存器持 u64 句柄指向堆上 `HnCell{rc,t,a,b,pkind,payload}`（跨 object ↔ rustc 只传 i64，
   规避 Windows x64 对 >16B 结构体的隐藏 sret 指针 ABI）；引用计数 retain/release，槽写释放旧值；
   str/err/fn 装箱，标量内联
