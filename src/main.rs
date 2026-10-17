@@ -1793,10 +1793,23 @@ fn build_native(
     });
     eprintln!("[2/4] {} 生成 object: {}（Cranelift，目标 {}）", label, obj, triple_s);
     natgen::gen_object(&vm_mod, &strtab, &path, &src, std::path::Path::new(&obj), &triple_s, cpu.as_deref().unwrap_or("ssse3"))?;
-    if cross {
-        eprintln!("[3/4] {} 链接原生 exe: {}（rustc + 内嵌运行时，交叉目标 {}）", label, out, triple_s);
+    // G3.4：链接路径选择——默认「rustc 可用则走 rustc 链接」（逐字节回归基准），否则回退打包
+    // 工具链（targets/：libhoneruntime.a + CRT + rust-lld，无需 rustc）。`HONE_NAT_LINK=rustc|packaged`
+    // 可强制指定（未知值按默认处理）：release.yml 的 verify-nat 用 `packaged` 强制验证「随包分发、
+    // 目标机无 rustc」的那条路径——否则 runner 自带的 rustc 会悄悄接管，测的就不是发布包了。
+    let link_choice = std::env::var("HONE_NAT_LINK").unwrap_or_default();
+    let use_packaged = if link_choice.eq_ignore_ascii_case("packaged") {
+        true
+    } else if link_choice.eq_ignore_ascii_case("rustc") {
+        false
     } else {
-        eprintln!("[3/4] {} 链接原生 exe: {}（rustc + 内嵌运行时）", label, out);
+        !rustc_available()
+    };
+    let via = if use_packaged { "打包工具链 targets/，无需 rustc" } else { "rustc + 内嵌运行时" };
+    if cross {
+        eprintln!("[3/4] {} 链接原生 exe: {}（{}，交叉目标 {}）", label, out, via, triple_s);
+    } else {
+        eprintln!("[3/4] {} 链接原生 exe: {}（{}）", label, out, via);
     }
     // 链接管线（干净构建机自足，无需本仓库）：
     //   临时目录/
@@ -1879,11 +1892,11 @@ fn build_native(
     rustc_args.push(main_rs.to_str().unwrap().to_string());
     rustc_args.push("-C".into());
     rustc_args.push(format!("link-arg={}", obj_s));
-    // G3.4：本机无 rustc 时回退打包工具链链接（script.o + libhoneruntime.a + CRT，
-    // 设计 §5.1）。rustc 可用则维持既有 rustc 路径（逐字节回归基准不变）；
-    // 打包路径当前仅覆盖宿主 windows-gnu COFF（交叉目标待 G3.6 CI 二次验证）。
-    if !rustc_available() {
-        // G3.4：rustc 缺失 → 打包工具链链接（COFF/ELF 双分支，见 link_native_packaged）。
+    // G3.4：打包工具链链接（script.o + libhoneruntime.a + CRT，设计 §5.1；COFF/ELF 双分支见
+    // link_native_packaged）。rustc 可用时默认维持 rustc 路径（逐字节回归基准），
+    // 由 HONE_NAT_LINK=packaged 强制走这里。
+    if use_packaged {
+        // G3.4：打包链接（COFF/ELF 双分支，见 link_native_packaged）。
         let packaged = link_native_packaged(&triple_s, &obj_s, &out_s);
         let _ = std::fs::remove_dir_all(&tmpdir);
         packaged?;

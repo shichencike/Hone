@@ -127,8 +127,14 @@
   `-C link-arg=-no-pie` 只影响链接器末端的开关、**改不了选哪个 crt1**——两者混用会产出
   「`rcrt1.o` 自重定位启动 + ET_EXEC（无 PT_DYNAMIC，`_DYNAMIC=0`）」的产物，`_start` 一开始扫
   dynamic 段就解引用空指针。修法：交叉路径补 **`-C relocation-model=static`**，让 rustc 自己按非 PIE
-  选 `crt1.o`/`crtbegin.o`（与打包工具链路径 G3.4 的产物入口逐字节一致，已用两条链接路径产物的
+  选 `crt1.o`/`crtbegin.o`  （与打包工具链路径 G3.4 的产物入口逐字节一致，已用两条链接路径产物的
   入口点字节比对验证）。
+- **发布流水线的 `verify-nat` 一直没真正验证发布包（v0.8.0 首次发布就卡在这里）**：该 job 的本意是
+  「用随包分发的工具链（无 rustc）编 musl 产物并运行」，但 runner 自带 rustc，`build_native`
+  会静默走 rustc 交叉链接 → 需要 musl std（该 job 未安装）→ `E0463`，`publish` 永远等不到，
+  GitHub 上一直没有 v0.8.0 的 Release。新增 **`HONE_NAT_LINK=rustc|packaged`**（默认 auto：rustc
+  可用走 rustc、缺失回退打包）强制链接路径，`release.yml` 的两步验证都显式设 `packaged`，
+  测到的才是用户实际拿到的发布包。
 
 ### 变更
 - **新增两条字节码指令**：`Instr::CondCheck(reg, kind)`（条件严格 bool 校验，kind 区分

@@ -1384,6 +1384,9 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   rustc 一次链接（runtime 源码内嵌进 hone 二进制，干净机器自足）
 · 产物体积（M3 G3.3）：链接期 `-C opt-level=z -C codegen-units=1 -Wl,--gc-sections -Wl,--strip-all`，
   hello 约 1.0MB、M2 各用例约 1.1MB（设计目标 ≤3MB）；`HONE_NAT_FLAGS` 可临时覆盖链接参数
+· 链接路径（G3.4）：默认「本机有 rustc 就走 rustc 链接」，没有则回退随包分发的打包工具链
+  （`targets/`，`HONE_TOOLCHAIN_DIR` 可指定位置，无需 rustc）；`HONE_NAT_LINK=rustc|packaged`
+  可强制指定（发布流水线的二次验证即用 `packaged` 强制走发布包那条路径）
 · CPU 基线（M3 G3.7）：x86_64 ISA 默认 baseline + SSSE3（设计 §6.3，避免 AVX 类指令在旧 CPU 非法）；
   `--cpu baseline|ssse3|sse4.2|avx2` 可选（`build --exe --native` / `hone natgen`）
 · 交叉编译（M3 G3.2）：`--target <triple>` 可选（`build --exe --native` / `hone natgen`）；支持

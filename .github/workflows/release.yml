@@ -112,11 +112,16 @@ jobs:
         with:
           path: dist
       # G3.6：交叉产物在 Windows 构建机不可运行，二次验证在此进行——
-      # ① 用 linux 产物 + 打包工具链（无 rustc 参与链接）编 hello 的 x86_64-musl
-      #    原生产物并在本 runner 直接运行（输出 Hello Hone!）；
+      # ① 用 linux 产物 + 打包工具链编 hello 的 x86_64-musl 原生产物并在本 runner 直接运行
+      #    （输出 Hello Hone!）；
       # ② aarch64-musl 产物校验 ELF 头（class=2 / ET_EXEC / machine=183）。
+      # HONE_NAT_LINK=packaged 显式强制走「随包分发的打包工具链」路径：runner 自带 rustc，
+      # 不强制的话会悄悄走 rustc 交叉链接（需要 musl std，本 job 没装 → E0463），
+      # 测到的就不是发布包 —— 那正是 v0.8.0 首次发布被卡住的原因。
       - name: run x86_64-musl product
         shell: bash
+        env:
+          HONE_NAT_LINK: packaged
         run: |
           set -e
           chmod +x dist/hone-linux-x86_64/hone-linux-x86_64
@@ -130,6 +135,8 @@ jobs:
           echo "x86_64-musl 产物运行验证通过"
       - name: check aarch64-musl ELF header
         shell: bash
+        env:
+          HONE_NAT_LINK: packaged
         run: |
           set -e
           chmod +x dist/hone-linux-x86_64/hone-linux-x86_64

@@ -719,6 +719,28 @@
 - **教训（已写入 AGENTS.md）**：ELF 交叉的「非 PIE」必须由 **rustc 层**的
   `-C relocation-model=static` 决定；`-C link-arg=-no-pie` 只能当双保险，不能单独顶用。
 
+### Release verify-nat 修复（2026-10-17，第三轮）—— 发布包首次被真正验证
+
+- **现象**：v0.8.0 的 tag 早在 GitHub 上，但 Releases 里一直没有 v0.8.0——`release.yml` 的
+  `verify-nat` 失败，`publish` 从未执行。日志：`E0463: can't find crate for std`
+  （`x86_64-unknown-linux-musl` 未安装）。
+- **根因（口径错位，非链接缺陷）**：`verify-nat` 的注释写着「用 linux 产物 + 打包工具链
+  （**无 rustc 参与链接**）编 musl 产物并运行」，但 runner 自带 rustc，而 `build_native` 的默认
+  选择是「rustc 可用即走 rustc」——于是它悄悄走了 **rustc 交叉链接**，需要 musl std，而该 job
+  从未 `rustup target add`，直接 `E0463`。也就是说：**这条流水线一次都没真正验证过发布包**，
+  而且它的注释与行为不符。
+- **修法**：新增 **`HONE_NAT_LINK=rustc|packaged`**（未设/未知值 = auto：rustc 可用走 rustc，
+  缺失回退打包），`build_native` 据此决定链接路径，`[3/4]` 阶段行同步打印实际路径；
+  `release.yml` 的两步验证（x86_64-musl 运行、aarch64 ELF 头）都显式 `HONE_NAT_LINK=packaged`
+  ——与「目标机无 rustc 时的真实发布包」一致，且不依赖 runner 是否装了 musl std。
+- **验证（本机 windows-gnu）**：三种模式实测——`packaged` → `[3/4] …（打包工具链 targets/，
+  无需 rustc…）` + `[4/4] …（工具链链接，无需 rustc）`；默认 → rustc 路径；`HONE_NAT_LINK=rustc`
+  → rustc 路径。两条路径的 musl 产物入口 24B 同构（`crt1.o` 启动），静态表（`HN_SRC` 脚本源 +
+  `HN_STRBLOB` 字面量字节）都在产物内；`regress4` **16/16**。
+- **备注**：`build_toolchain.py` 确认以 `--cfg hone_boot` 编 `libhoneruntime.a`（否则静态表自举
+  不参与编译，打包产物注册表为空）——这一点写入 AGENTS.md 作为硬约束。
+
+
 
 ---
 

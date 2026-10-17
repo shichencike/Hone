@@ -83,11 +83,18 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   其余→GNU/ELF（`crt1/crti/crtbegin … libunwind -lc -lm crtend/crtn` + `-no-pie
   --gc-sections --strip-all`）。lld 的依赖 DLL（libgcc_s_seh-1 / libwinpthread-1）须随包分发；
   rustc 可用时维持 rustc 链接路径（逐字节回归基准）。runtime 有改动后需重跑打包脚本。
+  - 链接路径由 **`HONE_NAT_LINK=rustc|packaged`** 强制（默认 auto：rustc 可用即走 rustc，缺失才
+    回退打包）。`packaged` 用于验证「随包分发、目标机无 rustc」的真实路径——注意 runner 自带
+    rustc 时默认会走 rustc 交叉链接（需 musl std），测到的就不是发布包。
+  - `libhoneruntime.a` 必须由打包脚本以 **`--cfg hone_boot`** 编（`build_toolchain.py` 已如此）：
+    缺该 cfg 则 `hn_boot` 静态表自举不参与编译，产物运行期注册表为空。
 - CI/发布（G3.6）：`ci.yml` test job 含 `regress4.py`（二进制定位支持 `HONE_BIN` 覆盖；Linux job 跑
   nat 回归前 `rustup target add x86_64-unknown-linux-musl`——**漏装时 rustc 报 E0463
   `can't find crate for std`，16 例全 BUILD-FAIL**）；
   `release.yml` 构建三目标工具链并产出 full 包（linux tar.gz / windows zip，hone + targets/
-  同目录），`verify-nat` job 在 ubuntu runner 上运行 x86_64-musl 产物 + aarch64 ELF 头校验，
+  同目录），`verify-nat` job 在 ubuntu runner 上用 **`HONE_NAT_LINK=packaged`** 强制走打包工具链
+  路径（否则 runner 自带 rustc 会接管 rustc 交叉链接、需要 musl std → E0463；v0.8.0 首次发布
+  就卡在这里）运行 x86_64-musl 产物 + aarch64 ELF 头校验，
   publish 等待验证通过。安装脚本（install.sh / install.ps1）优先下载 full 包，解压到
   hone 同目录即启用原生编译工具链。
 - 条件与逻辑语义（改 `vm.rs` 编译臂时注意，解释器为准）：`if`/`while`/`do-while`/`for`/三元/推导式 `if` 过滤六处条件站点**运行期严格 bool**（`Instr::CondCheck`），`&&`/`||` 短路求值且右侧操作数严格 bool（`Instr::IsBoolVal` 判「恰为该布尔值」，不是 truthy）。
