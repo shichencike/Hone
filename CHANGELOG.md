@@ -19,6 +19,13 @@
   - 交叉链接失败的 help 行不再说「本机仅宿主目标可用」（误导），改为指名三条出路：
     `rustup target add <triple>`、sysroot 内的 rust-lld、glibc 目标不在 CRT 矩阵内（改用 musl 或
     G3.4 打包工具链）
+- **nat 交叉产物在 Linux 上「启动即 SIGSEGV」（CI 16 例全 -11、零输出）**：rustc 对 musl 目标默认按
+  **static-PIE** 选启动 CRT（`rcrt1.o` + `crtbeginS.o` + `-pie --no-dynamic-linker`），而
+  `-C link-arg=-no-pie` 只影响链接器末端的开关、**改不了选哪个 crt1**——两者混用会产出
+  「`rcrt1.o` 自重定位启动 + ET_EXEC（无 PT_DYNAMIC，`_DYNAMIC=0`）」的产物，`_start` 一开始扫
+  dynamic 段就解引用空指针。修法：交叉路径补 **`-C relocation-model=static`**，让 rustc 自己按非 PIE
+  选 `crt1.o`/`crtbegin.o`（与打包工具链路径 G3.4 的产物入口逐字节一致，已用两条链接路径产物的
+  入口点字节比对验证）。
 
 ## [v0.8.0] — 2026-10-11
 

@@ -693,6 +693,33 @@
   `FALLBACK` 分支用桩验证：musl 编译失败 → 打印 FALLBACK → 宿主目标重试 → PASS（rc=0）。
   Linux 侧（musl 交叉 / 宿主 ELF）须由 CI 二次确认。
 
+### nat 交叉产物「启动即 SIGSEGV」修复（2026-10-17，第二轮）
+
+- **现象**：CI Linux job 的 nat 产物**能链出来但跑不动**——16 例全部 `退出码 nat=-11`（SIGSEGV）
+  且 **stdout/stderr 全空**（`boot_tables` 之前就死了，连 stderr 都来不及输出）。
+- **根因**：**rustc 对 musl 目标默认按 static-PIE 选启动 CRT**。`rustc --print link-args` 实测
+  （现状参数）：`…rcrt1.o crti.o crtbeginS.o … -static -pie --no-dynamic-linker -z relro -z now
+  --gc-sections --strip-all -no-pie crtendS.o crtn.o` ——
+  `-C link-arg=-no-pie` 只是**追加给链接器**的开关，改得了 ELF 类型（`e_type=EXEC`，所以 G3.2
+  当初「校验 ELF 头」看不出问题），**改不了 rustc 选哪个 crt1**。于是产物 = 「`rcrt1.o` 自重定位
+  启动代码 + 非 PIE 无 PT_DYNAMIC（`_DYNAMIC=0`）」→ `_start` 一进 dynamic 段扫描就解引用空指针。
+- **修法**：交叉分支补 **`-C relocation-model=static`**（rustc 的 `Pie::No` → 选
+  `crt1.o`/`crtbegin.o`，不再传 `-pie`/`--no-dynamic-linker`）。修复后 `--print link-args` 与打包
+  工具链路径（G3.4）的 CRT 序列一致：`crt1.o crti.o crtbegin.o … crtend.o crtn.o -static -no-pie`。
+- **验证（本机，无需 Linux）**：
+  - 入口点字节比对（最强判据）：打包工具链路径产物 `_start` 头 32B =
+    `48 31 ed 48 89 e7 48 8d 35 … 48 8b 37 48 8d 57 08 45 31 c9`，修复后的 rustc 路径产物
+    **逐字节一致**；修复前是 `… 48 81 ec c0 01 00 00 8b 07 49 …`（rcrt1 的 dynamic 扫描序）。
+  - `rustc --print link-args` 前后对比：crt 对象由 `rcrt1.o/crtbeginS.o/crtendS.o` 变为
+    `crt1.o/crtbegin.o/crtend.o`，`-pie --no-dynamic-linker` 消失。
+  - 静态表内容核对：`HN_FNPTRS` 内容 = `__hn_main` 地址且落在可执行段，`HN_LENS` 长度值合理
+    （排除「函数指针表没重定位」这一备选假设）；无 SHF_ALLOC 段落在 PT_LOAD 之外。
+  - `regress4` **16/16**（宿主 COFF 路径不受影响，本机两次全绿；中途一次 `async_go` FLAKY 属既有的
+    线程完成顺序非确定性）。
+- **教训（已写入 AGENTS.md）**：ELF 交叉的「非 PIE」必须由 **rustc 层**的
+  `-C relocation-model=static` 决定；`-C link-arg=-no-pie` 只能当双保险，不能单独顶用。
+
+
 ---
 
 ## 验收清单（设计 §十「完成定义」）

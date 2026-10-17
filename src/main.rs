@@ -1834,7 +1834,13 @@ fn build_native(
         let core = "-C opt-level=z -C codegen-units=1";
         let link = if cross {
             // 交叉：rustc 直接调 rust-lld（裸参数，lld 不认 gcc 驱动的 `-Wl,` 前缀）。
-            "-C link-arg=--gc-sections -C link-arg=--strip-all -C link-arg=-no-pie"
+            // **必须**加 `-C relocation-model=static`：rustc 对 musl 目标默认按 static-PIE 选启动
+            // CRT（`rcrt1.o` + `crtbeginS.o` + `-pie --no-dynamic-linker`），而 `-C link-arg=-no-pie`
+            // 只改链接器末端的开关、改不了「选哪个 crt1」。两者混用会产出「rcrt1.o 自重定位启动 +
+            // ET_EXEC（无 PT_DYNAMIC，`_DYNAMIC=0`）」的产物——`_start` 一扫 dynamic 段就解引用空指针
+            // → SIGSEGV（CI 的 Linux nat 回归 16 例全 -11 且零输出即此）。static 后 rustc 选
+            // `crt1.o`/`crtbegin.o`，入口与打包工具链路径（G3.4）逐字节一致。
+            "-C relocation-model=static -C link-arg=--gc-sections -C link-arg=--strip-all -C link-arg=-no-pie"
         } else if is_msvc {
             // msvc 宿主：链接驱动是 link.exe，GNU/ld 风格参数（`-Wl,--gc-sections`）不适用。
             // 用 link.exe 自己的等价开关去未引用段 / 折叠相同函数。

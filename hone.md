@@ -1392,7 +1392,10 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   链接参数按「目标 + 链接驱动」分派：宿主 Linux（ELF）需**非 PIE**
   （`-C relocation-model=static -C link-arg=-no-pie`——Cranelift 产非 PIC 对象，平台默认 PIE
   链接会报 `relocation R_X86_64_32S ... recompile with -fPIC`）、宿主 windows-gnu 经 MinGW gcc
-  （`-Wl,` 前缀）、宿主 msvc 经 link.exe（`/OPT:REF /OPT:ICF`）。Linux 侧交叉只支持 musl 目标
+  （`-Wl,` 前缀）、宿主 msvc 经 link.exe（`/OPT:REF /OPT:ICF`）。ELF 交叉还须显式
+  `-C relocation-model=static`：rustc 对 musl 目标默认按 static-PIE 选启动 CRT（`rcrt1.o`），
+  只加 `-no-pie` 链接参数会得到「PIE 启动对象 + 非 PIE ELF」，产物会在启动时解引用空
+  `_DYNAMIC` 而 SIGSEGV。Linux 侧交叉只支持 musl 目标
   （glibc 目标不在 CRT 分发矩阵内，rustc 会报 `link-self-contained is not supported on this target`）
 · 值模型：句柄式——寄存器持 u64 句柄指向堆上 `HnCell{rc,t,a,b,pkind,payload}`（跨 object ↔ rustc 只传 i64，
   规避 Windows x64 对 >16B 结构体的隐藏 sret 指针 ABI）；引用计数 retain/release，槽写释放旧值；

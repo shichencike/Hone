@@ -62,6 +62,11 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
     （`-C relocation-model=static -C link-arg=-no-pie`；缺了会让非 PIC 对象在默认 PIE 链接下报
     `relocation R_X86_64_32S ... recompile with -fPIC`，CI 的 Linux nat 回归曾因此全灭）；宿主 msvc →
     链接器是 link.exe，GNU 风格参数不适用（用 `/OPT:REF /OPT:ICF`）。
+  - ELF 交叉**必须**显式 `-C relocation-model=static`，不能只给 `-C link-arg=-no-pie`：rustc 对
+    musl 目标默认按 static-PIE 选启动 CRT（`rcrt1.o` + `crtbeginS.o` + `-pie --no-dynamic-linker`），
+    而 `link-arg=-no-pie` 只改链接器末端开关、改不了「选哪个 crt1」——混用会产出「`rcrt1.o` 启动 +
+    ET_EXEC（无 PT_DYNAMIC，`_DYNAMIC=0`）」，产物**启动即 SIGSEGV、零输出**（CI 的 Linux nat 回归
+    16 例全 -11 即此）。static 后的产物入口字节应与打包工具链路径（G3.4）一致，可作为回归判据。
   - Linux 只支持 musl 交叉目标：glibc 目标（含 `x86_64-unknown-linux-gnu`）不在 CRT 分发矩阵内，
     rustc 直接报 `option -C link-self-contained is not supported on this target`；宿主 glibc 路径不传
     `link-self-contained`，故不受此限。
