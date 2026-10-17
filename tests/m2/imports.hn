@@ -1,0 +1,20 @@
+// G3.1 import 构建期解析用例（interp / VM / nat 三引擎对齐）
+// 覆盖：本地路径 import（相对仓库根 CWD）/ `as 别名` 前缀替换 / 模块顶层副作用。
+// 注：`as 别名` 会整体替换模块前缀，但**函数体内对同模块函数的调用不做改写**——
+// 故别名模块不要用「自递归/互相调用按原名」的函数（三引擎行为一致，属既有别名语义）。
+import "math" from "./hone_lib/math.hn";
+import "str" from "./hone_lib/str.hn" as s;
+import "imports_mod" from "./tests/m2/imports_mod.hn";
+
+print(math_clamp(5, 0, 3));         // 3
+print(math_is_even(4));             // true
+print(math_is_odd(4));              // false
+print(math_gcd(12, 8));             // 4
+print(math_factorial(5));           // 120
+print(math_fib(10));                // 55
+print(s_repeat("ab", 3));           // ababab
+print(s_empty(""));                 // true
+print(s_join([3, 1, 4], "-"));      // 3-1-4
+print(s_quote("hi"));               // "hi"
+print(mod_double(21));              // 42
+print(mod_add(20, 22));             // 42

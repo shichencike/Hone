@@ -1,0 +1,5 @@
+type NP { v: int };
+np = new NP();
+with np {
+    print("in");
+}

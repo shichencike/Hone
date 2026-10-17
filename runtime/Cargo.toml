@@ -1,0 +1,11 @@
+[package]
+name = "honeruntime"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Hone 原生编译后端（natgen）的链接运行时：std-only 单文件，随产物链接"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]

@@ -1,0 +1,58 @@
+// class_test.hn - class 类特性验证
+// 运行: hone examples/class_test.hn
+// 验证点：
+//   1. 类.方法(...) 可调用类内函数
+//   2. 类成员函数不进全局符号表：裸名调用应报「undefined function」
+//   3. 类方法支持参数、返回值、递归
+//   4. 类方法内部可调用类内其他方法（经 类.方法 限定名）
+
+class Math {
+    fn double(x) {
+        return x * 2;
+    }
+    fn add(a, b) {
+        return a + b;
+    }
+    fn fib(n) {
+        if (n <= 1) {
+            return n;
+        }
+        return Math.fib(n - 1) + Math.fib(n - 2);
+    }
+    fn describe() {
+        return "Math class";
+    }
+    fn greet(name) -> str {
+        return "Hello, " + name;
+    }
+}
+
+print(Math.double(21));       // 42
+print(Math.add(2, 3));        // 5
+print(Math.fib(10));          // 55
+print(Math.describe());       // Math class
+print(Math.greet("hone"));    // Hello, hone
+
+// 类方法内调用同类其他方法（经 类.方法 限定名）
+class Calc {
+    fn square(x) {
+        return x * x;
+    }
+    fn sum_of_squares(a, b) {
+        return Calc.square(a) + Calc.square(b);
+    }
+}
+print(Calc.sum_of_squares(3, 4));  // 25
+
+// 类方法与全局函数不冲突：同名全局函数仍可用
+fn double(x) {
+    return "global double: " + to_str(x);
+}
+print(double(21));            // global double: 21
+print(Math.double(21));       // 42（类方法不受影响）
+
+// 类方法返回值参与类型推导
+r = Math.double(5);
+print(r * 3);                 // 30
+
+print("== class 特性验证完成 ==");

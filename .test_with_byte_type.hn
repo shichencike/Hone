@@ -1,0 +1,108 @@
+// ---- byte 类型 ----
+b1 = byte(65);
+assert(b1 == byte(65), "byte 相等比较");
+assert(byte(255) > byte(1), "byte 大于比较");
+n = to_int(b1);
+assert(n == 65, "byte 转 int");
+assert(to_int(byte(65)) == 65, "to_int(byte) 转 int");
+c = char(byte(65));
+assert(c == 'A', "char(byte)");
+
+// ---- bytes 类型 ----
+bs = b"abc";
+assert(len(bs) == 3, "len(bytes)");
+assert(bs[0] == byte(97), "bytes 索引取 byte");
+assert(is_bytes(bs), "is_bytes");
+assert(is_byte(bs[1]), "is_byte");
+bs2 = b"ab" + b"cd";
+assert(len(bs2) == 4, "bytes 拼接");
+assert(bs2 == b"abcd", "bytes 相等比较");
+sub = bs[1:3];
+assert(len(sub) == 2, "bytes 切片长度");
+assert(sub == b"bc", "bytes 切片内容");
+h = hex(bs);
+assert(h == "616263", "hex(bytes)");
+back = unhex(h);
+assert(back == bs, "unhex(hex(x)) == x");
+s = to_str(bs);
+assert(s == "abc", "to_str(bytes)");
+bs_utf = to_str(to_bytes("你好"), "utf-8");
+assert(bs_utf == "你好", "to_bytes/to_str utf-8 往返");
+bs_l1 = to_bytes("é", "latin-1");
+assert(len(bs_l1) == 1, "latin-1 单字节");
+bs_list = to_bytes([72, 105]);
+assert(bs_list == b"Hi", "int 列表转 bytes");
+
+// ---- readonly 变量 ----
+readonly int x = 5;
+assert(x == 5, "readonly 变量读取");
+fn f(readonly int y) {
+    return y + 1;
+}
+assert(f(10) == 11, "readonly 参数正常求值");
+
+// ---- struct 只读字段 ----
+struct Point {
+    readonly x: int,
+    y: int,
+};
+p = Point(1, 2);
+assert(p.x == 1 && p.y == 2, "struct 构造");
+p.y = 9;
+assert(p.y == 9, "普通字段可写");
+
+// ---- type 实例类 ----
+type Shape {
+    name: str,
+    sides: int,
+    area: int,
+    fn init(self, name: str, sides: int) {
+        self.name = name;
+        self.sides = sides;
+        self.area = 0;
+    }
+    fn desc(self) {
+        return "shape " + self.name;
+    }
+};
+type Square extends Shape {
+    side: int,
+    fn init(self, side: int) {
+        self.name = "square";
+        self.sides = 4;
+        self.side = side;
+        self.area = side * side;
+    }
+    fn perimeter(self) {
+        return self.side * 4;
+    }
+};
+sq = new Square(3);
+assert(sq.side == 3, "type 实例字段");
+assert(sq.area == 9, "init 设置字段");
+assert(sq.sides == 4, "继承字段");
+assert(sq.name == "square", "继承链构造");
+assert(sq.desc() == "shape square", "继承方法");
+assert(sq.perimeter() == 12, "子类方法");
+sq.side = 4;
+generic_shape = new Shape("poly", 5);
+assert(generic_shape.sides == 5, "基类构造");
+
+// ---- with 上下文 ----
+type Guard {
+    active: int,
+    fn __enter__(self) {
+        self.active = 1;
+        return self;
+    }
+    fn __exit__(self) {
+        self.active = 0;
+    }
+};
+g = new Guard();
+with g as r {
+    assert(r.active == 1, "with 块内资源激活");
+}
+assert(g.active == 0, "with 块结束自动清理");
+
+print("ALL OK");

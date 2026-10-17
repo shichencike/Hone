@@ -1,0 +1,66 @@
+// T3 运算与比较回归：str+str 拼接 / str ==/!= / 算术比较全集（镜像 vm.rs v_*）。
+// 对齐范围：str 拼接（v_add Str 臂）、str 相等（v_eq Str 臂）、int/float/char 运算比较。
+// 混合 int×float 被 checker 静态拒绝，运行期混合臂仅防御性对齐（不在此用例）。
+// 错误用例见 t3_err.hn（M0 文案级，逐字节渲染 T4 落地）。
+
+// ── str+str 拼接 ──
+print("ab" + "cd");
+print("Hello" + " " + "Hone");
+a = "foo";
+b = "bar";
+print(a + b);
+print(a + b + a);
+print("" + "x");
+print("x" + "");
+c = "";
+c = c + "init";
+c = c + "ial";
+print(c);
+
+// ── str ==/!= ──
+print("abc" == "abc");
+print("abc" == "abd");
+print("abc" != "abd");
+print("abc" != "abc");
+print("中文" == "中文");
+print("中文" != "zhongwen");
+print(a == "foo");
+print(a != "foo");
+
+// ── int 运算全集（含负数 / 边界）──
+print(7 + 8);
+print(7 - 8);
+print(-7 - 8);
+print(-7 * 8);
+print(15 / 4);
+print(-15 / 4);
+print(15 % 4);
+print(-15 % 4);
+print(100 / 10);
+print(7 % 3);
+
+// ── float 运算全集 ──
+print(1.5 + 2.25);
+print(1.5 - 2.25);
+print(-1.5 * 2.0);
+print(7.5 / 2.0);
+print(7.5 % 3.0);
+
+// ── 比较（int / float / char / bool）──
+print(3 < 5);
+print(5 <= 5);
+print(5 > 3);
+print(6 >= 5);
+print(1.5 < 2.0);
+print(-2.5 > -3.0);
+print('a' < 'b');
+print('z' >= 'z');
+print(1 == 1);
+print(1 != 2);
+print(1.0 == 1.0);
+
+// ── 一元 ──
+print(-0);
+print(-5.5);
+print(!true);
+print(!false);

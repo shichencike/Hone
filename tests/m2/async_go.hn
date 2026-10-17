@@ -1,0 +1,70 @@
+// G2.6 async-await / go 多线程：三引擎对齐。
+// 语义基准（vm.rs spawn_async / spawn_go / Await 执行臂）：
+//   async 调用 → 后台线程执行，立即返回 future；await 阻塞取结果（错误原样传播）。
+//   go → 后台线程 fire-and-forget，错误打印到 stderr 不影响主线程。
+// 确定性口径：子线程输出经 time.sleep 与主线程错峰（sleep 时长主线程 > 子线程）。
+
+// ── 1. async 调用 + await 取结果 ──
+async fn double(x) {
+    return x * 2;
+}
+print("before-await");
+f = double(21);
+print(await f);
+
+// ── 2. await 表达式形态（直接 await 调用）──
+async fn greet(name) {
+    return "hi " + name;
+}
+print(await greet("hone"));
+
+// ── 3. 两个 future 交错 await（完成顺序无关，取值各归各）──
+async fn addk(x, k) {
+    return x + k;
+}
+fa = addk(1, 10);
+fb = addk(2, 20);
+print(to_str(await fa) + "," + to_str(await fb));
+
+// ── 4. go 后台线程（fire-and-forget，子线程先睡先打，主线程睡更久保序）──
+// （单个后台线程：多个 go 线程间的输出顺序不确定，无法逐字节回归。）
+fn bg(n) {
+    time.sleep(0.05);
+    print("bg:" + to_str(n));
+}
+go bg(7);
+time.sleep(0.3);
+print("main-after-go");
+
+// ── 5. async 子线程错误经 await 传播（try/catch 接住）──
+async fn bad() {
+    return 1 / 0;
+}
+try {
+    r = await bad();
+    print("no-error");
+} catch e {
+    print("caught:" + e.code + ":" + e.message);
+}
+
+// ── 6. go 子线程内报错不影响主线程（stderr 打印，主线程继续）──
+fn boom() {
+    x = [1];
+    return x[9];
+}
+go boom();
+time.sleep(0.2);
+print("main-survived");
+
+// ── 7. await 结果继续参与运算 / 重入函数 ──
+async fn square(x) {
+    return x * x;
+}
+fn total() {
+    a = square(3);
+    b = square(4);
+    x = await a;
+    y = await b;
+    return to_str(x) + "+" + to_str(y);
+}
+print("total:" + total());

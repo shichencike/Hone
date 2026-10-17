@@ -1,0 +1,2 @@
+type T { a: int, fn m(self) { return 1; } };
+T.m();

@@ -1,0 +1,129 @@
+// stdlib_test.hn - 新标准库模块综合验证
+// 运行: hone examples/stdlib_test.hn
+// 注意：Hone 不支持 list[i] 下标 / 链式方法调用；
+//       列表元素用 for-in 遍历，dict 用 .字段 访问。
+
+print("== csv ==");
+rows = csv.parse("name,age\nAlice,30\nBob,25\n");
+print(len(rows));                      // 3
+for r in rows {
+    for c in r {
+        print(c);
+    }
+}
+pd = csv.parse_dict("a,b\n1,2\n");
+print(len(pd));                        // 1
+for d in pd {
+    for k, v in d {
+        print(k + "=" + v);
+    }
+}
+s = csv.stringify([["a", 1], ["b,c", 2]]);
+print(str_replace(s, "\n", "|"));      // a,1|b,"c,2"|  -> 转义
+
+print("== glob / temp ==");
+print(glob.match("*.hn", "hello.hn"));   // true
+print(glob.match("src/**/*.rs", "src/main.rs")); // true
+print(glob.match("a?.txt", "ab.txt"));   // true
+td = temp.dir("hone-test-");
+print(file_exists(td));                  // true
+tf = temp.file("hone-test-");
+write_file(tf, "hello");
+print(read_file(tf));                    // hello
+print(temp.remove(tf));                  // true
+print(temp.remove(td));                  // true
+
+print("== zlib ==");
+c = zlib.compress("hello hello hello hello");
+print(zlib.decompress(c));               // hello hello hello hello
+g = zlib.gzip("gzip me");
+print(zlib.gunzip(g));                   // gzip me
+
+print("== stat ==");
+nums = [1.0, 2.0, 3.0, 4.0, 5.0];
+print(stat.sum(nums));                   // 15
+print(stat.mean(nums));                  // 3
+print(stat.median([1.0, 2.0, 3.0]));     // 2
+print(stat.variance(nums));              // 2
+print(stat.stddev(nums));                // 1.4142...
+print(stat.min(nums));                   // 1
+print(stat.max(nums));                   // 5
+
+print("== matrix ==");
+m = [[1.0, 2.0], [3.0, 4.0]];
+print(to_str(matrix.transpose(m)));      // [[1,3],[2,4]]
+print(to_str(matrix.add(m, m)));         // [[2,4],[6,8]]
+print(to_str(matrix.mul(m, m)));         // [[7,10],[15,22]]
+print(to_str(matrix.scale(m, 2.0)));     // [[2,4],[6,8]]
+print(to_str(matrix.identity(2)));       // [[1,0],[0,1]]
+
+print("== diff / regex ==");
+d = diff.lines("a\nb\nc\n", "a\nx\nc\n");
+print(len(d));                           // 4 ops
+for op in d {
+    print(op.op + " " + op.line);
+}
+print(diff.unified("line1\n", "line2\n"));
+print(to_str(regex.find("a+", "aaa b aaa")));  // ["aaa","aaa"]
+print(to_str(regex.groups("(\\d+)-(\\d+)", "2024-08-09"))); // ["2024-08-09","2024","08"]
+print(to_str(regex.split("[,;]", "a,b;c")));   // ["a","b","c"]
+
+print("== time 增强 ==");
+t = time.parse("2024-08-09T12:00:00Z");
+print(time.add(t, 3600));                // t + 1h
+print(time.diff(time.add(t, 3600), t));  // 3600
+print(time.weekday(time.parse("2024-08-09T00:00:00Z"))); // 5 (周五, ISO 1=周一)
+print(time.format(t, "YYYY-MM-DD WW"));  // 2024-08-09 5
+
+print("== http.request ==");
+try {
+    r = http.request("https://httpbin.org/anything", {
+        "method": "POST",
+        "headers": {"User-Agent": "hone-test/1.0", "X-Custom": "abc"},
+        "body": "payload",
+        "timeout": 10
+    });
+    print("status ok, len=" + to_str(len(r)));
+} catch e {
+    print("http.request 失败(可忽略,需网络): " + e.code + " " + e.message);
+}
+
+print("== yaml ==");
+y = yaml.parse("name: hone\nversion: 1.0\nitems:\n  - a\n  - b\nok: true\n");
+print(y.name);                         // hone
+print(y.version);                      // 1
+print(y.ok);                           // true
+print(to_str(y.items));                // [a, b]
+print(yaml.stringify({"name": "hone", "n": 1}));
+
+print("== plot ==");
+svg = plot.bar([3.0, 1.0, 4.0, 1.0, 5.0], ["a", "b", "c", "d", "e"]);
+print("bar svg len=" + to_str(len(svg)));  // > 0
+write_file("examples/plot_test.svg", plot.line([0.0, 1.0, 2.0, 3.0], [1.0, 4.0, 9.0, 16.0]));
+print("plot.line 已写入 examples/plot_test.svg");
+
+print("== sqlite(需系统 libsqlite3) ==");
+try {
+    db = sqlite.open(":memory:");
+    sqlite.exec(db, "CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)");
+    sqlite.exec(db, "INSERT INTO t(name) VALUES ('hone')");
+    print(sqlite.last_insert_id(db));    // 1
+    sqlite.exec(db, "INSERT INTO t(name) VALUES ('rust')");
+    print(sqlite.changes(db));           // 1
+    r = sqlite.query(db, "SELECT id, name FROM t ORDER BY id");
+    print(len(r));                       // 2
+    for row in r {
+        for k, v in row {
+            print(k + "=" + v);
+        }
+    }
+    one = sqlite.query_one(db, "SELECT * FROM t WHERE id = 2");
+    print(one.name);                     // rust
+    print(sqlite.escape("O'Reilly"));    // O''Reilly
+    sqlite.close(db);
+    print("sqlite OK");
+} catch e {
+    print("sqlite 不可用(可忽略): " + e.code + " " + e.message);
+}
+
+print("== 全部模块验证完成 ==");

@@ -1,0 +1,92 @@
+// G2.4 运算符重载：二元 / 一元 / 内置（len / index）回退链 + native 组合与 native 错误不��退。
+// 错误路径（重载参数个数不匹配等）由 tests/regress_err.py 的 ov_* 用例承担。
+
+// ── 0. 被重载的自定义类型（dict 模拟「复数」）──
+fn mk(re, im) { return {"re": re, "im": im}; }
+fn c_re(c) { return c.re; }
+fn c_im(c) { return c.im; }
+
+fn __add(a, b) {
+    if (type_of(a) == "dict" && type_of(b) == "dict") {
+        return mk(c_re(a) + c_re(b), c_im(a) + c_im(b));
+    }
+    return mk(0, 0);
+}
+fn __mul(a, b) {
+    if (type_of(a) == "dict" && type_of(b) == "dict") {
+        return mk(c_re(a) * c_re(b), c_im(a) * c_im(b));
+    }
+    return mk(0, 0);
+}
+fn __eq(a, b) {
+    // 打印标记：证明「内建不比较 → 回退 __eq」确实发生（返回类型锁定为 bool，
+    // 故用副作用而非返回值做信号）。
+    print("[__eq " + type_of(a) + "/" + type_of(b) + "]");
+    if (type_of(a) == "dict" && type_of(b) == "dict") {
+        return c_re(a) == c_re(b) && c_im(a) == c_im(b);
+    }
+    return false;
+}
+
+z1 = mk(1, 2);
+z2 = mk(3, 4);
+print("add:" + to_str(z1 + z2));
+print("mul:" + to_str(z1 * z2));
+print("eq-same:" + to_str(z1 == mk(1, 2)));
+print("eq-diff:" + to_str(z1 == z2));
+print("eq-mixed:" + to_str(z1 == 5));
+
+// ── 1. 其余二元运算的回退（各定义一个 __op）──
+fn __sub(a, b) { return "sub"; }
+fn __div(a, b) { return "div"; }
+fn __mod(a, b) { return "mod"; }
+fn __ne(a, b) { return false; }
+fn __lt(a, b) { return true; }
+fn __le(a, b) { return true; }
+fn __gt(a, b) { return true; }
+fn __ge(a, b) { return true; }
+d = {"a": 1};
+print("sub:" + to_str(d - 1));
+print("div:" + to_str(d / 2));
+print("mod:" + to_str(d % 2));
+print("ne:" + to_str(d != 1));
+print("lt:" + to_str("s" < 1));
+print("le:" + to_str("s" <= 1));
+print("gt:" + to_str(1 > "s"));
+print("ge:" + to_str(1 >= "s"));
+
+// ── 2. 一元重载 __neg / __not ──
+fn __neg(a) { return "neg"; }
+fn __not(a) { return "not"; }
+print("neg:" + to_str(-d));
+print("not:" + to_str(!5));
+
+// ── 3. 内置重载 __len / __index ──
+fn __len(a) { return 42; }
+fn __index(a, i) { return "idx"; }
+print("len:" + to_str(len(5)));
+print("index:" + "a"[0]);
+
+// ── 4. native 组合与 native 错误**不**回退 ──
+print("int-add:" + to_str(1 + 2));
+print("str-add:" + ("a" + "b"));
+print("int-lt:" + to_str(1 < 2));
+print("str-cmp-eq:" + to_str("a" == "a"));
+print("list-eq:" + to_str([1, 2] == [1, 2]));
+print("list-index:" + to_str([9, 8][1]));
+print("len-str:" + to_str(len("hey")));
+
+// ── 5. 重载参与条件与短路；返回值继续参与运算 ──
+if (z1 == mk(1, 2)) { print("cond:hit"); }
+print("short:" + to_str(false && (z1 == 1)));
+w = {"a": 1} + 1;
+print("chain:" + to_str(w));
+
+// ── 6. struct / enum 实例参与重载（__eq 回退标记证明确实走了重载）──
+struct P { x: int };
+p1 = P(1);
+print("struct-eq:" + to_str(p1 == 1));
+enum E { A, B }
+e = E.A;
+print("enum-eq:" + to_str(e == 1));
+print("enum-neg-then-eq:" + to_str(-e == 1));

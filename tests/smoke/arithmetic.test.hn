@@ -1,0 +1,59 @@
+// 冒烟测试：整数 / 浮点 / 布尔 / 逻辑运算（断言失败抛 H700，双引擎通用）
+
+// 整数四则与取余
+assert_eq(1 + 2, 3);
+assert_eq(10 - 4, 6);
+assert_eq(3 * 4, 12);
+assert_eq(9 / 2, 4);          // 整数除法截断
+assert_eq(-9 / 2, -4);        // 向零截断
+assert_eq(10 % 3, 1);
+assert_eq(0 - 7, -7);
+
+// 幂与复合运算
+x = 2;
+x = x + 3;
+assert_eq(x, 5);
+x = x * 4;
+assert_eq(x, 20);
+y = 10;
+y = y - 4;
+assert_eq(y, 6);
+
+// 浮点
+assert_eq(1.5 + 2.25, 3.75);
+assert_eq(4.0 / 2, 2.0);
+f = 2.5 * 2;
+assert(is_float(f));
+assert_eq(f, 5.0);
+assert_eq(to_int(5.9), 5);
+assert_eq(to_float(3), 3.0);
+
+// 布尔与逻辑
+assert(true && false, "false");
+assert(!(true && false), "true");
+assert(true || false, "true");
+assert(!true, "false");
+assert(true == true, "==");
+assert(true != false, "!=");
+
+// 比较运算
+assert(1 < 2, "lt");
+assert(2 <= 2, "le");
+assert(3 > 4, "gt fail");
+assert(3 >= 3, "ge");
+assert("a" < "b", "str lt");
+
+// 类型谓词
+assert(is_int(1), "is_int");
+assert(is_float(1.5), "is_float");
+assert(is_bool(true), "is_bool");
+assert(is_str("s"), "is_str");
+assert(type_of(1) == "int", "type_of int");
+assert(type_of(1.5) == "float", "type_of float");
+assert(type_of("s") == "str", "type_of str");
+
+// 数学内置
+assert_eq(abs(-5), 5);
+assert_eq(max(3, 9), 9);
+assert_eq(min(3, 9), 3);
+assert_eq(max(3, 9, 12), 12);

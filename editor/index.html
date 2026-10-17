@@ -5,432 +5,1319 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 可视化编辑器</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: #1e1e2e; color: #cdd6f4; height: 100vh; display: flex; flex-direction: column; }
-  header { padding: 10px 16px; background: #181825; border-bottom: 1px solid #313244; display: flex; align-items: center; gap: 12px; }
-  header h1 { font-size: 16px; color: #89b4fa; }
-  header span { font-size: 12px; color: #6c7086; }
-  .btn { background: #45475a; border: none; color: #cdd6f4; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-  .btn:hover { background: #585b70; }
-  .btn.primary { background: #89b4fa; color: #1e1e2e; font-weight: 600; }
-  .btn.primary:hover { background: #a6c8ff; }
-  main { flex: 1; display: flex; overflow: hidden; }
-  section { display: flex; flex-direction: column; }
-  section h2 { font-size: 13px; color: #a6adc8; padding: 10px 14px; border-bottom: 1px solid #313244; }
-  #palette { width: 200px; border-right: 1px solid #313244; }
-  #palette-list { padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
-  .palette-item { background: #313244; border: 1px solid #45475a; border-radius: 6px; padding: 8px 10px; font-size: 13px; cursor: grab; user-select: none; }
-  .palette-item:hover { background: #45475a; }
-  .palette-item small { display: block; color: #6c7086; font-size: 11px; margin-top: 2px; }
-  #canvas { flex: 1; overflow-y: auto; padding: 14px; }
-  #canvas.hover { outline: 2px dashed #89b4fa; outline-offset: -4px; }
-  .empty-tip { color: #6c7086; font-size: 13px; text-align: center; margin-top: 60px; line-height: 1.8; }
-  .block { background: #313244; border: 1px solid #45475a; border-left: 4px solid #89b4fa; border-radius: 6px; margin: 6px 0; padding: 6px 8px; font-size: 13px; }
-  .block[data-type="if"], .block[data-type="while"] { border-left-color: #f9e2af; }
-  .block[data-type="fn"] { border-left-color: #a6e3a1; }
-  .block[data-type="comment"] { border-left-color: #6c7086; }
-  .block.dragging { opacity: 0.4; }
-  .block-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .block-head .kw { color: #f38ba8; font-weight: 600; }
-  .block-head .txt { color: #a6e3a1; font-style: italic; }
-  .block input { background: #1e1e2e; border: 1px solid #45475a; color: #cdd6f4; border-radius: 4px; padding: 3px 6px; font-size: 13px; width: 110px; font-family: Consolas, monospace; }
-  .block input.f-wide { width: 220px; }
-  .del { background: none; border: none; color: #f38ba8; cursor: pointer; font-size: 14px; padding: 0 4px; margin-left: auto; }
-  .del:hover { color: #ff6b6b; }
-  .slot { border: 1px dashed #45475a; border-radius: 4px; margin: 6px 0 2px 18px; padding: 4px; min-height: 26px; }
-  .slot.slot-else { border-style: dotted; border-color: #585b70; }
-  .slot.dragover { border-color: #89b4fa; background: rgba(137, 180, 250, 0.08); }
-  #preview { width: 380px; border-left: 1px solid #313244; }
-  #preview-bar { padding: 8px 14px; display: flex; gap: 8px; border-bottom: 1px solid #313244; }
-  #code { flex: 1; background: #11111b; border: none; color: #a6e3a1; font-family: Consolas, "Courier New", monospace; font-size: 12.5px; line-height: 1.6; padding: 12px 14px; white-space: pre; overflow: auto; }
+/* ========== 主题（CSS 变量，深/浅切换；安卓 8.1 WebView 兼容：不用 flex gap，用 margin） ========== */
+:root {
+  --bg: #1e1e2e; --bg2: #181825; --bg3: #11111b;
+  --panel: #313244; --panel2: #45475a;
+  --border: #313244; --border2: #45475a;
+  --text: #cdd6f4; --text2: #a6adc8; --text3: #6c7086;
+  --accent: #89b4fa; --accent2: #a6c8ff;
+  --red: #f38ba8; --yellow: #f9e2af; --green: #a6e3a1;
+  --pink: #f38ba8; --purple: #cba6f7;
+  --shadow: rgba(0,0,0,0.35);
+}
+[data-theme="light"] {
+  --bg: #eff1f5; --bg2: #e6e9ef; --bg3: #ffffff;
+  --panel: #ffffff; --panel2: #dce0e8;
+  --border: #dce0e8; --border2: #bcc0cc;
+  --text: #4c4f69; --text2: #5c5f77; --text3: #8c8fa1;
+  --accent: #1e66f5; --accent2: #3a7bfd;
+  --red: #d20f39; --yellow: #df8e1d; --green: #40a02b;
+  --pink: #d20f39; --purple: #8839ef;
+  --shadow: rgba(0,0,0,0.15);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  background: var(--bg); color: var(--text);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+button { font-family: inherit; }
+
+/* ========== 顶栏 ========== */
+header {
+  padding: 8px 12px; background: var(--bg2); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center;
+}
+header h1 { font-size: 15px; color: var(--accent); white-space: nowrap; }
+header .sub { font-size: 11px; color: var(--text3); margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spacer { flex: 1; }
+.btn {
+  background: var(--panel2); border: 1px solid var(--border2); color: var(--text);
+  padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12.5px;
+  margin-left: 6px; white-space: nowrap;
+}
+.btn:hover { background: var(--accent); color: var(--bg3); }
+.btn.primary { background: var(--accent); color: var(--bg3); font-weight: 600; }
+.btn.primary:hover { background: var(--accent2); }
+.btn.danger { color: var(--red); }
+.btn.danger:hover { background: var(--red); color: var(--bg3); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn:disabled:hover { background: var(--panel2); color: var(--text); }
+.btn.small { padding: 3px 8px; font-size: 11.5px; }
+
+/* ========== 三栏布局 ========== */
+main { flex: 1; display: flex; overflow: hidden; }
+section { display: flex; flex-direction: column; min-width: 0; }
+section > h2 {
+  font-size: 12.5px; color: var(--text2); padding: 8px 12px;
+  border-bottom: 1px solid var(--border); display: flex; align-items: center;
+}
+section > h2 .count { font-size: 11px; color: var(--text3); margin-left: auto; font-weight: normal; }
+
+/* 左：面板 */
+#palette { width: 216px; flex: 0 0 auto; border-right: 1px solid var(--border); }
+.search-box {
+  margin: 8px 10px 4px; padding: 5px 8px; width: calc(100% - 20px);
+  background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px;
+  color: var(--text); font-size: 12.5px;
+}
+#palette-list { padding: 6px 10px 12px; overflow-y: auto; flex: 1; }
+.palette-group { font-size: 11px; color: var(--text3); margin: 10px 2px 4px; }
+.palette-item {
+  background: var(--panel); border: 1px solid var(--border2); border-radius: 6px;
+  padding: 7px 9px; font-size: 12.5px; cursor: grab; user-select: none; margin-bottom: 5px;
+  touch-action: none;
+}
+.palette-item:hover { background: var(--panel2); }
+.palette-item small { display: block; color: var(--text3); font-size: 10.5px; margin-top: 2px; }
+.palette-item.pal-dragging { opacity: 0.4; }
+.palette-empty { color: var(--text3); font-size: 12px; text-align: center; margin-top: 16px; }
+
+/* 分隔条 */
+.splitter { width: 5px; cursor: col-resize; flex: 0 0 auto; background: var(--border); touch-action: none; }
+.splitter:hover, .splitter.active { background: var(--accent); }
+
+/* 中：画布 */
+#canvas { flex: 1; }
+#canvas-body { flex: 1; overflow-y: auto; padding: 12px; min-height: 0; }
+#canvas-body.drop-zone.dragging-over { outline: 2px dashed var(--accent); outline-offset: -3px; }
+.empty-tip { color: var(--text3); font-size: 12.5px; text-align: center; margin-top: 50px; line-height: 1.9; }
+.empty-tip code { background: var(--panel); border: 1px solid var(--border2); border-radius: 4px; padding: 1px 5px; font-size: 11.5px; }
+
+/* 代码块 */
+.block {
+  background: var(--panel); border: 1px solid var(--border2); border-left: 4px solid var(--accent);
+  border-radius: 6px; margin: 5px 0; padding: 5px 8px; font-size: 12.5px;
+  position: relative;
+  touch-action: none; /* 触屏上块内拖动为拖拽而非滚动（滚动请用块外空白区） */
+}
+.block[data-type="if"], .block[data-type="while"], .block[data-type="for"], .block[data-type="do"], .block[data-type="forin"], .block[data-type="match"] { border-left-color: var(--yellow); }
+.block[data-type="fn"], .block[data-type="tmpfn"], .block[data-type="asyncfn"], .block[data-type="class"] { border-left-color: var(--green); }
+.block[data-type="comment"] { border-left-color: var(--text3); }
+.block[data-type="try"] { border-left-color: var(--red); }
+.block[data-type="char"] { border-left-color: var(--purple); }
+.block.selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+.block.pal-dragging { opacity: 0.35; }
+.block-head { display: flex; align-items: center; flex-wrap: wrap; }
+.block-head .kw { color: var(--pink); font-weight: 600; white-space: pre; }
+.block-head .txt { color: var(--green); font-style: italic; }
+.block-head .fold {
+  background: none; border: none; color: var(--text3); cursor: pointer;
+  font-size: 10px; padding: 0 4px 0 0; margin: 0;
+}
+.block input, .block select {
+  background: var(--bg3); border: 1px solid var(--border2); color: var(--text);
+  border-radius: 4px; padding: 2px 5px; font-size: 12.5px; width: 100px;
+  font-family: Consolas, monospace; margin: 2px 2px;
+}
+.block input.f-wide { width: 200px; }
+.block select { width: auto; cursor: pointer; }
+.del {
+  background: none; border: none; color: var(--red); cursor: pointer;
+  font-size: 14px; padding: 0 4px; margin-left: auto; line-height: 1;
+}
+.del:hover { color: var(--red); transform: scale(1.2); }
+.slot {
+  border: 1px dashed var(--border2); border-radius: 4px; margin: 5px 0 3px 16px; padding: 4px;
+  min-height: 24px; touch-action: none;
+}
+.slot.slot-else { border-style: dotted; }
+.slot.slot-catch { border-style: dotted; border-color: var(--red); }
+.slot .empty-slot-hint { color: var(--text3); font-size: 10.5px; text-align: center; padding: 3px 0; }
+.slot.dragover { border-color: var(--accent); background: rgba(137, 180, 250, 0.10); }
+.slot.active-target { border-color: var(--accent); border-style: solid; background: rgba(137, 180, 250, 0.12); }
+/* 插入位置指示线 */
+.insert-bar { height: 3px; background: var(--accent); border-radius: 2px; margin: 1px 0; }
+.block.collapsed > .slot, .block.collapsed > .block-head.extra, .block.collapsed > .slot-else, .block.collapsed > .slot-catch, .block.collapsed > .close { display: none; }
+.block.collapsed .fold::before { content: "▶"; }
+.block .fold::before { content: "▼"; }
+
+/* 右：预览 */
+#preview { width: 400px; flex: 0 0 auto; border-left: 1px solid var(--border); }
+#preview-bar { padding: 6px 10px; display: flex; align-items: center; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+#preview-bar .btn { margin-left: 0; margin-right: 6px; }
+#status { font-size: 11.5px; color: var(--text3); margin-left: auto; }
+#status.ok { color: var(--green); }
+#status.err { color: var(--red); }
+.chk { font-size: 11.5px; color: var(--text2); display: flex; align-items: center; margin-right: 6px; }
+.chk input { margin-right: 3px; }
+#code-wrap { flex: 1; display: flex; overflow: auto; background: var(--bg3); }
+#code-lines {
+  padding: 10px 6px 10px 10px; text-align: right; color: var(--text3); font-size: 11.5px;
+  font-family: Consolas, monospace; line-height: 1.6; user-select: none; flex: 0 0 auto;
+  border-right: 1px solid var(--border); min-width: 26px; white-space: pre;
+}
+#code {
+  flex: 1; background: var(--bg3); border: none; color: var(--green);
+  font-family: Consolas, "Courier New", monospace; font-size: 12.5px; line-height: 1.6;
+  padding: 10px 12px; white-space: pre; overflow: visible; margin: 0;
+}
+#code-wrap.wrap #code, #code-wrap.wrap #code-lines { white-space: pre-wrap; word-break: break-all; }
+#code .tok-kw { color: var(--pink); }
+#code .tok-str { color: var(--green); }
+#code .tok-num { color: var(--accent); }
+#code .tok-com { color: var(--text3); font-style: italic; }
+#code .tok-fn { color: var(--accent); }
+#code .tok-char { color: var(--purple); }
+#code .tok-err { color: var(--red); text-decoration: underline wavy var(--red); }
+
+/* ========== 响应式（窄屏） ========== */
+@media (max-width: 900px) {
+  header .sub { display: none; }
+  #palette { display: none; }
+  #preview { display: none; }
+  body.pal-open #palette { display: flex; position: absolute; left: 0; top: 0; bottom: 0; width: 240px; z-index: 20; background: var(--bg2); box-shadow: 2px 0 8px var(--shadow); }
+  body.prev-open #preview { display: flex; position: absolute; right: 0; top: 0; bottom: 0; width: 60vw; max-width: 420px; z-index: 20; background: var(--bg2); box-shadow: -2px 0 8px var(--shadow); }
+  .splitter { display: none; }
+  #canvas { width: 100%; }
+}
 </style>
 </head>
 <body>
 <header>
+  <button class="btn" id="btn-mobile-pal" title="代码块面板">🧩</button>
+  <button class="btn" id="btn-mobile-prev" title="代码预览">📄</button>
   <h1>⚡ Hone 可视化编辑器</h1>
-  <span>拖拽代码块生成 .hn 代码 · 方案 A（独立网页）</span>
-  <div style="flex:1"></div>
-  <button class="btn" id="btn-clear">清空画布</button>
+  <span class="sub">拖拽代码块生成 .hn 代码</span>
+  <div class="spacer"></div>
+  <button class="btn" id="btn-undo" title="撤销 (Ctrl+Z)">↩ 撤销</button>
+  <button class="btn" id="btn-redo" title="重做 (Ctrl+Y)">↪ 重做</button>
   <button class="btn" id="btn-copy">复制代码</button>
   <button class="btn primary" id="btn-download">下载 .hn</button>
+  <button class="btn danger" id="btn-clear">清空</button>
+  <button class="btn" id="btn-theme" title="切换主题">🌙</button>
 </header>
 <main>
   <section id="palette">
-    <h2>代码块面板</h2>
+    <h2>代码块面板<span class="count" id="palette-count"></span></h2>
+    <input id="palette-search" class="search-box" placeholder="搜索代码块…（如 for / char / try）">
     <div id="palette-list"></div>
   </section>
+  <div class="splitter" id="splitter-left"></div>
   <section id="canvas">
-    <h2>画布（拖入代码块，if/while/函数内可继续拖入）</h2>
-    <div id="canvas-body">
-      <div class="empty-tip">从左侧拖拽代码块到这里开始编程<br>嵌套块（if / while / 函数）内部有虚线槽位，可继续拖入子块</div>
+    <h2>画布<span class="count">点击块选中 · Delete 删除 · Ctrl+C/V 复制粘贴 · 点标题折叠</span></h2>
+    <div id="canvas-body" class="drop-zone">
+      <div class="empty-tip">从左侧拖拽代码块到这里开始编程<br>嵌套块（if / while / 函数 / try 等）内部有虚线槽位，可继续拖入子块<br>按住拖到两个块之间可插入到中间</div>
     </div>
   </section>
+  <div class="splitter" id="splitter-right"></div>
   <section id="preview">
-    <h2>生成的代码</h2>
+    <h2>生成的代码<span class="count" id="validate-status"></span></h2>
     <div id="preview-bar">
-      <button class="btn" id="btn-copy2">复制</button>
-      <button class="btn" id="btn-download2">下载</button>
-      <span id="status" style="font-size:12px;color:#6c7086"></span>
+      <button class="btn small" id="btn-copy2">复制</button>
+      <button class="btn small" id="btn-download2">下载</button>
+      <button class="btn small" id="btn-run">▶ hone run</button>
+      <label class="chk"><input type="checkbox" id="chk-wrap">换行</label>
+      <span id="status"></span>
     </div>
-    <pre id="code"></pre>
+    <div id="code-wrap">
+      <pre id="code-lines"></pre>
+      <pre id="code"></pre>
+    </div>
   </section>
 </main>
 <script>
-// ---------- 代码块模板 ----------
-const TEMPLATES = [
-  { type: "var", label: "变量声明", hint: "x = 10; 自动推导类型", build: () => makeSimple("var", "变量", "x", "10") },
-  { type: "assign", label: "赋值", hint: "x = 表达式;", build: () => makeSimple("assign", "赋值", "x", "x + 1") },
-  { type: "print", label: "输出 print", hint: "print(值);", build: () => makeSimple("print", "输出", "hello", '"Hello Hone!"') },
-  { type: "if", label: "条件 if / else", hint: "条件必须是 bool", build: () => makeNested("if") },
-  { type: "while", label: "循环 while", hint: "条件必须是 bool", build: () => makeNested("while") },
-  { type: "fn", label: "函数定义", hint: "fn 名称(参数) { ... }", build: () => makeNested("fn") },
-  { type: "tmpfn", label: "临时函数 tmp fn", hint: "编译自动忽略", build: () => makeNested("tmpfn") },
-  { type: "return", label: "返回 return", hint: "return 表达式;", build: () => makeSimple("return", "返回", "0", "x") },
-  { type: "comment", label: "注释", hint: "// 说明文字", build: () => makeSimple("comment", "注释", "说明", "这是注释") },
-  { type: "log", label: "日志 log", hint: "彩色输出", build: () => {
-      const d = makeSimple("log", "log.info", "msg", '"hello"');
-      const sel = document.createElement("select");
-      sel.className = "f-inline"; sel.dataset.field = "level";
-      ["info","warn","error","debug"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
-      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
-      return d;
-    }
-  },
-  { type: "path", label: "路径 path", hint: "join/dirname/basename", build: () => {
-      const d = makeSimple("path", "path.join", "a", '"b"');
-      const sel = document.createElement("select");
-      sel.className = "f-inline"; sel.dataset.field = "op";
-      ["join","dirname","basename"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
-      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
-      return d;
-    }
-  },
-  { type: "args", label: "参数 args", hint: "get/has 命令行参数", build: () => {
-      const d = makeSimple("args", "args.get", "key", '"port"');
-      const sel = document.createElement("select");
-      sel.className = "f-inline"; sel.dataset.field = "op";
-      ["get","has"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
-      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
-      return d;
-    }
-  },
-  { type: "env", label: "环境变量 env", hint: "get/set", build: () => {
-      const d = makeSimple("env", "env.get", "key", '"PATH"');
-      const sel = document.createElement("select");
-      sel.className = "f-inline"; sel.dataset.field = "op";
-      ["get","set"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
-      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
-      return d;
-    }
-  },
-  { type: "db", label: "键值存储 db", hint: "set/get", build: () => {
-      const d = makeSimple("db", "db.set", "key", '"val"');
-      const sel = document.createElement("select");
-      sel.className = "f-inline"; sel.dataset.field = "op";
-      ["set","get"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
-      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
-      return d;
-    }
-  },
-  { type: "regex", label: "正则 regex", hint: "match/replace", build: () => {
-      const d = makeSimple("regex", "regex.match", "pat", '"^\\d+$"');
-      const sel = document.createElement("select");
-      sel.className = "f-inline"; sel.dataset.field = "op";
-      ["match","replace"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
-      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
-      return d;
-    }
-  },
-  { type: "crypto", label: "哈希 crypto", hint: "md5/sha256", build: () => {
-      const d = makeSimple("crypto", "crypto.md5", "text", '"hello"');
-      const sel = document.createElement("select");
-      sel.className = "f-inline"; sel.dataset.field = "op";
-      ["md5","sha256"].forEach(l => { const o = document.createElement("option"); o.value = l; o.textContent = l; sel.appendChild(o); });
-      d.querySelector(".block-head").insertBefore(sel, d.querySelector("input"));
-      return d;
-    }
-  },
-  { type: "debug_print", label: "调试输出 debug_print", hint: "仅 debug 模式", build: () => makeSimple("debug_print", "调试输出", "msg", '"x = " + to_str(x)") },
+"use strict";
+/* =========================================================================
+ * Hone 可视化编辑器（单文件重构版）
+ *  - 模板驱动：代码块统一由 TEMPLATES 描述，消除重复代码
+ *  - 事件委托：拖放/删除/输入全部委托到画布，动态槽位天然可用（修复旧版嵌套 Bug）
+ *  - pointer 事件统一拖拽：桌面 + 触屏（安卓 8.1 WebView）一致
+ *  - ES2017 语法：避免可选链 / ?. / ?? / flat / Object.fromEntries 等新特性
+ * ========================================================================= */
+
+// ---------- 小工具 ----------
+function $(id) { return document.getElementById(id); }
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function debounce(fn, ms) {
+  var t = null;
+  return function () {
+    var args = arguments, self = this;
+    if (t) clearTimeout(t);
+    t = setTimeout(function () { fn.apply(self, args); }, ms);
+  };
+}
+function isBlock(el) { return el && el.classList && el.classList.contains("block"); }
+function isSlot(el) { return el && el.classList && el.classList.contains("slot"); }
+function closestBlock(el) {
+  while (el && el !== document.body) {
+    if (isBlock(el)) return el;
+    el = el.parentNode;
+  }
+  return null;
+}
+function closestSlot(el) {
+  while (el && el !== document.body) {
+    if (isSlot(el)) return el;
+    el = el.parentNode;
+  }
+  return null;
+}
+// 查找放置容器：优先最近的槽位，否则画布本体
+function dropZoneFor(el) {
+  var s = closestSlot(el);
+  if (s) return s;
+  return $("canvas-body");
+}
+
+/* =========================================================================
+ * 代码块模板（数据驱动：head 描述头部形态，slots 描述嵌套槽位，gen 生成代码）
+ *   head 元素: {k:"kw", s:"文字"} 关键字 / {k:"f", f:"字段名", def:"默认", wide:true} 输入框
+ *             {k:"sel", f:"字段名", opts:[...], def:"默认"} 下拉框
+ *   slots: ["body"] 主体槽；["body","else"] if；["body","catch"] try
+ *   gen(v, c): v=字段值 dict，c={body, else, catch} 子槽代码（多行、已带相对缩进）
+ * ========================================================================= */
+var TEMPLATES = [
+  // ---------- 变量与赋值 ----------
+  { type: "var", group: "变量与赋值", label: "变量声明", hint: "x = 10; 自动推导类型",
+    head: [{ k: "kw", s: "变量 " }, { k: "f", f: "name", def: "x" }, { k: "kw", s: " = " }, { k: "f", f: "expr", def: "10" }],
+    gen: function (v) { return (v.name || "x") + " = " + (v.expr || "") + ";"; } },
+  { type: "assign", group: "变量与赋值", label: "赋值", hint: "x = 表达式; 要求类型一致",
+    head: [{ k: "kw", s: "赋值 " }, { k: "f", f: "name", def: "x" }, { k: "kw", s: " = " }, { k: "f", f: "expr", def: "x + 1" }],
+    gen: function (v) { return (v.name || "x") + " = " + (v.expr || "") + ";"; } },
+  { type: "char", group: "变量与赋值", label: "char 字符", hint: "char c = 'x'; 单个 Unicode 字符",
+    head: [{ k: "kw", s: "char " }, { k: "f", f: "name", def: "c" }, { k: "kw", s: " = " }, { k: "f", f: "expr", def: "'x'" }],
+    gen: function (v) { return "char " + (v.name || "c") + " = " + (v.expr || "'x'") + ";"; } },
+  { type: "list", group: "变量与赋值", label: "列表字面量", hint: "l = [1, 2, 3]; 元素逗号分隔",
+    head: [{ k: "kw", s: "列表 " }, { k: "f", f: "name", def: "l" }, { k: "kw", s: " = [" }, { k: "f", f: "expr", def: "1, 2, 3", wide: true }, { k: "kw", s: "]" }],
+    gen: function (v) { return (v.name || "l") + " = [" + (v.expr || "") + "];"; } },
+  { type: "dict", group: "变量与赋值", label: "字典字面量", hint: "d = {\"k\": v}; 键值用 : 分隔",
+    head: [{ k: "kw", s: "字典 " }, { k: "f", f: "name", def: "d" }, { k: "kw", s: " = {" }, { k: "f", f: "expr", def: '"k": 1', wide: true }, { k: "kw", s: "}" }],
+    gen: function (v) { return (v.name || "d") + " = {" + (v.expr || "") + "};"; } },
+  { type: "incdec", group: "变量与赋值", label: "自增/自减", hint: "i++ / i--",
+    head: [{ k: "f", f: "name", def: "i" }, { k: "sel", f: "op", opts: ["++", "--"], def: "++" }],
+    gen: function (v) { return (v.name || "i") + (v.op || "++") + ";"; } },
+
+  // ---------- 控制流 ----------
+  { type: "if", group: "控制流", label: "条件 if / else", hint: "条件必须是 bool；else 槽可留空",
+    head: [{ k: "kw", s: "if ( " }, { k: "f", f: "cond", def: "x > 5", wide: true }, { k: "kw", s: " ) {" }],
+    slots: ["body", "else"],
+    gen: function (v, c) {
+      var head = "if (" + (v.cond || "") + ")";
+      if (!c.body && !c.else) return head + " { }";
+      if (!c.else) return head + " {\n" + c.body + "\n}";
+      return head + " {\n" + c.body + "\n} else {\n" + c.else + "\n}";
+    } },
+  { type: "while", group: "控制流", label: "循环 while", hint: "条件必须是 bool",
+    head: [{ k: "kw", s: "while ( " }, { k: "f", f: "cond", def: "i < 10", wide: true }, { k: "kw", s: " ) {" }],
+    slots: ["body"],
+    gen: function (v, c) {
+      return c.body ? "while (" + (v.cond || "") + ") {\n" + c.body + "\n}" : "while (" + (v.cond || "") + ") { }";
+    } },
+  { type: "do", group: "控制流", label: "do-while", hint: "先执行一次再判断",
+    head: [{ k: "kw", s: "do {" }],
+    slots: ["body"],
+    fields_extra: [{ k: "kw", s: "} while ( " }, { k: "f", f: "cond", def: "i < 10", wide: true }, { k: "kw", s: " );" }],
+    gen: function (v, c) {
+      return c.body ? "do {\n" + c.body + "\n} while (" + (v.cond || "") + ");" : "do { } while (" + (v.cond || "") + ");";
+    } },
+  { type: "for", group: "控制流", label: "for 循环", hint: "for (init; cond; step)",
+    head: [{ k: "kw", s: "for ( " }, { k: "f", f: "init", def: "i = 0" }, { k: "kw", s: "; " }, { k: "f", f: "cond", def: "i < 10" }, { k: "kw", s: "; " }, { k: "f", f: "step", def: "i++" }, { k: "kw", s: " ) {" }],
+    slots: ["body"],
+    gen: function (v, c) {
+      var head = "for (" + (v.init || "") + "; " + (v.cond || "") + "; " + (v.step || "") + ")";
+      return c.body ? head + " {\n" + c.body + "\n}" : head + " { }";
+    } },
+  { type: "forin", group: "控制流", label: "for-in 遍历", hint: "for x in list / for k, v in dict",
+    head: [{ k: "kw", s: "for " }, { k: "f", f: "var", def: "x" }, { k: "kw", s: " in " }, { k: "f", f: "iter", def: "nums" }, { k: "kw", s: " {" }],
+    slots: ["body"],
+    gen: function (v, c) {
+      var head = "for " + (v.var || "x") + " in " + (v.iter || "");
+      return c.body ? head + " {\n" + c.body + "\n}" : head + " { }";
+    } },
+  { type: "break", group: "控制流", label: "break", hint: "退出循环",
+    head: [{ k: "kw", s: "break;" }],
+    gen: function () { return "break;"; } },
+  { type: "continue", group: "控制流", label: "continue", hint: "跳到下次迭代",
+    head: [{ k: "kw", s: "continue;" }],
+    gen: function () { return "continue;"; } },
+
+  // ---------- 函数 ----------
+  { type: "fn", group: "函数", label: "函数定义", hint: "fn 名称(参数) { ... }",
+    head: [{ k: "kw", s: "fn " }, { k: "f", f: "name", def: "main" }, { k: "kw", s: "(" }, { k: "f", f: "params", def: "a, b" }, { k: "kw", s: ") {" }],
+    slots: ["body"],
+    gen: function (v, c) {
+      var head = "fn " + (v.name || "main") + "(" + (v.params || "") + ")";
+      return c.body ? head + " {\n" + c.body + "\n}" : head + " { }";
+    } },
+  { type: "tmpfn", group: "函数", label: "临时函数 tmp fn", hint: "编译自动忽略",
+    head: [{ k: "kw", s: "tmp fn " }, { k: "f", f: "name", def: "helper" }, { k: "kw", s: "(" }, { k: "f", f: "params", def: "" }, { k: "kw", s: ") {" }],
+    slots: ["body"],
+    gen: function (v, c) {
+      var head = "tmp fn " + (v.name || "helper") + "(" + (v.params || "") + ")";
+      return c.body ? head + " {\n" + c.body + "\n}" : head + " { }";
+    } },
+  { type: "asyncfn", group: "函数", label: "async 异步函数", hint: "后台线程执行，await 等待",
+    head: [{ k: "kw", s: "async fn " }, { k: "f", f: "name", def: "task" }, { k: "kw", s: "(" }, { k: "f", f: "params", def: "" }, { k: "kw", s: ") {" }],
+    slots: ["body"],
+    gen: function (v, c) {
+      var head = "async fn " + (v.name || "task") + "(" + (v.params || "") + ")";
+      return c.body ? head + " {\n" + c.body + "\n}" : head + " { }";
+    } },
+  { type: "return", group: "函数", label: "返回 return", hint: "return 表达式;",
+    head: [{ k: "kw", s: "return " }, { k: "f", f: "expr", def: "x", wide: true }],
+    gen: function (v) { return "return " + (v.expr || "") + ";"; } },
+  { type: "class", group: "函数", label: "class 类", hint: "类内可拖入 fn 方法块",
+    head: [{ k: "kw", s: "class " }, { k: "f", f: "name", def: "Math" }, { k: "kw", s: " {" }],
+    slots: ["body"],
+    gen: function (v, c) {
+      var head = "class " + (v.name || "Math");
+      return c.body ? head + " {\n" + c.body + "\n}" : head + " { }";
+    } },
+
+  // ---------- 输出与调试 ----------
+  { type: "print", group: "输出与调试", label: "输出 print", hint: "print(值); 自动换行",
+    head: [{ k: "kw", s: "print( " }, { k: "f", f: "expr", def: '"Hello Hone!"', wide: true }, { k: "kw", s: " )" }],
+    gen: function (v) { return "print(" + (v.expr || "") + ");"; } },
+  { type: "debug_print", group: "输出与调试", label: "调试输出 debug_print", hint: "仅 debug 模式生效",
+    head: [{ k: "kw", s: "debug_print( " }, { k: "f", f: "expr", def: '"x = " + to_str(x)', wide: true }, { k: "kw", s: " )" }],
+    gen: function (v) { return "debug_print(" + (v.expr || "") + ");"; } },
+  { type: "log", group: "输出与调试", label: "日志 log", hint: "彩色输出 info/warn/error/debug",
+    head: [{ k: "kw", s: "log." }, { k: "sel", f: "level", opts: ["info", "warn", "error", "debug"], def: "info" }, { k: "kw", s: "( " }, { k: "f", f: "msg", def: '"hello"', wide: true }, { k: "kw", s: " )" }],
+    gen: function (v) { return "log." + (v.level || "info") + "(" + (v.msg || '""') + ");"; } },
+  { type: "comment", group: "输出与调试", label: "注释", hint: "// 说明文字",
+    head: [{ k: "kw", s: "// " }, { k: "f", f: "text", def: "这是注释", wide: true }],
+    gen: function (v) { return "// " + (v.text || ""); } },
+
+  // ---------- 集合与字符串 ----------
+  { type: "fstring", group: "集合与字符串", label: "f-string 插值", hint: "s = f\"...{expr}...\"",
+    head: [{ k: "kw", s: "f-string " }, { k: "f", f: "name", def: "s" }, { k: "kw", s: " = f\"" }, { k: "f", f: "expr", def: "你好, {name}!", wide: true }, { k: "kw", s: "\"" }],
+    gen: function (v) { return (v.name || "s") + " = f\"" + (v.expr || "") + "\";"; } },
+  { type: "multistr", group: "集合与字符串", label: "三引号字符串", hint: "保留换行，不转义",
+    head: [{ k: "kw", s: "多行 " }, { k: "f", f: "name", def: "text" }, { k: "kw", s: " = \"\"\"" }, { k: "f", f: "expr", def: "line1\\nline2", wide: true }, { k: "kw", s: "\"\"\"" }],
+    gen: function (v) { return (v.name || "text") + " = \"\"\"" + (v.expr || "") + "\"\"\";"; } },
+  { type: "charfn", group: "集合与字符串", label: "char 函数", hint: "ord('中') → 20013 / char(i) / char_at(s, i)",
+    head: [{ k: "sel", f: "op", opts: ["ord", "char", "char_at"], def: "ord" }, { k: "kw", s: "( " }, { k: "f", f: "a", def: "'中'" }, { k: "kw", s: ", " }, { k: "f", f: "b", def: "0" }, { k: "kw", s: " )" }],
+    gen: function (v) {
+      var op = v.op || "ord";
+      if (op === "char_at") return "char_at(" + (v.a || '""') + ", " + (v.b || "0") + ");";
+      return op + "(" + (v.a || "") + ");";
+    } },
+
+  // ---------- 内置函数 ----------
+  { type: "path", group: "内置函数", label: "路径 path", hint: "join / dirname / basename",
+    head: [{ k: "kw", s: "path." }, { k: "sel", f: "op", opts: ["join", "dirname", "basename"], def: "join" }, { k: "kw", s: "( " }, { k: "f", f: "a", def: '"a"' }, { k: "kw", s: ", " }, { k: "f", f: "b", def: '"b"' }, { k: "kw", s: " )" }],
+    gen: function (v) {
+      var op = v.op || "join";
+      if (op === "join") return "path.join(" + (v.a || '""') + ", " + (v.b || '""') + ");";
+      return "path." + op + "(" + (v.a || '""') + ");";
+    } },
+  { type: "args", group: "内置函数", label: "参数 args", hint: "get / has 命令行参数",
+    head: [{ k: "kw", s: "args." }, { k: "sel", f: "op", opts: ["get", "has"], def: "get" }, { k: "kw", s: "( " }, { k: "f", f: "a", def: '"port"' }, { k: "kw", s: " )" }],
+    gen: function (v) { return "args." + (v.op || "get") + "(" + (v.a || '""') + ");"; } },
+  { type: "env", group: "内置函数", label: "环境变量 env", hint: "get / set",
+    head: [{ k: "kw", s: "env." }, { k: "sel", f: "op", opts: ["get", "set"], def: "get" }, { k: "kw", s: "( " }, { k: "f", f: "a", def: '"PATH"' }, { k: "kw", s: ", " }, { k: "f", f: "b", def: '"/usr/bin"' }, { k: "kw", s: " )" }],
+    gen: function (v) {
+      var op = v.op || "get";
+      if (op === "set") return "env.set(" + (v.a || '""') + ", " + (v.b || '""') + ");";
+      return "env.get(" + (v.a || '""') + ");";
+    } },
+  { type: "db", group: "内置函数", label: "键值存储 db", hint: "set / get",
+    head: [{ k: "kw", s: "db." }, { k: "sel", f: "op", opts: ["set", "get"], def: "set" }, { k: "kw", s: "( " }, { k: "f", f: "a", def: '"key"' }, { k: "kw", s: ", " }, { k: "f", f: "b", def: '"val"' }, { k: "kw", s: " )" }],
+    gen: function (v) {
+      var op = v.op || "set";
+      if (op === "set") return "db.set(" + (v.a || '""') + ", " + (v.b || '""') + ");";
+      return "db.get(" + (v.a || '""') + ");";
+    } },
+  { type: "regex", group: "内置函数", label: "正则 regex", hint: "match / replace",
+    head: [{ k: "kw", s: "regex." }, { k: "sel", f: "op", opts: ["match", "replace"], def: "match" }, { k: "kw", s: "( " }, { k: "f", f: "a", def: '"^\\d+$"' }, { k: "kw", s: ", " }, { k: "f", f: "b", def: '"abc123"' }, { k: "kw", s: " )" }],
+    gen: function (v) {
+      var op = v.op || "match";
+      if (op === "replace") return "regex.replace(" + (v.a || '""') + ", " + (v.b || '""') + ", \"\");";
+      return "regex.match(" + (v.a || '""') + ", " + (v.b || '""') + ");";
+    } },
+  { type: "crypto", group: "内置函数", label: "哈希 crypto", hint: "md5 / sha256",
+    head: [{ k: "kw", s: "crypto." }, { k: "sel", f: "op", opts: ["md5", "sha256"], def: "md5" }, { k: "kw", s: "( " }, { k: "f", f: "a", def: '"hello"' }, { k: "kw", s: " )" }],
+    gen: function (v) { return "crypto." + (v.op || "md5") + "(" + (v.a || '""') + ");"; } },
+  { type: "ord", group: "内置函数", label: "ord 码点", hint: "ord('中') → 20013",
+    head: [{ k: "kw", s: "ord( " }, { k: "f", f: "a", def: "'中'" }, { k: "kw", s: " )" }],
+    gen: function (v) { return "ord(" + (v.a || "'a'") + ");"; } },
+
+  // ---------- 高级 ----------
+  { type: "match", group: "高级", label: "match 模式匹配", hint: "槽位中拖入 模式=>值 分支块",
+    head: [{ k: "kw", s: "match " }, { k: "f", f: "expr", def: "status", wide: true }, { k: "kw", s: " {" }],
+    slots: ["body"],
+    gen: function (v, c) {
+      return "match " + (v.expr || "") + " {\n" + (c.body || "") + "\n}";
+    } },
+  { type: "matchcase", group: "高级", label: "match 分支", hint: "模式 => 值（仅放 match 槽内）",
+    head: [{ k: "f", f: "pat", def: "200" }, { k: "kw", s: " => " }, { k: "f", f: "val", def: '"OK"', wide: true }, { k: "kw", s: "," }],
+    gen: function (v) { return (v.pat || "_") + " => " + (v.val || '""') + ","; } },
+  { type: "try", group: "高级", label: "try-catch", hint: "try { } catch e { } 错误处理",
+    head: [{ k: "kw", s: "try {" }],
+    slots: ["body", "catch"],
+    fields_extra: [{ k: "kw", s: "} catch " }, { k: "f", f: "var", def: "e" }, { k: "kw", s: " {" }],
+    gen: function (v, c) {
+      var head = "try {\n" + (c.body || "") + "\n}";
+      if (c.catch) head += " catch " + (v.var || "e") + " {\n" + c.catch + "\n}";
+      return head;
+    } },
+  { type: "enum", group: "高级", label: "枚举 enum", hint: "enum Name { A, B(int) }",
+    head: [{ k: "kw", s: "enum " }, { k: "f", f: "name", def: "Color" }, { k: "kw", s: " { " }, { k: "f", f: "variants", def: "Red, Green, Blue", wide: true }, { k: "kw", s: " }" }],
+    gen: function (v) { return "enum " + (v.name || "Color") + " { " + (v.variants || "") + " };"; } },
+  { type: "struct", group: "高级", label: "结构体 struct", hint: "struct Name { 字段: 类型 }",
+    head: [{ k: "kw", s: "struct " }, { k: "f", f: "name", def: "Point" }, { k: "kw", s: " { " }, { k: "f", f: "fields", def: "x: int, y: float", wide: true }, { k: "kw", s: " }" }],
+    gen: function (v) { return "struct " + (v.name || "Point") + " { " + (v.fields || "") + " };"; } },
+  { type: "throw", group: "高级", label: "抛出 throw", hint: "throw 字符串或 error 值",
+    head: [{ k: "kw", s: "throw " }, { k: "f", f: "expr", def: '"出错了"', wide: true }],
+    gen: function (v) { return "throw " + (v.expr || "") + ";"; } },
 ];
-let blockSeq = 0;
-
-function makeSimple(type, label, name, value) {
-  const d = document.createElement("div");
-  d.className = "block";
-  d.dataset.type = type;
-  d.draggable = true;
-  d.id = "b" + (++blockSeq);
-  const head = document.createElement("div");
-  head.className = "block-head";
-  if (type === "comment") {
-    head.innerHTML = `<span class="txt">//</span><input class="f-wide" data-field="text" value="${esc(value)}">`;
-  } else if (type === "print") {
-    head.innerHTML = `<span class="kw">print(</span><input data-field="expr" value="${esc(value)}"><span class="kw">)</span>`;
-  } else if (type === "return") {
-    head.innerHTML = `<span class="kw">return</span><input data-field="expr" value="${esc(value)}">`;
-  } else {
-    head.innerHTML = `<span class="kw">${label}</span><input data-field="name" value="${esc(name)}"><span class="kw">=</span><input data-field="expr" value="${esc(value)}">`;
-  }
-  const del = document.createElement("button");
-  del.className = "del"; del.textContent = "×"; del.title = "删除";
-  head.appendChild(del);
-  d.appendChild(head);
-  return d;
-}
-
-function makeNested(type) {
-  const d = document.createElement("div");
-  d.className = "block";
-  d.dataset.type = type;
-  d.draggable = true;
-  d.id = "b" + (++blockSeq);
-  const head = document.createElement("div");
-  head.className = "block-head";
-  if (type === "if") {
-    head.innerHTML = `<span class="kw">if (</span><input class="f-wide" data-field="cond" value="x &gt; 5"><span class="kw">) {</span>`;
-  } else if (type === "while") {
-    head.innerHTML = `<span class="kw">while (</span><input class="f-wide" data-field="cond" value="i &lt; 10"><span class="kw">) {</span>`;
-  } else {
-    head.innerHTML = `<span class="kw">fn</span><input data-field="name" value="main"><span class="kw">(</span><input data-field="params" value=""><span class="kw">) {</span>`;
-  }
-  const del = document.createElement("button");
-  del.className = "del"; del.textContent = "×"; del.title = "删除";
-  head.appendChild(del);
-  d.appendChild(head);
-
-  const slot = document.createElement("div");
-  slot.className = "slot";
-  slot.dataset.role = "body";
-  d.appendChild(slot);
-
-  if (type === "if") {
-    const elseHead = document.createElement("div");
-    elseHead.className = "block-head";
-    elseHead.innerHTML = `<span class="kw">} else {</span>`;
-    d.appendChild(elseHead);
-    const elseSlot = document.createElement("div");
-    elseSlot.className = "slot slot-else";
-    elseSlot.dataset.role = "else";
-    d.appendChild(elseSlot);
-    const close = document.createElement("div");
-    close.className = "block-head";
-    close.innerHTML = `<span class="kw">}</span>`;
-    d.appendChild(close);
-  } else {
-    const close = document.createElement("div");
-    close.className = "block-head";
-    close.innerHTML = `<span class="kw">}</span>`;
-    d.appendChild(close);
-  }
-  return d;
-}
-
-function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
-
-// ---------- 面板 ----------
-const paletteList = document.getElementById("palette-list");
-TEMPLATES.forEach(t => {
-  const item = document.createElement("div");
-  item.className = "palette-item";
-  item.draggable = true;
-  item.dataset.type = t.type;
-  item.innerHTML = `${t.label}<small>${t.hint}</small>`;
-  item.addEventListener("dragstart", e => {
-    e.dataTransfer.setData("text/plain", "palette:" + t.type);
-    e.dataTransfer.effectAllowed = "copy";
-  });
-  paletteList.appendChild(item);
+var TPL_MAP = {};
+TEMPLATES.forEach(function (t) { TPL_MAP[t.type] = t; });
+var GROUPS = [];
+TEMPLATES.forEach(function (t) {
+  if (GROUPS.indexOf(t.group) < 0) GROUPS.push(t.group);
 });
 
-// ---------- 拖拽与画布 ----------
-const canvasBody = document.getElementById("canvas-body");
-const canvas = document.getElementById("canvas");
+var blockSeq = 0;
 
-function setupDrop(zone) {
-  zone.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; zone.classList.add("dragover"); });
-  zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
-  zone.addEventListener("drop", e => {
-    e.preventDefault();
-    zone.classList.remove("dragover");
-    const data = e.dataTransfer.getData("text/plain") || "";
-    if (data.startsWith("palette:")) {
-      const type = data.slice(8);
-      const tpl = TEMPLATES.find(t => t.type === type);
-      if (tpl) zone.appendChild(tpl.build());
-    } else if (data.startsWith("move:")) {
-      const el = document.getElementById(data.slice(5));
-      if (el && el !== zone && !zone.contains(el)) zone.appendChild(el);
+// ---------- 块构造 ----------
+function makeHead(tpl, saved) {
+  var parts = [];
+  var defOf = function (f) {
+    var d = f.def;
+    if (saved && saved.f && saved.f[f.f] !== undefined) d = saved.f[f.f];
+    return d;
+  };
+  tpl.head.forEach(function (el) {
+    if (el.k === "kw") {
+      parts.push('<span class="kw">' + esc(el.s) + '</span>');
+    } else if (el.k === "sel") {
+      var opts = el.opts.map(function (o) {
+        return '<option value="' + esc(o) + '"' + (defOf(el) === o ? " selected" : "") + ">" + esc(o) + "</option>";
+      }).join("");
+      parts.push('<select data-f="' + el.f + '">' + opts + "</select>");
+    } else {
+      parts.push('<input data-f="' + el.f + '" title="' + esc(el.label || el.f) + '" value="' + esc(defOf(el)) + '"' + (el.wide ? ' class="f-wide"' : "") + ">");
     }
-    update();
   });
-}
-setupDrop(canvasBody);
-
-// 画布内块也可拖动（移动到其他槽位）
-document.addEventListener("dragstart", e => {
-  const b = e.target.closest ? e.target.closest(".block") : null;
-  if (b && b.dataset.type) {
-    e.dataTransfer.setData("text/plain", "move:" + b.id);
-    e.dataTransfer.effectAllowed = "move";
-    b.classList.add("dragging");
-  }
-});
-document.addEventListener("dragend", e => {
-  const b = e.target.closest ? e.target.closest(".block") : null;
-  if (b) b.classList.remove("dragging");
-});
-document.querySelectorAll(".slot").forEach(setupDrop);
-
-// 删除按钮（事件委托）
-document.addEventListener("click", e => {
-  if (e.target.classList && e.target.classList.contains("del")) {
-    e.target.closest(".block").remove();
-    update();
-  }
-});
-
-// 输入实时更新
-document.addEventListener("input", update);
-
-// ---------- 代码生成 ----------
-function childrenHTML(slot) {
-  const blocks = [...slot.children].filter(c => c.classList.contains("block"));
-  return blocks.map(b => genBlock(b, 0)).join("\n");
+  return parts.join("");
 }
 
+function makeSlot(role, cls) {
+  var s = document.createElement("div");
+  s.className = "slot" + (cls ? " " + cls : "");
+  s.dataset.role = role;
+  s.appendChild(makeEmptyHint());
+  return s;
+}
+function makeEmptyHint() {
+  var h = document.createElement("div");
+  h.className = "empty-slot-hint";
+  h.textContent = "拖入代码块…";
+  return h;
+}
+function refreshSlotHints(slot) {
+  var has = false;
+  for (var i = 0; i < slot.children.length; i++) {
+    if (isBlock(slot.children[i])) { has = true; break; }
+  }
+  var hint = slot.querySelector(".empty-slot-hint");
+  if (hint) hint.style.display = has ? "none" : "";
+}
+
+function makeBlock(tpl, saved) {
+  var d = document.createElement("div");
+  d.className = "block";
+  d.dataset.type = tpl.type;
+  d.id = "b" + (++blockSeq);
+  d.setAttribute("draggable", "false");
+
+  var head = document.createElement("div");
+  head.className = "block-head";
+  head.innerHTML = makeHead(tpl, saved);
+  d.appendChild(head);
+
+  var del = document.createElement("button");
+  del.className = "del";
+  del.textContent = "×";
+  del.title = "删除该块";
+  head.appendChild(del);
+
+  if (tpl.slots && tpl.slots.length) {
+    var fold = document.createElement("button");
+    fold.className = "fold";
+    fold.title = "折叠/展开";
+    head.appendChild(fold);
+
+    tpl.slots.forEach(function (role) {
+      var cls = "";
+      if (role === "else") cls = "slot-else";
+      if (role === "catch") cls = "slot-catch";
+      d.appendChild(makeSlot(role, cls));
+    });
+    // 尾部形态（do-while 的 `} while (cond);`、try 的 `} catch var {`）
+    if (tpl.fields_extra) {
+      var tail = document.createElement("div");
+      tail.className = "block-head extra";
+      var savedTail = saved || null;
+      var html = "";
+      tpl.fields_extra.forEach(function (el) {
+        if (el.k === "kw") html += '<span class="kw">' + esc(el.s) + "</span>";
+        else {
+          var dv = el.def;
+          if (savedTail && savedTail.f && savedTail.f[el.f] !== undefined) dv = savedTail.f[el.f];
+          html += '<input data-f="' + el.f + '" value="' + esc(dv) + '"' + (el.wide ? ' class="f-wide"' : "") + ">";
+        }
+      });
+      tail.innerHTML = html;
+      d.appendChild(tail);
+    }
+  }
+  return d;
+}
+
+// ---------- 面板渲染（分组 + 搜索） ----------
+var paletteList = $("palette-list");
+var searchBox = $("palette-search");
+function renderPalette(filter) {
+  filter = (filter || "").trim().toLowerCase();
+  paletteList.innerHTML = "";
+  var shown = 0;
+  GROUPS.forEach(function (g) {
+    var items = TEMPLATES.filter(function (t) {
+      return t.group === g && (!filter || t.label.toLowerCase().indexOf(filter) >= 0 || t.hint.toLowerCase().indexOf(filter) >= 0 || t.type.indexOf(filter) >= 0);
+    });
+    if (!items.length) return;
+    var gh = document.createElement("div");
+    gh.className = "palette-group";
+    gh.textContent = g;
+    paletteList.appendChild(gh);
+    items.forEach(function (t) {
+      var item = document.createElement("div");
+      item.className = "palette-item";
+      item.dataset.type = t.type;
+      item.innerHTML = esc(t.label) + "<small>" + esc(t.hint) + "</small>";
+      item.addEventListener("pointerdown", function (e) { startDrag(e, item, "palette"); });
+      paletteList.appendChild(item);
+      shown++;
+    });
+  });
+  $("palette-count").textContent = shown + " 个";
+  if (!shown) {
+    var empty = document.createElement("div");
+    empty.className = "palette-empty";
+    empty.textContent = "没有匹配的代码块";
+    paletteList.appendChild(empty);
+  }
+}
+searchBox.addEventListener("input", function () { renderPalette(searchBox.value); });
+renderPalette("");
+
+/* =========================================================================
+ * 代码生成（模板 gen + 统一缩进）
+ * ========================================================================= */
+function collectFields(block) {
+  var vals = {};
+  var inputs = block.querySelectorAll("input[data-f], select[data-f]");
+  for (var i = 0; i < inputs.length; i++) vals[inputs[i].dataset.f] = inputs[i].value;
+  return vals;
+}
+function childCode(slot, indent) {
+  var out = [];
+  var kids = slot.children;
+  for (var i = 0; i < kids.length; i++) {
+    if (isBlock(kids[i])) out.push(genBlock(kids[i], indent));
+  }
+  return out.join("\n");
+}
 function genBlock(block, indent) {
-  const tab = "\t".repeat(indent);
-  const type = block.dataset.type;
-  const val = f => { const i = block.querySelector(`input[data-field="${f}"]`); return i ? i.value : ""; };
-  const bodySlot = block.querySelector('.slot[data-role="body"]');
-  const elseSlot = block.querySelector('.slot[data-role="else"]');
-  const body = bodySlot ? childrenHTML(bodySlot) : "";
-  const elseBody = elseSlot ? childrenHTML(elseSlot) : "";
-  const inner = body ? body.split("\n").map(l => "\t" + l).join("\n") : "";
-  const innerElse = elseBody ? elseBody.split("\n").map(l => "\t" + l).join("\n") : "";
-
-  switch (type) {
-    case "var":
-    case "assign":
-      return `${tab}${val("name") || "x"} = ${val("expr")};`;
-    case "print":
-      return `${tab}print(${val("expr")});`;
-    case "return":
-      return `${tab}return ${val("expr")};`;
-    case "comment":
-      return `${tab}// ${val("text")}`;
-    case "debug_print":
-      return `${tab}debug_print(${val("expr")});`;
-    case "log": {
-      const level = val("level") || "info";
-      return `${tab}log.${level}(${val("name") || '""'});`;
+  var tab = "\t".repeat(indent);
+  var tpl = TPL_MAP[block.dataset.type];
+  if (!tpl) return "";
+  var vals = collectFields(block);
+  var children = {};
+  var roles = ["body", "else", "catch"];
+  for (var r = 0; r < roles.length; r++) {
+    var slot = block.querySelector('.slot[data-role="' + roles[r] + '"]');
+    if (slot) {
+      var code = childCode(slot, indent + 1);
+      if (code) children[roles[r]] = code;
     }
-    case "path": {
-      const op = val("op") || "join";
-      const a = val("name") || '""';
-      const b = val("expr") || '""';
-      if (op === "join") return `${tab}path.join(${a}, ${b});`;
-      return `${tab}path.${op}(${a});`;
-    }
-    case "args": {
-      const op = val("op") || "get";
-      return `${tab}args.${op}(${val("name") || '""'});`;
-    }
-    case "env": {
-      const op = val("op") || "get";
-      const a = val("name") || '""';
-      const b = val("expr") || '""';
-      if (op === "set") return `${tab}env.set(${a}, ${b});`;
-      return `${tab}env.get(${a});`;
-    }
-    case "db": {
-      const op = val("op") || "set";
-      const a = val("name") || '""';
-      const b = val("expr") || '""';
-      if (op === "set") return `${tab}db.set(${a}, ${b});`;
-      return `${tab}db.get(${a});`;
-    }
-    case "regex": {
-      const op = val("op") || "match";
-      const a = val("name") || '""';
-      const b = val("expr") || '""';
-      if (op === "replace") return `${tab}regex.replace(${a}, ${b}, "");`;
-      return `${tab}regex.match(${a}, ${b});`;
-    }
-    case "crypto": {
-      const op = val("op") || "md5";
-      return `${tab}crypto.${op}(${val("name") || '""'});`;
-    }
-    case "while":
-      return body
-        ? `${tab}while (${val("cond")}) {\n${inner}\n${tab}}`
-        : `${tab}while (${val("cond")}) { }`;
-    case "if":
-      if (!body && !elseBody) return `${tab}if (${val("cond")}) { }`;
-      if (!elseBody) return `${tab}if (${val("cond")}) {\n${inner}\n${tab}}`;
-      return `${tab}if (${val("cond")}) {\n${inner}\n${tab}} else {\n${innerElse}\n${tab}}`;
-    case "fn":
-      return `${tab}fn ${val("name") || "main"}(${val("params")}) {\n${inner}\n${tab}}`;
-    case "tmpfn":
-      return `${tab}tmp fn ${val("name") || "helper"}(${val("params")}) {\n${inner}\n${tab}}`;
-    default:
-      return "";
   }
+  var line = tpl.gen(vals, children);
+  return line.split("\n").map(function (l) { return tab + l; }).join("\n");
+}
+function canvasCode() {
+  var body = $("canvas-body");
+  var out = [];
+  var kids = body.children;
+  for (var i = 0; i < kids.length; i++) {
+    if (isBlock(kids[i])) out.push(genBlock(kids[i], 0));
+  }
+  return out.join("\n\n");
+}
+
+// ---------- 选中态 ----------
+var selectedBlock = null;
+function selectBlock(block) {
+  if (selectedBlock) selectedBlock.classList.remove("selected");
+  selectedBlock = block;
+  if (block) block.classList.add("selected");
+}
+
+/* =========================================================================
+ * pointer 事件统一拖拽（桌面 + 触屏）
+ *  - 事件委托：拖放目标由 elementFromPoint + closestSlot 动态解析，
+ *    动态创建的嵌套槽位天然可放置（修复旧版嵌套 Bug）
+ *  - 插入位置：悬停槽内按 Y 坐标定位插入点，显示 .insert-bar 指示线
+ * ========================================================================= */
+var dragState = null;
+
+function startDrag(e, el, source) {
+  if (e.button !== 0 && e.pointerType === "mouse") return;
+  if (e.target && e.target.closest && e.target.closest("input, select, button, .fold")) return;
+  e.preventDefault();
+  var ghost = document.createElement("div");
+  ghost.className = "block ghost";
+  ghost.style.position = "fixed";
+  ghost.style.left = (e.clientX + 12) + "px";
+  ghost.style.top = (e.clientY - 8) + "px";
+  ghost.style.pointerEvents = "none";
+  ghost.style.zIndex = "9999";
+  ghost.style.opacity = "0.85";
+  ghost.style.display = "none";
+  ghost.innerHTML = el.outerHTML;
+  document.body.appendChild(ghost);
+
+  dragState = {
+    el: el,
+    source: source,
+    ghost: ghost,
+    startX: e.clientX,
+    startY: e.clientY,
+    moved: false,
+    target: null,      // 当前悬停容器（.slot 或 canvas-body）
+    bar: null          // 插入指示线
+  };
+  if (source === "canvas") el.classList.add("pal-dragging");
+  document.addEventListener("pointermove", onDragMove);
+  document.addEventListener("pointerup", onDragEnd);
+}
+
+function clearInsertBar() {
+  if (dragState && dragState.bar && dragState.bar.parentNode) dragState.bar.parentNode.removeChild(dragState.bar);
+  if (dragState) dragState.bar = null;
+  if (dragState && dragState.target) dragState.target.classList.remove("active-target");
+  if (dragState) dragState.target = null;
+}
+function showInsertBar(container, before) {
+  clearInsertBar();
+  var bar = document.createElement("div");
+  bar.className = "insert-bar";
+  if (before) container.insertBefore(bar, before);
+  else container.appendChild(bar);
+  dragState.bar = bar;
+  dragState.target = container;
+  container.classList.add("active-target");
+}
+// 在容器内按 Y 坐标寻找插入点
+function insertionPoint(container, y) {
+  var blocks = [];
+  for (var i = 0; i < container.children.length; i++) {
+    if (isBlock(container.children[i])) blocks.push(container.children[i]);
+  }
+  for (var j = 0; j < blocks.length; j++) {
+    var r = blocks[j].getBoundingClientRect();
+    if (y < r.top + r.height / 2) return { before: blocks[j] };
+  }
+  return { before: null };
+}
+
+function onDragMove(e) {
+  if (!dragState) return;
+  var dx = e.clientX - dragState.startX;
+  var dy = e.clientY - dragState.startY;
+  if (!dragState.moved && Math.abs(dx) + Math.abs(dy) > 5) {
+    dragState.moved = true;
+    dragState.ghost.style.display = "block";
+  }
+  if (!dragState.moved) return;
+
+  var g = dragState.ghost;
+  g.style.left = (e.clientX + 12) + "px";
+  g.style.top = (e.clientY - 8) + "px";
+
+  // 边缘自动滚动（画布与面板）
+  autoScroll(e);
+
+  // 解析悬停目标
+  var under = document.elementFromPoint(e.clientX, e.clientY);
+  if (!under) return;
+  if (isBlock(dragState.el) && (under === dragState.el || dragState.el.contains(under))) {
+    clearInsertBar();
+    return;
+  }
+  var slot = closestSlot(under);
+  var container = slot || $("canvas-body");
+  if (dragState.el && (container === dragState.el || dragState.el.contains(container))) {
+    clearInsertBar();
+    return;
+  }
+  if (!dragState.moved) return;
+  var pt = insertionPoint(container, e.clientY);
+  showInsertBar(container, pt.before);
+}
+
+function onDragEnd(e) {
+  if (!dragState) return;
+  var ds = dragState;
+  dragState = null;
+  document.removeEventListener("pointermove", onDragMove);
+  document.removeEventListener("pointerup", onDragEnd);
+  if (ds.ghost.parentNode) ds.ghost.parentNode.removeChild(ds.ghost);
+
+  if (ds.el && ds.source === "canvas") ds.el.classList.remove("pal-dragging");
+
+  if (!ds.moved) {
+    // 未拖动 = 点击：画布块选中 / 面板块不处理
+    if (ds.source === "canvas") selectBlock(ds.el);
+    return;
+  }
+  if (!ds.target) return; // 悬停在无效区域
+  var before = null;
+  if (ds.bar) before = ds.bar.nextSibling;
+  var el = ds.el;
+  if (ds.source === "palette") {
+    el = makeBlock(TPL_MAP[ds.el.dataset.type], null);
+  }
+  pushHistory(); // 变更前入栈
+  if (before) ds.target.insertBefore(el, before);
+  else ds.target.appendChild(el);
+  ds.target.classList.remove("active-target");
+  if (ds.bar && ds.bar.parentNode) ds.bar.parentNode.removeChild(ds.bar);
+  refreshSlotHints(ds.target);
+  selectBlock(el);
+  update();
+}
+
+function autoScroll(e) {
+  var zones = [ $("canvas-body"), $("palette-list") ];
+  for (var i = 0; i < zones.length; i++) {
+    var z = zones[i];
+    if (!z) continue;
+    var r = z.getBoundingClientRect();
+    if (e.clientY > r.bottom - 40 && z.scrollHeight > z.clientHeight) z.scrollTop += 14;
+    else if (e.clientY < r.top + 40 && z.scrollTop > 0) z.scrollTop -= 14;
+  }
+}
+
+// 画布内块：pointerdown 开始拖拽候选（移动后成为拖拽，未移动为选中）
+document.addEventListener("pointerdown", function (e) {
+  var b = closestBlock(e.target);
+  if (!b) { selectBlock(null); return; }
+  if (e.target.closest && e.target.closest("input, select, button, .fold")) return;
+  startDrag(e, b, "canvas");
+});
+
+/* =========================================================================
+ * 序列化 / 撤销重做 / 持久化
+ * ========================================================================= */
+function serializeBlock(b) {
+  var data = { t: b.dataset.type, f: collectFields(b), c: {} };
+  ["body", "else", "catch"].forEach(function (role) {
+    var slot = b.querySelector('.slot[data-role="' + role + '"]');
+    if (!slot) return;
+    var kids = [];
+    for (var i = 0; i < slot.children.length; i++) {
+      if (isBlock(slot.children[i])) kids.push(serializeBlock(slot.children[i]));
+    }
+    if (kids.length) data.c[role] = kids;
+  });
+  return data;
+}
+function serializeCanvas() {
+  var out = [];
+  var kids = $("canvas-body").children;
+  for (var i = 0; i < kids.length; i++) {
+    if (isBlock(kids[i])) out.push(serializeBlock(kids[i]));
+  }
+  return out;
+}
+function deserializeBlock(data) {
+  var tpl = TPL_MAP[data.t];
+  if (!tpl) return null;
+  var b = makeBlock(tpl, { f: data.f || {} });
+  var roles = data.c || {};
+  Object.keys(roles).forEach(function (role) {
+    var slot = b.querySelector('.slot[data-role="' + role + '"]');
+    if (!slot) return;
+    roles[role].forEach(function (kid) {
+      var el = deserializeBlock(kid);
+      if (el) slot.appendChild(el);
+    });
+    refreshSlotHints(slot);
+  });
+  return b;
+}
+function loadCanvasData(data) {
+  $("canvas-body").innerHTML = "";
+  data.forEach(function (d) {
+    var el = deserializeBlock(d);
+    if (el) $("canvas-body").appendChild(el);
+  });
+  selectBlock(null);
+  refreshAllHints();
+  update();
+}
+function refreshAllHints() {
+  var slots = document.querySelectorAll(".slot");
+  for (var i = 0; i < slots.length; i++) refreshSlotHints(slots[i]);
+}
+
+// ---------- 撤销 / 重做 ----------
+var undoStack = [];
+var redoStack = [];
+var HISTORY_LIMIT = 100;
+function pushHistory() {
+  undoStack.push(JSON.stringify(serializeCanvas()));
+  if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+  redoStack = [];
+  updateUndoButtons();
+}
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(JSON.stringify(serializeCanvas()));
+  loadCanvasData(JSON.parse(undoStack.pop()));
+  updateUndoButtons();
+  statusTip("已撤销");
+}
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(JSON.stringify(serializeCanvas()));
+  loadCanvasData(JSON.parse(redoStack.pop()));
+  updateUndoButtons();
+  statusTip("已重做");
+}
+function updateUndoButtons() {
+  $("btn-undo").disabled = !undoStack.length;
+  $("btn-redo").disabled = !redoStack.length;
+}
+
+// ---------- 本地持久化（自动保存） ----------
+var SAVE_KEY = "hone-editor-canvas-v2";
+var saveCanvas = debounce(function () {
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(serializeCanvas())); } catch (err) {}
+}, 400);
+
+// ---------- 复制 / 剪切 / 粘贴 ----------
+var copyBuf = null;
+function copySelected() {
+  if (!selectedBlock) { statusTip("先点击选中一个块"); return false; }
+  copyBuf = JSON.stringify(serializeBlock(selectedBlock));
+  statusTip("已复制选中块（Ctrl+V 粘贴）");
+  return true;
+}
+function cutSelected() {
+  if (!copySelected()) return;
+  pushHistory();
+  var p = selectedBlock.parentNode;
+  selectedBlock.remove();
+  refreshSlotHints(p);
+  selectBlock(null);
+  update();
+  statusTip("已剪切（Ctrl+V 粘贴）");
+}
+function pasteBlock() {
+  if (!copyBuf) { statusTip("剪贴板为空"); return; }
+  pushHistory();
+  var data = JSON.parse(copyBuf);
+  var el = deserializeBlock(data);
+  if (!el) return;
+  var target = $("canvas-body");
+  var before = null;
+  if (selectedBlock && selectedBlock.parentNode) {
+    target = selectedBlock.parentNode;
+    before = selectedBlock.nextSibling;
+  }
+  if (before) target.insertBefore(el, before);
+  else target.appendChild(el);
+  refreshSlotHints(target);
+  selectBlock(el);
+  update();
+  statusTip("已粘贴");
+}
+
+// ---------- 删除 / 折叠（事件委托） ----------
+function deleteBlock(block) {
+  pushHistory();
+  var p = block.parentNode;
+  block.remove();
+  refreshSlotHints(p);
+  selectBlock(null);
+  update();
+}
+document.addEventListener("click", function (e) {
+  var del = e.target.closest ? e.target.closest(".del") : null;
+  if (del) {
+    var b = closestBlock(del);
+    if (b) deleteBlock(b);
+    return;
+  }
+  var fold = e.target.closest ? e.target.closest(".fold") : null;
+  if (fold) {
+    var blk = closestBlock(fold);
+    if (blk) blk.classList.toggle("collapsed");
+  }
+});
+
+// ---------- 键盘快捷键 ----------
+document.addEventListener("keydown", function (e) {
+  var t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
+  var ctrl = e.ctrlKey || e.metaKey;
+  var k = e.key;
+  if (k === "Delete" || k === "Backspace") {
+    if (selectedBlock) { e.preventDefault(); deleteBlock(selectedBlock); }
+  } else if (ctrl && (k === "z" || k === "Z")) {
+    e.preventDefault();
+    if (e.shiftKey) redo(); else undo();
+  } else if (ctrl && (k === "y" || k === "Y")) {
+    e.preventDefault(); redo();
+  } else if (ctrl && (k === "c" || k === "C")) {
+    e.preventDefault(); copySelected();
+  } else if (ctrl && (k === "x" || k === "X")) {
+    e.preventDefault(); cutSelected();
+  } else if (ctrl && (k === "v" || k === "V")) {
+    e.preventDefault(); pasteBlock();
+  }
+});
+
+// ---------- 输入实时更新 + 自动保存（事件委托） ----------
+document.addEventListener("input", function (e) {
+  if (e.target && e.target.dataset && e.target.dataset.f !== undefined) {
+    update();
+    saveCanvas();
+  }
+});
+
+// ---------- 工具栏按钮 ----------
+$("btn-undo").addEventListener("click", undo);
+$("btn-redo").addEventListener("click", redo);
+$("btn-clear").addEventListener("click", function () {
+  if (!confirm("清空画布？\n（可用 Ctrl+Z 撤销）")) return;
+  pushHistory();
+  $("canvas-body").innerHTML = "";
+  selectBlock(null);
+  update();
+  saveCanvas();
+  statusTip("画布已清空");
+});
+$("btn-theme").addEventListener("click", toggleTheme);
+
+// ---------- 初始画布 ----------
+function defaultCanvas() {
+  return [
+    { t: "fn", f: { name: "fib", params: "n" }, c: { body: [
+      { t: "if", f: { cond: "n <= 1" }, c: { body: [ { t: "return", f: { expr: "n" } } ] } },
+      { t: "return", f: { expr: "fib(n - 1) + fib(n - 2)" } }
+    ] } },
+    { t: "print", f: { expr: "fib(10)" } }
+  ];
+}
+(function init() {
+  var saved = null;
+  try { saved = localStorage.getItem(SAVE_KEY); } catch (err) {}
+  if (saved) {
+    try {
+      var data = JSON.parse(saved);
+      if (Array.isArray(data) && data.length) { loadCanvasData(data); return; }
+    } catch (err) {}
+  }
+  loadCanvasData(defaultCanvas());
+})();
+
+/* =========================================================================
+ * 预览：语法高亮 + 行号 + 校验 + 复制/下载/运行
+ * ========================================================================= */
+var HONE_KW = ["fn", "if", "else", "while", "do", "for", "in", "return", "true", "false",
+  "go", "try", "catch", "throw", "continue", "break", "match", "breakpoint", "load", "lazy",
+  "use", "import", "alias", "as", "from", "tmp", "struct", "class", "enum", "async", "await",
+  "int", "float", "bool", "str", "char"];
+function isIdentChar(c) { return /[A-Za-z0-9_]/.test(c); }
+
+// 逐字符扫描生成高亮 HTML（先转义，再套 tok-* class）
+function highlightCode(code) {
+  var html = "";
+  var i = 0;
+  var n = code.length;
+  while (i < n) {
+    var c = code[i];
+    // 行注释
+    if (c === "/" && code[i + 1] === "/") {
+      var j = code.indexOf("\n", i);
+      if (j < 0) j = n;
+      html += '<span class="tok-com">' + esc(code.slice(i, j)) + "</span>";
+      i = j;
+      continue;
+    }
+    // 块注释
+    if (c === "/" && code[i + 1] === "*") {
+      var k = code.indexOf("*/", i + 2);
+      var end = k < 0 ? n : k + 2;
+      html += '<span class="tok-com">' + esc(code.slice(i, end)) + "</span>";
+      i = end;
+      continue;
+    }
+    // 字符串 "..." 或 f"..."
+    if (c === '"') {
+      var s = '"';
+      var p = i + 1;
+      while (p < n) {
+        if (code[p] === "\\") { s += code.slice(p, p + 2); p += 2; continue; }
+        if (code[p] === '"') { s += '"'; p++; break; }
+        s += code[p]; p++;
+      }
+      html += '<span class="tok-str">' + esc(s) + "</span>";
+      i = p;
+      continue;
+    }
+    // 字符 '...'
+    if (c === "'") {
+      var ch = "'";
+      var q = i + 1;
+      while (q < n) {
+        if (code[q] === "\\") { ch += code.slice(q, q + 2); q += 2; continue; }
+        if (code[q] === "'") { ch += "'"; q++; break; }
+        ch += code[q]; q++;
+      }
+      html += '<span class="tok-char">' + esc(ch) + "</span>";
+      i = q;
+      continue;
+    }
+    // 数字
+    if (/[0-9]/.test(c)) {
+      var d = i;
+      while (d < n && /[0-9a-fA-FxX._]/.test(code[d])) d++;
+      html += '<span class="tok-num">' + esc(code.slice(i, d)) + "</span>";
+      i = d;
+      continue;
+    }
+    // 标识符 / 关键字 / 函数名
+    if (/[A-Za-z_]/.test(c)) {
+      var w = i;
+      while (w < n && isIdentChar(code[w])) w++;
+      var word = code.slice(i, w);
+      if (HONE_KW.indexOf(word) >= 0) {
+        html += '<span class="tok-kw">' + esc(word) + "</span>";
+      } else {
+        var after = w;
+        while (after < n && code[after] === " ") after++;
+        if (code[after] === "(") html += '<span class="tok-fn">' + esc(word) + "</span>";
+        else html += esc(word);
+      }
+      i = w;
+      continue;
+    }
+    // 其他字符
+    html += esc(c);
+    i++;
+  }
+  return html;
+}
+
+function renderLineNumbers(code) {
+  var n = code.split("\n").length;
+  var lines = [];
+  for (var i = 1; i <= n; i++) lines.push(String(i));
+  $("code-lines").textContent = lines.join("\n");
+}
+
+// 括号/引号配对校验（忽略注释与字符串/字符内部）
+function validateCode(code) {
+  var errs = [];
+  var stack = [];
+  var pairs = { "(": ")", "[": "]", "{": "}" };
+  var opens = "([{", closes = ")]}";
+  var inStr = false, inChar = false, inCom = false, inMulti = false;
+  var line = 1;
+  for (var i = 0; i < code.length; i++) {
+    var c = code[i];
+    if (c === "\n") line++;
+    if (inCom) { if (c === "\n") inCom = false; continue; }
+    if (inMulti) { if (c === "*" && code[i + 1] === "/") { inMulti = false; i++; } continue; }
+    if (inStr) {
+      if (c === "\\") i++;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (inChar) {
+      if (c === "\\") i++;
+      else if (c === "'") inChar = false;
+      continue;
+    }
+    if (c === "/" && code[i + 1] === "/") { inCom = true; i++; continue; }
+    if (c === "/" && code[i + 1] === "*") { inMulti = true; i++; continue; }
+    if (c === '"') { inStr = true; continue; }
+    if (c === "'") { inChar = true; continue; }
+    if (opens.indexOf(c) >= 0) stack.push({ ch: c, line: line });
+    if (closes.indexOf(c) >= 0) {
+      var top = stack.pop();
+      if (!top) errs.push("第 " + line + " 行有多余的 `" + c + "`");
+      else if (pairs[top.ch] !== c) errs.push("第 " + top.line + " 行 `" + top.ch + "` 与第 " + line + " 行 `" + c + "` 不匹配");
+    }
+  }
+  if (inStr) errs.push("字符串未闭合（缺 `\"`）");
+  if (inChar) errs.push("字符字面量未闭合（缺 `'`）");
+  if (inMulti) errs.push("多行注释未闭合（缺 `*/`）");
+  while (stack.length) {
+    var t = stack.pop();
+    errs.push("第 " + t.line + " 行缺少闭合 `" + pairs[t.ch] + "`");
+  }
+  return errs;
 }
 
 function update() {
-  const blocks = [...canvasBody.children].filter(c => c.classList.contains("block"));
-  const code = blocks.map(b => genBlock(b, 0)).join("\n\n");
-  document.getElementById("code").textContent = code;
-  const tip = canvasBody.querySelector(".empty-tip");
-  if (tip) tip.style.display = blocks.length ? "none" : "";
+  var code = canvasCode();
+  $("code").innerHTML = highlightCode(code);
+  renderLineNumbers(code);
+  var errs = validateCode(code);
+  var vs = $("validate-status");
+  if (errs.length) {
+    vs.textContent = "⚠ " + errs.length + " 处括号/引号问题";
+    vs.title = errs.join("\n");
+    vs.style.color = "var(--red)";
+  } else {
+    vs.textContent = "✓ 括号与引号配对";
+    vs.title = "语法结构检查通过（完整语法校验请用 hone 运行）";
+    vs.style.color = "var(--green)";
+  }
+  var tip = document.querySelector(".empty-tip");
+  if (tip) tip.style.display = code ? "none" : "";
+  saveCanvas();
 }
 
-// ---------- 顶部按钮 ----------
-document.getElementById("btn-clear").addEventListener("click", () => {
-  if (!confirm("清空画布？")) return;
-  canvasBody.querySelectorAll(".block").forEach(b => b.remove());
-  update();
-});
+// ---------- 状态提示 ----------
+function statusTip(msg, isErr) {
+  var st = $("status");
+  st.textContent = msg;
+  st.className = isErr ? "err" : "ok";
+  clearTimeout(statusTip._t);
+  statusTip._t = setTimeout(function () { st.textContent = ""; st.className = ""; }, 2200);
+}
+
+// ---------- 复制 / 下载 / 运行 ----------
 function copyCode() {
-  const code = document.getElementById("code").textContent;
-  navigator.clipboard.writeText(code).then(() => {
-    const st = document.getElementById("status");
-    st.textContent = "已复制 ✓";
-    setTimeout(() => st.textContent = "", 1500);
+  var code = $("code").textContent;
+  if (!code) { statusTip("画布为空", true); return; }
+  navigator.clipboard.writeText(code).then(function () { statusTip("已复制代码 ✓"); }, function () {
+    statusTip("复制失败（请手动选择复制）", true);
   });
 }
-document.getElementById("btn-copy").addEventListener("click", copyCode);
-document.getElementById("btn-copy2").addEventListener("click", copyCode);
 function downloadCode() {
-  const code = document.getElementById("code").textContent;
-  const blob = new Blob([code], { type: "text/plain" });
-  const a = document.createElement("a");
+  var code = $("code").textContent;
+  if (!code) { statusTip("画布为空", true); return; }
+  var blob = new Blob([code], { type: "text/plain" });
+  var a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "program.hn";
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  statusTip("已下载 program.hn ✓");
 }
-document.getElementById("btn-download").addEventListener("click", downloadCode);
-document.getElementById("btn-download2").addEventListener("click", downloadCode);
+$("btn-copy").addEventListener("click", copyCode);
+$("btn-copy2").addEventListener("click", copyCode);
+$("btn-download").addEventListener("click", downloadCode);
+$("btn-download2").addEventListener("click", downloadCode);
+// 运行提示：浏览器沙箱无法直接调本机 hone，提供命令提示
+$("btn-run").addEventListener("click", function () {
+  var cmd = "hone run program.hn";
+  navigator.clipboard.writeText(cmd).then(function () {
+    statusTip("已复制：hone run program.hn（先下载保存，再在本机终端执行）");
+  });
+});
+$("chk-wrap").addEventListener("change", function () {
+  $("code-wrap").classList.toggle("wrap", $("chk-wrap").checked);
+});
 
-// 初始示例：fib 函数
-(function initDemo() {
-  const fn = makeNested("fn");
-  fn.querySelector('input[data-field="name"]').value = "fib";
-  fn.querySelector('input[data-field="params"]').value = "n";
-  const ifB = makeNested("if");
-  ifB.querySelector('input[data-field="cond"]').value = "n <= 1";
-  const ret1 = makeSimple("return", "返回", "0", "n");
-  ifB.querySelector('.slot[data-role="body"]').appendChild(ret1);
-  fn.querySelector('.slot[data-role="body"]').appendChild(ifB);
-  const ret2 = makeSimple("return", "返回", "0", "fib(n - 1) + fib(n - 2)");
-  fn.querySelector('.slot[data-role="body"]').appendChild(ret2);
-  canvasBody.appendChild(fn);
-  const pr = makeSimple("print", "输出", "r", "fib(10)");
-  canvasBody.appendChild(pr);
-  update();
+/* =========================================================================
+ * 主题切换（深/浅，localStorage 记忆）
+ * ========================================================================= */
+function toggleTheme() {
+  var cur = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", cur);
+  $("btn-theme").textContent = cur === "light" ? "☀️" : "🌙";
+  try { localStorage.setItem("hone-editor-theme", cur); } catch (err) {}
+}
+(function initTheme() {
+  var t = null;
+  try { t = localStorage.getItem("hone-editor-theme"); } catch (err) {}
+  if (t === "light") {
+    document.documentElement.setAttribute("data-theme", "light");
+    $("btn-theme").textContent = "☀️";
+  }
 })();
+
+/* =========================================================================
+ * 分栏宽度拖拽（pointer 事件）
+ * ========================================================================= */
+function makeSplitter(splitter, target, minW, maxW) {
+  splitter.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    var moving = true;
+    var startX = e.clientX;
+    var startW = target.getBoundingClientRect().width;
+    var dir = splitter.id === "splitter-left" ? 1 : -1;
+    splitter.classList.add("active");
+    function move(ev) {
+      if (!moving) return;
+      var w = startW + (ev.clientX - startX) * dir;
+      if (w < minW) w = minW;
+      if (w > maxW) w = maxW;
+      target.style.width = w + "px";
+    }
+    function up() {
+      moving = false;
+      splitter.classList.remove("active");
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+    }
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  });
+}
+makeSplitter($("splitter-left"), $("palette"), 160, 420);
+makeSplitter($("splitter-right"), $("preview"), 280, 680);
+
+// 窄屏（<=900px）下面板/预览以浮层开关显示
+function closeMobilePanels() {
+  document.body.classList.remove("pal-open");
+  document.body.classList.remove("prev-open");
+}
+$("btn-mobile-pal").addEventListener("click", function () {
+  document.body.classList.toggle("pal-open");
+  document.body.classList.remove("prev-open");
+});
+$("btn-mobile-prev").addEventListener("click", function () {
+  document.body.classList.toggle("prev-open");
+  document.body.classList.remove("pal-open");
+});
+document.addEventListener("click", function (e) {
+  if (document.body.classList.contains("pal-open") && e.target.closest("#palette")) return;
+  if (document.body.classList.contains("prev-open") && e.target.closest("#preview")) return;
+  // 点面板/预览浮层外部时关闭
+  if (e.target.closest("#btn-mobile-pal, #btn-mobile-prev")) return;
+  closeMobilePanels();
+});
+window.addEventListener("resize", function () {
+  if (window.innerWidth > 900) closeMobilePanels();
+});
 </script>
 </body>
 </html>

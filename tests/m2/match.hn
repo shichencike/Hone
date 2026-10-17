@@ -1,0 +1,73 @@
+// G2.3 match 模式匹配：字面量 / 枚举变体 / 载荷绑定 / 通配 / 作用域与闭包。
+// 无匹配分支（无 `_`）的 H005 运行期错误路径由 tests/regress_err.py 的 match_no_arm 用例承担。
+
+// ── 1. 字面量模式：int / str / bool / float / char ──
+x = 5;
+print("lit-int:" + (match x { 1 => "one", 5 => "five", _ => "other" }));
+x2 = 3;
+print("lit-int-miss:" + (match x2 { 1 => "one", 5 => "five", _ => "other" }));
+s = "b";
+print("lit-str-hit:" + (match s { "a" => "A", "b" => "B", _ => "?" }));
+s2 = "zzz";
+print("lit-str-miss:" + (match s2 { "a" => "A", "b" => "B", _ => "fallback" }));
+b = true;
+print("lit-bool:" + (match b { true => "T", false => "F" }));
+f = 1.5;
+print("lit-float:" + (match f { 1.5 => "one-five", 2.5 => "two-five", _ => "other" }));
+c = 'y';
+print("lit-char:" + (match c { 'x' => "X", 'y' => "Y", _ => "?" }));
+
+// ── 2. 臂顺序：通配在前则后续臂不可达；无通配但命中（不触发 H005） ──
+w = 5;
+print("wild-first:" + (match w { _ => "wild", 5 => "five" }));
+print("no-wild-hit:" + (match w { 4 => "four", 5 => "five" }));
+
+// ── 3. 枚举变体模式：无载荷 / 载荷绑定 / `_` 忽略载荷 / 跨枚举同名变体不命中 ──
+enum Color { Red, Green, Blue };
+cc = Color.Green;
+print("variant-nopayload:" + (match cc { Color.Red => "red", Color.Green => "green", _ => "?" }));
+enum Shape { Circle(float), Rect(float, float) };
+sh = Shape.Rect(2.0, 3.0);
+print("bind-two:" + to_str(match sh { Shape.Circle(r) => 2.0 * r, Shape.Rect(w0, h0) => w0 + h0, _ => 0.0 }));
+print("bind-ignore:" + to_str(match sh { Shape.Rect(_, h1) => h1, _ => 0.0 }));
+enum Dir { Red };
+print("cross-enum:" + (match cc { Dir.Red => "dir-red", _ => "other" }));
+
+// ── 4. 绑定作用域：遮蔽外层同名变量，外层不受影响（绑定随臂结束弹出） ──
+// （绑定名与既有变量同名时 checker 会做类型归一：用同型 int 用例）
+enum Box { B(int) };
+bx = Box.B(5);
+n = 1;
+print("shadow:" + to_str(match bx { Box.B(n) => n + 1, _ => 0 }));
+print("outer-kept:" + to_str(n));
+// 同一表达式内，匹配结果之后的 `+ rr` 读取外层 rr（绑定已不在作用域）
+rr = 9;
+print("bind-then-outer:" + to_str((match bx { Box.B(rr) => rr, _ => 0 }) + rr));
+// 臂结束后同名变量可重新声明（绑定不泄漏为 VM 变量区占用）
+after = match bx { Box.B(tt) => tt, _ => 0 };
+tt = 100;
+print("redecl-after:" + to_str(tt) + "," + to_str(after));
+
+// ── 5. 闭包：lambda 捕获绑定值（内层优先）；捕获普通外层变量 ──
+bx2 = Box.B(5);
+outer = 7;
+fl = match bx2 { Box.B(outer) => (fn() { return outer; }), _ => (fn() { return 0; }) };
+print("cap-bind:" + to_str(fl()));
+fl2 = match bx2 { Box.B(rad) => (fn() { return rad + 1; }), _ => (fn() { return 0; }) };
+print("cap-bind2:" + to_str(fl2()));
+
+// ── 6. 组合：嵌套 / 作函数返回值 / 作实参 / list 字面量 / 循环累加 ──
+enum Opt { Some(int), None };
+o = Opt.Some(3);
+print("nested:" + (match o { Opt.Some(v) => match v { 3 => "three", _ => "other" }, Opt.None => "none" }));
+fn describe(v) {
+    return match v { Opt.Some(v2) => "some(" + to_str(v2) + ")", Opt.None => "none" };
+}
+print("fn-ret:" + describe(o));
+print("call-arg:" + to_str(len(match o { Opt.Some(v3) => [v3, v3], Opt.None => [] })));
+print("list-lit:" + to_str([match 1 { 1 => "a", _ => "b" }, match 2 { 1 => "a", _ => "b" }]));
+total = 0;
+for (i = 0; i < 4; i = i + 1) {
+    total = total + (match i { 0 => 10, 1 => 20, _ => 1 });
+}
+print("loop-total:" + to_str(total));

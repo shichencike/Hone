@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hone 语言参考 - 权威语法规范</title>
+<meta name="description" content="Hone 语言参考：语法、数据类型、运算符、控制流（含 goto 标签与 macro 宏，H105/H106 编译期校验）、函数、集合、class、枚举、运算符重载、异步、内置函数、错误码 H001–H999 的精确规范。">
+<meta name="theme-color" content="#0b0e14">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <button class="menu-btn" onclick="toggleNav()" aria-label="菜单">&#9776;</button>
+  <span class="logo"><span class="mark">&#9889;</span> Hone</span>
+  <span class="spacer"></span>
+  <span class="right">
+    <span class="ver">v0.8.0</span>
+    <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">&#9728;</span><span class="ti-dark">&#127769;</span></button>
+  </span>
+</header>
+
+<aside class="sidebar" id="sidebar">
+  <nav>
+    <div class="nav-group">
+      <div class="nav-title">入门</div>
+      <a href="index.html">首页</a>
+      <a href="install.html">安装</a>
+      <a href="download.html">下载</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">学习</div>
+      <a href="tutorial.html">教程</a>
+      <a href="examples.html">示例</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">参考</div>
+      <a href="docs.html">文档</a>
+      <a href="language.html" class="active">语言参考</a>
+      <a href="stdlib.html">标准库</a>
+      <a href="perf.html">性能</a>
+      <a href="lsp.html">LSP / 编辑器</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">项目</div>
+      <a href="changelog.html">更新日志</a>
+      <a href="faq.html">FAQ</a>
+      <a href="about.html">关于</a>
+    </div>
+    <div class="page-toc">
+      <div class="nav-title">本页目录</div>
+      <ol>
+      <li><a href="#syntax">基础语法</a></li>
+      <li><a href="#vars">数据类型与变量</a></li>
+      <li><a href="#operators">运算符</a></li>
+      <li><a href="#control">控制流（标签 / goto / 宏）</a></li>
+      <li><a href="#fn">函数</a></li>
+      <li><a href="#collections">集合与字符串</a></li>
+      <li><a href="#lang-ext">结构体 · 模式匹配 · 管道</a></li>
+      <li><a href="#class">class 类</a></li>
+      <li><a href="#lang-new">多返回值 · 解构赋值 · 推导式 · 可选链</a></li>
+      <li><a href="#enum">枚举（enum）与 match 变体模式</a></li>
+      <li><a href="#overload">运算符重载（__op 特殊函数）</a></li>
+      <li><a href="#async">异步函数（async fn + await）</a></li>
+      <li><a href="#type-inst">type 实例类 与 with 上下文</a></li>
+      <li><a href="#builtins">内置函数参考</a></li>
+      <li><a href="#errors">错误处理 / 错误码 H001–H999</a></li>
+    </ol>
+    </div>
+  </nav>
+</aside>
+<div class="sidebar-backdrop" id="navBackdrop"></div>
+
+<main>
+
+  <h2><span class="hash">#</span>Hone 语言参考</h2>
+  <p>本页是 Hone 语言的<strong>权威参考手册</strong>：对语言自身的语法与语义做精确、最小化的规范说明——语法结构、类型系统、运算符、控制流及其编译期安全约束、函数、集合、class、枚举、运算符重载、异步、内置函数、错误码。每个条目均可在源码与 <code class="inline">hone explain &lt;错误码&gt;</code> 中核对。</p>
+  <p class="note">📘 本页与 <a href="docs.html">docs.html（综合使用手册）</a> 互补：集成（import / hone.json 清单）、工具链（hone run/build/repl/...）、GUI·进程·定时·图片·桌宠库、进阶用法与常见坑，仍在 docs.html 中。</p>
+
+  <input type="text" id="search" class="search-box" placeholder="搜索参考…（如 goto、macro、运算符、list）" oninput="searchDocs(this.value)">
+  <div id="search-count" class="search-count"></div>
+
+  
+
+<section id="syntax">
+    <h2><span class="hash">#</span>2. 基础语法</h2>
+    <table>
+      <tr><th>项目</th><th>约定</th></tr>
+      <tr><td>文件扩展名</td><td><code>.hn</code></td></tr>
+      <tr><td>语句结束符</td><td><code>;</code> 分号</td></tr>
+      <tr><td>代码块</td><td><code>{ }</code> 大括号</td></tr>
+      <tr><td>缩进</td><td>强制 Tab（<code>hone fmt</code> 统一）</td></tr>
+      <tr><td>注释</td><td><code>// 单行</code> 与 <code>/* 多行 */</code></td></tr>
+      <tr><td>命名空间</td><td>点号访问：<code>time.now()</code>、<code>sys.msgbox()</code></td></tr>
+      <tr><td>临时函数</td><td><code>tmp fn name() { ... }</code> 编译自动忽略</td></tr>
+      <tr><td>调试输出</td><td><code>debug_print(expr);</code> 仅 debug 模式生效</td></tr>
+    </table>
+  </section>
+<section id="vars">
+    <h2><span class="hash">#</span>3. 数据类型与变量</h2>
+    <p>静态强类型：类型一经推导或显式声明即锁定，禁止隐式转换。</p>
+<pre><code>x = <span class="n">10</span>;              <span class="c">// 自动推导为 int</span>
+f = <span class="n">3.14</span>;            <span class="c">// 自动推导为 float</span>
+y : <span class="k">int</span> = <span class="n">20</span>;    <span class="c">// 显式类型（Rust/TS 风格）</span>
+<span class="k">int</span> z = <span class="n">30</span>;      <span class="c">// 显式类型（C 风格）</span>
+x = <span class="s">"Hone"</span>;          <span class="c">// error[H001]: 期望 int，得到 str</span>
+ch = <span class="s">'a'</span>;            <span class="c">// char：单引号字面量（须恰好一个字符）</span>
+<span class="k">char</span> w = <span class="s">'中'</span>;   <span class="c">// 显式 char 声明；按码点比较：'a' &lt; 'b'</span>
+readonly int pi = 3;        <span class="c">// 只读变量：初始化后禁止再赋值</span>
+x : readonly int = 5;       <span class="c">// 类型位置 readonly（与上一行等价）</span>
+bv = 0b1010001;             <span class="c">// byte：8 位字节值</span>
+bs = b"abc";                <span class="c">// bytes：字节序列</span></code></pre>
+    <table>
+      <tr><th>类型</th><th>说明</th><th>字面量示例</th></tr>
+      <tr><td><code>int</code></td><td>64 位有符号整数</td><td><code>0, 42, -1</code></td></tr>
+      <tr><td><code>float</code></td><td>64 位双精度（IEEE 754）</td><td><code>3.14, .2, 2.0</code></td></tr>
+      <tr><td><code>bool</code></td><td>布尔值</td><td><code>true, false</code></td></tr>
+      <tr><td><code>str</code></td><td>UTF-8 字符串</td><td><code>"hello"</code>（支持 \n \t \\ \"）</td></tr>
+      <tr><td><code>char</code></td><td>单个 Unicode 字符（按码点比较，无算术运算）</td><td><code>'a', '\n', '中'</code>（须恰好一个字符）</td></tr>
+      <tr><td><code>byte</code></td><td>8 位无符号字节值（0..=255，与 int 严格隔离、无隐式转换，支持 <code>==</code>/<code>&lt;</code>/<code>&gt;</code> 比较）</td><td><code>0b1010001</code> / <code>byte(81)</code></td></tr>
+      <tr><td><code>bytes</code></td><td>字节序列（支持 len / 索引取 byte / 切片 / <code>+</code> 拼接 / <code>==</code> / for-in 迭代）</td><td><code>b"abc"</code></td></tr>
+      <tr><td><code>ptr</code></td><td>FFI 不透明指针句柄（void*，用于 load 动态库调用）</td><td><code>load</code> 返回值 / <code>0</code> 表示 NULL</td></tr>
+      <tr><td><code>list</code></td><td>动态列表（元素类型不锁定）</td><td><code>[1, "a", true]</code></td></tr>
+      <tr><td><code>dict</code></td><td>动态字典（字符串键 → 任意值）</td><td><code>{"name": "hone", "ver": 1}</code></td></tr>
+    </table>
+    <h3><span class="hash">#</span>3.1 写时复制容器（cow）</h3>
+    <p><code>cow</code> 声明关键字：集合值共享只读缓冲，写者首次写时深拷贝隔离（以 <code>Arc</code> 引用计数归零自动回收，无追踪式垃圾回收）。覆盖 <code>list</code> / <code>dict</code> / <code>str</code> / <code>bytes</code>。</p>
+<pre><code>cow x = [<span class="n">1</span>, <span class="n">2</span>];           <span class="c">// list，类型由初始化式推断</span>
+cow str s = <span class="s">"hi"</span>;         <span class="c">// str 显式标注</span>
+cow b = {a: <span class="n">1</span>};           <span class="c">// dict</span>
+x : cow str = <span class="s">"hi"</span>;         <span class="c">// 类型位置等价写法</span>
+cow readonly bytes buf = b<span class="s">"…"</span>; <span class="c">// 只读可叠加</span>
+<span class="k">fn</span> f(<span class="k">cow</span> z) { ... }         <span class="c">// cow 形参</span></code></pre>
+    <ul>
+      <li><strong>共享与隔离</strong>：<code>cow→cow</code> 赋值共享同一缓冲（O(1)，无拷贝）；<code>cow→普通</code> 赋值在边界自动深拷贝，普通变量永不共享 cow 缓冲。</li>
+      <li><strong>写时复制</strong>：对 cow 容器的原地赋值（索引赋值 <code>a[i] = x</code>、字段赋值 <code>a.k = x</code>）触发写路径——独占（引用计数 1）直接原地写，共享则先深拷贝出私有缓冲再写，其他共享者不受影响。</li>
+      <li><strong>透明性</strong>：<code>type_of(cow 值)</code> 报内层类型（<code>"list"</code> / <code>"dict"</code> / <code>"str"</code> / <code>"bytes"</code>）；<code>len</code>、<code>==</code>/<code>!=</code>、for-in、推导式、切片、内置函数均按内层值工作，报错文案与普通值一致。</li>
+      <li><strong>限制</strong>：<code>str</code>/<code>bytes</code> 不可变，仅零拷贝共享（无写路径）；<code>list</code>/<code>dict</code> 可变，写前检查唯一性；<code>+=</code> 等复合赋值不触发写时复制（按既有值语义）。</li>
+      <li><strong>仅解释器支持</strong>：VM（<code>--vm</code>）/ DLL（<code>build --dll</code>）遇 <code>cow</code> 声明或形参报 <code>H999</code>（"cow works in interpreted mode only"）。</li>
+    </ul>
+  </section>
+<section id="operators">
+    <h2><span class="hash">#</span>4. 运算符</h2>
+    <table>
+      <tr><th>类别</th><th>运算符</th><th>说明</th></tr>
+      <tr><td>算术</td><td><code>+ - * / %</code></td><td>int 除法为整除，除零报 H009</td></tr>
+      <tr><td>字符串拼接</td><td><code>+</code></td><td><code>"a" + "b"</code> → <code>"ab"</code>（仅 str + str）</td></tr>
+      <tr><td>比较</td><td><code>== != &lt; &gt; &lt;= &gt;=</code></td><td>返回 bool，要求两侧同类型</td></tr>
+      <tr><td>逻辑</td><td><code>&amp;&amp; || !</code></td><td>与、或、非；操作数为 bool</td></tr>
+      <tr><td>赋值</td><td><code>=</code></td><td>变量类型锁定后不可赋其他类型</td></tr>
+      <tr><td>复合赋值</td><td><code>+= -= *= /= %=</code></td><td>等价于 <code>x = x op y</code>；str 仅支持 <code>+=</code> 拼接</td></tr>
+      <tr><td>自增/自减</td><td><code>++ --</code></td><td><code>i++</code>/<code>i--</code> 后缀返回旧值，<code>++i</code>/<code>--i</code> 前缀返回新值（仅数值变量）</td></tr>
+      <tr><td>三元</td><td><code>? :</code></td><td><code>cond ? a : b</code>，条件必须 bool，右结合可嵌套</td></tr>
+      <tr><td>空值合并</td><td><code>??</code></td><td><code>a ?? b</code>：a 为 null 取 b（短路求值；null 来自 void 函数调用等占位值）</td></tr>
+    </table>
+    <p>字符串插值优先使用 f-string（见第 7 章），比拼接更简洁。</p>
+    <p>自增/自减、三元、空值合并的完整示例见 <code class="inline">examples/new_syntax_demo.hn</code>。</p>
+  </section>
+<section id="control">
+    <h2><span class="hash">#</span>5. 控制流</h2>
+    <p>条件表达式必须显式返回 bool，禁止隐式转换（<code>if (1)</code> 视为非法）。</p>
+<pre><code>x = <span class="n">7</span>;                  <span class="c">// 先定义再判断</span>
+<span class="k">if</span> (x &gt; <span class="n">5</span>) {
+    <span class="f">print</span>(<span class="s">"大"</span>);
+} <span class="k">else if</span> (x &gt; <span class="n">0</span>) {
+    <span class="f">print</span>(<span class="s">"小"</span>);
+} <span class="k">else</span> {
+    <span class="f">print</span>(<span class="s">"非正"</span>);
+}
+
+i = <span class="n">0</span>;
+<span class="k">while</span> (i &lt; <span class="n">10</span>) {
+    i = i + <span class="n">1</span>;
+}
+
+<span class="c">// for-in：遍历列表（单变量）或字典（键、值双变量）</span>
+nums = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>];
+<span class="k">for</span> x <span class="k">in</span> nums {
+    <span class="f">print</span>(x * x);      <span class="c">// 1 4 9</span>
+}
+
+user = {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};
+<span class="k">for</span> k, v <span class="k">in</span> user {
+    <span class="f">print</span>(k + <span class="s">"= "</span> + <span class="f">to_str</span>(v));
+}
+
+<span class="c">// do-while：先执行循环体再判断条件（至少执行一次）</span>
+j = <span class="n">0</span>;
+<span class="k">do</span> {
+    j = j + <span class="n">1</span>;
+} <span class="k">while</span> (j &lt; <span class="n">3</span>);
+
+<span class="c">// C 风格 for：init; cond; step 三段均可省略（for (;;) 无限循环，配合 break 退出）</span>
+<span class="k">for</span> (i = <span class="n">0</span>; i &lt; <span class="n">5</span>; i = i + <span class="n">1</span>) {
+    <span class="f">print</span>(i);          <span class="c">// 0 1 2 3 4</span>
+}
+
+<span class="c">// continue：跳过本次循环剩余语句，直接进入下一次迭代</span>
+<span class="k">for</span> (i = <span class="n">1</span>; i &lt;= <span class="n">5</span>; i = i + <span class="n">1</span>) {
+    <span class="k">if</span> (i % <span class="n">2</span> == <span class="n">0</span>) { <span class="k">continue</span>; }
+    <span class="f">print</span>(i);          <span class="c">// 1 3 5（只打印奇数）</span>
+}</code></pre>
+
+    <h3>标签与 goto（H105）</h3>
+    <p>Hone 提供编译期安全的 <code class="inline">goto</code>：用 <code class="inline">名字:</code> 定义标签（单独占一行、行尾紧跟冒号），用 <code class="inline">goto 名字;</code> 跳转。常用于手工搭循环、一次性跳出多层嵌套、跳过一段代码。</p>
+<pre><code>i = <span class="n">0</span>;
+again:
+<span class="f">print</span>(i);
+i = i + <span class="n">1</span>;
+<span class="k">if</span> (i &lt; <span class="n">3</span>) { <span class="k">goto</span> again; }   <span class="c">// 回跳：依次打印 0 1 2</span>
+
+<span class="c">// 向外层标签跳转：一次性跳出嵌套循环（等价于带标签 break）</span>
+<span class="k">for</span> b <span class="k">in</span> [<span class="n">2</span>, <span class="n">4</span>] {
+    <span class="k">for</span> a <span class="k">in</span> [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>] {
+        <span class="k">if</span> (a == <span class="n">3</span>) { <span class="k">goto</span> found; }
+    }
+}
+found:
+<span class="f">print</span>(b);   <span class="c">// 2（a==3 时直接跳出两层循环）</span></code></pre>
+    <p><strong>安全规则（全部编译期检查，运行期绝不跳到未定义位置，报错 <code class="inline">error[H105]</code>）</strong>：</p>
+    <ul>
+      <li>标签只能在同一函数内使用，且同一函数内名字唯一（重复定义报错）；</li>
+      <li>只能跳到「从跳转点向外层可见」的标签：标签必须位于跳转点所在语句块或其外层语句块中，因此<strong>无法跳进 if / 循环等内层语句块</strong>（也就不存在「跳入未初始化作用域」的问题）；</li>
+      <li><strong>禁止向前跳过变量绑定</strong>：若标签在跳转点之后，且两者之间在同一语句块内存在 <code class="inline">x = ...</code> / <code class="inline">int x = ...</code> / 解构赋值等绑定语句，则报错（否则跳转后会读到未初始化变量）；</li>
+      <li>标签不跨函数：lambda、嵌套 fn 各自独立，外层标签在内层不可见（反之亦然）；</li>
+      <li>标签写法 <code class="inline">loop_top:</code> 与类型注解 <code class="inline">x : int = 10;</code> 不冲突：冒号后同一行还有内容即按类型注解解析；</li>
+    </ul>
+    <p>排查标签 / 跳转报错：<code class="inline">hone explain H105</code>。</p>
+
+    <h3>宏 macro（H106）</h3>
+    <p>宏是<strong>解析期</strong>的代码生成工具：在解析之后、类型检查之前，由预处理阶段（<code class="inline">src/preproc.rs</code>）做<strong>纯 AST 替换</strong>。因此解释器 / 字节码 VM / 原生编译三个后端看到的是展开后的同一份代码，<strong>运行期不存在宏实体</strong>，行为完全一致。</p>
+    <p>两种形式，调用写法均与函数一致（<code class="inline">NAME(实参)</code>）：</p>
+<pre><code><span class="c">// 表达式宏：用于表达式位置</span>
+<span class="k">macro</span> <span class="f">SQ</span>(x) =&gt; x * x;
+<span class="k">macro</span> <span class="f">CLAMP</span>(v, lo, hi) =&gt; (v &lt; lo) ? lo : ((v &gt; hi) ? hi : v);
+<span class="f">print</span>(<span class="f">SQ</span>(<span class="n">3</span>));                   <span class="c">// 9</span>
+<span class="f">print</span>(<span class="f">CLAMP</span>(<span class="n">12</span>, <span class="n">0</span>, <span class="n">10</span>));         <span class="c">// 10</span>
+
+<span class="c">// 语句宏：展开为独立作用域代码块</span>
+<span class="k">macro</span> <span class="f">SAY</span>(msg) { <span class="f">print</span>(msg); }
+<span class="k">macro</span> <span class="f">INC</span>(x) { x = x + <span class="n">1</span>; }      <span class="c">// 形参作赋值目标：实参须是裸变量名</span>
+<span class="f">SAY</span>(<span class="s">"hi"</span>);
+n = <span class="n">0</span>; <span class="f">INC</span>(n); <span class="f">print</span>(n);           <span class="c">// 1</span></code></pre>
+    <p><strong>安全约定（编译期检查，越界用法报 <code class="inline">error[H106]</code>）</strong>：</p>
+    <ul>
+      <li>宏必须定义在<strong>程序顶层</strong>（函数 / 代码块 / 类 / 循环内定义宏一律报错）；</li>
+      <li><strong>先定义后使用</strong>：按源码顺序展开；若调用的名字对应更靠后的宏定义，直接报 H106 并指出定义行号（提示把定义上移）；</li>
+      <li><strong>宏体在定义点展开</strong>：只能引用比它更早定义的宏 ⇒ 引用关系必然无环，<strong>不存在无限展开</strong>，也不需要展开深度上限；</li>
+      <li><strong>纯 AST 替换</strong>（非文本替换）：无运算符优先级陷阱、无 token 拼接问题；</li>
+      <li>宏名不能与函数 / async fn / 结构体 / 类 / 枚举重名，宏之间也不能重名；</li>
+      <li>实参个数必须与形参个数一致；</li>
+      <li>表达式宏体内禁用 <code class="inline">++</code> / <code class="inline">--</code> 与 lambda（会改变实参的求值作用域）；形参不能作为被调用的函数名（宏是语法替换，不支持高阶）；</li>
+      <li>语句宏展开为<strong>独立作用域块</strong>，体内声明的变量不会泄漏到调用处；体内禁止 <code class="inline">return</code> / <code class="inline">goto</code> / 标签 / 嵌套 macro；<code class="inline">break</code> / <code class="inline">continue</code> 仅限宏体自身的循环；</li>
+      <li>形参可用作简单赋值目标（<code class="inline">x = ...</code> / <code class="inline">x += ...</code> / <code class="inline">int x = ...</code>），此时对应实参必须是裸变量名；不能用作循环变量、catch 变量、解构目标或类型名。</li>
+    </ul>
+    <p>与函数的分工：需要返回值、递归、一等值（传参 / 存变量）时用 <code class="inline">fn</code>；只想去掉一层样板写法时用宏。排查宏报错：<code class="inline">hone explain H106</code>。</p>
+
+  </section>
+<section id="fn">
+    <h2><span class="hash">#</span>6. 函数</h2>
+<pre><code><span class="k">fn</span> <span class="f">add</span>(a : <span class="k">int</span>, b : <span class="k">int</span>) -&gt; <span class="k">int</span> {
+    <span class="k">return</span> a + b;
+}
+
+<span class="c">// 参数类型可由调用上下文推导（推荐复杂场景显式声明）</span>
+<span class="k">fn</span> <span class="f">greet</span>(name) {
+    <span class="f">print</span>(<span class="s">"你好, "</span> + name);
+}</code></pre>
+    <ul>
+      <li>函数返回类型由 return 推导，也可用 <code>fn f() -&gt; type</code> 声明</li>
+      <li>无返回值时调用作为表达式得到 null 占位</li>
+      <li>所有函数扁平化存在于全局符号表（不支持 <code>::</code> 路径）</li>
+    </ul>
+
+    <h3>泛型函数</h3>
+    <p>在函数名后、参数列表前用 <code class="inline">[T, U]</code> 声明类型参数，参数与返回类型注解可引用
+      （<code class="inline">x: T</code>、<code class="inline">-&gt; T</code>）。调用时按实参自动推导，同一泛型函数
+      可以不同类型多次调用、互不锁定；<strong>编译期擦除</strong>——运行期与普通函数零差异，无运行时开销、不产生重复代码。</p>
+<pre><code><span class="k">fn</span> <span class="f">identity</span>[<span class="k">T</span>](x: <span class="k">T</span>) -&gt; <span class="k">T</span> {
+    <span class="k">return</span> x;
+}
+<span class="f">print</span>(<span class="f">identity</span>(<span class="n">42</span>));          <span class="c">// 42（T=int）</span>
+<span class="f">print</span>(<span class="f">identity</span>(<span class="s">"hello"</span>));     <span class="c">// hello（T=str）</span>
+
+<span class="k">fn</span> <span class="f">swap</span>[<span class="k">A</span>, <span class="k">B</span>](a: <span class="k">A</span>, b: <span class="k">B</span>) -&gt; <span class="k">B</span> {
+    <span class="k">return</span> b;
+}
+<span class="f">print</span>(<span class="f">swap</span>(<span class="n">1</span>, <span class="s">"two"</span>));        <span class="c">// two（A=int, B=str）</span>
+
+<span class="k">fn</span> <span class="f">pick</span>[<span class="k">T</span>](a: <span class="k">T</span>, b: <span class="k">T</span>, want_first: <span class="k">bool</span>) -&gt; <span class="k">T</span> {
+    <span class="k">if</span> (want_first) {
+        <span class="k">return</span> a;
+    }
+    <span class="k">return</span> b;
+}
+<span class="f">print</span>(<span class="f">pick</span>(<span class="s">"a"</span>, <span class="s">"b"</span>, <span class="k">true</span>)); <span class="c">// a（T=str）</span>
+<span class="f">print</span>(<span class="f">pick</span>(<span class="n">10</span>, <span class="n">20</span>, <span class="k">false</span>));  <span class="c">// 20（T=int）</span></code></pre>
+    <p>约束：函数名全局唯一（泛型与普通同名仍报 already defined）；未声明的类型参数报 H002；
+      重复类型参数报 H005；同一类型参数处调用点必须传同型（否则 H001）。
+      类方法同样支持泛型（class 中 <code class="inline">fn 方法[T](...)</code>）。
+      完整示例见 <code class="inline">examples/generic_test.hn</code>。</p>
+
+    <h3>默认参数</h3>
+    <p><code class="inline">fn f(a, b = 10)</code>：调用时省略的<strong>尾部实参</strong>取默认值。
+      必选参数（无默认值）必须位于默认参数之前（否则报错）；默认表达式在<strong>调用时求值</strong>，
+      可引用其前面的参数（如 <code class="inline">fn f(a, b = a * 2)</code>）。参数个数检查按
+      「必选个数 ~ 总个数」区间；lambda 参数同样支持默认值；<code class="inline">hone build --dll</code> 暂不支持。</p>
+<pre><code><span class="k">fn</span> <span class="f">greet</span>(name, greeting = <span class="s">"Hello"</span>) {
+    <span class="k">return</span> greeting + <span class="s">", "</span> + name + <span class="s">"!"</span>;
+}
+<span class="f">print</span>(<span class="f">greet</span>(<span class="s">"Hone"</span>));           <span class="c">// Hello, Hone!</span>
+<span class="f">print</span>(<span class="f">greet</span>(<span class="s">"Hone"</span>, <span class="s">"Hi"</span>));     <span class="c">// Hi, Hone!</span>
+
+<span class="k">fn</span> <span class="f">repeat_char</span>(ch, times = <span class="n">3</span>, sep = <span class="s">"-"</span>) {
+    s = <span class="s">""</span>;
+    <span class="k">for</span> (i = <span class="n">0</span>; i &lt; times; i = i + <span class="n">1</span>) {
+        s = s + ch;
+        <span class="k">if</span> (i &lt; times - <span class="n">1</span>) { s = s + sep; }
+    }
+    <span class="k">return</span> s;
+}
+<span class="f">print</span>(<span class="f">repeat_char</span>(<span class="s">"*"</span>));        <span class="c">// *-*-*</span>
+<span class="f">print</span>(<span class="f">repeat_char</span>(<span class="s">"*"</span>, <span class="n">2</span>));     <span class="c">// *-*</span></code></pre>
+
+    <h3>匿名函数（lambda）</h3>
+    <p><code class="inline">fn(x) { ... }</code> 是一等值：可赋值给变量、作为参数传递（高阶函数）、
+      作为返回值返回（闭包工厂）。<strong>创建时按值捕获当前作用域可见的变量（闭包）</strong>，
+      调用时经变量名动态解析；无函数名、无泛型、无 <code class="inline">-&gt;</code> 返回注解，返回类型动态。
+      <code class="inline">break</code> / <code class="inline">continue</code> / <code class="inline">return</code> 只能出现在 lambda 自身函数体内。</p>
+<pre><code>double = <span class="k">fn</span>(x) {
+    <span class="k">return</span> x * <span class="n">2</span>;
+};
+<span class="f">print</span>(double(<span class="n">21</span>));     <span class="c">// 42</span>
+
+base = <span class="n">10</span>;
+adder = <span class="k">fn</span>(y) {
+    <span class="k">return</span> base + y;   <span class="c">// 捕获外围变量 base（按值）</span>
+};
+<span class="f">print</span>(adder(<span class="n">5</span>));       <span class="c">// 15</span>
+
+<span class="k">fn</span> <span class="f">apply</span>(f, v) {
+    <span class="k">return</span> f(v);       <span class="c">// f 为 lambda 参数，动态调用</span>
+}
+<span class="f">print</span>(<span class="f">apply</span>(<span class="k">fn</span>(n: <span class="k">int</span>) { <span class="k">return</span> n * n; }, <span class="n">6</span>));   <span class="c">// 36</span>
+
+<span class="k">fn</span> <span class="f">make_adder</span>(offset) {
+    <span class="k">return</span> <span class="k">fn</span>(z) { <span class="k">return</span> z + offset; };   <span class="c">// 返回闭包</span>
+}
+add5 = <span class="f">make_adder</span>(<span class="n">5</span>);
+<span class="f">print</span>(add5(<span class="n">10</span>));       <span class="c">// 15</span></code></pre>
+  </section>
+<section id="collections">
+    <h2><span class="hash">#</span>7. 集合与字符串</h2>
+    <p>列表 <code>[a, b, c]</code> 与字典 <code>{"k": v}</code> 为动态集合类型：元素类型不锁定、可混合，
+      变量本身仍遵循类型锁定规则（不能把列表赋给已锁定的标量变量）。</p>
+<pre><code>nums = [<span class="n">1</span>, <span class="s">"a"</span>, <span class="k">true</span>];          <span class="c">// 混合元素列表</span>
+user = {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"ver"</span>: <span class="n">1</span>};   <span class="c">// 字符串键 → 任意值</span>
+
+<span class="f">print</span>(<span class="f">len</span>(nums));               <span class="c">// 3（元素个数）</span>
+<span class="f">print</span>(<span class="f">to_str</span>(user));            <span class="c">// {name: hone, ver: 1}</span>
+
+l = <span class="f">append</span>(nums, <span class="s">"x"</span>);          <span class="c">// [1, a, true, x]（返回新列表）</span>
+<span class="f">print</span>(<span class="f">contains</span>(l, <span class="s">"a"</span>));       <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">index_of</span>(l, <span class="s">"x"</span>));       <span class="c">// 3（找不到返回 -1）</span>
+
+<span class="f">print</span>(<span class="f">has_key</span>(user, <span class="s">"name"</span>));  <span class="c">// true</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">keys</span>(user)));      <span class="c">// [name, ver]</span>
+<span class="f">print</span>(<span class="f">to_str</span>(<span class="f">values</span>(user)));    <span class="c">// [hone, 1]</span></code></pre>
+    <p><strong>f-string 字符串插值</strong>：<code>f"..."</code> 内 <code>{expr}</code> 嵌入任意表达式，
+      <code>{{</code> / <code>}}</code> 转义字面大括号：</p>
+<pre><code>name = <span class="s">"hone"</span>;
+<span class="f">print</span>(<span class="s">f"你好, {name}! sum = {1 + 2}"</span>);   <span class="c">// 你好, hone! sum = 3</span>
+<span class="f">print</span>(<span class="s">f"{{{<span class="n">1</span> + <span class="n">1</span>}}}"</span>);                 <span class="c">// 字面大括号 + 表达式</span></code></pre>
+    <p><strong>三引号原始字符串</strong>：<code>"""..."""</code> 多行字符串，内容<strong>不做转义处理</strong>
+      （<code>\n</code>、<code>\t</code> 等原样保留），跨行书写、保留换行与缩进；与普通字符串同值
+      （支持 len、拼接、比较等）：</p>
+<pre><code>text = <span class="s">"""line1
+line2
+    indented"""</span>;
+<span class="f">print</span>(text);       <span class="c">// line1 换行 line2 换行 "    indented"</span>
+<span class="f">print</span>(<span class="f">len</span>(text));  <span class="c">// 24</span></code></pre>
+    <p><strong>类型判断</strong>：<code>is_int</code> <code>is_float</code> <code>is_str</code> <code>is_bool</code>
+      <code>is_list</code> <code>is_dict</code> <code>is_null</code>，判断运行期值类型，常用于分支处理混合集合。</p>
+  </section>
+<section id="lang-ext">
+    <h2><span class="hash">#</span>7.5 结构体 · 模式匹配 · 管道</h2>
+    <p><strong>struct 结构体</strong>：声明确定的数据形态（字段名与类型固定），实例用 dict 表示、字段访问 <code>p.字段</code>；
+      构造时按字段顺序传参，检查阶段校验字段个数与类型（H001/H011）：</p>
+<pre><code><span class="k">struct</span> <span class="f">Point</span> { <span class="k">readonly</span> x: <span class="k">int</span>, y: <span class="k">float</span> };
+p = <span class="f">Point</span>(<span class="n">3</span>, <span class="n">2.5</span>);
+<span class="f">print</span>(p.x);   <span class="c">// 3（只读字段，赋值报错）</span>
+p.y = <span class="n">9</span>;                <span class="c">// 普通字段可写</span>
+<span class="f">print</span>(p.y);   <span class="c">// 9</span></code></pre>
+    <p><strong>只读字段</strong>：<code>readonly</code> 修饰的字段初始化后禁止再赋值（静态检查 + 运行时兜底）；
+      两种写法等价：<code>readonly f: int</code> 与 <code>f: readonly int</code>。type 实例类（§7.11）同样支持只读字段。</p>
+    <p><strong>match 模式匹配</strong>：多分支表达式的简洁写法，模式支持字面量与 <code>_</code> 通配符（放最后、只能一次），
+      返回匹配分支的值，全部不匹配时运行时报错（建议补 <code>_</code> 兜底）：</p>
+<pre><code>s = <span class="k">match</span> <span class="n">2</span> {
+    <span class="n">1</span> =&gt; <span class="s">"one"</span>,
+    <span class="n">2</span> =&gt; <span class="s">"two"</span>,
+    _ =&gt; <span class="s">"other"</span>,
+};
+<span class="f">print</span>(s);   <span class="c">// two</span></code></pre>
+    <p><strong>管道操作符 <code>|&gt;</code></strong>：数据流向更直观。<code>x |&gt; f</code> 等价 <code>f(x)</code>，
+      <code>x |&gt; f(a, b)</code> 等价 <code>f(x, a, b)</code>，可链式（解析期转换为普通调用）：</p>
+<pre><code><span class="f">print</span>(<span class="s">"hello world"</span> |&gt; <span class="f">len</span>);       <span class="c">// 11</span>
+<span class="f">print</span>([<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>] |&gt; <span class="f">len</span> |&gt; <span class="f">to_str</span>); <span class="c">// "3"</span></code></pre>
+  </section>
+<section id="class">
+    <h2><span class="hash">#</span>7.6 class 类（成员函数不进全局符号表）</h2>
+    <p><strong>class 类</strong>：将一组相关函数组织成命名空间，通过 <code class="inline">类名.方法(...)</code> 调用
+      （如 <code class="inline">Math.double(21)</code>）。关键特性：<strong>成员函数不进入全局符号表</strong>——
+      不能用裸名调用（<code class="inline">double(21)</code> 报 H002），不污染全局命名空间，
+      同名全局函数可与类方法共存、互不影响；类内方法互相调用也要用限定名
+      （<code class="inline">return Math.fib(n - 1) + Math.fib(n - 2);</code>）。</p>
+<pre><code><span class="k">class</span> <span class="f">Math</span> {
+    <span class="k">fn</span> <span class="f">double</span>(x) {
+        <span class="k">return</span> x * <span class="n">2</span>;
+    }
+    <span class="k">fn</span> <span class="f">fib</span>(n) {
+        <span class="k">if</span> (n &lt;= <span class="n">1</span>) {
+            <span class="k">return</span> n;
+        }
+        <span class="k">return</span> <span class="f">Math.fib</span>(n - <span class="n">1</span>) + <span class="f">Math.fib</span>(n - <span class="n">2</span>);
+    }
+    <span class="k">fn</span> <span class="f">greet</span>(name) -&gt; <span class="k">str</span> {
+        <span class="k">return</span> <span class="s">"Hello, "</span> + name;
+    }
+}
+
+<span class="f">print</span>(<span class="f">Math.double</span>(<span class="n">21</span>));   <span class="c">// 42</span>
+<span class="f">print</span>(<span class="f">Math.fib</span>(<span class="n">10</span>));      <span class="c">// 55</span>
+<span class="f">print</span>(<span class="f">Math.greet</span>(<span class="s">"hone"</span>)); <span class="c">// Hello, hone</span>
+
+<span class="k">fn</span> <span class="f">double</span>(x) {            <span class="c">// 全局同名函数与类方法共存</span>
+    <span class="k">return</span> <span class="s">"global: "</span> + <span class="f">to_str</span>(x);
+}
+<span class="f">print</span>(<span class="f">double</span>(<span class="n">21</span>));        <span class="c">// global: 21</span>
+<span class="f">print</span>(<span class="f">Math.double</span>(<span class="n">21</span>));   <span class="c">// 42（类方法不受影响）</span></code></pre>
+    <p>类方法支持参数、返回值（可写 <code class="inline">-&gt; type</code> 注解）、递归、return，与普通函数能力一致；
+      类名与 struct 名不能重复（报 H005）；结尾分号可选（class 是块结构，与 struct 不同）。
+      完整示例见 <code class="inline">examples/class_test.hn</code>。</p>
+  </section>
+<section id="lang-new">
+    <h2><span class="hash">#</span>7.7 多返回值 · 解构赋值 · 推导式 · 可选链</h2>
+    <p><strong>多返回值</strong>：<code class="inline">return a, b, ...;</code> 一个函数可一次返回多个值，
+      运行时打包为列表，由解构赋值接收；不解构时（<code class="inline">x = f();</code>）拿到打包后的列表。
+      仍支持单值 return 与空 return（返回 null）；<code class="inline">hone build --dll</code> 暂不支持：</p>
+<pre><code><span class="k">fn</span> <span class="f">divmod</span>(a, b) {
+    <span class="k">return</span> a / b, a % b;
+}
+q, r = <span class="f">divmod</span>(<span class="n">10</span>, <span class="n">3</span>);
+<span class="f">print</span>(q);   <span class="c">// 3</span>
+<span class="f">print</span>(r);   <span class="c">// 1</span>
+
+<span class="k">fn</span> <span class="f">minmax</span>(a, b) {
+    <span class="k">if</span> (a &lt; b) { <span class="k">return</span> a, b; }
+    <span class="k">return</span> b, a;
+}
+lo, hi = <span class="f">minmax</span>(<span class="n">7</span>, <span class="n">2</span>);
+<span class="f">print</span>(lo);   <span class="c">// 2</span>
+<span class="f">print</span>(hi);   <span class="c">// 7</span>
+
+packed = <span class="f">divmod</span>(<span class="n">8</span>, <span class="n">3</span>);
+<span class="f">print</span>(packed);   <span class="c">// [2, 2]（不解构时拿到打包列表）</span></code></pre>
+    <p><strong>解构赋值</strong>：列表解构 <code class="inline">a, b = [1, 2]</code> 按位置依次绑定变量
+      （元素不足报错、多余元素忽略，典型用途 <code class="inline">a, b = [b, a];</code> 交换）；
+      字典解构 <code class="inline">{a, b} = dict</code> 按键取出同名变量，改名形式
+      <code class="inline">{a: x, b: y} = dict</code>（等价 <code class="inline">x = dict["a"]</code>），键缺失报错：</p>
+<pre><code>a, b = [<span class="n">1</span>, <span class="n">2</span>];          <span class="c">// a=1, b=2</span>
+first, second = [<span class="n">9</span>, <span class="n">8</span>, <span class="n">7</span>];  <span class="c">// 多余元素忽略：first=9, second=8</span>
+
+user = {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"age"</span>: <span class="n">7</span>};
+{name, age} = user;           <span class="c">// name="hone", age=7</span>
+{name: n, age: a} = user;     <span class="c">// 改名：n="hone", a=7</span>
+
+q, r = <span class="f">divmod</span>(<span class="n">17</span>, <span class="n">5</span>);     <span class="c">// 与多返回值配合：q=3, r=2</span></code></pre>
+    <p><strong>列表/字典推导式</strong>：<code class="inline">[表达式 for 变量 in 集合 (if 条件)]</code> 与
+      <code class="inline">{键: 值 for 变量 in 集合 (if 条件)}</code>，一行生成集合。
+      集合为列表时单变量绑定元素，为字典时双变量（k、v 分别为键、值）；
+      字典推导式的键必须求值为 <code class="inline">str</code>（动态键用 <code class="inline">to_str</code> 转换）：</p>
+<pre><code>nums = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>, <span class="n">4</span>, <span class="n">5</span>];
+dbl = [x * <span class="n">2</span> <span class="k">for</span> x <span class="k">in</span> nums];              <span class="c">// [2, 4, 6, 8, 10]</span>
+evens = [x <span class="k">for</span> x <span class="k">in</span> nums <span class="k">if</span> x % <span class="n">2</span> == <span class="n">0</span>];  <span class="c">// [2, 4]</span>
+
+grades = {<span class="s">"alice"</span>: <span class="n">90</span>, <span class="s">"bob"</span>: <span class="n">85</span>};
+passed = [k <span class="k">for</span> k, v <span class="k">in</span> grades <span class="k">if</span> v &gt;= <span class="n">90</span>];   <span class="c">// ["alice"]</span>
+rev = {<span class="f">to_str</span>(v): k <span class="k">for</span> k, v <span class="k">in</span> grades};      <span class="c">// {"90": "alice", "85": "bob"}</span></code></pre>
+    <p><strong>可选链 <code class="inline">?.</code></strong>：<code class="inline">a?.b</code> 在 a 为 null 时
+      短路返回 null，否则等价普通字段访问；可链式 <code class="inline">a?.b?.c</code>，可与空值合并配合
+      <code class="inline">a?.b ?? "默认值"</code>。混合链 <code class="inline">a?.b.c</code> 中
+      <code class="inline">?.</code> 只短路其后一个字段，继续的普通字段访问在 null 上仍报错（与 JS 一致）。
+      obj 非 null 但字段不存在时同样报错；Hone 无 null 字面量，null 来自 void 函数调用等占位值；
+      <code class="inline">hone build --dll</code> 暂不支持：</p>
+<pre><code><span class="k">fn</span> <span class="f">get_user</span>() {
+    <span class="k">return</span> {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"age"</span>: <span class="n">7</span>};
+}
+<span class="f">print</span>(<span class="f">get_user</span>()?.name);   <span class="c">// hone</span>
+
+<span class="k">fn</span> <span class="f">void_fn</span>() {
+}
+v = <span class="f">void_fn</span>();
+<span class="f">print</span>(v?.name);             <span class="c">// null（短路）</span>
+<span class="f">print</span>(v?.a?.b);             <span class="c">// null（链式短路）</span>
+<span class="f">print</span>(v?.name ?? <span class="s">"匿名"</span>);  <span class="c">// 匿名（与空值合并配合）</span></code></pre>
+  </section>
+<section id="enum">
+    <h2><span class="hash">#</span>7.8 枚举（enum）与 match 变体模式</h2>
+    <p><strong>enum</strong>：<code class="inline">enum 名称 { 变体, 变体(类型, ...), ... };</code>
+      简单变体无载荷、带载荷变体携带多个类型化字段（int/float/bool/str）。变体访问
+      <code class="inline">Color.Red</code>（无载荷）或构造 <code class="inline">Shape.Circle(1.5)</code>
+      （带载荷，按载荷顺序传参，检查阶段校验个数与类型）。<code class="inline">==</code>/<code class="inline">!=</code>
+      比较类型 + 变体 + 载荷（不同枚举互不相等）。枚举名全局唯一（与 struct/class 重名报错），
+      变体名在枚举内唯一。值显示为 <code class="inline">Color.Red</code> / <code class="inline">Shape.Circle(1.5)</code>。</p>
+    <p><strong>match 变体模式</strong>：<code class="inline">Color.Red</code>（无载荷）或
+      <code class="inline">Shape.Circle(r)</code>（载荷绑定到分支体变量，<code class="inline">_</code> 忽略某项），
+      与字面量 / <code class="inline">_</code> 通配符模式共存；绑定变量仅本分支内可见：</p>
+<pre><code><span class="k">enum</span> <span class="t">Shape</span> { Circle(<span class="k">float</span>), Rect(<span class="k">float</span>, <span class="k">float</span>) };
+area = <span class="k">match</span> <span class="f">Shape</span>.Circle(<span class="n">2.0</span>) {
+    <span class="f">Shape</span>.Circle(r) =&gt; <span class="n">3.14159</span> * r * r,
+    <span class="f">Shape</span>.Rect(w, h) =&gt; w * h,
+    _ =&gt; <span class="n">0</span>,
+};
+<span class="f">print</span>(area);   <span class="c">// 12.56636…</span></code></pre>
+    <p>全链路支持解析 / 静态检查 / 解释器 / 原生编译 / fmt / LSP；示例
+      <code class="inline">examples/enum_demo.hn</code>。</p>
+  </section>
+<section id="overload">
+    <h2><span class="hash">#</span>7.9 运算符重载（__op 特殊函数）</h2>
+    <p>顶层定义特殊函数 <code class="inline">fn __op(参数) { ... }</code>，仅在内建运算不支持的
+      操作数组合时被调用；内置类型（int/float/str/list/dict/enum 等）的固有行为完全不受影响。
+      覆盖二元 <code class="inline">+ - * / % == != &lt; &lt;= &gt; &gt;=</code>
+      （<code class="inline">__add/__sub/__mul/__div/__mod/__eq/__ne/__lt/__le/__gt/__ge</code>）、
+      一元 <code class="inline">-x</code>/<code class="inline">!x</code>
+      （<code class="inline">__neg/__not</code>）、内置 <code class="inline">len(x)</code>/
+      <code class="inline">x[i]</code>（<code class="inline">__len/__index</code>）。
+      重载函数与普通函数一样遵循返回类型锁定；定义了重载后涉及动态值的运算静态检查放宽
+      （交给运行时判定）。原生编译后端支持二元/一元重载（生成「内建组合 → 内建运算，否则 →
+      __op 调用」分派链）；示例 <code class="inline">examples/overload_demo.hn</code>：</p>
+<pre><code><span class="k">fn</span> <span class="f">__add</span>(a, b) {
+    <span class="k">if</span> (<span class="f">type_of</span>(a) == <span class="s">"dict"</span> &amp;&amp; <span class="f">type_of</span>(b) == <span class="s">"dict"</span>) {
+        <span class="k">return</span> <span class="f">mk_complex</span>(<span class="f">c_re</span>(a) + <span class="f">c_re</span>(b), <span class="f">c_im</span>(a) + <span class="f">c_im</span>(b));
+    }
+    <span class="k">return</span> {<span class="s">"re"</span>: <span class="n">0</span>, <span class="s">"im"</span>: <span class="n">0</span>};
+}
+zs = z1 + z2;        <span class="c">// dict + dict 内建不支持 → __add</span>
+<span class="f">print</span>(<span class="f">to_str</span>(zs));  <span class="c">// {re: 4, im: 6}</span></code></pre>
+  </section>
+<section id="async">
+    <h2><span class="hash">#</span>7.10 异步函数（async fn + await）</h2>
+    <p><code class="inline">async fn 名称(参数) { ... }</code> 定义异步函数（与 fn 同构）。
+      调用时在后台线程执行并立即返回 future（不阻塞调用方）；<code class="inline">await 表达式</code>
+      阻塞等待 future 完成并返回其结果。错误传播：async 函数体内 throw / 运行时错误存入 future，
+      await 时原样抛出（可 try/catch 捕获）。与 <code class="inline">go</code> 互补：
+      go 发后不理、async/await 结构化并发（多个 async 并行启动、依次 await，总耗时约等于最慢者）。
+      <code class="inline">hone build --dll</code> 对 async/await 报「暂不支持」；
+      示例 <code class="inline">examples/async_demo.hn</code>：</p>
+<pre><code><span class="k">async</span> <span class="k">fn</span> <span class="f">compute</span>(n) {
+    <span class="k">return</span> n * <span class="n">2</span>;
+}
+f = <span class="f">compute</span>(<span class="n">21</span>);      <span class="c">// 立即返回 future（不阻塞）</span>
+<span class="f">print</span>(<span class="k">await</span> f);    <span class="c">// 42（阻塞等待结果）</span></code></pre>
+  </section>
+<section id="type-inst">
+    <h2><span class="hash">#</span>7.11 type 实例类 与 with 上下文管理器</h2>
+    <p><strong>type 实例类</strong>：带方法、继承与构造器的实例类（与 struct「纯数据 dict」互补）：
+      字段 + <code>fn</code> 方法，<strong>所有方法（含 <code>init</code>/<code>__enter__</code>/<code>__exit__</code>）必须把
+      <code>self</code> 作为显式首参</strong>，调用 <code>obj.method(...)</code> 时 self 自动填充实例。
+      字段为引用语义：方法体内 <code>self.f = x</code> 的写入对调用方实例立即可见：</p>
+<pre><code><span class="k">type</span> <span class="f">Shape</span> {
+    name: <span class="k">str</span>, sides: <span class="k">int</span>, area: <span class="k">int</span>,
+    <span class="k">fn</span> <span class="f">desc</span>(self) {
+        <span class="k">return</span> <span class="s">"shape "</span> + self.name;
+    }
+};
+sq = <span class="k">new</span> <span class="f">Shape</span>(<span class="s">"square"</span>, <span class="n">4</span>, <span class="n">16</span>);     <span class="c">// 无 init：实参按继承链字段顺序（父在前）绑定</span>
+<span class="f">print</span>(sq.desc());                     <span class="c">// shape square</span>
+sq.area = <span class="n">25</span>;                         <span class="c">// 字段可写</span></code></pre>
+    <p><strong>init 构造器</strong>（self 首参，可覆盖父类）：有 init 时 <code>new Type(...)</code> 的实参绑定 init
+      的参数（去掉 self）：</p>
+<pre><code><span class="k">type</span> <span class="f">Square</span> <span class="k">extends</span> <span class="f">Shape</span> {
+    side: <span class="k">int</span>,
+    <span class="k">fn</span> <span class="f">init</span>(self, side: <span class="k">int</span>) {
+        self.name = <span class="s">"square"</span>;
+        self.sides = <span class="n">4</span>;
+        self.side = side;
+        self.area = side * side;
+    }
+    <span class="k">fn</span> <span class="f">perimeter</span>(self) {
+        <span class="k">return</span> self.side * <span class="n">4</span>;
+    }
+};
+s = <span class="k">new</span> <span class="f">Square</span>(<span class="n">5</span>);
+<span class="f">print</span>(s.desc());        <span class="c">// shape square（继承方法）</span>
+<span class="f">print</span>(s.perimeter());   <span class="c">// 20（子类方法）</span></code></pre>
+    <p><strong>with 上下文管理器</strong>：<code>with expr [as r] { ... }</code> 进入时调 <code>__enter__()</code>
+      （返回值绑定 <code>r</code>，仅块内可见），退出时（<strong>含报错路径</strong>）必调 <code>__exit__()</code>，错误不被吞。
+      与 try/catch 正交：块内 throw 会先执行 <code>__exit__</code> 再向外传播：</p>
+<pre><code><span class="k">type</span> <span class="f">Guard</span> {
+    active: <span class="k">int</span>,
+    <span class="k">fn</span> <span class="f">__enter__</span>(self) { self.active = <span class="n">1</span>; <span class="k">return</span> self; }
+    <span class="k">fn</span> <span class="f">__exit__</span>(self)  { self.active = <span class="n">0</span>; }
+};
+g = <span class="k">new</span> <span class="f">Guard</span>();
+<span class="k">with</span> g <span class="k">as</span> r {
+    <span class="f">print</span>(r.active);   <span class="c">// 1（块内资源已激活）</span>
+}
+<span class="f">print</span>(g.active);       <span class="c">// 0（块结束自动清理；报错路径同样执行 __exit__）</span></code></pre>
+    <p>只读字段（两种写法等价：<code>readonly f: int</code> / <code>f: readonly int</code>）同样适用于 type 实例类。
+      示例 <code class="inline">examples/with_type_demo.hn</code>；type 实例 / with / 字段赋值为解释器特性，
+      VM / DLL 构建报 H999（用 <code class="inline">hone run</code> 运行）。</p>
+  </section>
+<section id="builtins">
+    <h2><span class="hash">#</span>8. 内置函数参考</h2>
+    <p>全部开箱即用，无需导入：</p>
+    <table>
+      <tr><th>类别</th><th>函数</th></tr>
+      <tr><td>基础</td><td><code>print</code> <code>len</code> <code>type_of</code> <code>read_file</code> <code>write_file</code> <code>file_exists</code> <code>read_bytes</code>（读二进制 → 字节列表）<code>write_bytes</code>（写二进制字节列表）</td></tr>
+      <tr><td>标准输入</td><td><code>input(prompt?)</code> 读取一行返回 str（EOF 报 H306）<code>read_int(prompt?)</code>（格式错报 H006）<code>read_float(prompt?)</code>（格式错报 H007）</td></tr>
+      <tr><td>集合</td><td><code>append</code> <code>clone</code> <code>copy</code>（深度拷贝）<code>contains</code> <code>index_of</code> <code>keys</code> <code>values</code> <code>has_key</code></td></tr>
+      <tr><td>类型判断</td><td><code>is_int</code> <code>is_float</code> <code>is_str</code> <code>is_bool</code> <code>is_list</code> <code>is_dict</code> <code>is_null</code> <code>is_byte</code> <code>is_bytes</code></td></tr>
+      <tr><td>断言 / 测试</td><td><code>assert</code>（条件为 false 抛 H700，配合 <code>hone test</code>）<code>assert_eq</code>（实际≠期望抛 H700，相等语义与 <code>==</code> 一致）</td></tr>
+      <tr><td>字符串</td><td><code>str_contains</code> <code>str_replace</code> <code>str_trim</code></td></tr>
+      <tr><td>字符</td><td><code>ord</code>（字符 → 码点）<code>char</code>（码点 → 字符，越界报错）<code>char_at</code>（按 Unicode 字符取串中字符，返回 char）<code>char_upper</code> <code>char_lower</code>（大小写转换）<code>char_is_digit</code> <code>char_is_alpha</code> <code>char_is_space</code>（字符分类）</td></tr>
+      <tr><td>字节</td><td><code>byte(x)</code>（int → byte 显式转换，越界报错；byte → byte 原样）<code>to_bytes(s, enc?)</code>（str → bytes，默认 utf-8、支持 latin-1；int 列表 → bytes）<code>hex(b)</code>（bytes → 十六进制 str）<code>unhex(s)</code>（十六进制 str → bytes）</td></tr>
+      <tr><td>数学</td><td><code>abs</code> <code>max</code> <code>min</code></td></tr>
+      <tr><td>类型转换</td><td><code>to_str</code>（含 char → 单字符字符串）<code>to_int</code> <code>to_float</code>；char ↔ int 用 <code>ord</code> / <code>char</code></td></tr>
+      <tr><td>时间</td><td><code>time.now</code> <code>time.sleep</code> <code>time.format</code>（占位符 YYYY/MM/DD/HH/mm/SS/WW 星期）<code>time.parse</code> <code>time.add</code>（时间戳算术）<code>time.diff</code>（时间差）<code>time.weekday</code>（ISO 星期 1-7）</td></tr>
+      <tr><td>随机</td><td><code>random.int</code> <code>random.float</code></td></tr>
+      <tr><td>UUID</td><td><code>uuid.new</code>（UUID v4）</td></tr>
+      <tr><td>网络 / JSON</td><td><code>http_get</code> <code>http_post</code> <code>http.request</code>（通用请求：method/headers/body/timeout，可自定义 User-Agent）<code>json_parse</code> <code>json_stringify</code></td></tr>
+      <tr><td>邮件 / WebSocket</td><td><code>smtp.send</code>（SMTP 发邮件，支持 STARTTLS / 隐式 TLS / AUTH LOGIN）<code>ws.request</code>（WebSocket 请求-响应，支持 wss://）</td></tr>
+      <tr><td>本地服务器</td><td><code>server.listen</code> <code>server.poll</code> <code>server.respond</code>（纯 std::net 实现，跨平台一致；respond 可指定状态码如 404/500）</td></tr>
+      <tr><td>系统（跨平台）</td><td><code>sys.run</code> <code>sys.get_env</code> <code>glob.match</code>（glob 匹配）<code>glob.list</code>（递归列出）<code>temp.dir</code> <code>temp.file</code> <code>temp.remove</code>（临时文件/目录）</td></tr>
+      <tr><td>系统（Windows API）</td><td><code>sys.msgbox</code> <code>sys.beep</code> <code>sys.clipboard_set</code> <code>sys.get_screen_size</code> <code>sys.reg_read</code> <code>sys.reg_write</code></td></tr>
+      <tr><td>日志（彩色）</td><td><code>log.info</code> <code>log.warn</code> <code>log.error</code> <code>log.debug</code></td></tr>
+      <tr><td>路径</td><td><code>path.join</code> <code>path.dirname</code> <code>path.basename</code></td></tr>
+      <tr><td>命令行参数</td><td><code>args.get</code>（支持类型转换与默认值：<code>args.get("port", int, 8080)</code>）<code>args.has</code></td></tr>
+      <tr><td>环境变量</td><td><code>env.get</code> <code>env.set</code></td></tr>
+      <tr><td>键值存储</td><td><code>db.set</code> <code>db.get</code></td></tr>
+      <tr><td>正则</td><td><code>regex.match</code> <code>regex.replace</code> <code>regex.find</code>（全部匹配）<code>regex.groups</code>（捕获组）<code>regex.split</code></td></tr>
+      <tr><td>文本对比</td><td><code>diff.lines</code>（逐行操作）<code>diff.unified</code>（unified diff 文本）</td></tr>
+      <tr><td>数据处理</td><td><code>csv.parse</code> <code>csv.parse_dict</code> <code>csv.stringify</code> <code>yaml.parse</code> <code>yaml.stringify</code></td></tr>
+      <tr><td>统计与矩阵</td><td><code>stat.sum</code> <code>stat.mean</code> <code>stat.median</code> <code>stat.variance</code> <code>stat.stddev</code> <code>stat.min</code> <code>stat.max</code> <code>matrix.identity</code> <code>matrix.transpose</code> <code>matrix.add</code> <code>matrix.mul</code> <code>matrix.scale</code></td></tr>
+      <tr><td>绘图</td><td><code>plot.bar</code>（SVG 柱状图）<code>plot.line</code>（SVG 折线图，返回 SVG 文本可保存为 .svg）</td></tr>
+      <tr><td>加密与哈希</td><td><code>crypto.md5</code> <code>crypto.sha1</code> <code>crypto.sha256</code> <code>crypto.hmac_sha256</code> <code>crypto.base64_encode</code> <code>crypto.base64_decode</code></td></tr>
+      <tr><td>压缩与归档</td><td><code>archive.zip_list</code> <code>archive.zip_read</code> <code>archive.zip_extract</code> <code>archive.zip_create</code>（tar.gz 同款 tgz_* 四函数）<code>zlib.compress</code> <code>zlib.decompress</code> <code>zlib.gzip</code> <code>zlib.gunzip</code>（结果 base64 编码）</td></tr>
+      <tr><td>数据库</td><td><code>sqlite.open</code> <code>sqlite.close</code> <code>sqlite.exec</code> <code>sqlite.query</code> <code>sqlite.query_one</code> <code>sqlite.escape</code> <code>sqlite.last_insert_id</code> <code>sqlite.changes</code>（运行时加载系统 libsqlite3）</td></tr>
+      <tr><td>指针类</td><td><code>ptr.alloc</code> <code>ptr.free</code> <code>ptr.is_null</code> <code>ptr.is_valid</code> <code>ptr.size</code> <code>ptr.read_int/float/byte</code> <code>ptr.write_int/float/byte</code>（分配表跟踪防野指针，H304/H305）</td></tr>
+      <tr><td>插件系统</td><td><code>plugin.load</code> <code>plugin.has</code> <code>plugin.list</code> <code>plugin.unload</code>（运行期动态注册，调用走 C ABI 通道）</td></tr>
+    </table>
+    <h3>TLS 根证书回退（https / wss / smtp）</h3>
+    <p>所有 TLS 连接（<code class="inline">http_get</code> <code class="inline">http_post</code>
+      <code class="inline">http.request</code>、<code class="inline">ws.request</code> 的 wss://、
+      <code class="inline">smtp.send</code>）优先使用内置 Mozilla 根证书（webpki-roots）；
+      证书校验失败时自动重连，回退到<strong>系统根证书</strong>
+      （Windows ROOT 证书库 / LinuxTermux 系统 CA bundle），防止内置根证书过期导致连接失败。
+      私有 CA 场景可经 <code class="inline">HONE_CA_BUNDLE</code> 环境变量（缺省
+      <code class="inline">~/.hn/ca.pem</code>）信任 PEM 文件中的<strong>根证书与中间证书</strong>；
+      中间证书会注入链构建，服务器即使不随链发送中间证书也能完成验证。</p>
+    <h3>输入默认值（EOF 降级）</h3>
+    <p><code class="inline">input</code> / <code class="inline">read_int</code> / <code class="inline">read_float</code>
+      在 EOF（管道关闭 / Ctrl+Z / Ctrl+D）时抛 <code class="inline">error[H306]</code>，
+      <code class="inline">read_int</code> / <code class="inline">read_float</code> 格式非法时抛
+      <code class="inline">error[H006]</code> / <code class="inline">error[H007]</code>。
+      它们<strong>不返回 null</strong>，因此不能直接用 <code class="inline">??</code> 空值合并兜底；
+      给输入设默认值的标准做法是用 try-catch 包装：</p>
+<pre><code><span class="k">fn</span> <span class="f">ask</span>(prompt, fallback) {
+    <span class="k">try</span> {
+        <span class="k">return</span> <span class="f">input</span>(prompt);
+    } <span class="k">catch</span> e {
+        <span class="k">return</span> fallback;   <span class="c">// H306 EOF → 返回默认值</span>
+    }
+}
+name = <span class="f">ask</span>(<span class="s">"姓名: "</span>, <span class="s">"匿名"</span>);
+<span class="f">print</span>(<span class="s">"你好, "</span> + name + <span class="s">"!"</span>);
+
+<span class="c">// 数字输入同理：一个 catch 同时兜住格式错误 H006/H007 与 EOF H306</span>
+<span class="k">fn</span> <span class="f">ask_int</span>(prompt, fallback) {
+    <span class="k">try</span> {
+        <span class="k">return</span> <span class="f">read_int</span>(prompt);
+    } <span class="k">catch</span> e {
+        <span class="k">return</span> fallback;   <span class="c">// H006 格式错 / H306 EOF → 返回默认值</span>
+    }
+}
+age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span class="n">0</span>);
+<span class="f">print</span>(<span class="s">"明年你 "</span> + <span class="f">to_str</span>(age + <span class="n">1</span>) + <span class="s">" 岁"</span>);</code></pre>
+    <p>注意：<code class="inline">??</code> 空值合并只对 null 值生效（如 void 函数调用占位值）；
+      input 在 EOF 是抛错误而不是返回 null，必须用 try-catch 捕获后降级。</p>
+  </section>
+<section id="errors">
+    <h2><span class="hash">#</span>11. 错误处理</h2>
+    <p>错误统一为 <code>error[Hxxx]</code> 格式：编译期静态检查报错，运行期可恢复错误用 try-catch 捕获。</p>
+<pre><code>error[H001]: type mismatch: variable `x` is locked to `int`, got `str`
+  --&gt; err.hn:3:1
+3 | x = <span class="s">"Hone"</span>;
+  | ^
+help: Hone types are locked after inference; no implicit conversion is allowed</code></pre>
+    <table>
+      <tr><th>错误码</th><th>含义</th></tr>
+      <tr><td>H001 ~ H012</td><td>类型 / 语法 / 推导 / 运行期基础错误（含泛型同一类型参数处实参不一致、类方法裸名调用、类型参数重复声明等，见下）</td></tr>
+      <tr><td>H101 ~ H104</td><td>词法语法细分：非法字符 / 未闭合字符串 / 未闭合注释 / 缺少分号</td></tr>
+      <tr><td>H105 / H106</td><td>控制流标签与宏：H105 标签/跳转错误（未定义标签、标签重复、跨函数跳转、跳进内层语句块、向前跳过变量绑定）；H106 宏定义/展开错误（非顶层定义、重复定义、与函数/类/枚举重名、实参个数不符、语句宏用于表达式位置、宏体含 return/goto/lambda 等越界用法）</td></tr>
+      <tr><td>H200 ~ H204</td><td>网络：请求失败 / 超时 / 连接拒绝 / DNS 失败 / 非 2xx 响应（http_get / http_post / http.request / smtp.send / ws.request）</td></tr>
+      <tr><td>H300 ~ H303</td><td>系统 / DLL：系统调用 / 库加载失败（含 sqlite 库缺失）/ 参数校验 / 权限不足</td></tr>
+      <tr><td>H304 ~ H305</td><td>指针：野指针（未分配/已释放/重复释放/空指针）/ 越界访问（ptr 类）</td></tr>
+      <tr><td>H306</td><td>标准输入：读取失败 / EOF（input / read_int / read_float）</td></tr>
+      <tr><td>H401 ~ H404</td><td>文件：不存在 / 权限不足 / 被占用锁定 / 通用 NOT_FOUND</td></tr>
+      <tr><td>H600</td><td>throw 主动抛出的用户错误</td></tr>
+      <tr><td>H700</td><td>assert 断言失败（测试框架）</td></tr>
+      <tr><td>H999</td><td>尚未实现</td></tr>
+    </table>
+    <p><strong>class / 泛型 / 新模块相关报错</strong>：</p>
+    <ul>
+      <li><code>H001</code> 泛型：同一类型参数处实参类型不一致（如 <code class="inline">pick[T](a: T, b: T)</code> 两次实参需同型）</li>
+      <li><code>H002</code> 类方法裸名调用（成员函数不进全局符号表，必须 <code class="inline">类.方法(...)</code>）；泛型注解引用未声明的类型参数</li>
+      <li><code>H005</code> 类型参数重复声明（<code class="inline">fn dup[T, T]</code>）、类名与 struct 名重复、类成员非 <code class="inline">fn</code> 定义</li>
+      <li><code>H011</code> struct 构造 / 类方法调用的参数个数不符</li>
+      <li><code>H301</code> sqlite 库缺失：Linux 安装 libsqlite3，Windows 将 sqlite3.dll 放到 hone.exe 旁边</li>
+    </ul>
+    <p>完整解释与修复建议：<code class="inline">hone explain H201</code>。</p>
+    <p><strong>try-catch 恢复</strong>：捕获可恢复错误（ZError 通道）；panic 类崩溃不进入捕获。
+      配合 <code class="inline">--restart</code> / <code class="inline">--resume</code> 实现无人值守运行。</p>
+<pre><code><span class="k">try</span> {
+    resp = <span class="f">http_get</span>(<span class="s">"https://example.com/data"</span>);
+} <span class="k">catch</span> e {
+    <span class="f">print</span>(e.code + <span class="s">": "</span> + e.message);  <span class="c">// 字段: code/message/file/line/col/context</span>
+    resp = <span class="f">db.get</span>(<span class="s">"cached"</span>);        <span class="c">// 降级回退</span>
+}
+
+<span class="k">throw</span> <span class="s">"用户错误"</span>;   <span class="c">// 主动抛出 → error[H600]</span>
+<span class="k">throw</span> e;             <span class="c">// 重抛已捕获的 error 值</span></code></pre>
+    <table>
+      <tr><th>机制</th><th>说明</th></tr>
+      <tr><td><code>--restart[=N]</code></td><td>脚本失败自动重拉（默认最多 3 次）；<code>--backoff=a,b,c</code> 重启间隔递增（默认 1,3,10 秒）；<code>--restart-on=H200,H401</code> 只对白名单错误码重启，确定性错误直接退出</td></tr>
+      <tr><td><code>--resume</code></td><td>恢复上次 db 检查点；<code>db.set</code> 自动落盘 <code>~/.hone/state/</code>，崩溃不丢检查点，脚本内容变更后检查点自动失效</td></tr>
+      <tr><td>错误对象字段</td><td><code>e.code</code> / <code>e.message</code> / <code>e.file</code> / <code>e.context</code>（str）；<code>e.line</code> / <code>e.col</code>（int）</td></tr>
+    </table>
+    <p>注意：Hone 为块作用域，try/catch 块内赋值的变量在块外不可见，跨块共享的变量需在块前声明。示例见 <code class="inline">examples/try_catch.hn</code>、<code class="inline">examples/restart_demo.hn</code>、<code class="inline">examples/resume_demo.hn</code>。</p>
+  </section>
+
+</main>
+
+<footer>
+  Hone v0.8.0 &middot; MIT License &middot; <span class="sword">&#128481;</span> Hone &ndash; 为效率而生，为乐趣而造
+  &middot; <a href="https://github.com/shichencike/Hone">GitHub</a>
+</footer>
+
+<script src="site.js"></script>
+<script>
+// 参考手册即时搜索：按关键词过滤章节（匹配标题/正文/代码）
+function searchDocs(q) {
+  q = (q || "").trim().toLowerCase();
+  var secs = document.querySelectorAll("section");
+  var count = 0;
+  for (var i = 0; i < secs.length; i++) {
+    var s = secs[i];
+    var show = q === "" || s.textContent.toLowerCase().indexOf(q) !== -1;
+    s.style.display = show ? "" : "none";
+    if (show) count++;
+  }
+  document.getElementById("search-count").textContent =
+    q === "" ? "" : "匹配 " + count + " / " + secs.length + " 章";
+}
+</script>
+</body>
+</html>

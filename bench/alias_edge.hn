@@ -1,0 +1,17 @@
+// 边界测试 1：alias 内置函数
+alias print as p;
+p("内置别名OK");
+
+// 边界测试 2：alias 链（别名再起别名）
+fn add(a : int, b : int) -> int { return a + b; }
+alias add as plus;
+alias plus as sum2;
+print(sum2(1, 2));
+
+// 边界测试 3：alias 点号内置函数
+alias random.int as rint;
+print(rint(1, 100));
+
+// 边界测试 4：alias 点号 + 数值函数
+alias abs as mabs;
+print(mabs(-5));

@@ -1,0 +1,84 @@
+// enum_demo.hn - 枚举类型（enum）+ match 变体模式验证
+// 运行: hone examples/enum_demo.hn
+// 验证点：
+//   1. enum 简单变体定义与访问（Color.Red）
+//   2. enum 带载荷变体定义与构造（Shape.Circle(1.5)）
+//   3. match 变体模式（无载荷 / 带载荷绑定 / 通配符）
+//   4. 枚举值相等比较（== / !=）
+//   5. 枚举作为函数参数与返回值
+//   6. to_str / 显示格式（Color.Red / Shape.Circle(1.5)）
+
+// 简单变体枚举
+enum Color { Red, Green, Blue };
+
+// 带载荷变体枚举
+enum Shape { Circle(float), Rect(float, float) };
+
+// 1. 简单变体访问与显示
+c = Color.Red;
+print(c);                       // Color.Red
+print(to_str(c));               // Color.Red
+print(c == Color.Red);          // true
+print(c == Color.Green);        // false
+print(c != Color.Blue);         // true
+
+// 2. 带载荷变体构造与显示
+s = Shape.Circle(1.5);
+print(s);                       // Shape.Circle(1.5)
+r = Shape.Rect(2.0, 3.0);
+print(r);                       // Shape.Rect(2, 3)
+
+// 3. match 变体模式：无载荷匹配
+desc = match c {
+    Color.Red => "红",
+    Color.Green => "绿",
+    Color.Blue => "蓝",
+    _ => "未知",
+};
+print(desc);                    // 红
+
+// 4. match 变体模式：带载荷绑定（绑定变量在本分支内可见）
+area = match s {
+    Shape.Circle(radius) => 3.14159 * radius * radius,
+    Shape.Rect(w, h) => w * h,
+    _ => 0,
+};
+print(area);                    // 7.06858（约）
+
+// 5. match 变体模式：部分绑定（_ 忽略某项）
+wh = match r {
+    Shape.Rect(w, _) => w,
+    _ => -1,
+};
+print(wh);                      // 2
+
+// 6. 枚举作为函数参数与返回值
+fn shape_kind(sh) -> str {
+    return match sh {
+        Shape.Circle(_) => "circle",
+        Shape.Rect(_, _) => "rect",
+        _ => "other",
+    };
+}
+print(shape_kind(Shape.Circle(5.0)));   // circle
+print(shape_kind(Shape.Rect(1.0, 2.0)));  // rect
+
+// 7. 枚举放入列表与遍历
+shapes = [Shape.Circle(1.0), Shape.Rect(4.0, 5.0), Color.Green];
+for sh in shapes {
+    print(to_str(sh));
+}
+// Shape.Circle(1)
+// Shape.Rect(4, 5)
+// Color.Green
+
+// 8. 类型不匹配的变体不会命中（不同枚举同名变体互不干扰）
+enum Direction { Up, Down };
+d = Direction.Up;
+print(d == Color.Red);          // false（不同枚举不相等）
+print(match d {
+    Direction.Up => "上",
+    _ => "其他",
+});                             // 上
+
+print("== 枚举特性验证完成 ==");

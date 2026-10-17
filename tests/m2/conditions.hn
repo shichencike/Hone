@@ -1,0 +1,43 @@
+// G2.3（引擎对齐）：&&/|| 短路求值与条件严格 bool 的三引擎正常路径。
+// 非 bool 条件 / 逻辑操作数的 H001 错误路径由 tests/regress_err.py 的 cond_*/logic_* 用例承担。
+
+// ── 1. &&/|| 短路：右侧不求值（副作用不可见） ──
+fn side() {
+    print("side");
+    return true;
+}
+print("a:" + to_str(false && side()));
+print("b:" + to_str(true || side()));
+print("c:" + to_str(true && side()));
+print("d:" + to_str(false || side()));
+
+// ── 2. 短路避免右侧求值错误（除零不触发） ──
+print("e:" + to_str(false && (1 / 0 == 0)));
+print("f:" + to_str(true || (1 / 0 == 0)));
+
+// ── 3. 普通布尔逻辑组合 ──
+x = 5;
+print("g:" + to_str(x > 1 && x < 10));
+print("h:" + to_str(x < 1 || x == 5));
+print("i:" + to_str(!(x == 4)));
+print("j:" + to_str(x == 5 && x != 4 && x > 0));
+print("k:" + to_str(x == 1 || x == 2 || x == 5));
+b = false;
+print("l:" + to_str(b || x == 5));
+print("m:" + to_str(!b && true));
+
+// ── 4. 优先与结合：&& 高于 ||（与解释器一致） ──
+t = true;
+f0 = false;
+print("n:" + to_str(t || f0 && f0));
+print("o:" + to_str(f0 && t || t));
+print("p:" + to_str((t || f0) && f0));
+
+// ── 5. 逻辑结果可直接作条件 ──
+if (x > 1 && x < 10) { print("q:in-range"); }
+while (x > 3 && x < 6) {
+    print("r:loop");
+    x = x + 1;
+}
+y = (x == 6 || x == 7) ? "s:hit" : "s:miss";
+print(y);

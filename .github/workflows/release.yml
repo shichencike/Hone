@@ -7,6 +7,11 @@ on:
 permissions:
   contents: write
 
+# Windows runner 默认 locale 为 charmap/GBK：强制 Python 标准流用 UTF-8，
+# 避免 build_toolchain.py / 回归脚本处理 UTF-8 文本时崩溃。
+env:
+  PYTHONIOENCODING: utf-8
+
 jobs:
   build:
     name: build ${{ matrix.name }}
@@ -18,15 +23,17 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: hone-linux-x86_64
+            cmd: cargo build --release --locked --target x86_64-unknown-linux-gnu
           - name: termux-aarch64
             os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             artifact: hone-termux-aarch64
-            linker: rust-lld
+            cmd: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: hone-windows-x86_64.exe
+            cmd: cargo build --release --locked --target x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -36,14 +43,55 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      # .cargo/config.toml 里的 linker 是开发机本机绝对路径，CI 上改用工具链自带的 rust-lld（仅 musl 目标）
+      # Termux(musl) 目标用 zig 链接：rust-lld 在 aarch64-musl 上缺 libdl（-ldl 解析失败），
+      # zig 自带 musl libc 存根可正常链接；其余平台用原生 cargo build。
+      - name: Install zig
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        uses: goto-bus-stop/setup-zig@v2
+      - name: Install cargo-zigbuild
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: cargo install cargo-zigbuild --locked
       - name: build release
-        run: cargo build --release --locked --target ${{ matrix.target }} ${{ matrix.linker && format('--config target.{0}.linker="rust-lld"', matrix.target) || '' }}
+        shell: bash
+        run: ${{ matrix.cmd }}
+      # G3.4：打包原生编译工具链（targets/ 运行时归档 + lld + CRT）随 full 包分发，
+      # 目标机 build --exe --native 无需 rustc。三目标矩阵在 linux job 构建
+      # （musl / windows-gnu 的 std 组件与 self-contained CRT 均随 rustup target 提供）；
+      # windows job 构建宿主 windows-gnu 目标（供 Windows full.zip）。
+      - name: build native toolchain (targets/)
+        if: matrix.name == 'linux-x86_64'
+        shell: bash
+        run: |
+          rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-pc-windows-gnu
+          python3 tests/tools/build_toolchain.py --all-common
+      - name: build native toolchain (targets/, windows-gnu)
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          python tests/tools/build_toolchain.py --target x86_64-pc-windows-gnu
       - name: copy artifact
         shell: bash
         run: |
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/hone.exe" "dist/${{ matrix.artifact }}" 2>/dev/null || cp "target/${{ matrix.target }}/release/hone" "dist/${{ matrix.artifact }}"
+      # G3.4：full 包 = 可执行文件 + targets/（安装脚本优先下载，解压即用）。
+      - name: package full toolchain bundle (linux)
+        if: matrix.name == 'linux-x86_64'
+        shell: bash
+        run: |
+          mkdir -p dist/full
+          cp target/x86_64-unknown-linux-gnu/release/hone dist/full/hone
+          cp -r targets dist/full/targets
+          tar -czf "dist/hone-linux-x86_64-full.tar.gz" -C dist/full hone targets
+      - name: package full toolchain bundle (windows)
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/full | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/hone.exe dist/full/hone.exe
+          Copy-Item -Recurse -Force targets dist/full/targets
+          Compress-Archive -Path dist/full/hone.exe,dist/full/targets -DestinationPath dist/hone-windows-x86_64-full.zip -Force
       - name: sha256
         shell: bash
         run: |
@@ -54,9 +102,74 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/
 
+  verify-nat:
+    name: verify nat cross products (G3.4/G3.6)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      # G3.6：交叉产物在 Windows 构建机不可运行，二次验证在此进行——
+      # ① 用**发布产物本身**编 hello 的 x86_64-musl 原生可执行文件并在本 runner 直接运行
+      #    （断言输出 Hello Hone!）；
+      # ② aarch64-musl 产物校验 ELF 头（class=2 / ET_EXEC / machine=183）；
+      # ③ full 包内容清单检查（targets/ 的运行时归档 / CRT / lld 是否齐全）。
+      # 这里走 **rustc 链接路径**（故先装目标 std），不强制 HONE_NAT_LINK=packaged：Linux 侧随包的
+      # targets/lld/rust-lld 动态依赖 sysroot 里的 libLLVM.so，尚未随包分发，packaged 路径在
+      # Linux 上暂不可用（打包工具链在 Linux 的自足化见进度文档「G3.8」）。
+      - name: run x86_64-musl product
+        shell: bash
+        run: |
+          set -e
+          chmod +x dist/hone-linux-x86_64/hone-linux-x86_64
+          rustup target add x86_64-unknown-linux-musl
+          printf 'print("Hello Hone!");\n' > hello.hn
+          dist/hone-linux-x86_64/hone-linux-x86_64 natgen hello.hn -o hello-musl --target x86_64-unknown-linux-musl
+          out=$(./hello-musl)
+          [ "$out" = "Hello Hone!" ] || { echo "产物输出不符: $out"; exit 1; }
+          echo "x86_64-musl 产物运行验证通过"
+      - name: check aarch64-musl ELF header
+        shell: bash
+        run: |
+          set -e
+          chmod +x dist/hone-linux-x86_64/hone-linux-x86_64
+          rustup target add aarch64-unknown-linux-musl
+          printf 'print("Hello Hone!");\n' > hello.hn
+          dist/hone-linux-x86_64/hone-linux-x86_64 natgen hello.hn -o hello-a64 --target aarch64-unknown-linux-musl
+          # 头部 20 字节逐字节断言（od 打印的是**文件字节序**，不用 xxd——runner 未必带它）：
+          #   偏移 4      e_ident[EI_CLASS]  ELFCLASS64=2 → "02"
+          #   偏移 16-17  e_type  小端 ET_EXEC=0x0002    → 文件里是 "0200"
+          #   偏移 18-19  e_machine 小端 aarch64=0x00b7  → 文件里是 "b700"（不是 "00b7"）
+          hdr=$(od -An -tx1 -N20 hello-a64 | tr -d ' \n')
+          echo "hello-a64 头部 20B: $hdr"
+          [ "${hdr:0:8}" = "7f454c46" ] || { echo "不是 ELF：${hdr:0:8}"; exit 1; }
+          [ "${hdr:8:2}" = "02" ] || { echo "非 ELFCLASS64（期望 02，实得 ${hdr:8:2}）"; exit 1; }
+          [ "${hdr:32:4}" = "0200" ] || { echo "e_type 非 ET_EXEC（期望 0200，实得 ${hdr:32:4}）"; exit 1; }
+          [ "${hdr:36:4}" = "b700" ] || { echo "e_machine 非 aarch64（期望 b700，实得 ${hdr:36:4}）"; exit 1; }
+          echo "aarch64-musl ELF 头校验通过（ELFCLASS64 / ET_EXEC / aarch64）"
+      - name: check full bundle layout
+        shell: bash
+        run: |
+          set -e
+          mkdir -p tcdist
+          tar -xzf "$(find dist -name 'hone-linux-x86_64-full.tar.gz' | head -1)" -C tcdist
+          for f in hone \
+                   targets/lld/rust-lld \
+                   targets/x86_64-unknown-linux-musl/libhoneruntime.a \
+                   targets/aarch64-unknown-linux-musl/libhoneruntime.a \
+                   targets/x86_64-pc-windows-gnu/libhoneruntime.a \
+                   targets/crt/x86_64-unknown-linux-musl/crt1.o \
+                   targets/crt/aarch64-unknown-linux-musl/crt1.o \
+                   targets/crt/x86_64-pc-windows-gnu/crt2.o; do
+            test -e "tcdist/$f" || { echo "full 包缺少: $f"; exit 1; }
+          done
+          echo "full 包内容检查通过"
+
   publish:
     name: publish release + homebrew + scoop
-    needs: build
+    needs: [build, verify-nat]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,13 +180,18 @@ jobs:
         run: |
           set -e
           mkdir -p dist/pkg
-          cp "dist/hone-linux-x86_64/hone-linux-x86_64" "dist/pkg/hone-linux-x86_64"
-          tar -czf "dist/pkg/hone-linux-x86_64.tar.gz" -C "dist/hone-linux-x86_64" "hone-linux-x86_64"
-          cp "dist/hone-termux-aarch64/hone-termux-aarch64" "dist/pkg/hone-termux-aarch64"
-          tar -czf "dist/pkg/hone-termux-aarch64.tar.gz" -C "dist/hone-termux-aarch64" "hone-termux-aarch64"
-          cp "dist/hone-windows-x86_64/hone-windows-x86_64.exe" "dist/pkg/hone-windows-x86_64.exe"
+          # download-artifact@v4 的子目录名与产物名一致（windows 产物名带 .exe），
+          # 按 basename 复制最稳妥，不受子目录命名影响。
+          # **排除 `*/full/*`**：full 包目录里是 targets/ 整棵树（CRT/lld/运行时归档），摊平会把它们
+          # 当成独立资产传上 release 页（v0.8.0 首跑踩过：rust-lld.exe / libhoneruntime.a 都挂出来了）。
+          find dist -type f | sort
+          find dist -type f -not -path '*/full/*' -not -path 'dist/pkg/*' -exec cp {} dist/pkg/ \;
+          tar -czf "dist/pkg/hone-linux-x86_64.tar.gz" -C "dist/pkg" "hone-linux-x86_64"
+          tar -czf "dist/pkg/hone-termux-aarch64.tar.gz" -C "dist/pkg" "hone-termux-aarch64"
           cp install.sh "dist/pkg/install.sh"
           cp install.ps1 "dist/pkg/install.ps1"
+          ls -la dist/pkg
+          test -f dist/pkg/hone-windows-x86_64.exe
           cd dist/pkg
           sha256sum * > checksums.txt
           cat checksums.txt
@@ -82,70 +200,3 @@ jobs:
         with:
           files: dist/pkg/*
           generate_release_notes: true
-
-      # 以下两步需要预先配置：新建 tap/bucket 仓库 + 仓库 Secrets 里添加 TAP_TOKEN（PAT，权限 repo）
-      # 未配置 TAP_TOKEN 时自动跳过，不影响 Releases 发布
-      - name: update Homebrew tap
-        if: ${{ secrets.TAP_TOKEN != '' }}
-        env:
-          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
-        run: |
-          set -e
-          SHA=$(grep 'hone-linux-x86_64.tar.gz' dist/pkg/checksums.txt | awk '{print $1}')
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/shichencike/homebrew-hone.git" tap
-          cat > tap/hone.rb <<EOF
-          class Hone < Formula
-            desc "轻量级、跨平台、可嵌入的脚本语言"
-            homepage "https://github.com/shichencike/Hone"
-            url "https://github.com/shichencike/Hone/releases/download/${GITHUB_REF_NAME}/hone-linux-x86_64.tar.gz"
-            sha256 "${SHA}"
-            version "${GITHUB_REF_NAME#v}"
-            def install
-              bin.install "hone-linux-x86_64" => "hone"
-            end
-          end
-          EOF
-          cd tap
-          git config user.email "hone-ci@users.noreply.github.com"
-          git config user.name "hone-ci"
-          git add hone.rb
-          git commit -m "hone ${GITHUB_REF_NAME}"
-          git push
-
-      - name: update Scoop bucket
-        if: ${{ secrets.TAP_TOKEN != '' }}
-        env:
-          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
-        run: |
-          set -e
-          SHA=$(grep 'hone-windows-x86_64.exe' dist/pkg/checksums.txt | awk '{print $1}')
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/shichencike/scoop-hone.git" bucket
-          cat > bucket/hone.json <<EOF
-          {
-            "version": "${GITHUB_REF_NAME#v}",
-            "description": "轻量级、跨平台、可嵌入的脚本语言",
-            "homepage": "https://github.com/shichencike/Hone",
-            "license": "MIT",
-            "architecture": {
-              "64bit": {
-                "url": "https://github.com/shichencike/Hone/releases/download/${GITHUB_REF_NAME}/hone-windows-x86_64.exe",
-                "hash": "${SHA}"
-              }
-            },
-            "bin": [["hone-windows-x86_64.exe", "hone"]],
-            "checkver": "github",
-            "autoupdate": {
-              "architecture": {
-                "64bit": {
-                  "url": "https://github.com/shichencike/Hone/releases/download/\$version/hone-windows-x86_64.exe"
-                }
-              }
-            }
-          }
-          EOF
-          cd bucket
-          git config user.email "hone-ci@users.noreply.github.com"
-          git config user.name "hone-ci"
-          git add hone.json
-          git commit -m "hone ${GITHUB_REF_NAME}"
-          git push

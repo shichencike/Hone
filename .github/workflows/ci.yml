@@ -7,6 +7,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Windows runner 默认 locale 为 charmap/GBK，强制 Python 以 UTF-8 读写标准流，
+  # 避免回归脚本解码 Hone 的 UTF-8 输出时崩溃（配合 regress4.py 的 encoding='utf-8'）。
+  PYTHONIOENCODING: utf-8
 
 jobs:
   test:
@@ -30,6 +33,17 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then BIN=./target/debug/hone.exe; else BIN=./target/debug/hone; fi
           "$BIN" examples/hello.hn
           "$BIN" examples/fib.hn
+      # G3.6：原生编译后端三引擎回归（interp / VM / nat 逐字节；nat 每例单独
+      # rustc 链接，16 例约数分钟）。
+      # nat 目标：Linux 侧用 musl（设计 §6.3，glibc 不随 hone 分发 CRT）——须先
+      # `rustup target add x86_64-unknown-linux-musl`，否则 rustc 报 E0463
+      # （can't find crate for `std`）；regress4.py 在本机缺该目标时退回宿主目标。
+      - name: nat 三引擎回归 (regress4)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN=target/debug/hone.exe; else BIN=target/debug/hone; fi
+          if [ "$RUNNER_OS" = "Linux" ]; then rustup target add x86_64-unknown-linux-musl; fi
+          HONE_BIN="$BIN" python tests/regress4.py
 
   termux:
     name: cross-compile aarch64 (Termux / musl)
@@ -42,6 +56,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: aarch64-musl
-      # .cargo/config.toml 里的 linker 是开发机本机绝对路径，CI 上改用工具链自带的 rust-lld
+      # musl 目标用 zig 链接（rust-lld 缺 libdl 会 -ldl 失败）；zig 自带 musl libc 存根
+      - uses: goto-bus-stop/setup-zig@v2
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked
       - name: build
-        run: cargo build --release --locked --target aarch64-unknown-linux-musl --config 'target.aarch64-unknown-linux-musl.linker="rust-lld"'
+        run: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl

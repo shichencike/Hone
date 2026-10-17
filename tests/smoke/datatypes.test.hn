@@ -1,0 +1,105 @@
+// 冒烟测试：enum / match / struct / goto / 宏（双引擎通用，不含 VM 不支持的特性）
+
+// enum：简单变体
+enum Color { Red, Green, Blue };
+c = Color.Red;
+assert(c == Color.Red, "enum eq");
+assert(c != Color.Green, "enum neq");
+assert_eq(to_str(c), "Color.Red");
+
+// enum：带载荷变体
+enum Shape { Circle(float), Rect(float, float) };
+s = Shape.Circle(1.5);
+assert(to_str(s) == "Shape.Circle(1.5)", "enum payload str");
+
+// match：无载荷 / 带载荷绑定 / 通配
+desc = match c {
+    Color.Red => "red",
+    Color.Green => "green",
+    _ => "other",
+};
+assert_eq(desc, "red");
+
+area = match s {
+    Shape.Circle(r) => 2 * r,
+    Shape.Rect(w, h) => 2 * (w + h),
+    _ => 0,
+};
+assert_eq(area, 3.0, "match payload bind");
+
+// match 作为函数参数
+fn kind(sh) {
+    return match sh {
+        Shape.Circle(_) => "c",
+        Shape.Rect(_, _) => "r",
+        _ => "?",
+    };
+}
+assert_eq(kind(Shape.Rect(1.0, 2.0)), "r");
+
+// 不同枚举同名变体互不干扰
+enum Direction { Up, Down };
+d = Direction.Up;
+assert(d == Color.Red, "cross enum should differ");
+
+// struct：纯数据 + 位置构造
+struct Point { x: int, y: int };
+pt = new Point(3, 4);
+assert_eq(pt.x, 3);
+assert_eq(pt.y, 4);
+assert(is_dict(pt), "struct 是 dict 视图");
+
+// struct 字段数与构造一致
+struct RGB { r: int, g: int, b: int };
+col = new RGB(10, 20, 30);
+assert_eq(col.g, 20);
+
+// goto：循环与跳出多层
+i = 0;
+sum = 0;
+loop_head:
+if (i >= 5) {
+    goto loop_done;
+}
+sum = sum + i;
+i = i + 1;
+goto loop_head;
+loop_done:
+assert_eq(sum, 10, "goto 循环");
+
+// goto 跳出嵌套
+outer = 0;
+i = 0;
+w1:
+while (i < 3) {
+    j = 0;
+    w2:
+    while (j < 3) {
+        if (i == 2 && j == 1) {
+            goto w1_done;
+        }
+        j = j + 1;
+        goto w2;
+    }
+    i = i + 1;
+    goto w1;
+}
+w1_done:
+outer = 1;
+assert_eq(outer, 1, "goto 跳出嵌套");
+
+// 宏：表达式宏
+macro SQ(x) => x * x;
+assert_eq(SQ(4), 16);
+
+// 宏：引用更早定义的宏
+macro QUAD(x) => SQ(SQ(x));
+assert_eq(QUAD(2), 16);
+
+// 宏：语句宏
+macro ADDTWO(v) {
+    v = v + 2;
+}
+m = 10;
+ADDTWO(m);
+assert_eq(m, 12);

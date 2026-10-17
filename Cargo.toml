@@ -1,6 +1,6 @@
 [package]
 name = "hone"
-version = "0.3.0"
+version = "0.8.0"
 edition = "2021"
 description = "Hone - 轻量级、跨平台、可嵌入的脚本语言（单文件解释器）"
 license = "MIT"
@@ -9,7 +9,16 @@ license = "MIT"
 name = "hone"
 path = "src/main.rs"
 
+# 原生编译后端（natgen）的运行时库：std-only 独立 crate。
+# 双轨使用：(1) workspace 成员供开发 / `cargo test -p honeruntime`；
+# (2) 经 include_str! 嵌入 hone 二进制，natgen 时写出临时目录参与产物构建（干净构建机自足）。
+[workspace]
+members = ["runtime"]
+exclude = ["tests/hone_lib"]
+
 [profile.release]
+# 实测（2026-08-14）：fat LTO + 单 codegen unit 在本机最快（3m53s）且体积最小（3.7MB）；
+# thin LTO 的两种组合（cgu=1 / cgu=16）反而更慢（4m47s+）且更大（4.0MB+），故保留原配置。
 lto = true
 opt-level = "z"
 strip = true
@@ -23,11 +32,23 @@ libloading = "0.7"
 regex = "1"
 md-5 = "0.10"
 sha2 = "0.10"
-once_cell = "1"
+sha1 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tar = "0.4"
+flate2 = "1"
 # TLS：rustls + rustls-rustcrypto（纯 Rust，无 C 依赖），Windows/Linux/Termux 跨平台一致
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
 rustls-rustcrypto = "0.0.2-alpha"
+# 证书链构建（自定义验证器注入中间证书用；与 rustls 同版本树）
+rustls-webpki = "0.103"
 webpki-roots = "0.26"
+cranelift-codegen = { version = "0.136.2", features = ["arm64"] }
+cranelift-frontend = "0.136.2"
+cranelift-module = "0.136.2"
+cranelift-object = "0.136.2"
+target-lexicon = "0.13.5"
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["winuser", "winbase", "winreg", "synchapi", "errhandlingapi", "winnt"] }
+winapi = { version = "0.3", features = ["winuser", "winbase", "winreg", "synchapi", "errhandlingapi", "winnt", "wincrypt", "libloaderapi", "wingdi", "windef", "minwindef", "commctrl", "shellapi", "commdlg", "objbase", "shobjidl"] }
