@@ -181,9 +181,11 @@ jobs:
           set -e
           mkdir -p dist/pkg
           # download-artifact@v4 的子目录名与产物名一致（windows 产物名带 .exe），
-          # 按 basename 复制最稳妥，不受子目录命名影响
+          # 按 basename 复制最稳妥，不受子目录命名影响。
+          # **排除 `*/full/*`**：full 包目录里是 targets/ 整棵树（CRT/lld/运行时归档），摊平会把它们
+          # 当成独立资产传上 release 页（v0.8.0 首跑踩过：rust-lld.exe / libhoneruntime.a 都挂出来了）。
           find dist -type f | sort
-          find dist -type f -exec cp {} dist/pkg/ \;
+          find dist -type f -not -path '*/full/*' -not -path 'dist/pkg/*' -exec cp {} dist/pkg/ \;
           tar -czf "dist/pkg/hone-linux-x86_64.tar.gz" -C "dist/pkg" "hone-linux-x86_64"
           tar -czf "dist/pkg/hone-termux-aarch64.tar.gz" -C "dist/pkg" "hone-termux-aarch64"
           cp install.sh "dist/pkg/install.sh"

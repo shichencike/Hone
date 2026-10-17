@@ -142,6 +142,10 @@
   `od`（runner 未必带 `xxd`）并**先把头部 20 字节打出来**再逐项断言（`e_ident[EI_CLASS]`=
   ELFCLASS64 / `e_type`=ET_EXEC / `e_machine`=aarch64），失败信息带实得值。
   G3.8 口径定案（用户决定）：本版不随包分发 `libLLVM`，Linux 无 rustc 时请安装 Rust 工具链。
+- **发布页被 full 包内容污染**：`publish` 用 `find dist -type f -exec cp {} dist/pkg/` 摊平全部产物，
+  而 full 包解出的 `*/full/targets/` 是整棵工具链树，于是 `rust-lld.exe`、`libhoneruntime.a`、
+  各目标 `crt1.o` / `crt2.o` 全被当成独立资产挂上 release（v0.8.0 首跑踩到；同名文件还互相覆盖，
+  只能剩下每类一个）。改为排除 `*/full/*`，只上传三个平台产物、两个 full 包与安装脚本。
 
 ### 变更
 - **新增两条字节码指令**：`Instr::CondCheck(reg, kind)`（条件严格 bool 校验，kind 区分
