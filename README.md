@@ -58,7 +58,9 @@ Cranelift 把 VM 字节码直接 lower 为机器码，
   to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq/read_file）；struct 字段写入与 VM 一致
   编译期 H999；**默认参数**在 VM / 原生后端尚未实现（仅解释器支持），其余子集外指令编译期报
   H990「未实现」（M2 逐步放开）
-- 依赖本机 rustc（M3 起改为随 hone 分发的预编译工具链）；与 `-c` 互斥（H005 显式报错）
+- 链接路径：本机有 rustc 走 rustc 链接，否则回退随 hone 分发的预编译工具链（安装 full 包即启用）。
+  注意：Windows 侧 full 包自足；**Linux 侧随包的 `rust-lld` 动态依赖 `libLLVM.so`（本版未随包分发）**，
+  故 Linux 上原生编译需要本机 Rust 工具链（`rustc`）；`hone build --exe -c`（C 后端）已在 v0.8.0 移除
 
 ## 用法
 

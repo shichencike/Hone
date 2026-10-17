@@ -136,6 +136,12 @@
   （rustc 路径，job 内 `rustup target add`），另加 **full 包内容清单检查**；新增
   **`HONE_NAT_LINK=rustc|packaged`** 开关（默认 auto）与 rust-lld 缺依赖库时的指名 help。
   Linux 打包工具链自足化（随包分发 lld 的运行期依赖）登记为 **G3.8** 待办。
+- **`release.yml` 的 aarch64 ELF 头校验断言写错字节序，从来不可能通过**：`xxd -p` 打印的是
+  **文件字节序**，aarch64 的 `e_machine=0x00b7` 在文件里是 `b7 00`，而断言写的是 `00b7`
+  （`e_type` 那行恰好写对了）——此前该步骤总在更早的链接阶段失败，所以一直没暴露。现改用
+  `od`（runner 未必带 `xxd`）并**先把头部 20 字节打出来**再逐项断言（`e_ident[EI_CLASS]`=
+  ELFCLASS64 / `e_type`=ET_EXEC / `e_machine`=aarch64），失败信息带实得值。
+  G3.8 口径定案（用户决定）：本版不随包分发 `libLLVM`，Linux 无 rustc 时请安装 Rust 工具链。
 
 ### 变更
 - **新增两条字节码指令**：`Instr::CondCheck(reg, kind)`（条件严格 bool 校验，kind 区分

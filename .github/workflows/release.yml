@@ -136,11 +136,19 @@ jobs:
           set -e
           chmod +x dist/hone-linux-x86_64/hone-linux-x86_64
           rustup target add aarch64-unknown-linux-musl
+          printf 'print("Hello Hone!");\n' > hello.hn
           dist/hone-linux-x86_64/hone-linux-x86_64 natgen hello.hn -o hello-a64 --target aarch64-unknown-linux-musl
-          # e_machine 偏移 18-19 小端 = 0x00b7 (183, aarch64)；e_type 偏移 16-17 = 0x0002 (ET_EXEC)
-          [ "$(xxd -p -l 2 -s 18 hello-a64)" = "00b7" ]
-          [ "$(xxd -p -l 2 -s 16 hello-a64)" = "0200" ]
-          echo "aarch64-musl ELF 头校验通过（ET_EXEC / aarch64）"
+          # 头部 20 字节逐字节断言（od 打印的是**文件字节序**，不用 xxd——runner 未必带它）：
+          #   偏移 4      e_ident[EI_CLASS]  ELFCLASS64=2 → "02"
+          #   偏移 16-17  e_type  小端 ET_EXEC=0x0002    → 文件里是 "0200"
+          #   偏移 18-19  e_machine 小端 aarch64=0x00b7  → 文件里是 "b700"（不是 "00b7"）
+          hdr=$(od -An -tx1 -N20 hello-a64 | tr -d ' \n')
+          echo "hello-a64 头部 20B: $hdr"
+          [ "${hdr:0:8}" = "7f454c46" ] || { echo "不是 ELF：${hdr:0:8}"; exit 1; }
+          [ "${hdr:8:2}" = "02" ] || { echo "非 ELFCLASS64（期望 02，实得 ${hdr:8:2}）"; exit 1; }
+          [ "${hdr:32:4}" = "0200" ] || { echo "e_type 非 ET_EXEC（期望 0200，实得 ${hdr:32:4}）"; exit 1; }
+          [ "${hdr:36:4}" = "b700" ] || { echo "e_machine 非 aarch64（期望 b700，实得 ${hdr:36:4}）"; exit 1; }
+          echo "aarch64-musl ELF 头校验通过（ELFCLASS64 / ET_EXEC / aarch64）"
       - name: check full bundle layout
         shell: bash
         run: |

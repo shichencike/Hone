@@ -89,6 +89,8 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
     `link_native_packaged` 会针对该形态给出指名 help 并建议走 rustc 路径，且会先把
     `targets/lld/`（含 `lib/`）加进 `LD_LIBRARY_PATH`（随包依赖一旦补上即可生效）。Windows 侧靠
     同目录 DLL 已自足。`build_toolchain.py::package_lld` 会把这类依赖的真实体积打印出来。
+    **G3.8 决策（2026-10-17，用户拍板）**：本版**不**随包分发 libLLVM（避免 full 包体积暴涨）；
+    Linux 无 rustc 时的口径 = 请安装 Rust 工具链（README / hone.md 已写明）。
   - `libhoneruntime.a` 必须由打包脚本以 **`--cfg hone_boot`** 编（`build_toolchain.py` 已如此）：
     缺该 cfg 则 `hn_boot` 静态表自举不参与编译，产物运行期注册表为空。
 - CI/发布（G3.6）：`ci.yml` test job 含 `regress4.py`（二进制定位支持 `HONE_BIN` 覆盖；Linux job 跑
@@ -97,7 +99,9 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   `release.yml` 构建三目标工具链并产出 full 包（linux tar.gz / windows zip，hone + targets/
   同目录），`verify-nat` job 在 ubuntu runner 上：① 用**发布产物本身**编 x86_64-musl 产物并
   **真跑**断言输出（故先 `rustup target add x86_64-unknown-linux-musl`）；② aarch64 ELF 头校验
-  （同法先装该目标 std）；③ full 包内容清单检查（运行时归档 / CRT / lld 是否齐全）。
+  （同法先装该目标 std；断言用 `od` 而非 `xxd`——runner 未必带 xxd，且**按文件字节序**写：
+  `e_type`=「0200」、`e_machine` aarch64=「b700」，写成 `00b7` 永远不会通过）；③ full 包内容清单
+  检查（运行时归档 / CRT / lld 是否齐全）。
   **不要**给该 job 加 `HONE_NAT_LINK=packaged`：Linux 侧打包链接缺 libLLVM（G3.8），只会以
   加载期失败告终。publish 等待验证通过。安装脚本（install.sh / install.ps1）优先下载 full 包，
   解压到 hone 同目录即启用原生编译工具链。
