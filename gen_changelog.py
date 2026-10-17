@@ -56,7 +56,10 @@ def parse():
         if line.startswith("## "):
             if cur:
                 releases.append(cur)
-            m = re.match(r"##\s+\[(.*?)\](?:\s+-\s+(.*))?", line)
+            # 版本与日期之间的分隔符可能是 ASCII 半角 `-`，也可能是破折号 `—` / `–`。
+            # 只认 `-` 时，v0.8.0（用 em dash 写）的日期会被静默丢掉——官网上它是唯一
+            # 没有 <span class="date"> 的版本块。
+            m = re.match(r"##\s+\[(.*?)\](?:\s+[-\u2014\u2013]\s+(.*))?", line)
             ver = m.group(1) if m else line[3:].strip()
             date = (m.group(2) or "").strip()
             cur = {"ver": ver, "date": date, "subs": []}
