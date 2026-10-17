@@ -1,33 +1,6 @@
 # Changelog
 
-## [Unreleased]
-
-### 修复
-- **CI 的 nat 三引擎回归（Linux job）16 例全灭**：回归脚本在 Linux 上强制
-  `--target x86_64-unknown-linux-musl`，而 runner 未装该目标的 Rust std，rustc 报
-  `E0463: can't find crate for 'std'`。三处一起修：
-  - `ci.yml`：nat 回归步骤在 Linux 上先 `rustup target add x86_64-unknown-linux-musl`（Linux 侧
-    回归口径为 musl，见设计 §6.3；glibc 目标不在 CRT 分发矩阵内）
-  - `regress4.py`：nat 目标改为「已装 musl 用 musl，否则用宿主目标」，且首选目标编译失败时
-    退回宿主目标重试一次并打印 `FALLBACK`（不静默；摘要行新增 `FALLBACK(退回宿主目标)`）
-  - `build_native`（`src/main.rs`）：链接参数改按**目标 + 链接驱动**分派，而非「是否交叉」——
-    宿主 Linux（ELF）此前漏了非 PIE 处理，Cranelift 产出的非 PIC 对象在平台默认 PIE 链接下会报
-    `relocation R_X86_64_32S ... can not be used when making a PIE object; recompile with -fPIC`
-    （musl 交叉路径早已带 `-no-pie`，宿主路径漏了）。宿主 ELF 现用
-    `-C relocation-model=static -C link-arg=-no-pie`；宿主 msvc 不再收到链接器不认识的
-    GNU/ld 风格参数（改用 link.exe 的 `/OPT:REF /OPT:ICF`）
-  - 交叉链接失败的 help 行不再说「本机仅宿主目标可用」（误导），改为指名三条出路：
-    `rustup target add <triple>`、sysroot 内的 rust-lld、glibc 目标不在 CRT 矩阵内（改用 musl 或
-    G3.4 打包工具链）
-- **nat 交叉产物在 Linux 上「启动即 SIGSEGV」（CI 16 例全 -11、零输出）**：rustc 对 musl 目标默认按
-  **static-PIE** 选启动 CRT（`rcrt1.o` + `crtbeginS.o` + `-pie --no-dynamic-linker`），而
-  `-C link-arg=-no-pie` 只影响链接器末端的开关、**改不了选哪个 crt1**——两者混用会产出
-  「`rcrt1.o` 自重定位启动 + ET_EXEC（无 PT_DYNAMIC，`_DYNAMIC=0`）」的产物，`_start` 一开始扫
-  dynamic 段就解引用空指针。修法：交叉路径补 **`-C relocation-model=static`**，让 rustc 自己按非 PIE
-  选 `crt1.o`/`crtbegin.o`（与打包工具链路径 G3.4 的产物入口逐字节一致，已用两条链接路径产物的
-  入口点字节比对验证）。
-
-## [v0.8.0] — 2026-10-11
+## [v0.8.0] — 2026-10-17
 
 ### 新增
 - **原生编译后端（`hone build --exe --native` / `hone natgen`）**：第三条执行路径——用
@@ -133,6 +106,29 @@
   展开为「从深到浅」的 IndexSet 链
 - **VM 解构错误文案对齐解释器**：区分列表 / 字典解构形态不符（各有专属 help）、列表元素数不足时
   报实际变量数并补help
+- **CI 的 nat 三引擎回归（Linux job）16 例全灭**：回归脚本在 Linux 上强制
+  `--target x86_64-unknown-linux-musl`，而 runner 未装该目标的 Rust std，rustc 报
+  `E0463: can't find crate for 'std'`。三处一起修：
+  - `ci.yml`：nat 回归步骤在 Linux 上先 `rustup target add x86_64-unknown-linux-musl`（Linux 侧
+    回归口径为 musl，见设计 §6.3；glibc 目标不在 CRT 分发矩阵内）
+  - `regress4.py`：nat 目标改为「已装 musl 用 musl，否则用宿主目标」，且首选目标编译失败时
+    退回宿主目标重试一次并打印 `FALLBACK`（不静默；摘要行新增 `FALLBACK(退回宿主目标)`）
+  - `build_native`（`src/main.rs`）：链接参数改按**目标 + 链接驱动**分派，而非「是否交叉」——
+    宿主 Linux（ELF）此前漏了非 PIE 处理，Cranelift 产出的非 PIC 对象在平台默认 PIE 链接下会报
+    `relocation R_X86_64_32S ... can not be used when making a PIE object; recompile with -fPIC`
+    （musl 交叉路径早已带 `-no-pie`，宿主路径漏了）。宿主 ELF 现用
+    `-C relocation-model=static -C link-arg=-no-pie`；宿主 msvc 不再收到链接器不认识的
+    GNU/ld 风格参数（改用 link.exe 的 `/OPT:REF /OPT:ICF`）
+  - 交叉链接失败的 help 行不再说「本机仅宿主目标可用」（误导），改为指名三条出路：
+    `rustup target add <triple>`、sysroot 内的 rust-lld、glibc 目标不在 CRT 矩阵内（改用 musl 或
+    G3.4 打包工具链）
+- **nat 交叉产物在 Linux 上「启动即 SIGSEGV」（CI 16 例全 -11、零输出）**：rustc 对 musl 目标默认按
+  **static-PIE** 选启动 CRT（`rcrt1.o` + `crtbeginS.o` + `-pie --no-dynamic-linker`），而
+  `-C link-arg=-no-pie` 只影响链接器末端的开关、**改不了选哪个 crt1**——两者混用会产出
+  「`rcrt1.o` 自重定位启动 + ET_EXEC（无 PT_DYNAMIC，`_DYNAMIC=0`）」的产物，`_start` 一开始扫
+  dynamic 段就解引用空指针。修法：交叉路径补 **`-C relocation-model=static`**，让 rustc 自己按非 PIE
+  选 `crt1.o`/`crtbegin.o`（与打包工具链路径 G3.4 的产物入口逐字节一致，已用两条链接路径产物的
+  入口点字节比对验证）。
 
 ### 变更
 - **新增两条字节码指令**：`Instr::CondCheck(reg, kind)`（条件严格 bool 校验，kind 区分
