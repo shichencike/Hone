@@ -129,12 +129,13 @@
   dynamic 段就解引用空指针。修法：交叉路径补 **`-C relocation-model=static`**，让 rustc 自己按非 PIE
   选 `crt1.o`/`crtbegin.o`  （与打包工具链路径 G3.4 的产物入口逐字节一致，已用两条链接路径产物的
   入口点字节比对验证）。
-- **发布流水线的 `verify-nat` 一直没真正验证发布包（v0.8.0 首次发布就卡在这里）**：该 job 的本意是
-  「用随包分发的工具链（无 rustc）编 musl 产物并运行」，但 runner 自带 rustc，`build_native`
-  会静默走 rustc 交叉链接 → 需要 musl std（该 job 未安装）→ `E0463`，`publish` 永远等不到，
-  GitHub 上一直没有 v0.8.0 的 Release。新增 **`HONE_NAT_LINK=rustc|packaged`**（默认 auto：rustc
-  可用走 rustc、缺失回退打包）强制链接路径，`release.yml` 的两步验证都显式设 `packaged`，
-  测到的才是用户实际拿到的发布包。
+- **发布流水线的 `verify-nat` 从未真正跑过发布验证（v0.8.0 首次发布即卡在此）**：先是该 job 里
+  `build_native` 默认走 rustc 交叉链接、需要 musl std（未安装）→ `E0463`；改为强制走随包工具链
+  后又暴露**Linux 侧 `targets/lld/rust-lld` 并不自足**（动态依赖 sysroot 的 `libLLVM.so`，
+  随包未分发）→ 加载期失败。最终定型：`verify-nat` 用**发布产物本身**编 musl 产物并真跑
+  （rustc 路径，job 内 `rustup target add`），另加 **full 包内容清单检查**；新增
+  **`HONE_NAT_LINK=rustc|packaged`** 开关（默认 auto）与 rust-lld 缺依赖库时的指名 help。
+  Linux 打包工具链自足化（随包分发 lld 的运行期依赖）登记为 **G3.8** 待办。
 
 ### 变更
 - **新增两条字节码指令**：`Instr::CondCheck(reg, kind)`（条件严格 bool 校验，kind 区分

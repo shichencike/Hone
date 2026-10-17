@@ -568,6 +568,9 @@
 - [ ] **G3.4 工具链打包**：`targets/` 运行时归档（每目标 staticlib）+ CRT + lld 随 hone 分发；`HONE_TOOLCHAIN_DIR` 覆盖；安装脚本改 zip/tar.gz 包
 - [ ] **G3.5 静态表入 object**：const blob / span 表 / 函数注册表移入 script.o rodata（设计 §4.7，替换 wrapper 静态表）+ 启动 FNV 自检
 - [ ] **G3.6 CI 自动化**：`ci.yml` 增 nat 三引擎回归（`regress4.py`）；release 流水线发布三目标脚本产物 + 交叉产物 CI 二次验证
+- [ ] **G3.8 Linux 打包工具链自足化**：随包分发 `rust-lld` 的运行期依赖（`libLLVM.so`，体积按实测
+      权衡）或改用静态链接的 lld——在此之前 Linux 侧「无 rustc 打包链接」不可用（会自动改走
+      rustc 路径）；详见第四轮实现进度
 - [x] **G3.7 CPU 基线**：x86_64 ISA 默认 baseline+SSSE3（设计 §6.3，经 IsaBuilder 设置）；
       `--cpu baseline|ssse3|sse4.2|avx2` 预设（`build --exe --native` / `natgen` 均支持，详见 G3.7 实现进度）
 
@@ -729,16 +732,44 @@
   选择是「rustc 可用即走 rustc」——于是它悄悄走了 **rustc 交叉链接**，需要 musl std，而该 job
   从未 `rustup target add`，直接 `E0463`。也就是说：**这条流水线一次都没真正验证过发布包**，
   而且它的注释与行为不符。
-- **修法**：新增 **`HONE_NAT_LINK=rustc|packaged`**（未设/未知值 = auto：rustc 可用走 rustc，
-  缺失回退打包），`build_native` 据此决定链接路径，`[3/4]` 阶段行同步打印实际路径；
-  `release.yml` 的两步验证（x86_64-musl 运行、aarch64 ELF 头）都显式 `HONE_NAT_LINK=packaged`
-  ——与「目标机无 rustc 时的真实发布包」一致，且不依赖 runner 是否装了 musl std。
+- **修法（第一版，后被第四轮修正）**：新增 **`HONE_NAT_LINK=rustc|packaged`**（未设/未知值 =
+  auto：rustc 可用走 rustc，缺失回退打包），`build_native` 据此决定链接路径，`[3/4]` 阶段行同步
+  打印实际路径；初版让 `release.yml` 的两步验证都强制 `packaged`（走「目标机无 rustc」的真实
+  发布包路径）。该强制随即在第四轮暴露出打包路径自身的问题，最终定型见下。
 - **验证（本机 windows-gnu）**：三种模式实测——`packaged` → `[3/4] …（打包工具链 targets/，
   无需 rustc…）` + `[4/4] …（工具链链接，无需 rustc）`；默认 → rustc 路径；`HONE_NAT_LINK=rustc`
   → rustc 路径。两条路径的 musl 产物入口 24B 同构（`crt1.o` 启动），静态表（`HN_SRC` 脚本源 +
   `HN_STRBLOB` 字面量字节）都在产物内；`regress4` **16/16**。
 - **备注**：`build_toolchain.py` 确认以 `--cfg hone_boot` 编 `libhoneruntime.a`（否则静态表自举
   不参与编译，打包产物注册表为空）——这一点写入 AGENTS.md 作为硬约束。
+
+### Linux 打包工具链「非自足」暴露与 verify-nat 定型（2026-10-17，第四轮）—— 登记 G3.8
+
+- **现象**：第三轮强制 `HONE_NAT_LINK=packaged` 后，`verify-nat` 走到打包链接即失败：
+  `targets/lld/rust-lld: error while loading shared libraries: libLLVM.so.23.1-rust-1.99.1-stable:
+  cannot open shared object file`。
+- **根因**：**Linux 侧 `rust-lld` 不是自足二进制**——它动态链接 sysroot 里的 `libLLVM.so`，靠自身
+  RPATH 在工具链内部才能找到；`build_toolchain.py` 只拷贝了二进制（Windows 侧靠 `bin/*.dll`
+  同目录拷贝解决，Linux 侧没有对应处理）。于是「目标机无 rustc 的打包链接」在 Linux 上根本起不来。
+  这也说明 **打包路径此前从未在 Linux 上被真正执行过**（注释声称「无 rustc 参与链接」，实际
+  runner 有 rustc，一直走的是 rustc 路径）。
+- **定型修法**：
+  1. `release.yml`：`verify-nat` 改回 **rustc 链接路径**（job 内 `rustup target add
+     x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl`）——验证的是**发布产物本身**能否
+     产出并运行 Linux 原生程序；新增 ③ **full 包内容清单检查**（运行时归档 / CRT / lld 齐全）。
+     注释里明确写出「不要加 `HONE_NAT_LINK=packaged`（Linux 侧缺 libLLVM）」，避免后来者重蹈。
+  2. `link_native_packaged`：把 `targets/lld/`（含 `lib/`）并入 `LD_LIBRARY_PATH`（随包依赖一旦
+     补上即生效），并对「加载期失败」单独给指名 help（说明 libLLVM 缺依赖 + 建议走 rustc 路径），
+     不再与「三元组不一致」混为一谈。
+  3. `build_toolchain.py::package_lld`：非 Windows 下用 `ldd` 解析并**如实打印** lld 在 sysroot 内
+     的依赖清单与体积（供「是否随包分发」的决策），并写明自足化待办号 G3.8。
+- **待办 G3.8（Linux 打包工具链自足化）**：随包分发 lld 的运行期依赖（`libLLVM.so`，体积需按
+  实测权衡）或改用静态链接的 lld；在此之前，Linux 侧「无 rustc 打包链接」不可用（装 rustc 即
+  自动走 rustc 路径，行为正确且已由 `verify-nat` 覆盖）。
+- **验证（本机）**：`cargo build` 通过（无新增警告）；`regress4` 16/16；`HONE_NAT_LINK` 三模式
+  行为不变；`package_lld` 的依赖打印在 Linux 打包日志中可见（本机为 Windows，走 DLL 分支）。
+  Linux 侧最终确认由 `release.yml` 的 `verify-nat` 承担。
+
 
 
 

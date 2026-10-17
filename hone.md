@@ -1386,7 +1386,9 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   hello 约 1.0MB、M2 各用例约 1.1MB（设计目标 ≤3MB）；`HONE_NAT_FLAGS` 可临时覆盖链接参数
 · 链接路径（G3.4）：默认「本机有 rustc 就走 rustc 链接」，没有则回退随包分发的打包工具链
   （`targets/`，`HONE_TOOLCHAIN_DIR` 可指定位置，无需 rustc）；`HONE_NAT_LINK=rustc|packaged`
-  可强制指定（发布流水线的二次验证即用 `packaged` 强制走发布包那条路径）
+  可强制指定。注意：Windows 侧打包链接已自足（`rust-lld.exe` + 同目录依赖 DLL），**Linux 侧随包的
+  `rust-lld` 动态依赖 `libLLVM.so`、尚未随包分发**，故该平台无 rustc 时打包链接暂不可用
+  （装 rustc 即自动走 rustc 路径；自足化见进度文档 G3.8）
 · CPU 基线（M3 G3.7）：x86_64 ISA 默认 baseline + SSSE3（设计 §6.3，避免 AVX 类指令在旧 CPU 非法）；
   `--cpu baseline|ssse3|sse4.2|avx2` 可选（`build --exe --native` / `hone natgen`）
 · 交叉编译（M3 G3.2）：`--target <triple>` 可选（`build --exe --native` / `hone natgen`）；支持

@@ -1632,8 +1632,26 @@ fn link_native_packaged(
             args.push(crt.join(l).into_os_string());
         }
     }
-    let p = std::process::Command::new(&lld)
-        .args(&args)
+    // Linux 侧 rust-lld 是**动态链接**的（依赖 sysroot 里的 libLLVM.so）：若依赖库随包分发在
+    // targets/lld/（或 lld/lib/），经 LD_LIBRARY_PATH 让它找到；Windows 靠 DLL 同目录，无需此步。
+    let mut lld_cmd = std::process::Command::new(&lld);
+    lld_cmd.args(&args);
+    if !cfg!(windows) {
+        if let Some(parent) = lld.parent() {
+            let mut dirs = vec![parent.display().to_string()];
+            let libdir = parent.join("lib");
+            if libdir.is_dir() {
+                dirs.push(libdir.display().to_string());
+            }
+            if let Ok(prev) = std::env::var("LD_LIBRARY_PATH") {
+                if !prev.is_empty() {
+                    dirs.push(prev);
+                }
+            }
+            lld_cmd.env("LD_LIBRARY_PATH", dirs.join(":"));
+        }
+    }
+    let p = lld_cmd
         .output()
         .map_err(|e| internal(format!("链接器启动失败: {e}"), "检查 targets/lld/ 下的 rust-lld"))?;
     if !p.status.success() {
@@ -1642,10 +1660,15 @@ fn link_native_packaged(
             // 无 stderr（如 DLL 缺失等加载期失败）：至少给出退出码。
             err = format!("链接器退出码 {}", p.status.code().unwrap_or(-1));
         }
-        return Err(internal(
-            format!("链接失败:\n{err}"),
-            "检查 script.o 与 libhoneruntime.a 的目标三元组一致性",
-        ));
+        // 动态库缺失（如 Linux 侧 rust-lld 依赖 libLLVM.so）会伪装成「链接失败」——单独指路。
+        let hint = if err.contains("error while loading shared libraries") {
+            "打包工具链的 rust-lld 缺少运行期依赖库（Linux 侧 rust-lld 动态依赖 sysroot 的 \
+             libLLVM.so，随包自足化见进度文档 G3.8）：本机装 rustc 即可走 rustc 链接路径，\
+             或把依赖库与 targets/lld/ 一同分发".to_string()
+        } else {
+            "检查 script.o 与 libhoneruntime.a 的目标三元组一致性".to_string()
+        };
+        return Err(ZError::plain(codes::INTERNAL, format!("链接失败:\n{err}"), Some(hint)));
     }
     Ok(())
 }

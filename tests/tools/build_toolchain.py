@@ -56,6 +56,39 @@ def build_staticlib(target: str, sysroot: str) -> Path:
     return out
 
 
+def lld_runtime_deps(src: Path, sysroot: str) -> list:
+    """列出 lld 的动态依赖中**位于 sysroot 内**的库。
+
+    Linux/macOS 的 rust-lld 是动态链接的（典型：sysroot 的 libLLVM.so），目标机没有 rustc 就找不到
+    → 打包路径不可用。Windows 侧 rust-lld.exe 的依赖是 bin/ 下的 DLL（已随包拷贝），无需此步。
+    """
+    if sys.platform == "win32":
+        return []
+    try:
+        r = subprocess.run(["ldd", str(src)], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    if r.returncode != 0:
+        return []
+    root = Path(sysroot).resolve()
+    deps = []
+    for line in (r.stdout or "").splitlines():
+        if "=>" not in line:
+            continue
+        path = line.split("=>", 1)[1].strip().split(" ")[0]
+        if not path.startswith("/"):
+            continue
+        p = Path(path)
+        try:
+            p.relative_to(root)
+        except ValueError:
+            continue          # 系统库（libc/libstdc++ 等）：目标机自带，不随包
+        if p.is_file():
+            deps.append(p)
+    return deps
+
+
 def package_lld(sysroot: str) -> Path:
     host = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
     host_triple = next(l.split(": ")[1].strip() for l in host.splitlines() if l.startswith("host:"))
@@ -72,6 +105,17 @@ def package_lld(sysroot: str) -> Path:
         shutil.copy2(dll, lld_dir / dll.name)
         print(f"[lld] 依赖 DLL {dll.name}")
     print(f"[lld] {src} -> {dst}")
+    # 非 Windows：lld 动态依赖 sysroot 内的共享库（libLLVM.so 等），**未**随包分发
+    # ——目标机无 rustc 时该平台打包链接暂不可用（G3.8）。此处如实打印体积，供打包决策。
+    deps = lld_runtime_deps(src, sysroot)
+    if deps:
+        total = sum(d.stat().st_size for d in deps) / (1024 * 1024)
+        print(f"[lld] 告警：{exe} 动态依赖 sysroot 内 {len(deps)} 个库（合计 {total:.1f} MB），"
+              f"尚未随包分发：")
+        for d in deps:
+            print(f"[lld]   {d.name}  {d.stat().st_size / (1024 * 1024):.1f} MB")
+        print("[lld] → 目标机无 rustc 时该平台打包链接不可用（hone 会自动改用 rustc 链接路径）；"
+              "自足化见进度文档 G3.8")
     return dst
 
 
