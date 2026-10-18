@@ -23,20 +23,42 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: hone-linux-x86_64
-            cmd: cargo build --release --locked --target x86_64-unknown-linux-gnu
+            cmd: cargo build --release --locked --target x86_64-unknown-linux-gnu -j 1
           - name: termux-aarch64
             os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             artifact: hone-termux-aarch64
-            cmd: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl
+            cmd: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl -j 1
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: hone-windows-x86_64.exe
-            cmd: cargo build --release --locked --target x86_64-pc-windows-msvc
+            cmd: cargo build --release --locked --target x86_64-pc-windows-msvc -j 1
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # 极限降级防 OOM：rustc 宏展开 + 代码生成内存峰值极高，runner 物理内存不够。
+      - name: add 12GB swap (ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo swapoff -a || true
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+      - name: enlarge pagefile (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $c = Get-CimInstance Win32_ComputerSystem
+          if ($c.AutomaticManagedPagefile) {
+            Set-CimInstance -InputObject $c -Property @{AutomaticManagedPagefile = $false}
+          }
+          $pf = Get-CimInstance Win32_PageFileSetting | Select-Object -First 1
+          Set-CimInstance -InputObject $pf -Property @{InitialSize = 4096; MaximumSize = 16384}
+          "pagefile: initial 4096 MB / max 16384 MB"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}

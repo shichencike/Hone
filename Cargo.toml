@@ -29,8 +29,10 @@ codegen-units = 1
 # debug（dev）profile：关闭调试符号。debuginfo=2 时 rustc 链接 200MB 级产物，
 # 本机与 CI runner（ubuntu/windows/termux，exit 143 / memory allocation failed，
 # 2026-10-18）均内存耗尽；回归测试只比对 stdout/stderr 逐字节输出，无需符号。
+# codegen-units=1：单 codegen unit 消除代码生成阶段的并行内存峰值。
 [profile.dev]
 debug = 0
+codegen-units = 1
 
 [dependencies]
 serde_json = "1"

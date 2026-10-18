@@ -23,10 +23,34 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # 极限降级防 OOM：本仓库 rustc 宏展开 + 代码生成内存峰值极高，runner 物理内存
+      # 不够（2026-10-18 三平台 build 全灭）。Linux：fallocate 造 12GB swap 让编译器
+      # 用硬盘兜底；Windows：页面文件临时调大到 16GB。
+      - name: add 12GB swap (ubuntu)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo swapoff -a || true
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+      - name: enlarge pagefile (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $c = Get-CimInstance Win32_ComputerSystem
+          if ($c.AutomaticManagedPagefile) {
+            Set-CimInstance -InputObject $c -Property @{AutomaticManagedPagefile = $false}
+          }
+          $pf = Get-CimInstance Win32_PageFileSetting | Select-Object -First 1
+          Set-CimInstance -InputObject $pf -Property @{InitialSize = 4096; MaximumSize = 16384}
+          "pagefile: initial 4096 MB / max 16384 MB"
       - name: build
-        run: cargo build --release --locked
+        run: cargo build --release --locked -j 1
       - name: cargo test
-        run: cargo test --release --locked
+        run: cargo test --release --locked -j 1
       - name: smoke test
         shell: bash
         run: |
@@ -56,9 +80,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: aarch64-musl
+      # 极限降级防 OOM（同 test job）：runner 内存不够，swap 兜底 + 单线程编译。
+      - name: add 12GB swap (ubuntu)
+        shell: bash
+        run: |
+          sudo swapoff -a || true
+          sudo fallocate -l 12G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
       # musl 目标用 zig 链接（rust-lld 缺 libdl 会 -ldl 失败）；zig 自带 musl libc 存根
       - uses: goto-bus-stop/setup-zig@v2
       - name: Install cargo-zigbuild
-        run: cargo install cargo-zigbuild --locked
+        run: cargo install cargo-zigbuild --locked -j 1
       - name: build
-        run: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl
+        run: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl -j 1
