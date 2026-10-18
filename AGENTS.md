@@ -78,38 +78,30 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   `HN_LENS` 为字节长度目录），runtime `hn_boot`（`#[cfg(hone_boot)]`，链接产物路径才编译，
   cargo test 不定义该 cfg）在 `hn_entry` 首行自举注册 + FNV 自检；wrapper 已固定为 5 行
   （无脚本信息）。改 blob 布局必须两端同步：`natgen.rs HN_BLOBS` 与 `runtime hn_boot`。
-- 无 rustc 链接（G3.4）：本机无 rustc 时 `build_native` 自动走打包工具链
-  （`targets/<triple>/libhoneruntime.a` + `targets/lld/rust-lld.exe` + `targets/crt/<triple>/`，
-  `HONE_TOOLCHAIN_DIR` 覆盖；打包脚本 `tests/tools/build_toolchain.py`，CRT 取
-  **各目标** rustlib 的 self-contained 目录）。链接 flavor 按目标环境分派：Windows→COFF
-  （lld-link + 显式归档路径，`-defaultlib` 不认 `.a`；CRT 清单含 libntdll.a / libuserenv.a），
-  其余→GNU/ELF（`crt1/crti/crtbegin … libunwind -lc -lm crtend/crtn` + `-no-pie
-  --gc-sections --strip-all`）。lld 的依赖 DLL（libgcc_s_seh-1 / libwinpthread-1）须随包分发；
-  rustc 可用时维持 rustc 链接路径（逐字节回归基准）。runtime 有改动后需重跑打包脚本。
-  - 链接路径由 **`HONE_NAT_LINK=rustc|packaged`** 强制（默认 auto：rustc 可用即走 rustc，缺失才
-    回退打包）。**Linux 侧 `packaged` 目前不可用**：随包的 `targets/lld/rust-lld` 动态依赖 sysroot
-    的 `libLLVM.so`（未随包分发，见 G3.8），进程一起就报 `error while loading shared libraries`；
-    `link_native_packaged` 会针对该形态给出指名 help 并建议走 rustc 路径，且会先把
-    `targets/lld/`（含 `lib/`）加进 `LD_LIBRARY_PATH`（随包依赖一旦补上即可生效）。Windows 侧靠
-    同目录 DLL 已自足。`build_toolchain.py::package_lld` 会把这类依赖的真实体积打印出来。
-    **G3.8 决策（2026-10-17，用户拍板）**：本版**不**随包分发 libLLVM（避免 full 包体积暴涨）；
-    Linux 无 rustc 时的口径 = 请安装 Rust 工具链（README / hone.md 已写明）。
-  - `libhoneruntime.a` 必须由打包脚本以 **`--cfg hone_boot`** 编（`build_toolchain.py` 已如此）：
-    缺该 cfg 则 `hn_boot` 静态表自举不参与编译，产物运行期注册表为空。
+- NAT 链接路径（G3.4 纯 .o 生成器口径）：`build_native`（`build --exe --native`/`natgen`）产出
+  脚本 object（`script.nat.o`），内嵌运行时源码（`runtime/src/lib.rs`）经 rustc 编成静态库
+  `libhoneruntime.a`（`--cfg hone_boot`，按源码内容+目标三元组 md5 缓存于
+  `~/.hone/cache/runtime/`，运行时源码不变时跨脚本复用），最后交**系统 gcc** 链接为可执行文件：
+  `gcc script.nat.o libhoneruntime.a -o script`（windows-gnu 需补 Rust std 依赖导入库
+  `-lws2_32 -lntdll -lbcrypt -luserenv -ladvapi32`）。不再分发预编译工具链（删 `build_toolchain.py` /
+  `targets/` / `rust-lld` / `HONE_NAT_LINK` 等）；本机无 rustc/gcc 时安装 Rust 工具链与 MinGW-w64 即可。
+  - `libhoneruntime.a` 由 `runtime_staticlib()` 以 `--cfg hone_boot` 编（缺该 cfg 则 `hn_boot`
+    静态表自举不参与编译，产物运行期注册表为空）。runtime 有改动后缓存键变化自动重编。
+  - 交叉编译：`--target <triple>` 选目标，走 rustc `link-self-contained` + 自带 musl CRT +
+    rust-lld 裸链接（`-no-pie --gc-sections --strip-all`），产物在 Windows 上不可运行，
+    靠 CI Linux job 二次验证（G3.6）。
 - CI/发布（G3.6）：`ci.yml` test job 含 `regress4.py`（二进制定位支持 `HONE_BIN` 覆盖；Linux job 跑
   nat 回归前 `rustup target add x86_64-unknown-linux-musl`——**漏装时 rustc 报 E0463
   `can't find crate for std`，16 例全 BUILD-FAIL**）；
-  `release.yml` 构建三目标工具链并产出 full 包（linux tar.gz / windows zip，hone + targets/
-  同目录），`verify-nat` job 在 ubuntu runner 上：① 用**发布产物本身**编 x86_64-musl 产物并
+  `release.yml` 构建三目标发布产物（linux tar.gz / windows zip，hone + install.sh/bat），
+  `verify-nat` job 在 ubuntu runner 上：① 用**发布产物本身**编 x86_64-musl 产物并
   **真跑**断言输出（故先 `rustup target add x86_64-unknown-linux-musl`）；② aarch64 ELF 头校验
   （同法先装该目标 std；断言用 `od` 而非 `xxd`——runner 未必带 xxd，且**按文件字节序**写：
   `e_type`=「0200」、`e_machine` aarch64=「b700」，写成 `00b7` 永远不会通过）；③ full 包内容清单
-  检查（运行时归档 / CRT / lld 是否齐全）。
-  **不要**给该 job 加 `HONE_NAT_LINK=packaged`：Linux 侧打包链接缺 libLLVM（G3.8），只会以
-  加载期失败告终。publish 等待验证通过。安装脚本仅存 install.sh（Linux/Termux），优先下载 full 包，
-  解压到 hone 同目录即启用原生编译工具链；**install.ps1 已移除**，Windows 安装 = 手动下载
-  `hone-windows-x86_64-full.zip` 解压后将其目录加入 PATH。Windows 构建产物在 release.yml 经
-  signtool 签名（secrets WINDOWS_CERT_PFX / WINDOWS_CERT_PASSWORD；缺失时跳过签名不失败）。
+  检查（纯 hone 本体，无工具链分发）。publish 等待验证通过。安装脚本 install.sh（Linux/Termux）
+  与 install.bat（Windows）随发布上传；Windows 安装 = 双击 install.bat（与 full zip 同目录）。
+  Windows 构建产物在 release.yml 经 signtool 签名（secrets WINDOWS_CERT_PFX /
+  WINDOWS_CERT_PASSWORD；缺失时跳过签名不失败）。
 - 条件与逻辑语义（改 `vm.rs` 编译臂时注意，解释器为准）：`if`/`while`/`do-while`/`for`/三元/推导式 `if` 过滤六处条件站点**运行期严格 bool**（`Instr::CondCheck`），`&&`/`||` 短路求值且右侧操作数严格 bool（`Instr::IsBoolVal` 判「恰为该布尔值」，不是 truthy）。
 
 ## 项目特有约定

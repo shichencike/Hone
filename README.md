@@ -11,7 +11,7 @@
 从 [GitHub Releases](https://github.com/shichencike/Hone/releases) 下载对应平台的文件：
 
 - **Linux / Termux**：一键脚本 `curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh`，或手动下载 `hone-linux-x86_64.tar.gz` / `hone-termux-aarch64.tar.gz` 解压。
-- **Windows**：不提供一键脚本，请手动下载 `hone-windows-x86_64-full.zip`，解压到任意目录（例如 `C:\hone`），然后将其所在目录加入系统环境变量 `PATH`（「系统属性 → 高级 → 环境变量」中编辑 `Path`，新增该目录），新开的终端即生效。full 包自带原生编译工具链（`targets/`），随 hone.exe 同目录解压即启用。
+- **Windows**：双击 `install.bat`（从 GitHub Releases 下载 `hone-windows-x86_64-full.zip` 与 `install.bat` 置于同目录后运行；纯 ASCII 批处理，原生 `curl.exe` + `tar.exe`，支持镜像回退 / sha256 校验 / 断点续传 / `--uninstall` 卸载），或手动下载 `hone-windows-x86_64-full.zip` 解压后将 hone.exe 所在目录加入 `PATH`。
 
 ## 构建
 
@@ -67,9 +67,13 @@ Cranelift 把 VM 字节码直接 lower 为机器码，
   to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq/read_file）；struct 字段写入与 VM 一致
   编译期 H999；**默认参数**在 VM / 原生后端尚未实现（仅解释器支持），其余子集外指令编译期报
   H990「未实现」（M2 逐步放开）
-- 链接路径：本机有 rustc 走 rustc 链接，否则回退随 hone 分发的预编译工具链（安装 full 包即启用）。
-  注意：Windows 侧 full 包自足；**Linux 侧随包的 `rust-lld` 动态依赖 `libLLVM.so`（本版未随包分发）**，
-  故 Linux 上原生编译需要本机 Rust 工具链（`rustc`）；`hone build --exe -c`（C 后端）已在 v0.8.0 移除
+- 链接路径（纯 .o 生成器，零黑盒）：natgen 出脚本 object 后，内嵌运行时源码（`runtime/src`）由
+  本机 rustc 编成静态库 `libhoneruntime.a`（`--cfg hone_boot`，按源码+目标哈希缓存于
+  `~/.hone/cache/runtime/`，运行时源码不变则跨脚本复用），最后交**系统 gcc** 链接为可执行文件
+  （`gcc app.o libhoneruntime.a -o app`；windows-gnu 需补 Rust std 依赖导入库
+  `-lws2_32 -lntdll -lbcrypt -luserenv -ladvapi32`）。不再分发预编译工具链：本机无 rustc / gcc
+  时安装 Rust 工具链（`rustc`）与 MinGW-w64（Windows）即可。`hone build --exe -c`（C 后端）
+  已在 v0.8.0 移除
 
 ## 用法
 
@@ -357,11 +361,11 @@ p("via alias");
 - `load` 依赖 `libloading`（纯 Rust，无 C 编译）；被调用库需导出 `#[no_mangle] pub extern "C" fn` 形式的
   int64 函数；已加载的库不跨 `go` 线程（懒加载路径与别名可克隆）
 - `load` 签名块（typed FFI）：`load "lib" as m { fn f(a: int, b: str) -> ptr; ... }` 显式声明
-  C ABI 类型，支持 int/float/bool/str/ptr/void，调用按声明精确转换，静态检查参数个数与类型；
-  未声明签名的库函数仍按 int64 通道调用（见 `examples/ffi_demo.hn`）
+  C ABI 类型，支持 int/int32/float/float32/bool/str/ptr/void，调用按声明精确转换，
+  静态检查参数个数与类型；未声明签名的库函数仍按 int64 通道调用
 - `load "lib" as m from "header.h"`：从 C 头文件自动提取函数原型生成签名（受限解析器，跳过
-  注释/预处理/struct 定义，typedef 简单展开；回调/变参/数组/结构体按值标记 unsupported 并报错）；
-  `hone bind <header.h>` 离线生成签名块（见 `examples/ffi_header.hn`）
+  注释/预处理/struct 定义，typedef 简单展开；不支持数组参数/结构体按值/long double，
+  变参与回调现已支持）；`hone bind <header.h>` 离线生成签名块
 - 模块/库函数类型在运行时才能确定，包含 import/load/alias 的程序中静态检查会对未定义函数放行
 
 ## 可视化编辑器

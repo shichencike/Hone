@@ -204,6 +204,7 @@ jobs:
           tar -czf "dist/pkg/hone-linux-x86_64.tar.gz" -C "dist/pkg" "hone-linux-x86_64"
           tar -czf "dist/pkg/hone-termux-aarch64.tar.gz" -C "dist/pkg" "hone-termux-aarch64"
           cp install.sh "dist/pkg/install.sh"
+          cp install.bat "dist/pkg/install.bat"
           ls -la dist/pkg
           test -f dist/pkg/hone-windows-x86_64.exe
           cd dist/pkg

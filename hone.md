@@ -16,7 +16,7 @@ Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.7.12）
 · 一键脚本（推荐）：
   · Linux / Termux：curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh
 · 手动下载：从 GitHub Releases 下载对应平台二进制（Windows x86_64 / Linux x86_64 / Termux aarch64）；
-  Windows 请下载 hone-windows-x86_64-full.zip，解压后将其所在目录加入系统环境变量 PATH（不提供一键脚本）
+  Windows 请下载 hone-windows-x86_64-full.zip 与 install.bat 置于同目录后双击安装（或手动解压后加入 PATH）
 · 源码构建：cargo build --release，产物为 target/release/hone（Windows 下为 hone.exe）
 
 验证安装：
@@ -1282,12 +1282,9 @@ examples/guipro_adv_demo.hn（进阶控件：滑块/表格/树/画布/托盘/菜
 · 语法：load "路径" as 别名 { fn 函数名(参数: 类型, ...) -> 返回类型; ... }
 · 签名块显式声明 C ABI 参数与返回类型，调用时按声明精确转换，不再限制为 int64 单通道
 · 支持类型：int → int64_t，float → double，bool → C bool，str → const char*，ptr → void*
-· 返回类型额外支持 void；参数最多 8 个；变参（...）与受限回调（fn(int 类参数...) -> int 类返回，
-  0-4 参、float 形参/返回不支持）已支持（仅解释器引擎；VM/原生编译 H999）
-· 变参调用：固定参数按签名转换，其余实参按运行时类型转换（int/float/bool/str/ptr，
-  ctypes 式；单次调用最多 12 个实参；float 固定参数的变参函数不支持）
-· 回调：把 Hone 函数名或 lambda 传给回调形参即可（同步回调，仅限该次 FFI 调用窗口内有效，
-  异步回调报错）
+· 返回类型额外支持 void；参数最多 8 个；变参（...）与受限回调（fn(int/int32/float/float32/bool/str/ptr 类参数...) -> int/int32/float/float32/bool/str/ptr/void 类返回，0-8 参）已支持（解释器引擎实测通过；VM/原生编译后端亦实现）
+· 变参调用：固定参数按签名转换，其余实参按运行时类型转换（int/float/float32/bool/str/ptr，ctypes 式；float 固定参数的变参函数现已支持）
+· 回调：把 Hone 函数名或 lambda 传给回调形参即可（同步回调，仅限该次 FFI 调用窗口内有效，异步回调报错）
 · 签名块要求 as 别名（作为调用前缀），以 } 结尾无需分号
 · 静态检查：签名块声明的函数调用会在检查阶段校验参数个数与类型（H001/H005），
   返回类型也参与类型推导（例如 m.cos(0.0) 的类型为 float）
@@ -1325,8 +1322,8 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
     char* / const char* → str；其余指针（void*/struct X*/句柄）→ ptr；void → void
   - 简单 typedef 展开（如 sqlite3_int64 → long long int → int）
   - 属性宏跳过（__attribute__((...)) / __declspec / 全大写前缀宏如 SQLITE_API）
-· 不支持的原型（回调 fn(...)、变参 ...、数组参数、结构体按值、long double）会以
-  unsupported 标记，调用时直接报错（而非 ABI 崩溃）；hone bind 输出中列为注释
+· 不支持的原型（数组参数、结构体按值、long double）会以 unsupported 标记，调用时直接报错（而非 ABI 崩溃）；
+  变参与回调现已在解释器实测通过，hone bind 输出中列为支持
 · 与签名块可混用：from 头文件签名先注册，签名块中的同名声明覆盖之
 · 完整示例：examples/ffi_header.hn（头文件见 tests/hone_lib/hone_lib.h）
 
@@ -1388,24 +1385,24 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 4.6 原生编译后端（hone build --exe --native）
 
 · 与 AOT（-c，经 C 中间文件）并列的第二条原生后端：`hone build --exe --native <script.hn>`
-  直接用 Cranelift 把 VM 字节码 lower 为机器码（object），再经生成式 wrapper + rustc 链接成原生可执行文件
+  直接用 Cranelift 把 VM 字节码 lower 为机器码（object），再经**系统 gcc** 链接成原生可执行文件
+  （内嵌运行时源码经 rustc 编成静态库 `libhoneruntime.a`，按源码+目标哈希缓存至
+  `~/.hone/cache/runtime/`，运行时源码不变则跨脚本复用；链接命令：`gcc app.o libhoneruntime.a -o app`，
+  windows-gnu 需补 Rust std 依赖导入库 `-lws2_32 -lntdll -lbcrypt -luserenv -ladvapi32`）
 · 命令形态：`hone natgen` 是 `build --exe --native` 的等价别名
 · 仅 object 模式：`hone build --obj <script.hn> [-o <out>]` 与 `hone natgen <script.hn> --obj <o>`
   同语义——生成 Cranelift object 即停（object 即最终产物，不链接 exe），默认产物名 `{}.nat.o`
   （相对当前目录）。用途：保留脚本 object 供调试 / 自行链接、交叉目标出 object
   （无需目标 std 与链接器）；object 格式由目标决定（COFF / ELF）
 · 管线：解析 + 类型检查 → VM 字节码 → Cranelift object（每 chunk 一个函数，main 为 `__hn_main`）→
-  rustc 一次链接（runtime 源码内嵌进 hone 二进制，干净机器自足）
-· 产物体积（M3 G3.3）：链接期 `-C opt-level=z -C codegen-units=1 -Wl,--gc-sections -Wl,--strip-all`，
-  hello 约 1.0MB、M2 各用例约 1.1MB（设计目标 ≤3MB）；`HONE_NAT_FLAGS` 可临时覆盖链接参数
-· 链接路径（G3.4）：默认「本机有 rustc 就走 rustc 链接」，没有则回退随包分发的打包工具链
-  （`targets/`，`HONE_TOOLCHAIN_DIR` 可指定位置，无需 rustc）；`HONE_NAT_LINK=rustc|packaged`
-  可强制指定。注意：Windows 侧打包链接已自足（`rust-lld.exe` + 同目录依赖 DLL），**Linux 侧随包的
-  `rust-lld` 动态依赖 `libLLVM.so`、尚未随包分发**，故该平台无 rustc 时打包链接暂不可用
-  （装 rustc 即自动走 rustc 路径；自足化见进度文档 G3.8）
-· CPU 基线（M3 G3.7）：x86_64 ISA 默认 baseline + SSSE3（设计 §6.3，避免 AVX 类指令在旧 CPU 非法）；
+  内嵌运行时源码编静态库 → 系统 gcc 链接（纯 .o 生成器，零黑盒）
+· 产物体积：链接期 `-C opt-level=z -C codegen-units=1 -Wl,--gc-sections -Wl,--strip-all`（ELF）或
+  等价 gcc 参数（COFF），hello 约 1.0MB、M2 各用例约 1.1MB（设计目标 ≤3MB）
+· 链接路径：不再分发预编译工具链。本机无 rustc / gcc 时安装 Rust 工具链（`rustc`）与
+  MinGW-w64（Windows）即可。`HONE_NAT_LINK` 环境变量已移除
+· CPU 基线：x86_64 ISA 默认 baseline + SSSE3（设计 §6.3，避免 AVX 类指令在旧 CPU 非法）；
   `--cpu baseline|ssse3|sse4.2|avx2` 可选（`build --exe --native` / `hone natgen`）
-· 交叉编译（M3 G3.2）：`--target <triple>` 可选（`build --exe --native` / `hone natgen`）；支持
+· 交叉编译：`--target <triple>` 可选（`build --exe --native` / `hone natgen`）；支持
   `x86_64-pc-windows-gnu`（宿主）/ `x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl`，
   经 rustc `link-self-contained` 自带 musl CRT + rust-lld 裸链接产出；产物名默认带目标后缀。
   链接参数按「目标 + 链接驱动」分派：宿主 Linux（ELF）需**非 PIE**

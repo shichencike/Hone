@@ -63,12 +63,13 @@
     <div class="dl-card">
       <div>
         <div class="dl-os">🪟 Windows x86_64</div>
-        <div class="dl-file">hone-windows-x86_64.exe</div>
-        <div class="dl-desc">64 位 Windows 10 / 11，无需安装，双击或命令行直接运行</div>
+        <div class="dl-file">hone-windows-x86_64-full.zip（+ install.bat）</div>
+        <div class="dl-desc">64 位 Windows 10 / 11：与 install.bat 置于同目录后双击安装（纯 ASCII 批处理，原生 curl.exe + tar.exe）</div>
       </div>
       <div class="dl-btns">
-        <a class="btn primary" href="https://ghproxy.net/https://github.com/shichencike/Hone/releases/latest/download/hone-windows-x86_64.exe">国内镜像</a>
-        <a class="btn" href="https://github.com/shichencike/Hone/releases/latest/download/hone-windows-x86_64.exe">GitHub 官方</a>
+        <a class="btn primary" href="https://ghproxy.net/https://github.com/shichencike/Hone/releases/latest/download/hone-windows-x86_64-full.zip">国内镜像</a>
+        <a class="btn" href="https://github.com/shichencike/Hone/releases/latest/download/hone-windows-x86_64-full.zip">GitHub 官方</a>
+        <a class="btn" href="https://github.com/shichencike/Hone/releases/latest/download/install.bat">install.bat</a>
       </div>
     </div>
     <div class="dl-card">
@@ -110,7 +111,7 @@ curl -fsSL https://ghproxy.net/https://github.com/shichencike/Hone/releases/late
 
 <span class="c">// 或从 GitHub 官方拉取（脚本内部默认已走镜像、失败自动回退官方）</span>
 curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh
-<span class="c">// Windows：不提供一键脚本，手动下载 hone-windows-x86_64-full.zip 解压后加入 PATH</span></code></pre>
+<span class="c">// Windows：下载 hone-windows-x86_64-full.zip 与 install.bat 置于同目录，双击安装</span></code></pre>
     <p>指定版本：<code class="inline">HONE_VERSION=v0.8.0 curl -fsSL .../install.sh | sh</code>（Windows 先 <code class="inline">$env:HONE_VERSION = "v0.8.0"</code>）。详细说明见 <a href="install.html">安装教程</a>。</p>
     <p><strong>镜像源（国内加速）</strong>：安装脚本默认先走<strong>ghproxy.net 前缀代理</strong>，失败自动回退官方 GitHub；
       可用 <code class="inline">HONE_MIRROR</code> 指定其他镜像，或 <code class="inline">HONE_MIRROR=off</code> 强制只用官方源。

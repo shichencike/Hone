@@ -3,17 +3,26 @@
 ## [Unreleased]
 
 ### 新增
-- **VM 引擎完整支持 byte/bytes 值**：内置函数产出的字节值（read_bytes / crypto.base64_decode /
-  archive.zip_read / ptr.read_byte / bytes 索引）在 interp/VM 双引擎均可完整使用——显示 /
-  `==` / byte 排序比较 / 索引 / for-in 迭代 / `+` 拼接 / len 与解释器逐字节一致。VM 新增
-  `ISBYTES` 指令（文本 IR 往返同步；natgen lowering 恒 false，runtime 预留 `T_BYTES` 标签）；
-  推导式对 bytes 源的拒绝与 for-in 双变量 `requires a dict` 报错（list/bytes 两种文案）三处
-  引擎对齐。byte/bytes **字面量语法**（0b… / b"…" / byte()）仍仅解释器支持（VM/AOT/DLL
-  编译期报 H999）
-- **`hone build --obj` 仅 object 模式**：原生管线编译到 Cranelift object 即停（object 即最终产物，
-  不链接 exe）——`hone build --obj <script.hn> [-o <out>] [--cpu <name>] [--target <triple>]`，
-  默认产物名 `{}.nat.o`。用途：保留脚本 object 供调试 / 自行链接、交叉目标出 object
-  （无需目标 std 与链接器）；object 格式由目标决定（COFF / ELF）
+- **FFI 回调 + 变参全链路支持（解释器实测通过；VM/原生编译后端亦实现）**：删 ffi_dispatch!/
+  ffi_variadic! 穷举宏（8190 类型实例化内存峰值），切换为 libffi 静态构建（ffi_prep_cif/
+  ffi_prep_cif_var/ffi_call + ffi_closure 回调）。支持 int/int32/float/float32/bool/str/ptr/void
+  全标量参数与返回，回调 0-8 参、变参无固定上限、float 固定参数的变参函数已支持。
+- **int32/float32 新类型全链路**：lexer/parser/header/checker/interp/VM/NAT/签名块/头文件绑定
+  全覆盖；C `int32_t`/`uint32_t` 映射 `int32`，C `float` 映射 `float32`。
+- **NAT 降级纯 .o 生成器**：natgen 出脚本 object，内嵌运行时源码经 rustc 编静态库
+  `libhoneruntime.a`（`--cfg hone_boot`，按源码+目标 md5 缓存），交**系统 gcc** 链接
+  (`gcc app.o libhoneruntime.a -o app`)。删打包工具链全家（build_toolchain.py/targets/rust-lld/
+  HONE_NAT_LINK/HONE_TOOLCHAIN_DIR），Linux 需本机 rustc+gcc，Windows 需 MinGW-w64。
+- **install.bat 纯 ASCII 安装脚本**：原生 curl.exe+tar.exe，镜像回退/sha256 校验/断点续传/PATH
+  去重/--uninstall 卸载/幂等，功能对齐 install.sh；Windows 安装 = 双击 install.bat。
+- **CI 恢复多核极速**：删 -j 1 与 swap/页面文件，保留 actions/cache@v4。
+
+### 变更（破坏性变更）
+- 移除 install.ps1 / build_toolchain.py / targets/ 工具链分发 / HONE_NAT_LINK 环境变量；
+  full 包仅含 hone 本体（无 targets/）。
+- 头文件绑定不支持列表缩减：数组参数/结构体按值/long double 仍 unsupported；
+  变参与回调现已支持（hone bind 输出列为支持）。
+- 原生编译链接路径口径变更：不再随包分发工具链；本机无 rustc/gcc 时需安装 Rust+MinGW。
 
 ### 变更（byte/bytes 内置函数返回值修正，含破坏性变更）
 - **`read_bytes(path)` → `bytes`**（原 `list[int]`）：返回真正的字节序列（索引得 byte 值、
