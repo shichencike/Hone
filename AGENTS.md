@@ -5,14 +5,17 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
 ## 构建与测试
 
 - `cargo check` 只查类型、不产二进制；**改代码后验证行为必须先 `cargo build`**，`target/` 旧二进制会静默沿用。
-- 回归脚本依赖 `target/debug/hone.exe`，先 build 再跑：
+- **dev profile 无调试符号**（Cargo.toml `[profile.dev] debug = 0`）：debuginfo=2 时 rustc
+  链接 200MB 级产物，本机与 CI runner 均内存耗尽（exit 143 / STATUS_STACK_BUFFER_OVERRUN）；
+  CI 全部走 `cargo build --release`。
+- 回归脚本依赖 `target/release/hone.exe`（`HONE_BIN` 可覆盖定位），先 build 再跑：
   - `python tests/regress3.py` — 解释器 vs VM 输出逐字节对齐
   - `python tests/regress_err.py` — 三引擎（interp/VM/nat）错误诊断逐字符对齐（行/列/文案/help）
   - `python tests/regress4.py` — 三引擎正常路径逐字节对齐（需本机 rustc）；nat 目标：Linux 侧首选 musl 交叉目标（需 `rustup target add x86_64-unknown-linux-musl`，未装则用宿主目标），首选目标编译失败时退回宿主目标重试并打印 `FALLBACK`，不静默。
   - `python tests/regress_ir.py` — 文本 IR 往返
   - `python tests/tools/audit_err.py` — 开发期扫雷：55 例错误文案 + help 行 nat-vs-interp 批量比对（慢，不入常规回归）
   - `python tests/tools/probe_align.py` — 开发期扫雷：152 例 match / 条件 / 逻辑 / 解构 / 重载 / alias+goto / 默认参数 / 点号内置 / async+go 形态的 interp-vs-VM 逐字节比对；`--nat` 追加第三引擎（每例单独 build，慢）。动态类型值（enum/struct）下的条件与逻辑分叉、以及重载回退边界靠它扫出。
-- CI（.github/workflows/ci.yml）：ubuntu/windows 两个 test job 做 `cargo build --locked` + `cargo test --locked` + hello/fib smoke + `tests/regress4.py`（Linux job 先 `rustup target add x86_64-unknown-linux-musl`，供 nat 回归的 musl 目标）；无 rustfmt/clippy 配置，格式化用语言自带 `hone fmt`（作用于 .hn，非 Rust）。
+- CI（.github/workflows/ci.yml）：ubuntu/windows 两个 test job 做 `cargo build --release --locked` + `cargo test --release --locked` + hello/fib smoke + `tests/regress4.py`（Linux job 先 `rustup target add x86_64-unknown-linux-musl`，供 nat 回归的 musl 目标）；无 rustfmt/clippy 配置，格式化用语言自带 `hone fmt`（作用于 .hn，非 Rust）。
 
 ## 架构
 

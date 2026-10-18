@@ -16,7 +16,10 @@ import tempfile
 
 # 仓库根目录 = 本脚本（tests/tools/）所在目录的上两级，换机器/换路径均可用。
 os.chdir(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-BIN = os.path.abspath("target/debug/hone.exe")
+BIN = os.environ.get(
+    "HONE_BIN",
+    os.path.abspath("target/release/hone.exe" if os.name == "nt" else "target/release/hone"),
+)
 
 CASES = {
     # 算术 / 除零 / 溢出

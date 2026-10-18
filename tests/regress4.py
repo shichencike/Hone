@@ -29,10 +29,10 @@ os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from regress_common import should_skip  # noqa: E402
 
-# 待测二进制：默认 target/debug 下按平台取 hone.exe / hone；HONE_BIN 可覆盖（CI）。
+# 待测二进制：默认 target/release 下按平台取 hone.exe / hone；HONE_BIN 可覆盖（CI）。
 BIN = os.environ.get(
     "HONE_BIN",
-    "./target/debug/hone.exe" if os.name == "nt" else "./target/debug/hone",
+    "./target/release/hone.exe" if os.name == "nt" else "./target/release/hone",
 )
 
 # nat 交叉目标（仅 Linux）：glibc 目标不在 hone 的 CRT 分发矩阵内，Linux 侧回归口径取 musl。

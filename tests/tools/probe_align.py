@@ -21,7 +21,10 @@ import sys
 import tempfile
 
 os.chdir(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-BIN = os.path.join(os.getcwd(), "target", "debug", "hone.exe")
+BIN = os.environ.get(
+    "HONE_BIN",
+    os.path.join(os.getcwd(), "target", "release", "hone.exe" if os.name == "nt" else "hone"),
+)
 
 ENUM_H = "enum C{A,B}\nc=C.A;\n"
 

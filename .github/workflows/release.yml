@@ -11,9 +11,6 @@ permissions:
 # 避免 build_toolchain.py / 回归脚本处理 UTF-8 文本时崩溃。
 env:
   PYTHONIOENCODING: utf-8
-  # debug 构建（windows job 的 cargo build）降 debuginfo 防 runner 内存耗尽；
-  # release job 自身走 release profile（Cargo.toml 已 strip）不受影响。
-  CARGO_PROFILE_DEV_DEBUG: 0
 
 jobs:
   build:

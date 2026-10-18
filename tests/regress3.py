@@ -7,7 +7,10 @@ sys.path.insert(0, _HERE)
 # SKIP / FLAKY 分类表与 regress_ir.py 共用一份，避免两处各自维护导致漂移。
 from regress_common import SKIP, FLAKY, should_skip
 
-BIN = "./target/debug/hone.exe"
+BIN = os.environ.get(
+    "HONE_BIN",
+    "./target/release/hone.exe" if os.name == "nt" else "./target/release/hone",
+)
 
 def skip(base):
     return should_skip(base)

@@ -21,7 +21,10 @@ import tempfile
 
 # 仓库根目录 = 本脚本所在目录（tests/）的上一级，换机器/换路径均可用。
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-BIN = "./target/debug/hone.exe"
+BIN = os.environ.get(
+    "HONE_BIN",
+    "./target/release/hone.exe" if os.name == "nt" else "./target/release/hone",
+)
 
 # 每个用例：期望各引擎产生完全相同的 (stdout+stderr, 退出码)。
 CASES = {

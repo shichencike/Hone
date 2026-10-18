@@ -33,7 +33,7 @@ def msg(m):
 
 def main():
     p = subprocess.Popen(
-        [r"D:\shichencike\Desktop\hone\target\debug\hone.exe", "lsp"],
+        [r"D:\shichencike\Desktop\hone\target\release\hone.exe", "lsp"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     req_id = [0]

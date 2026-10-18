@@ -18,7 +18,10 @@ sys.path.insert(0, _HERE)
 # SKIP / FLAKY 分类表与 regress3.py 共用一份，避免两处各自维护导致漂移。
 from regress_common import SKIP, FLAKY, should_skip
 
-BIN = "./target/debug/hone.exe"
+BIN = os.environ.get(
+    "HONE_BIN",
+    "./target/release/hone.exe" if os.name == "nt" else "./target/release/hone",
+)
 # IR 中间文件写入系统临时目录，避免在项目目录留下/删除文件。
 IR = os.path.join(tempfile.mkdtemp(prefix="hone_ir_"), "rt_check.ir")
 
