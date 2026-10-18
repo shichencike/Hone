@@ -22,8 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      # 官方 cache：registry/git/target 全缓存。单核编译（-j 1）慢，首次过后命中
-      # 增量缓存即提速。Swatinem/rust-cache 与此处路径重叠，二选一取官方。
+      # 官方 cache：registry/git/target 全缓存，命中增量缓存即大幅提速。
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
@@ -34,34 +33,10 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
-      # 极限降级防 OOM：本仓库 rustc 宏展开 + 代码生成内存峰值极高，runner 物理内存
-      # 不够（2026-10-18 三平台 build 全灭）。Linux：fallocate 造 12GB swap 让编译器
-      # 用硬盘兜底；Windows：页面文件临时调大到 16GB。
-      - name: add 12GB swap (ubuntu)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          sudo swapoff -a || true
-          sudo fallocate -l 12G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
-          free -h
-      - name: enlarge pagefile (windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $c = Get-CimInstance Win32_ComputerSystem
-          if ($c.AutomaticManagedPagefile) {
-            Set-CimInstance -InputObject $c -Property @{AutomaticManagedPagefile = $false}
-          }
-          $pf = Get-CimInstance Win32_PageFileSetting | Select-Object -First 1
-          Set-CimInstance -InputObject $pf -Property @{InitialSize = 4096; MaximumSize = 16384}
-          "pagefile: initial 4096 MB / max 16384 MB"
       - name: build
-        run: cargo build --release --locked -j 1
+        run: cargo build --release --locked
       - name: cargo test
-        run: cargo test --release --locked -j 1
+        run: cargo test --release --locked
       - name: smoke test
         shell: bash
         run: |
@@ -100,19 +75,9 @@ jobs:
           key: ${{ runner.os }}-cargo-aarch64-musl-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-aarch64-musl-
-      # 极限降级防 OOM（同 test job）：runner 内存不够，swap 兜底 + 单线程编译。
-      - name: add 12GB swap (ubuntu)
-        shell: bash
-        run: |
-          sudo swapoff -a || true
-          sudo fallocate -l 12G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
-          free -h
       # musl 目标用 zig 链接（rust-lld 缺 libdl 会 -ldl 失败）；zig 自带 musl libc 存根
       - uses: goto-bus-stop/setup-zig@v2
       - name: Install cargo-zigbuild
-        run: cargo install cargo-zigbuild --locked -j 1
+        run: cargo install cargo-zigbuild --locked
       - name: build
-        run: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl -j 1
+        run: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl

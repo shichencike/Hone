@@ -590,11 +590,26 @@ pub struct Interp {
 /// load 加载的 C ABI 库函数签名约定：全 int64 参数（不足补 0，x64 ABI 安全）。
 type KaLibFn = unsafe extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64;
 
-/// typed FFI 调用参数：int 类（int/bool/str 指针/ptr 句柄，走整数寄存器）与 float 类（double）。
+// 工业级 FFI：libffi CIF 动态调用（固定 + 变参 ffi_prep_cif_var）。静态编入产物
+// （libffi-sys 默认从源码构建 C libffi 并静态链接），无系统动态库依赖。
+use libffi_sys::{
+    ffi_abi_FFI_DEFAULT_ABI, ffi_call, ffi_cif, ffi_closure, ffi_closure_alloc, ffi_closure_free,
+    ffi_prep_cif, ffi_prep_cif_var, ffi_prep_closure_loc, ffi_status_FFI_OK, ffi_type,
+};
+use std::ffi::c_void;
+use std::ptr::{addr_of_mut, null_mut};
+
+/// typed FFI 调用参数值载体：写入 u64 对齐槽，libffi 按声明的 C 类型宽度读取。
 #[derive(Clone, Copy)]
 enum CArg {
+    /// int64_t
     I(i64),
+    /// int32_t
+    I32(i32),
+    /// double
     F(f64),
+    /// C float（32 位，仅固定参数位）
+    F32(f32),
 }
 
 /// typed FFI 调用返回值。
@@ -604,91 +619,60 @@ enum CRet {
     F(f64),
 }
 
-#[inline]
-fn carg_i(cargs: &[CArg], i: usize) -> i64 {
-    match cargs[i] {
-        CArg::I(v) => v,
-        CArg::F(_) => unreachable!("class bit mismatch"),
+/// FfiTy → libffi ffi_type（固定参数位，调用方向）。Bool 传 0/1 整数（C 侧 _Bool
+/// 读低字节，ABI 安全）。
+fn ffi_type_of(ty: &FfiTy) -> *mut ffi_type {
+    match ty {
+        FfiTy::Int | FfiTy::Bool => addr_of_mut!(libffi_sys::ffi_type_sint64),
+        FfiTy::Int32 => addr_of_mut!(libffi_sys::ffi_type_sint32),
+        FfiTy::Float => addr_of_mut!(libffi_sys::ffi_type_double),
+        FfiTy::Float32 => addr_of_mut!(libffi_sys::ffi_type_float),
+        FfiTy::Str | FfiTy::Ptr | FfiTy::Callback { .. } => addr_of_mut!(libffi_sys::ffi_type_pointer),
+        FfiTy::Void => unreachable!("void is not a parameter type"),
     }
 }
 
-#[inline]
-fn carg_f(cargs: &[CArg], i: usize) -> f64 {
-    match cargs[i] {
-        CArg::F(v) => v,
-        CArg::I(_) => unreachable!("class bit mismatch"),
+/// FfiTy（回调原型）→ libffi ffi_type（C→Hone 方向，按 C 真实布局读取：_Bool 1 字节）。
+fn ffi_cb_type_of(ty: &FfiTy) -> *mut ffi_type {
+    match ty {
+        FfiTy::Int => addr_of_mut!(libffi_sys::ffi_type_sint64),
+        FfiTy::Int32 => addr_of_mut!(libffi_sys::ffi_type_sint32),
+        FfiTy::Float => addr_of_mut!(libffi_sys::ffi_type_double),
+        FfiTy::Float32 => addr_of_mut!(libffi_sys::ffi_type_float),
+        FfiTy::Bool => addr_of_mut!(libffi_sys::ffi_type_uint8),
+        FfiTy::Str | FfiTy::Ptr | FfiTy::Callback { .. } => addr_of_mut!(libffi_sys::ffi_type_pointer),
+        FfiTy::Void => unreachable!("void is not a parameter type"),
     }
 }
 
-/// 按参数类别（0=int 类 / 1=float 类）逐位展开二分树，叶节点用具体签名取出符号并调用。
-/// $bits 为运行时类别位掩码（第 i 位 1 表示第 i 个参数是 float）；索引列表 [$i, $rest...] 由调用方按元数给出。
-macro_rules! ffi_dispatch {
-    // 基础：所有参数位已消费，用累积的类型列表取出符号并调用
-    ([], $bits:expr, $retf:expr, $lib:expr, $name:expr, $cargs:expr, $sym_err:expr, [$($t:ty),*], [$($v:expr),*]) => {
-        if $retf {
-            let sym: libloading::Symbol<unsafe extern "C" fn($($t),*) -> f64> = unsafe { $lib.get($name) }.map_err($sym_err)?;
-            CRet::F(unsafe { sym($($v),*) })
-        } else {
-            let sym: libloading::Symbol<unsafe extern "C" fn($($t),*) -> i64> = unsafe { $lib.get($name) }.map_err($sym_err)?;
-            CRet::I(unsafe { sym($($v),*) })
-        }
-    };
-    // 单元素：消费最后一个索引位后进入基础规则
-    ([$i:tt], $bits:expr, $retf:expr, $lib:expr, $name:expr, $cargs:expr, $sym_err:expr, [$($t:ty),*], [$($v:expr),*]) => {
-        if ($bits >> $i) & 1 == 1 {
-            ffi_dispatch!([], $bits, $retf, $lib, $name, $cargs, $sym_err, [$($t,)* f64], [$($v,)* carg_f($cargs, $i)])
-        } else {
-            ffi_dispatch!([], $bits, $retf, $lib, $name, $cargs, $sym_err, [$($t,)* i64], [$($v,)* carg_i($cargs, $i)])
-        }
-    };
-    // 多元素：消费头部索引位，继续递归
-    ([$i:tt, $($ri:tt)*], $bits:expr, $retf:expr, $lib:expr, $name:expr, $cargs:expr, $sym_err:expr, [$($t:ty),*], [$($v:expr),*]) => {
-        if ($bits >> $i) & 1 == 1 {
-            ffi_dispatch!([$($ri)*], $bits, $retf, $lib, $name, $cargs, $sym_err, [$($t,)* f64], [$($v,)* carg_f($cargs, $i)])
-        } else {
-            ffi_dispatch!([$($ri)*], $bits, $retf, $lib, $name, $cargs, $sym_err, [$($t,)* i64], [$($v,)* carg_i($cargs, $i)])
-        }
-    };
+/// FfiTy（回调返回）→ libffi ffi_type。
+fn ffi_cb_ret_type_of(ty: &FfiTy) -> *mut ffi_type {
+    match ty {
+        FfiTy::Void => addr_of_mut!(libffi_sys::ffi_type_void),
+        other => ffi_cb_type_of(other),
+    }
 }
 
-#[inline]
-fn carg_is_f(cargs: &[CArg], i: usize) -> bool {
-    matches!(cargs[i], CArg::F(_))
+/// C 变参位 → libffi ffi_type：按 C 默认实参提升（float32→double；int32 保持 int）。
+fn vararg_ffi_type(c: &CArg) -> *mut ffi_type {
+    match c {
+        CArg::I(_) => addr_of_mut!(libffi_sys::ffi_type_sint64),
+        CArg::I32(_) => addr_of_mut!(libffi_sys::ffi_type_sint32),
+        CArg::F(_) | CArg::F32(_) => addr_of_mut!(libffi_sys::ffi_type_double),
+    }
 }
 
-/// 变参（ctypes 式）FFI 调用：与 ffi_dispatch! 同模式，但尾参展开为 C 变参
-/// 函数指针类型 `unsafe extern "C" fn(A..., ...) -> R`（调用变参函数是稳定 Rust
-/// 合法语法；调用方按 varargs 约定设置寄存器/AL，与 C 调用点一致）。
-/// 固定参数 + 变参实参统一放在 $cargs 里按索引逐位取类别展开。
-macro_rules! ffi_variadic {
-    // 基础：全部索引位已消费，展开变参符号类型并调用
-    ([], $retf:expr, $lib:expr, $name:expr, $cargs:expr, $sym_err:expr, [$($t:ty),*], [$($v:expr),*]) => {
-        if $retf {
-            let sym: libloading::Symbol<unsafe extern "C" fn($($t,)* ...) -> f64> =
-                unsafe { $lib.get($name) }.map_err($sym_err)?;
-            CRet::F(unsafe { sym($($v),*) })
-        } else {
-            let sym: libloading::Symbol<unsafe extern "C" fn($($t,)* ...) -> i64> =
-                unsafe { $lib.get($name) }.map_err($sym_err)?;
-            CRet::I(unsafe { sym($($v),*) })
+/// 参数值写入 u64 对齐槽（槽 8 字节 ≥ 全部标量；按声明宽度写入低字节）。
+fn write_slot(slot: &mut u64, c: &CArg) {
+    let p = slot as *mut u64;
+    unsafe {
+        match c {
+            CArg::I(v) => *(p as *mut i64) = *v,
+            CArg::I32(v) => *(p as *mut i32) = *v,
+            CArg::F(v) => *(p as *mut f64) = *v,
+            CArg::F32(v) => *(p as *mut f32) = *v,
         }
-    };
-    // 单元素：消费最后一个索引位后进入基础规则
-    ([$i:tt], $retf:expr, $lib:expr, $name:expr, $cargs:expr, $sym_err:expr, [$($t:ty),*], [$($v:expr),*]) => {
-        if carg_is_f($cargs, $i) {
-            ffi_variadic!([], $retf, $lib, $name, $cargs, $sym_err, [$($t,)* f64], [$($v,)* carg_f($cargs, $i)])
-        } else {
-            ffi_variadic!([], $retf, $lib, $name, $cargs, $sym_err, [$($t,)* i64], [$($v,)* carg_i($cargs, $i)])
-        }
-    };
-    // 多元素：消费头部索引位，继续递归
-    ([$i:tt, $($ri:tt)*], $retf:expr, $lib:expr, $name:expr, $cargs:expr, $sym_err:expr, [$($t:ty),*], [$($v:expr),*]) => {
-        if carg_is_f($cargs, $i) {
-            ffi_variadic!([$($ri)*], $retf, $lib, $name, $cargs, $sym_err, [$($t,)* f64], [$($v,)* carg_f($cargs, $i)])
-        } else {
-            ffi_variadic!([$($ri)*], $retf, $lib, $name, $cargs, $sym_err, [$($t,)* i64], [$($v,)* carg_i($cargs, $i)])
-        }
-    };
+    }
 }
 
 // ========== FFI 回调（零依赖受限方案） ==========
@@ -770,12 +754,15 @@ fn cb_dispatch(a: &[i64]) -> i64 {
         });
         return 0;
     }
-    // 整数类参数 → Hone 值（按原型类别；str 参数视为 C 字符串指针读取）
+    // 标量参数 → Hone 值（按原型类别读取槽内值：int32 取低 32 位、float/float32 按位重解释）
     let args: Vec<Value> = params
         .iter()
         .zip(a.iter())
         .map(|(ty, v)| match ty {
             FfiTy::Int => Value::Int(*v),
+            FfiTy::Int32 => Value::Int(*v as i32 as i64),
+            FfiTy::Float => Value::Float(f64::from_bits(*v as u64)),
+            FfiTy::Float32 => Value::Float(f32::from_bits(*v as u32) as f64),
             FfiTy::Bool => Value::Bool(*v != 0),
             FfiTy::Str => {
                 if *v == 0 {
@@ -785,7 +772,7 @@ fn cb_dispatch(a: &[i64]) -> i64 {
                 }
             }
             FfiTy::Ptr => Value::Ptr(*v as usize),
-            other => unreachable!("callback prototype allows integer-class params only, got {}", other.name()),
+            other => unreachable!("callback prototype allows scalar params only, got {}", other.name()),
         })
         .collect();
     // 全新解释器实例执行回调体（快照环境：函数/结构体/枚举/别名）；panic 不得穿 C 栈
@@ -822,6 +809,27 @@ fn cb_dispatch(a: &[i64]) -> i64 {
             Value::Int(i) => i,
             other => {
                 cb_ret_err("int", &other);
+                0
+            }
+        },
+        FfiTy::Int32 => match value {
+            Value::Int(i) => i as i32 as i64,
+            other => {
+                cb_ret_err("int32", &other);
+                0
+            }
+        },
+        FfiTy::Float => match value {
+            Value::Float(f) => f.to_bits() as i64,
+            other => {
+                cb_ret_err("float", &other);
+                0
+            }
+        },
+        FfiTy::Float32 => match value {
+            Value::Float(f) => (f as f32).to_bits() as i64,
+            other => {
+                cb_ret_err("float32", &other);
                 0
             }
         },
@@ -871,33 +879,114 @@ fn cb_ret_err(want: &str, got: &Value) {
     });
 }
 
-// trampoline 家族：0-4 个整数类参数 × i64 / void 返回（函数指针按 i64 传给 C）
-unsafe extern "C" fn cb0() -> i64 { cb_dispatch(&[]) }
-unsafe extern "C" fn cb1(a0: i64) -> i64 { cb_dispatch(&[a0]) }
-unsafe extern "C" fn cb2(a0: i64, a1: i64) -> i64 { cb_dispatch(&[a0, a1]) }
-unsafe extern "C" fn cb3(a0: i64, a1: i64, a2: i64) -> i64 { cb_dispatch(&[a0, a1, a2]) }
-unsafe extern "C" fn cb4(a0: i64, a1: i64, a2: i64, a3: i64) -> i64 { cb_dispatch(&[a0, a1, a2, a3]) }
-unsafe extern "C" fn cbv0() {}
-unsafe extern "C" fn cbv1(_a0: i64) {}
-unsafe extern "C" fn cbv2(_a0: i64, _a1: i64) {}
-unsafe extern "C" fn cbv3(_a0: i64, _a1: i64, _a2: i64) {}
-unsafe extern "C" fn cbv4(_a0: i64, _a1: i64, _a2: i64, _a3: i64) {}
-
-/// 按回调原型选取 trampoline 函数指针（n = 参数个数；void_ret = 返回 void）。
-fn cb_trampoline(n: usize, void_ret: bool) -> usize {
-    match (n, void_ret) {
-        (0, false) => cb0 as usize,
-        (1, false) => cb1 as usize,
-        (2, false) => cb2 as usize,
-        (3, false) => cb3 as usize,
-        (4, false) => cb4 as usize,
-        (0, true) => cbv0 as usize,
-        (1, true) => cbv1 as usize,
-        (2, true) => cbv2 as usize,
-        (3, true) => cbv3 as usize,
-        (4, true) => cbv4 as usize,
-        _ => 0,
+// libffi 回调 closure：C→Hone 方向统一入口。closure 回调收到原始 CIF/参数指针，
+// 按原型类别逐个读取槽内值（float32 槽 4 字节、bool 槽 1 字节，其余标量 8 字节），
+// 调 cb_dispatch 完成 Hone 侧执行；返回值按原型返回类别写 rvalue。
+unsafe extern "C" fn cb_closure_invoke(
+    _cif: *mut ffi_cif,
+    ret: *mut c_void,
+    args: *mut *mut c_void,
+    _user: *mut c_void,
+) {
+    // 原型来自窗口槽（closure 与窗口一一对应，参数类别与个数恒等）
+    let Some(proto) = CB_CTX.with(|c| c.borrow().as_ref().map(|ctx| ctx.cb.clone())) else {
+        return;
+    };
+    let FfiTy::Callback { params, ret: ret_ty } = &proto else {
+        return;
+    };
+    // 按类别读槽：float32→u32 位模式、bool→u8、其余标量→u64（统一装进 i64 槽）
+    let mut slots: Vec<i64> = Vec::with_capacity(params.len());
+    for (i, ty) in params.iter().enumerate() {
+        let p = *args.add(i) as *const c_void;
+        if p.is_null() {
+            slots.push(0);
+            continue;
+        }
+        let v = match ty {
+            FfiTy::Float32 => *(p as *const u32) as i64,
+            FfiTy::Bool => *(p as *const u8) as i64,
+            _ => *(p as *const u64) as i64,
+        };
+        slots.push(v);
     }
+    let out = cb_dispatch(&slots);
+    // cb_dispatch 返回「按位打包」的 i64（float 类别 = 位模式）；按原型返回类别落盘
+    if ret.is_null() {
+        return;
+    }
+    match ret_ty.as_ref() {
+        FfiTy::Float => *(ret as *mut f64) = f64::from_bits(out as u64),
+        FfiTy::Float32 => *(ret as *mut f32) = f32::from_bits(out as u32),
+        FfiTy::Bool => *(ret as *mut u8) = out as u8,
+        FfiTy::Int32 => *(ret as *mut i32) = out as i32,
+        FfiTy::Void => {}
+        _ => *(ret as *mut i64) = out,
+    }
+}
+
+/// 按回调原型构造 libffi closure（工业级回调 trampoline）：
+/// 返回 (传给 C 的函数指针地址, closure 可写指针, CIF 堆指针, atypes 堆指针)。
+/// CIF 与参数类型表**必须**在 closure 存活期内有效（libffi trampoline 展开
+/// 参数布局时读它们）——两者均 Box::leak 进堆，窗口收尾统一释放。
+/// 窗口收尾：`ffi_closure_free(w)` + `drop(Box::from_raw(cif))` + `drop(Box::from_raw(atypes))`。
+unsafe fn cb_closure_new(proto: &FfiTy) -> Result<(usize, *mut c_void, *mut ffi_cif, *mut *mut ffi_type), ZError> {
+    let FfiTy::Callback { params, ret } = proto else {
+        return Err(ZError::plain(codes::INTERNAL, "internal: not a callback prototype", None::<&str>));
+    };
+    let cif = Box::into_raw(Box::new(std::mem::zeroed::<ffi_cif>()));
+    let atypes = Box::into_raw(
+        params.iter().map(ffi_cb_type_of).collect::<Vec<*mut ffi_type>>().into_boxed_slice(),
+    ) as *mut *mut ffi_type;
+    let rtype = ffi_cb_ret_type_of(ret);
+    let st = ffi_prep_cif(
+        cif,
+        ffi_abi_FFI_DEFAULT_ABI,
+        params.len() as u32,
+        rtype,
+        atypes,
+    );
+    if st != ffi_status_FFI_OK {
+        drop(Box::from_raw(cif));
+        drop(Box::from_raw(std::slice::from_raw_parts_mut(atypes, params.len())));
+        return Err(ZError::plain(
+            codes::INTERNAL,
+            format!("libffi: ffi_prep_cif failed with status {st}"),
+            None::<&str>,
+        ));
+    }
+    // closure_alloc 返回可写区（存 ffi_closure），code 侧写出可调用地址（trampoline 机器码）
+    let mut code: *mut c_void = null_mut();
+    let writable = ffi_closure_alloc(std::mem::size_of::<ffi_closure>(), &mut code);
+    if writable.is_null() || code.is_null() {
+        drop(Box::from_raw(cif));
+        drop(Box::from_raw(std::slice::from_raw_parts_mut(atypes, params.len())));
+        return Err(ZError::plain(
+            codes::INTERNAL,
+            "libffi: ffi_closure_alloc failed",
+            Some("closure allocation requires an executable-code-capable allocator"),
+        ));
+    }
+    let closure = writable as *mut ffi_closure;
+    let st = ffi_prep_closure_loc(closure, cif, Some(cb_closure_invoke), writable, code);
+    if st != ffi_status_FFI_OK {
+        ffi_closure_free(writable);
+        drop(Box::from_raw(cif));
+        drop(Box::from_raw(std::slice::from_raw_parts_mut(atypes, params.len())));
+        return Err(ZError::plain(
+            codes::INTERNAL,
+            format!("libffi: ffi_prep_closure_loc failed with status {st}"),
+            None::<&str>,
+        ));
+    }
+    Ok((code as usize, writable, cif, atypes))
+}
+
+/// 释放一次回调窗口的全部 libffi 分配（closure + CIF + 参数类型表）。
+unsafe fn cb_closure_drop(writable: *mut c_void, cif: *mut ffi_cif, atypes: *mut *mut ffi_type, n: usize) {
+    ffi_closure_free(writable);
+    drop(Box::from_raw(cif));
+    drop(Box::from_raw(std::slice::from_raw_parts_mut(atypes, n)));
 }
 
 /// 运行整个程序。debug 为 true 时 breakpoint; 生效。
@@ -2172,20 +2261,12 @@ impl Interp {
                 )),
             ));
         }
-        // 变参 + float 固定参数：变参通道按整数寄存器/栈传递，double 必须走 XMM，两者不能混排
-        if sig.variadic && sig.params.iter().any(|p| p.ty == FfiTy::Float) {
-            return Err(self.runtime_err(
-                codes::TYPE_MISMATCH,
-                format!("`{}`: `float` fixed parameters are not supported in variadic functions", func_name),
-                span,
-                Some("declare the fixed parameters as `int`/`str`/`ptr` (C varargs pass them in integer registers)"),
-            ));
-        }
         // 参数转换：str 参数需 CString 保持存活直到调用结束
         let mut cargs: Vec<CArg> = Vec::with_capacity(args.len());
         let mut cstrings: Vec<CString> = Vec::new();
-        // 回调窗口是否已安装（调用后清理槽位）
+        // 回调窗口是否已安装（调用后清理槽位）；closure 分配记录（writable, cif, atypes, n）
         let mut cb_installed = false;
+        let mut cb_allocs: Vec<(*mut c_void, *mut ffi_cif, *mut *mut ffi_type, usize)> = Vec::new();
         for (i, a) in args.iter().enumerate() {
             if i >= sig.params.len() {
                 // 变参实参（ctypes 式）：按运行时类型转换
@@ -2231,6 +2312,25 @@ impl Interp {
                         ))
                     }
                 },
+                FfiTy::Int32 => match a {
+                    Value::Int(v) if *v >= i32::MIN as i64 && *v <= i32::MAX as i64 => cargs.push(CArg::I32(*v as i32)),
+                    Value::Int(v) => {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` parameter `{}` expects int32 range, got {}", func_name, p.name, v),
+                            span,
+                            Some("the declared FFI signature maps `int32` to a 32-bit C integer"),
+                        ))
+                    }
+                    other => {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` parameter `{}` expects `int`, got `{}`", func_name, p.name, other.type_name()),
+                            span,
+                            Some("the declared FFI signature maps `int32` to a 32-bit C integer"),
+                        ))
+                    }
+                },
                 FfiTy::Float => match a {
                     Value::Float(v) => cargs.push(CArg::F(*v)),
                     other => {
@@ -2239,6 +2339,25 @@ impl Interp {
                             format!("`{}` parameter `{}` expects `float`, got `{}`", func_name, p.name, other.type_name()),
                             span,
                             Some("the declared FFI signature maps `float` to double"),
+                        ))
+                    }
+                },
+                FfiTy::Float32 => match a {
+                    Value::Float(v) if *v >= f32::MIN as f64 && *v <= f32::MAX as f64 => cargs.push(CArg::F32(*v as f32)),
+                    Value::Float(v) => {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` parameter `{}` expects float32 range, got {}", func_name, p.name, v),
+                            span,
+                            Some("the declared FFI signature maps `float32` to a 32-bit C float"),
+                        ))
+                    }
+                    other => {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` parameter `{}` expects `float`, got `{}`", func_name, p.name, other.type_name()),
+                            span,
+                            Some("the declared FFI signature maps `float32` to a 32-bit C float"),
                         ))
                     }
                 },
@@ -2289,8 +2408,8 @@ impl Interp {
                         ))
                     }
                 },
-                FfiTy::Callback { params: cbp, ret: cbr } => {
-                    // 回调实参：Hone 可调用（lambda 或顶层函数名）→ trampoline 指针。
+                FfiTy::Callback { params: cbp, .. } => {
+                    // 回调实参：Hone 可调用（lambda 或顶层函数名）→ libffi closure 地址。
                     // 同步回调：指针仅在本调用窗口内有效（C 必须在返回前回调，可多次回调）。
                     let (lambda, fname) = match a {
                         Value::Lambda(l) => (Some(l.clone()), None),
@@ -2314,16 +2433,20 @@ impl Interp {
                             ))
                         }
                     };
-                    if cbp.len() > 4 {
+                    // 构造 libffi closure（CIF 按原型：标量参数/返回全支持，上限 8 参）
+                    if cbp.len() > 8 {
                         return Err(self.runtime_err(
-                            codes::NOT_IMPLEMENTED,
-                            format!("`{}` parameter `{}`: callbacks support at most 4 parameters", func_name, p.name),
+                            codes::DLL_ARG,
+                            format!("`{}` parameter `{}`: callbacks support at most 8 parameters", func_name, p.name),
                             span,
                             Some("reduce the callback parameter count, or wrap it on the C side"),
                         ));
                     }
-                    let void_ret = matches!(cbr.as_ref(), FfiTy::Void);
-                    let tramp = cb_trampoline(cbp.len(), void_ret);
+                    let (code_ptr, writable, cif, atypes) =
+                        unsafe { cb_closure_new(&p.ty) }.map_err(|e| {
+                            ZError::plain(e.code, format!("`{}` parameter `{}`: {}", func_name, p.name, e.msg), e.help)
+                        })?;
+                    cb_allocs.push((writable, cif, atypes, cbp.len()));
                     // 安装回调窗口：原型 + 可调用 + 环境快照（回调在全新解释器实例中执行）
                     CB_CTX.with(|c| {
                         *c.borrow_mut() = Some(CbCtx {
@@ -2339,71 +2462,85 @@ impl Interp {
                         })
                     });
                     cb_installed = true;
-                    cargs.push(CArg::I(tramp as i64));
+                    cargs.push(CArg::I(code_ptr as i64));
                 }
                 FfiTy::Void => unreachable!("void is not a parameter type"),
             }
         }
-        // 参数类别位：第 i 位 1 表示第 i 个参数为 float（double，走 XMM 寄存器）
-        let bits: u32 = cargs
-            .iter()
-            .enumerate()
-            .fold(0u32, |acc, (i, c)| if matches!(c, CArg::F(_)) { acc | (1 << i) } else { acc });
-        let retf = sig.ret == FfiTy::Float;
-        let name = func_name.as_bytes();
+        // libffi CIF 调用：固定参数走 ffi_prep_cif；变参走 ffi_prep_cif_var
+        //（nfixedargs = 具名参数数，其余实参按 C 默认实参提升规则声明类型）。
+        let ret_ty = match &sig.ret {
+            FfiTy::Void => addr_of_mut!(libffi_sys::ffi_type_void),
+            FfiTy::Float => addr_of_mut!(libffi_sys::ffi_type_double),
+            FfiTy::Float32 => addr_of_mut!(libffi_sys::ffi_type_float),
+            _ => addr_of_mut!(libffi_sys::ffi_type_sint64),
+        };
+        let ntotal = cargs.len();
+        let nfixed = sig.params.len();
+        let mut atypes: Vec<*mut ffi_type> = Vec::with_capacity(ntotal);
+        for (i, c) in cargs.iter().enumerate() {
+            if i < nfixed {
+                atypes.push(ffi_type_of(&sig.params[i].ty));
+            } else {
+                atypes.push(vararg_ffi_type(c));
+            }
+        }
+        let mut cif: ffi_cif = unsafe { std::mem::zeroed() };
+        let st = if sig.variadic {
+            unsafe {
+                ffi_prep_cif_var(&mut cif, ffi_abi_FFI_DEFAULT_ABI, nfixed as u32, ntotal as u32, ret_ty, atypes.as_mut_ptr())
+            }
+        } else {
+            unsafe { ffi_prep_cif(&mut cif, ffi_abi_FFI_DEFAULT_ABI, ntotal as u32, ret_ty, atypes.as_mut_ptr()) }
+        };
+        if st != ffi_status_FFI_OK {
+            return Err(self.runtime_err(
+                codes::INTERNAL,
+                format!("libffi: cif preparation failed with status {}", st),
+                span,
+                Some("this is an internal error; please report it"),
+            ));
+        }
+        // 实参槽（8 字节对齐 ≥ 全部标量）+ 指针数组；CIF 要求两者存活到 ffi_call 返回
+        let mut slots: Vec<u64> = vec![0u64; ntotal.max(1)];
+        for (slot, c) in slots.iter_mut().zip(cargs.iter()) {
+            write_slot(slot, c);
+        }
+        let aptrs: Vec<*mut c_void> = slots.iter_mut().map(|s| s as *mut u64 as *mut c_void).collect();
+        let mut rslot: u64 = 0;
         let lib = self.libs.get(lib_name).unwrap();
-        let sym_err = |e: libloading::Error| {
+        let sym: libloading::Symbol<unsafe extern "C" fn()> = unsafe {
+            lib.get(func_name.as_bytes())
+        }.map_err(|e| {
             self.runtime_err(
                 codes::NOT_FOUND,
                 format!("symbol `{}` not found in library `{}`: {}", func_name, lib_name, e),
                 span,
                 Some("check the exported symbol name (e.g. `#[no_mangle] pub extern \"C\" fn`)"),
             )
-        };
-        let cret = if sig.variadic {
-            // 变参调用：实参按索引逐位展开为 C 变参函数指针类型（调用变参函数是稳定 Rust 合法语法）
-            match cargs.len() {
-                1 => ffi_variadic!([0], retf, lib, name, &cargs, &sym_err, [], []),
-                2 => ffi_variadic!([0, 1], retf, lib, name, &cargs, &sym_err, [], []),
-                3 => ffi_variadic!([0, 1, 2], retf, lib, name, &cargs, &sym_err, [], []),
-                4 => ffi_variadic!([0, 1, 2, 3], retf, lib, name, &cargs, &sym_err, [], []),
-                5 => ffi_variadic!([0, 1, 2, 3, 4], retf, lib, name, &cargs, &sym_err, [], []),
-                6 => ffi_variadic!([0, 1, 2, 3, 4, 5], retf, lib, name, &cargs, &sym_err, [], []),
-                7 => ffi_variadic!([0, 1, 2, 3, 4, 5, 6], retf, lib, name, &cargs, &sym_err, [], []),
-                8 => ffi_variadic!([0, 1, 2, 3, 4, 5, 6, 7], retf, lib, name, &cargs, &sym_err, [], []),
-                9 => ffi_variadic!([0, 1, 2, 3, 4, 5, 6, 7, 8], retf, lib, name, &cargs, &sym_err, [], []),
-                10 => ffi_variadic!([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], retf, lib, name, &cargs, &sym_err, [], []),
-                11 => ffi_variadic!([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], retf, lib, name, &cargs, &sym_err, [], []),
-                12 => ffi_variadic!([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], retf, lib, name, &cargs, &sym_err, [], []),
-                _ => {
-                    return Err(self.runtime_err(
-                        codes::DLL_ARG,
-                        format!("`{}` takes at most 12 arguments in a variadic call", func_name),
-                        span,
-                        Some("reduce the number of variadic arguments"),
-                    ))
-                }
-            }
-        } else {
-            match cargs.len() {
-                0 => ffi_dispatch!([], bits, retf, lib, name, &cargs, &sym_err, [], []),
-                1 => ffi_dispatch!([0], bits, retf, lib, name, &cargs, &sym_err, [], []),
-                2 => ffi_dispatch!([0, 1], bits, retf, lib, name, &cargs, &sym_err, [], []),
-                3 => ffi_dispatch!([0, 1, 2], bits, retf, lib, name, &cargs, &sym_err, [], []),
-                4 => ffi_dispatch!([0, 1, 2, 3], bits, retf, lib, name, &cargs, &sym_err, [], []),
-                5 => ffi_dispatch!([0, 1, 2, 3, 4], bits, retf, lib, name, &cargs, &sym_err, [], []),
-                6 => ffi_dispatch!([0, 1, 2, 3, 4, 5], bits, retf, lib, name, &cargs, &sym_err, [], []),
-                7 => ffi_dispatch!([0, 1, 2, 3, 4, 5, 6], bits, retf, lib, name, &cargs, &sym_err, [], []),
-                8 => ffi_dispatch!([0, 1, 2, 3, 4, 5, 6, 7], bits, retf, lib, name, &cargs, &sym_err, [], []),
-                _ => unreachable!("fixed arity checked above"),
-            }
+        })?;
+        unsafe {
+            ffi_call(&mut cif, Some(*sym), &mut rslot as *mut u64 as *mut c_void, aptrs.as_ptr() as *mut *mut c_void);
+        }
+        // 按返回类别解读槽：float 类别 = 位模式，整数类别 = 数值
+        let cret = match &sig.ret {
+            FfiTy::Float => CRet::F(f64::from_bits(rslot)),
+            FfiTy::Float32 => CRet::F(f32::from_bits(rslot as u32) as f64),
+            _ => CRet::I(rslot as i64),
         };
         // 回调窗口收尾：清理槽位；回调体内的错误原样上抛（保留 Hone 侧定位）
         if cb_installed {
             CB_CTX.with(|c| *c.borrow_mut() = None);
+            // libffi 分配统一释放（closure + 堆上的 CIF/atypes）
+            for (w, cf, at, n) in cb_allocs.drain(..) {
+                unsafe { cb_closure_drop(w, cf, at, n) };
+            }
             if let Some(e) = CB_ERR.with(|e| e.borrow_mut().take()) {
                 return Err(e);
             }
+        } else {
+            // 调用中途失败（早退路径）也必须释放已分配的 closure
+            debug_assert!(cb_allocs.is_empty() || std::thread::panicking());
         }
         // cstrings 在此作用域内保持存活，调用完成后再释放
         Ok(match sig.ret {
@@ -2411,7 +2548,15 @@ impl Interp {
                 CRet::I(v) => v,
                 CRet::F(_) => unreachable!("return class mismatch"),
             }),
+            FfiTy::Int32 => Value::Int(match cret {
+                CRet::I(v) => v as i32 as i64,
+                CRet::F(_) => unreachable!("return class mismatch"),
+            }),
             FfiTy::Float => Value::Float(match cret {
+                CRet::F(v) => v,
+                CRet::I(_) => unreachable!("return class mismatch"),
+            }),
+            FfiTy::Float32 => Value::Float(match cret {
                 CRet::F(v) => v,
                 CRet::I(_) => unreachable!("return class mismatch"),
             }),

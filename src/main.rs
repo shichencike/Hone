@@ -29,6 +29,8 @@ mod netmod;
 // 原生后端运行时（runtime/src/lib.rs，std-only 单文件）：嵌入二进制，
 // natgen 时写出临时目录参与产物链接（干净构建机无需本仓库）。
 pub(crate) const NAT_RUNTIME_SRC: &str = include_str!("../runtime/src/lib.rs");
+/// 内嵌运行时源码的真实路径（rustc 编 staticlib 的输入；include_str! 同源，改一处即两处）。
+pub(crate) const NAT_RUNTIME_SRC_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/runtime/src/lib.rs");
 mod parser;
 mod pluginmod;
 mod plotmod;
@@ -496,7 +498,7 @@ fn print_help() {
     println!("  hone natgen <file.hn>  原生编译（build --exe --native 别名）：脚本 → Cranelift object → 链接原生可执行 [-o <out>] [--cpu <name>] [--target <triple>]；--obj <o> 仅产 object 不链接");
     println!("  hone build --dll <file.hn> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
     println!("  hone build --exe <file.hn> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
-    println!("  hone build --exe --native <file.hn> 原生编译为可执行文件（Cranelift→object→内嵌运行时，需 rustc；[-o <out>] [--cpu <name>] [--target <triple>]）");
+    println!("  hone build --exe --native <file.hn> 原生编译为可执行文件（Cranelift→object→运行时静态库→系统 gcc 链接；[-o <out>] [--cpu <name>] [--target <triple>]）");
     println!("  hone build --obj <file.hn> 仅编译为原生 object（Cranelift，不链接 exe；[-o <out>] [--cpu <name>] [--target <triple>]）");
     println!("  hone build --script <file.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）");
     println!("  hone get                   读取当前目录 hone.json 清单，批量下载全部模块");
@@ -1563,195 +1565,7 @@ fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
     }
 }
 
-/// 定位 rustc 自带的 rust-lld（G3.2 交叉目标裸链接用；位于 `<sysroot>/lib/rustlib/<host>/bin/`）。
-fn rust_lld_path() -> Option<std::path::PathBuf> {
-    let out = std::process::Command::new("rustc")
-        .args(["--print", "sysroot"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let sysroot = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    let host = target_lexicon::Triple::host().to_string();
-    let exe = if cfg!(windows) { "rust-lld.exe" } else { "rust-lld" };
-    let p = std::path::Path::new(&sysroot)
-        .join("lib")
-        .join("rustlib")
-        .join(&host)
-        .join("bin")
-        .join(exe);
-    if p.exists() {
-        Some(p)
-    } else {
-        None
-    }
-}
-
-// ── G3.4 工具链打包（设计 §5.1：script.o + libhoneruntime.a + CRT → exe，目标机无 rustc）──
-// 目录布局（targets/ 随 hone 分发；安装包解压即用）：
-//   targets/<triple>/libhoneruntime.a   该目标的运行时 staticlib（rustc 预编译，见
-//                                       tests/tools/build_toolchain.py）
-//   targets/lld/rust-lld.exe            链接器（宿主工具，跨目标通用）
-//   targets/crt/<triple>/               该目标的 CRT + 导入库（rustc sysroot
-//                                       self-contained 目录拷贝：crt2.o / lib*.a）
-// HONE_TOOLCHAIN_DIR 环境变量可覆盖 targets/ 位置（开发/嵌入式场景）。
-
-/// 定位工具链目录：HONE_TOOLCHAIN_DIR → `<exe 目录>/targets/` → `./targets/`。
-fn toolchain_dir() -> Option<std::path::PathBuf> {
-    if let Ok(d) = std::env::var("HONE_TOOLCHAIN_DIR") {
-        let p = std::path::PathBuf::from(d);
-        if p.is_dir() {
-            return Some(p);
-        }
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let p = parent.join("targets");
-            if p.is_dir() {
-                return Some(p);
-            }
-        }
-    }
-    let p = std::path::PathBuf::from("targets");
-    if p.is_dir() {
-        Some(p)
-    } else {
-        None
-    }
-}
-
-/// rustc 是否可用（决定走 rustc 链接还是打包工具链链接）。
-fn rustc_available() -> bool {
-    std::process::Command::new("rustc")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
-/// G3.4：无 rustc 的打包链接（仅宿主 windows-gnu COFF；交叉目标的打包链接待 G3.6）。
-/// 链接线与手动验证一致：crt2.o + libmingw32/libgcc/libgcc_eh/libmoldname/
-/// libmingwex/libmsvcrt/libntdll/libpthread/libadvapi32/libws2_32/libkernel32/
-/// libuser32/libbcrypt/libuserenv（std 与 runtime 的全部符号依赖）。
-fn link_native_packaged(
-    triple_s: &str,
-    script_obj: &str,
-    out: &str,
-) -> Result<(), ZError> {
-    let internal = |msg: String, hint: &str| {
-        ZError::plain(codes::INTERNAL, msg, Some(hint.to_string()))
-    };
-    let tc = toolchain_dir().ok_or_else(|| {
-        internal(
-            "未找到打包工具链（targets/）且本机无 rustc".into(),
-            "安装完整 hone 发行包（含 targets/），或设置 HONE_TOOLCHAIN_DIR 指向工具链目录，或安装 rustc",
-        )
-    })?;
-    let lld = tc.join("lld").join(if cfg!(windows) { "rust-lld.exe" } else { "rust-lld" });
-    let crt = tc.join("crt").join(triple_s);
-    let rtlib = tc.join(triple_s).join("libhoneruntime.a");
-    for (p, what) in [
-        (&lld, "链接器 rust-lld"),
-        (&crt, "CRT 目录"),
-        (&rtlib, "运行时归档 libhoneruntime.a"),
-    ] {
-        if !p.exists() {
-            return Err(internal(
-                format!("工具链不完整：缺少 {what}: {}", p.display()),
-                "重新安装 hone 发行包或运行 tests/tools/build_toolchain.py 重建",
-            ));
-        }
-    }
-    // 按 target 环境选链接 flavor：windows-gnu → COFF（lld-link）；musl/gnu ELF → GNU flavor。
-    let triple: target_lexicon::Triple = triple_s
-        .parse()
-        .map_err(|e| internal(format!("目标三元组解析失败 `{triple_s}`: {e}"), "检查 --target 值"))?;
-    let is_coff = matches!(triple.operating_system, target_lexicon::OperatingSystem::Windows);
-    let mut args: Vec<std::ffi::OsString>;
-    if is_coff {
-        // COFF 链接（windows-gnu）：lld-link flavor。CRT/导入库为显式输入文件
-        // （lld-link 的 -defaultlib 只认 .lib 名，不认 GNU 归档）。
-        let libs = [
-            "crt2.o", "libmingw32.a", "libgcc.a", "libgcc_eh.a", "libmoldname.a",
-            "libmingwex.a", "libmsvcrt.a", "libntdll.a", "libpthread.a",
-            "libadvapi32.a", "libws2_32.a", "libkernel32.a", "libuser32.a",
-            "libbcrypt.a", "libuserenv.a",
-        ];
-        args = vec![
-            "-flavor".into(), "link".into(),
-            format!("/OUT:{}", out).into(),
-            "/SUBSYSTEM:CONSOLE".into(),
-            script_obj.into(),
-            rtlib.into_os_string(),
-        ];
-        for l in libs {
-            args.push(crt.join(l).into_os_string());
-        }
-    } else {
-        // GNU/ELF 链接（musl / gnu）：crt1/crti/crtbegin → 产物段 → libunwind → libc/libm
-        // → crtend/crtn。-no-pie：Cranelift 产非 PIC 对象（与 G3.2 rustc 路径口径一致，
-        // 产物 ET_EXEC 静态）。CRT 归档为 targets/crt/<triple>/（self-contained 拷贝）。
-        let libs_start = ["crt1.o", "crti.o", "crtbegin.o"];
-        let libs_end = ["crtend.o", "crtn.o"];
-        args = vec![
-            "-flavor".into(), "gnu".into(),
-            "-o".into(), out.into(),
-            "-no-pie".into(), "--gc-sections".into(), "--strip-all".into(),
-        ];
-        for l in libs_start {
-            args.push(crt.join(l).into_os_string());
-        }
-        args.push(script_obj.into());
-        args.push(rtlib.into_os_string());
-        args.push(crt.join("libunwind.a").into_os_string());
-        args.push(format!("-L{}", crt.display()).into());
-        args.push("-lc".into());
-        args.push("-lm".into());
-        for l in libs_end {
-            args.push(crt.join(l).into_os_string());
-        }
-    }
-    // Linux 侧 rust-lld 是**动态链接**的（依赖 sysroot 里的 libLLVM.so）：若依赖库随包分发在
-    // targets/lld/（或 lld/lib/），经 LD_LIBRARY_PATH 让它找到；Windows 靠 DLL 同目录，无需此步。
-    let mut lld_cmd = std::process::Command::new(&lld);
-    lld_cmd.args(&args);
-    if !cfg!(windows) {
-        if let Some(parent) = lld.parent() {
-            let mut dirs = vec![parent.display().to_string()];
-            let libdir = parent.join("lib");
-            if libdir.is_dir() {
-                dirs.push(libdir.display().to_string());
-            }
-            if let Ok(prev) = std::env::var("LD_LIBRARY_PATH") {
-                if !prev.is_empty() {
-                    dirs.push(prev);
-                }
-            }
-            lld_cmd.env("LD_LIBRARY_PATH", dirs.join(":"));
-        }
-    }
-    let p = lld_cmd
-        .output()
-        .map_err(|e| internal(format!("链接器启动失败: {e}"), "检查 targets/lld/ 下的 rust-lld"))?;
-    if !p.status.success() {
-        let mut err = String::from_utf8_lossy(&p.stderr).to_string();
-        if err.is_empty() {
-            // 无 stderr（如 DLL 缺失等加载期失败）：至少给出退出码。
-            err = format!("链接器退出码 {}", p.status.code().unwrap_or(-1));
-        }
-        // 动态库缺失（如 Linux 侧 rust-lld 依赖 libLLVM.so）会伪装成「链接失败」——单独指路。
-        let hint = if err.contains("error while loading shared libraries") {
-            "打包工具链的 rust-lld 缺少运行期依赖库（Linux 侧 rust-lld 动态依赖 sysroot 的 \
-             libLLVM.so，随包自足化见进度文档 G3.8）：本机装 rustc 即可走 rustc 链接路径，\
-             或把依赖库与 targets/lld/ 一同分发".to_string()
-        } else {
-            "检查 script.o 与 libhoneruntime.a 的目标三元组一致性".to_string()
-        };
-        return Err(ZError::plain(codes::INTERNAL, format!("链接失败:\n{err}"), Some(hint)));
-    }
-    Ok(())
-}
+// ── 原生编译产物形态（NativeArtifact）──
 
 /// 原生编译管线的最终产物形态：
 /// Exe = 完整管线（object 为中间物 + 链接原生 exe）；Obj = 仅 object
@@ -1763,8 +1577,8 @@ enum NativeArtifact {
 }
 
 /// 共享原生编译管线（T7）：`hone natgen` 与 `hone build --exe --native` 共用入口。
-/// 阶段：解析+类型检查 → VM 字节码 → Cranelift object（x86_64 COFF，含 `__hn_main`
-/// 与各用户函数）→ 生成式 wrapper + rustc 链接原生 exe。
+/// 阶段：解析+类型检查 → VM 字节码 → Cranelift object（x86_64 COFF / ELF 由目标决定，
+/// 含 `__hn_main` 与各用户函数）→ [仅 Exe 模式] 内嵌运行时静态库 + 系统 gcc 链接原生 exe。
 /// `label`：阶段输出前缀（"natgen" / "build"）；out/obj 为 None 时取默认名。
 /// `artifact`：产物形态——Exe 走完整管线；Obj 仅产 object（生成后提前返回，不链接）。
 fn build_native(
@@ -1778,7 +1592,7 @@ fn build_native(
 ) -> Result<(), ZError> {
     let obj_only = artifact == NativeArtifact::Obj;
     let total = if obj_only { 2 } else { 4 };
-    // G3.2：目标三元组——默认宿主目标；`--target` 指定交叉目标（交叉产物需目标 std/运行时，见 G3.4）。
+    // G3.2：目标三元组——默认宿主目标；`--target` 指定交叉目标（交叉产物需目标 rust std 编运行时静态库）。
     let host = target_lexicon::Triple::host();
     let triple = match &target {
         Some(t) => t.parse::<target_lexicon::Triple>().map_err(|e| {
@@ -1921,158 +1735,149 @@ fn build_native(
         eprintln!("[{total}/{total}] {label} 完成: {obj}（仅 object，未链接 exe）");
         return Ok(());
     }
-    // G3.4：链接路径选择——默认「rustc 可用则走 rustc 链接」（逐字节回归基准），否则回退打包
-    // 工具链（targets/：libhoneruntime.a + CRT + rust-lld，无需 rustc）。`HONE_NAT_LINK=rustc|packaged`
-    // 可强制指定（未知值按默认处理）：release.yml 的 verify-nat 用 `packaged` 强制验证「随包分发、
-    // 目标机无 rustc」的那条路径——否则 runner 自带的 rustc 会悄悄接管，测的就不是发布包了。
-    let link_choice = std::env::var("HONE_NAT_LINK").unwrap_or_default();
-    let use_packaged = if link_choice.eq_ignore_ascii_case("packaged") {
-        true
-    } else if link_choice.eq_ignore_ascii_case("rustc") {
-        false
-    } else {
-        !rustc_available()
-    };
-    let via = if use_packaged { "打包工具链 targets/，无需 rustc" } else { "rustc + 内嵌运行时" };
+    // 纯 .o 生成器口径（链接交还系统 gcc）：exe 模式 = 内嵌运行时源码经 rustc 编成
+    // 静态库 libhoneruntime.a（含 C 入口 main，按「源码内容 + 目标三元组」哈希缓存于
+    // ~/.hone/cache/runtime/）→ 系统 gcc 把 script.o 与静态库链接为可执行。零黑盒：
+    // 链接命令原样打印，用户可自行复现 / 接管。
+    let via = "内嵌运行时静态库 + 系统 gcc";
     if cross {
-        eprintln!("[3/{total}] {label} 链接原生 exe: {out}（{via}，交叉目标 {triple_s}）");
+        eprintln!("[3/{total}] {label} 链接原生 exe: {out}（{via}，目标 {triple_s}）");
     } else {
         eprintln!("[3/{total}] {label} 链接原生 exe: {out}（{via}）");
     }
-    // 链接管线（干净构建机自足，无需本仓库）：
-    //   临时目录/
-    //     rt.rs    内嵌运行时（NAT_RUNTIME_SRC，含 rt_* 与 hn_entry 入口）
-    //     main.rs  生成式 wrapper：include! rt.rs + 字符串表 + main 调 hn_entry
-    //   rustc main.rs -C link-arg=obj.o → exe
-    // object 提供 __hn_main（脚本 main chunk）与各用户函数；rustc 负责 CRT。
-    let tmpdir = std::env::temp_dir().join(format!("hone_natgen_{}", std::process::id()));
-    std::fs::create_dir_all(&tmpdir)
-        .map_err(|e| ZError::plain(codes::INTERNAL, format!("创建临时构建目录: {e}"), None::<String>))?;
-    let rt_rs = tmpdir.join("rt.rs");
-    std::fs::write(&rt_rs, NAT_RUNTIME_SRC)
-        .map_err(|e| ZError::plain(codes::INTERNAL, format!("写运行时源: {e}"), None::<String>))?;
-    let main_rs = tmpdir.join("main.rs");
-    // G3.5：wrapper 瘦身为脚本无关的固定代码——全部程序静态表已移入 script.o
-    // rodata（natgen emit_static_tables 的 HN_* 符号），运行时 hn_entry 首行经
-    // hn_boot（--cfg hone_boot）自举注册；CLI 参数解析同步移入 runtime。
-    let mut wrapper = String::new();
-    wrapper.push_str("// 固定 wrapper（G3.5）：include 运行时 + 入口；程序静态表在 script.o rodata。\n");
-    wrapper.push_str("include!(\"rt.rs\");\n");
-    wrapper.push_str("fn main() {\n");
-    wrapper.push_str("    std::process::exit(hn_entry() as i32);\n");
-    wrapper.push_str("}\n");
-    std::fs::write(&main_rs, wrapper)
-        .map_err(|e| ZError::plain(codes::INTERNAL, format!("写 wrapper: {e}"), None::<String>))?;
+    let rtlib = runtime_staticlib(&triple_s)?;
     let out_s = out.to_string();
     let obj_s = obj.to_string();
-    // G3.3 体积裁剪：opt-level=z（体积优先）+ 单 codegen unit + 链接期 --gc-sections
-    // （去未引用段）+ --strip-all（去符号表）。可用 HONE_NAT_FLAGS 覆盖（调试/实验用）。
-    // 参数形态按**目标 + 链接器驱动**分派，而不是按「是否交叉」——宿主 Linux（glibc）
-    // 与交叉 musl 同属 ELF，同为「Cranelift 非 PIC 对象 + 平台默认 PIE」这一组合。
+    // 链接参数按目标环境分派（Cranelift 产非 PIC 对象）：
+    //   ELF：必须非 PIE（-no-pie），否则 R_X86_64_32S 重定位报错；
+    //   windows-gnu（MinGW gcc 驱动）：参数经 -Wl,；
+    //   msvc（无 gcc）：报错指路（用户环境无 MinGW 时自行安装或改用 --obj 自链）。
     let is_elf = matches!(triple.operating_system, target_lexicon::OperatingSystem::Linux);
     let is_msvc = matches!(triple.environment, target_lexicon::Environment::Msvc);
-    let default_flags = {
-        let core = "-C opt-level=z -C codegen-units=1";
-        let link = if cross {
-            // 交叉：rustc 直接调 rust-lld（裸参数，lld 不认 gcc 驱动的 `-Wl,` 前缀）。
-            // **必须**加 `-C relocation-model=static`：rustc 对 musl 目标默认按 static-PIE 选启动
-            // CRT（`rcrt1.o` + `crtbeginS.o` + `-pie --no-dynamic-linker`），而 `-C link-arg=-no-pie`
-            // 只改链接器末端的开关、改不了「选哪个 crt1」。两者混用会产出「rcrt1.o 自重定位启动 +
-            // ET_EXEC（无 PT_DYNAMIC，`_DYNAMIC=0`）」的产物——`_start` 一扫 dynamic 段就解引用空指针
-            // → SIGSEGV（CI 的 Linux nat 回归 16 例全 -11 且零输出即此）。static 后 rustc 选
-            // `crt1.o`/`crtbegin.o`，入口与打包工具链路径（G3.4）逐字节一致。
-            "-C relocation-model=static -C link-arg=--gc-sections -C link-arg=--strip-all -C link-arg=-no-pie"
-        } else if is_msvc {
-            // msvc 宿主：链接驱动是 link.exe，GNU/ld 风格参数（`-Wl,--gc-sections`）不适用。
-            // 用 link.exe 自己的等价开关去未引用段 / 折叠相同函数。
-            "-C link-arg=/OPT:REF -C link-arg=/OPT:ICF"
-        } else if is_elf {
-            // 宿主 ELF（Linux gnu / musl）：cc 驱动 + GNU ld，参数经 `-Wl,` 传；且 **必须** 非 PIE
-            // ——Cranelift 产非 PIC 对象（含 R_X86_64_64/32S 绝对重定位），而 Linux 目标默认按
-            // PIE 链接，会报 `relocation R_X86_64_32S ... can not be used when making a PIE
-            // object; recompile with -fPIC`。`relocation-model=static` 让 rustc 自身不再追加
-            // `-pie`，`link-arg=-no-pie` 再明确交给 cc（双保险，与 `-pie` 出现顺序无关）。
-            "-C relocation-model=static -C link-arg=-no-pie -C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--strip-all"
-        } else {
-            // windows-gnu 宿主：经 MinGW gcc 驱动链接，参数须 `-Wl,`。
-            "-C link-arg=-Wl,--gc-sections -C link-arg=-Wl,--strip-all"
-        };
-        format!("{core} {link}")
-    };
-
-    let flags = std::env::var("HONE_NAT_FLAGS").unwrap_or(default_flags);
-    let mut rustc_args: Vec<String> = vec!["--edition".into(), "2021".into(), "--cfg".into(), "hone_boot".into()];
-    rustc_args.extend(flags.split_whitespace().map(str::to_string));
-    // 交叉目标：显式传 --target（宿主目标不传，保持既有行为逐字节不变），并用 rustc
-    // 自带 CRT（link-self-contained）+ rust-lld 裸链接（设计 §5.1/5.2）。
-    if cross {
-        rustc_args.push("--target".into());
-        rustc_args.push(triple_s.clone());
-        rustc_args.push("-C".into());
-        rustc_args.push("link-self-contained=yes".into());
-        if let Some(lld) = rust_lld_path() {
-            rustc_args.push("-C".into());
-            rustc_args.push(format!("linker={}", lld.display()));
-        }
+    if is_msvc {
+        return Err(ZError::plain(
+            codes::NOT_IMPLEMENTED,
+            "msvc 目标无系统 gcc 链接路径（H999）：Cranelift object + 运行时静态库需 GNU 链接器",
+            Some("改用 `hone natgen <file> --obj <o>` 仅产 object 自行链接，或安装 MinGW-w64 gcc"),
+        ));
     }
-    rustc_args.push("-o".into());
-    rustc_args.push(out_s.clone());
-    rustc_args.push(main_rs.to_str().unwrap().to_string());
-    rustc_args.push("-C".into());
-    rustc_args.push(format!("link-arg={}", obj_s));
-    // G3.4：打包工具链链接（script.o + libhoneruntime.a + CRT，设计 §5.1；COFF/ELF 双分支见
-    // link_native_packaged）。rustc 可用时默认维持 rustc 路径（逐字节回归基准），
-    // 由 HONE_NAT_LINK=packaged 强制走这里。
-    if use_packaged {
-        // G3.4：打包链接（COFF/ELF 双分支，见 link_native_packaged）。
-        let packaged = link_native_packaged(&triple_s, &obj_s, &out_s);
-        let _ = std::fs::remove_dir_all(&tmpdir);
-        packaged?;
-        if !std::path::Path::new(&out).is_file() {
-            return Err(ZError::plain(
-                codes::INTERNAL,
-                "链接器报告成功但产物不存在",
-                None::<String>,
-            ));
-        }
-        eprintln!("[{total}/{total}] {label} 完成: {out}（工具链链接，无需 rustc）");
-        return Ok(());
+    let mut link_cmd = vec!["gcc".to_string(), obj_s.clone(), rtlib.display().to_string()];
+    if is_elf {
+        link_cmd.push("-no-pie".into());
+        link_cmd.push("-Wl,--gc-sections".into());
+        link_cmd.push("-Wl,--strip-all".into());
+    } else {
+        // windows-gnu：Rust std 依赖的导入库 gcc 驱动不自动带（rustc 自身链接才注入），
+        // 缺了会在链接期报 undefined reference（closesocket / NtReadFile / WSAGetLastError…）
+        link_cmd.push("-lws2_32".into());
+        link_cmd.push("-lntdll".into());
+        link_cmd.push("-lbcrypt".into());
+        link_cmd.push("-luserenv".into());
+        link_cmd.push("-ladvapi32".into());
+        link_cmd.push("-Wl,--gc-sections".into());
+        link_cmd.push("-Wl,--strip-all".into());
     }
-    let p = std::process::Command::new("rustc")
-        .args(&rustc_args)
+    link_cmd.push("-o".into());
+    link_cmd.push(out_s.clone());
+    eprintln!("[link] {}", link_cmd.join(" "));
+    let lp = std::process::Command::new(&link_cmd[0])
+        .args(&link_cmd[1..])
         .output()
         .map_err(|e| {
             ZError::plain(
                 codes::INTERNAL,
-                format!("rustc 启动失败: {e}"),
-                Some("需要本机 rustc 工具链"),
+                format!("gcc 启动失败: {e}"),
+                Some("需要系统 gcc（MinGW-w64 / 发行版 gcc）；或用 `--obj` 仅产 object 自行链接"),
             )
         })?;
-    let _ = std::fs::remove_dir_all(&tmpdir);
-    if !p.status.success() {
-        let err = String::from_utf8_lossy(&p.stderr);
-        let hint = if cross {
-            // 交叉失败的常见三类原因分开说：缺目标 std（rustup 组件未装）/ 缺 rust-lld /
-            // glibc 目标不支持 `link-self-contained`（Linux 交叉只支持 musl，见设计 §一 非目标）。
-            format!(
-                "交叉目标 `{triple_s}` 需要该目标的 Rust std 与自带 CRT（`rustup target add {triple_s}`）\
-                 ，以及 sysroot 内的 rust-lld；Linux 侧交叉请用 musl 目标（glibc 目标不在 CRT 分发矩阵内），\
-                 或改用随 hone 分发的打包工具链（G3.4）"
-            )
-        } else {
-            "检查 rustc 工具链与 object 目标三元组一致性".to_string()
-        };
-        return Err(ZError::plain(codes::INTERNAL, format!("链接失败:\n{err}"), Some(hint)));
+    if !lp.status.success() {
+        let err = String::from_utf8_lossy(&lp.stderr);
+        return Err(ZError::plain(
+            codes::INTERNAL,
+            format!("gcc 链接失败:\n{err}"),
+            Some("检查 gcc 版本与 object 目标三元组一致性；或用 `--obj` 仅产 object 自行链接"),
+        ));
     }
     if !std::path::Path::new(&out).is_file() {
         return Err(ZError::plain(
             codes::INTERNAL,
-            "rustc 报告成功但产物不存在",
+            "gcc 报告成功但产物不存在",
             None::<String>,
         ));
     }
     eprintln!("[{total}/{total}] {label} 完成: {out}");
     Ok(())
+}
+
+/// 内嵌运行时静态库（exe 链接用）：NAT_RUNTIME_SRC 经 rustc 编为
+/// `--cfg hone_boot --crate-type staticlib` 的 libhoneruntime.a（含 C 入口 main）。
+/// 按「源码内容 + 目标三元组」md5 缓存于 ~/.hone/cache/runtime/——运行时源码不变
+/// 时跨脚本复用，不重复编译。交叉目标需已装该目标的 rust std。
+fn runtime_staticlib(triple_s: &str) -> Result<std::path::PathBuf, ZError> {
+    use md5::Digest;
+    let host = target_lexicon::Triple::host().to_string();
+    let cross = triple_s != host;
+    let mut h = md5::Md5::new();
+    h.update(NAT_RUNTIME_SRC.as_bytes());
+    h.update(triple_s.as_bytes());
+    let hash = format!("{:x}", h.finalize())[..12].to_string();
+    let dir = crate::interp::hone_cache_dir().join("runtime");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| ZError::plain(codes::INTERNAL, format!("创建运行时缓存目录: {e}"), None::<String>))?;
+    let lib = dir.join(format!("libhoneruntime-{}.a", hash));
+    if lib.is_file() {
+        return Ok(lib);
+    }
+    // 编到临时名再改名：并发/中断不会留下半截 .a 被后续命中。
+    let tmp = dir.join(format!(".tmp-{}", hash));
+    let mut cmd: Vec<std::ffi::OsString> = vec![
+        "rustc".into(),
+        "--edition".into(),
+        "2021".into(),
+        "--cfg".into(),
+        "hone_boot".into(),
+        "--crate-type".into(),
+        "staticlib".into(),
+        "-C".into(),
+        "opt-level=z".into(),
+        "-C".into(),
+        "codegen-units=1".into(),
+        "-C".into(),
+        "panic=abort".into(),
+        "-o".into(),
+        tmp.clone().into_os_string(),
+    ];
+    if cross {
+        cmd.push("--target".into());
+        cmd.push(triple_s.into());
+    }
+    cmd.push(NAT_RUNTIME_SRC_PATH.into());
+    eprintln!("[3b] 编译内嵌运行时静态库: {}（缓存 {}）", triple_s, lib.display());
+    let p = std::process::Command::new(&cmd[0])
+        .args(&cmd[1..])
+        .output()
+        .map_err(|e| {
+            ZError::plain(
+                codes::INTERNAL,
+                format!("rustc 启动失败: {e}"),
+                Some("需要本机 rustc 工具链（运行时静态库编译一次后缓存复用）"),
+            )
+        })?;
+    if !p.status.success() {
+        let err = String::from_utf8_lossy(&p.stderr);
+        let hint = if cross {
+            format!(
+                "交叉目标 `{triple_s}` 需要该目标的 Rust std（`rustup target add {triple_s}`）；\
+                 Linux 侧交叉请用 musl 目标（glibc 目标不在分发矩阵内）"
+            )
+        } else {
+            "检查 rustc 工具链".to_string()
+        };
+        return Err(ZError::plain(codes::INTERNAL, format!("运行时静态库编译失败:\n{err}"), Some(hint)));
+    }
+    std::fs::rename(&tmp, &lib)
+        .map_err(|e| ZError::plain(codes::INTERNAL, format!("落盘运行时静态库: {e}"), None::<String>))?;
+    Ok(lib)
 }
 
 /// 末尾输出汇总；有失败即退出码非 0。

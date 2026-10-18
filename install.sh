@@ -157,23 +157,17 @@ if [ -x "$INSTALL_DIR/hone" ] && [ -n "$EXPECTED_BIN" ]; then
   fi
 fi
 
-# 3) 优先下载完整工具链包（hone + targets/ 运行时归档：build --exe --native 无 rustc 可用）；
+# 3) 优先下载 full 包（hone 本体；原生编译走「object + 系统 gcc 链接」，无需工具链分发）；
 #    其次 .tar.gz 裸二进制压缩包（更小）；最后退回裸二进制
 FULL_TGZ=$(awk -v a="$ASSET-full.tar.gz" '$2 == a {print $1}' "$TMPDL/checksums.txt")
 if [ -n "$FULL_TGZ" ]; then
   fetch "$ASSET-full.tar.gz" "$TMPDL/hone_full.tgz" || die "下载 $ASSET-full.tar.gz 失败"
   ACTUAL=$($SHA "$TMPDL/hone_full.tgz" | awk '{print $1}')
-  [ "$ACTUAL" = "$FULL_TGZ" ] || die "sha256 校验失败（full 工具链包）：期望 $FULL_TGZ，实际 $ACTUAL"
+  [ "$ACTUAL" = "$FULL_TGZ" ] || die "sha256 校验失败（full 包）：期望 $FULL_TGZ，实际 $ACTUAL"
   tar -xzf "$TMPDL/hone_full.tgz" -C "$TMPDL" || die "解压失败（tar 包损坏？）"
-  [ -f "$TMPDL/hone" ] || die "工具链包缺少 hone 可执行文件"
+  [ -f "$TMPDL/hone" ] || die "full 包缺少 hone 可执行文件"
   chmod +x "$TMPDL/hone"
   mv -f "$TMPDL/hone" "$INSTALL_DIR/hone"
-  # targets/ 落在 hone 可执行文件同目录（toolchain_dir() 按 <exe 目录>/targets/ 解析）
-  if [ -d "$TMPDL/targets" ]; then
-    rm -rf "$INSTALL_DIR/targets"
-    cp -r "$TMPDL/targets" "$INSTALL_DIR/targets"
-    ok "已安装原生编译工具链（$INSTALL_DIR/targets/，build --exe --native 无需 rustc）"
-  fi
   VER=$("$INSTALL_DIR/hone" --version 2>/dev/null | head -n1)
   ok "安装完成: $INSTALL_DIR/hone ($VER)"
 elif [ -n "$EXPECTED_TGZ" ]; then

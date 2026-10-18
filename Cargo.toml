@@ -37,6 +37,10 @@ codegen-units = 1
 [dependencies]
 serde_json = "1"
 libloading = "0.7"
+# 工业级 FFI：动态调用（CIF，含变参 ffi_prep_cif_var）+ 回调闭包（ffi_closure）。
+# 默认（无 system feature）从源码构建 libffi C 库并**静态**链入产物，无系统动态库依赖；
+# MSVC 目标经预处理头 + cc 构建（无需 automake/make），GNU/ELF 目标需 make + C 编译器。
+libffi-sys = "4.2.2"
 regex = "1"
 md-5 = "0.10"
 sha2 = "0.10"

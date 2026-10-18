@@ -359,9 +359,9 @@ fn try_proto(toks: &[Tok], i: usize, defs: &HashMap<String, TyDef>) -> Option<(F
     Some((FfiSig { name, params, ret, variadic, unsupported: None }, next))
 }
 
-/// 从回调参数的 token 序列提取受限原型：`int (*)(int, void*)` / `int (*)(int, void*)` 的
-/// 参数表部分。返回 FfiTy::Callback（限 0-4 个 int 类参数 + int 类返回；float 形参/
-/// 返回的回调受 x64 ABI double 传递限制，不支持——标记 unsupported）。
+/// 从回调参数的 token 序列提取受限原型：`int (*)(int, void*)` 的参数表部分。
+/// 返回 FfiTy::Callback（0-8 个标量参数 + 标量返回；libffi closure 支持
+/// int/int32/float/float32/bool/str/ptr 全标量传递）。
 fn callback_from_toks(pt: &[Tok], defs: &HashMap<String, TyDef>) -> Result<FfiTy, &'static str> {
     // 取最内层括号内容（回调原型 `int (*)(int, void*)` 只有一层参数括号）
     let open = pt.iter().position(|t| t == &Tok::Punct("(".to_string()))
@@ -397,11 +397,9 @@ fn callback_from_toks(pt: &[Tok], defs: &HashMap<String, TyDef>) -> Result<FfiTy
     if !ret_strs.is_empty() {
         let (rty, _) = extract_param_type(&ret_strs, defs);
         match rty? {
-            t @ (FfiTy::Int | FfiTy::Bool | FfiTy::Str | FfiTy::Ptr | FfiTy::Void) => ret = t,
-            _ => {
-                return Err(
-                    "floating-point return (`float`/`double`) is not supported in callbacks",
-                )
+            t @ (FfiTy::Int | FfiTy::Int32 | FfiTy::Float | FfiTy::Float32 | FfiTy::Bool | FfiTy::Str | FfiTy::Ptr | FfiTy::Void) => ret = t,
+            FfiTy::Callback { .. } => {
+                return Err("callback return types support scalars only (`int`/`int32`/`float`/`float32`/`bool`/`str`/`ptr`/`void`)")
             }
         }
     }
@@ -425,16 +423,15 @@ fn callback_from_toks(pt: &[Tok], defs: &HashMap<String, TyDef>) -> Result<FfiTy
         }
         let (pty, _) = extract_param_type(&strs, defs);
         match pty? {
-            t @ (FfiTy::Int | FfiTy::Bool | FfiTy::Str | FfiTy::Ptr) => cb_params.push(t),
-            _ => {
-                return Err(
-                    "floating-point parameter (`float`/`double`) is not supported in callbacks",
-                )
+            t @ (FfiTy::Int | FfiTy::Int32 | FfiTy::Float | FfiTy::Float32 | FfiTy::Bool | FfiTy::Str | FfiTy::Ptr) => cb_params.push(t),
+            // void 参数位已在上面 `strs == ["void"]` 分支 continue，不会到这里；兜底拒绝
+            FfiTy::Void | FfiTy::Callback { .. } => {
+                return Err("callback parameters support scalars only (`int`/`int32`/`float`/`float32`/`bool`/`str`/`ptr`)")
             }
         }
     }
-    if cb_params.len() > 4 {
-        return Err("callbacks with more than 4 parameters are not supported");
+    if cb_params.len() > 8 {
+        return Err("callbacks with more than 8 parameters are not supported");
     }
     Ok(FfiTy::Callback { params: cb_params, ret: Box::new(ret) })
 }
@@ -570,11 +567,15 @@ fn map_type(toks: &[String], defs: &HashMap<String, TyDef>, depth: usize) -> Res
     if real.iter().any(|t| t.as_str() == "void") {
         return Ok(FfiTy::Void);
     }
-    if real.iter().any(|t| t.as_str() == "float" || t.as_str() == "double") {
+    if real.iter().any(|t| t.as_str() == "double") {
         if real.iter().any(|t| t.as_str() == "long") {
             return Err("`long double` is not supported");
         }
         return Ok(FfiTy::Float);
+    }
+    // C float（32 位）：映射为 FfiTy::Float32（Hone 侧签名块写作 float32）
+    if real.iter().any(|t| t.as_str() == "float") {
+        return Ok(FfiTy::Float32);
     }
     if real.iter().any(|t| t.as_str() == "bool" || t.as_str() == "_Bool") {
         return Ok(FfiTy::Bool);
@@ -584,6 +585,13 @@ fn map_type(toks: &[String], defs: &HashMap<String, TyDef>, depth: usize) -> Res
     }
     if real.iter().any(|t| t.as_str() == "enum") {
         return Ok(FfiTy::Int);
+    }
+    // int32_t / uint32_t（含常见 typedef 形态 int32）→ Int32
+    if real.iter().any(|t| {
+        let t = t.as_str();
+        t == "int32_t" || t == "uint32_t" || t == "int32" || t == "uint32"
+    }) {
+        return Ok(FfiTy::Int32);
     }
     // int/long/short/size_t/char 等整数族（含未知 typedef，如 time_t）
     Ok(FfiTy::Int)

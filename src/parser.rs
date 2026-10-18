@@ -1557,13 +1557,15 @@ impl Parser {
     fn ffi_ty_from_tok(&mut self, tok: &Tok) -> Result<FfiTy, ZError> {
         match tok {
             Tok::TInt => Ok(FfiTy::Int),
+            Tok::TInt32 => Ok(FfiTy::Int32),
             Tok::TFloat => Ok(FfiTy::Float),
+            Tok::TFloat32 => Ok(FfiTy::Float32),
             Tok::TBool => Ok(FfiTy::Bool),
             Tok::TStr => Ok(FfiTy::Str),
             Tok::Ident(s) if s == "ptr" => Ok(FfiTy::Ptr),
             Tok::Ident(s) if s == "void" => Ok(FfiTy::Void),
             Tok::Fn => {
-                // 回调原型：`fn(p: ty, ...) -> ret`（零依赖受限：0-4 个 int 类形参）
+                // 回调原型：`fn(p: ty, ...) -> ret`（libffi closure：标量参数/返回全支持）
                 self.expect(&Tok::LParen, "`(`")?;
                 let mut cb_params = Vec::new();
                 if !self.at(&Tok::RParen) {
@@ -1574,11 +1576,14 @@ impl Parser {
                             Tok::Ident(s) if s == "str" => cb_params.push(FfiTy::Str),
                             Tok::Ident(s) if s == "bool" => cb_params.push(FfiTy::Bool),
                             Tok::TInt => cb_params.push(FfiTy::Int),
+                            Tok::TInt32 => cb_params.push(FfiTy::Int32),
+                            Tok::TFloat => cb_params.push(FfiTy::Float),
+                            Tok::TFloat32 => cb_params.push(FfiTy::Float32),
                             other => {
                                 return Err(self.err_here(
                                     codes::SYNTAX,
                                     format!("callback parameter type {} is not supported", other.describe()),
-                                    Some("callback parameters support `int`/`bool`/`str`/`ptr` only"),
+                                    Some("callback parameters support `int`/`int32`/`float`/`float32`/`bool`/`str`/`ptr` only"),
                                 ))
                             }
                         }
@@ -1594,12 +1599,12 @@ impl Parser {
                 let (rtok, _) = self.next();
                 let cb_ret = self.ffi_ty_from_tok(&rtok)?;
                 match cb_ret {
-                    FfiTy::Int | FfiTy::Ptr | FfiTy::Void | FfiTy::Bool | FfiTy::Str => {}
+                    FfiTy::Int | FfiTy::Int32 | FfiTy::Float | FfiTy::Float32 | FfiTy::Ptr | FfiTy::Void | FfiTy::Bool | FfiTy::Str => {}
                     other => {
                         return Err(self.err_here(
                             codes::SYNTAX,
                             format!("callback return type `{}` is not supported", other.name()),
-                            Some("callback return types support `int`/`bool`/`str`/`ptr`/`void`"),
+                            Some("callback return types support `int`/`int32`/`float`/`float32`/`bool`/`str`/`ptr`/`void`"),
                         ))
                     }
                 }
@@ -1608,7 +1613,7 @@ impl Parser {
             other => Err(self.err_here(
                 codes::SYNTAX,
                 format!("expected a type name, found {}", other.describe()),
-                Some("supported FFI types: `int`/`float`/`bool`/`str`/`ptr`, return types also allow `void`; callbacks: `fn(int) -> int`"),
+                Some("supported FFI types: `int`/`int32`/`float`/`float32`/`bool`/`str`/`ptr`, return types also allow `void`; callbacks: `fn(int) -> int`"),
             )),
         }
     }

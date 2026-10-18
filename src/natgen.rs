@@ -431,7 +431,7 @@ impl<'x, 'f> ChunkLower<'x, 'f> {
                         .find(|(k, _, _)| *k == key)
                         .cloned();
                     match entry {
-                        Some((_, b, p)) => (b, vec![r.into()]),
+                        Some((_, b, _)) => (b, vec![r.into()]),
                         None => {
                             let b = self.bcx.create_block();
                             let p = self.bcx.func.dfg.append_block_param(b, I64);

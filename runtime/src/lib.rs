@@ -5883,6 +5883,14 @@ pub extern "C" fn hn_entry() -> i32 {
     0
 }
 
+/// C 链接器入口（系统 gcc 链接 `app.o + libhoneruntime.a -o app` 时被 CRT 引用）：
+/// 调 hn_entry 并以退出码返回。仅 staticlib 链接路径有意义；hone 本体是独立 bin crate
+/// （不经本 crate 编译），rlib 测试构建有自己的测试桩，互不冲突。
+#[no_mangle]
+pub extern "C" fn main() -> i32 {
+    hn_entry()
+}
+
 // 测试构建下 object 不存在：不声明 extern，改由下方测试桩定义同名符号。
 #[cfg(not(test))]
 extern "C" {

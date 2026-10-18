@@ -3113,13 +3113,20 @@ impl Checker {
                 sig.ret.name()
             )
         };
-        if sig.params.len() != arg_tys.len() {
+        // 变参签名：实参数须 ≥ 具名参数数（多出的变参实参运行期按类型转换）；
+        // 定长签名：精确相等
+        if arg_tys.len() < sig.params.len() || (!sig.variadic && arg_tys.len() != sig.params.len()) {
+            let expected = if sig.variadic {
+                format!("at least {}", sig.params.len())
+            } else {
+                format!("{}", sig.params.len())
+            };
             return Err(self.zerr(
                 codes::ARG_COUNT,
                 format!(
                     "wrong number of arguments: `{}` expects {}, got {}",
                     sig.name,
-                    sig.params.len(),
+                    expected,
                     arg_tys.len()
                 ),
                 span,
@@ -3129,7 +3136,9 @@ impl Checker {
         for (p, aty) in sig.params.iter().zip(arg_tys) {
             let expected = match p.ty {
                 FfiTy::Int => Some(Ty::Int),
+                FfiTy::Int32 => Some(Ty::Int),
                 FfiTy::Float => Some(Ty::Float),
+                FfiTy::Float32 => Some(Ty::Float),
                 FfiTy::Bool => Some(Ty::Bool),
                 FfiTy::Str => Some(Ty::Str),
                 // 不透明指针：静态阶段不限制（值为运行时地址）
@@ -3158,7 +3167,9 @@ impl Checker {
         }
         let ty = match sig.ret {
             FfiTy::Int => Ty::Int,
+            FfiTy::Int32 => Ty::Int,
             FfiTy::Float => Ty::Float,
+            FfiTy::Float32 => Ty::Float,
             FfiTy::Bool => Ty::Bool,
             FfiTy::Str => Ty::Str,
             FfiTy::Ptr => Ty::Unknown,

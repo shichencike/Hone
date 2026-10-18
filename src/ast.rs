@@ -323,8 +323,12 @@ pub enum TyName {
 pub enum FfiTy {
     /// int64_t
     Int,
+    /// int32_t
+    Int32,
     /// double
     Float,
+    /// C float（32 位；签名块里写 float32，头文件解析里 C `float` → 本类型）
+    Float32,
     /// _Bool / bool（按整数寄存器传递，返回时非零即 true）
     Bool,
     /// const char*（UTF-8 / C 字符串）
@@ -334,7 +338,7 @@ pub enum FfiTy {
     /// void（仅作返回类型）
     Void,
     /// C 回调原型（签名块形参写作 `fn(p: ty, ...) -> ret`）：解释器把 Hone 函数
-    /// 打包成 trampoline 地址传给 C（仅同步回调；零依赖方案限 4 参内 int 类形参）
+    /// 打包成 libffi closure 地址传给 C（仅同步回调；标量参数/返回全支持）
     Callback { params: Vec<FfiTy>, ret: Box<FfiTy> },
 }
 
@@ -342,7 +346,9 @@ impl FfiTy {
     pub fn name(&self) -> &'static str {
         match self {
             FfiTy::Int => "int",
+            FfiTy::Int32 => "int32",
             FfiTy::Float => "float",
+            FfiTy::Float32 => "float32",
             FfiTy::Bool => "bool",
             FfiTy::Str => "str",
             FfiTy::Ptr => "ptr",
