@@ -7,6 +7,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # debug 构建降 debuginfo=0：debuginfo=2 时 rustc 链接 200MB 级大产物会耗尽
+  # runner 内存（GitHub CI 三平台 exit 143 / memory allocation failed，2026-10-18）。
+  # 回归测试只看 stdout/stderr 逐字节输出，不需要调试符号。
+  CARGO_PROFILE_DEV_DEBUG: 0
   # Windows runner 默认 locale 为 charmap/GBK，强制 Python 以 UTF-8 读写标准流，
   # 避免回归脚本解码 Hone 的 UTF-8 输出时崩溃（配合 regress4.py 的 encoding='utf-8'）。
   PYTHONIOENCODING: utf-8
