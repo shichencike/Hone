@@ -41,7 +41,7 @@ die()  { printf "%b[ERROR]%b %s\n" "$C_R" "$C_X" "$1" >&2; exit 1; }
 case "$(uname -s)" in
   Linux) OS="linux" ;;
   *)
-    die "install.sh 仅支持 Linux/Termux；Windows 请用 install.ps1，macOS 暂未发布"
+    die "install.sh 仅支持 Linux/Termux；Windows 请手动下载 hone-windows-x86_64-full.zip 并将其目录加入 PATH，macOS 暂未发布"
     ;;
 esac
 

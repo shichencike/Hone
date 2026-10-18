@@ -1,7 +1,7 @@
 // archmod.rs - 压缩与归档（archive.* 内置函数）
 // 纯 Rust 实现（zip/tar/flate2），Windows / Linux / Termux 跨平台一致。
 //   archive.zip_list(path)      -> list    列出 zip 文件条目名
-//   archive.zip_read(path, e)   -> str     读取 zip 中指定条目的文本内容
+//   archive.zip_read(path, e)   -> bytes   读取 zip 中指定条目的内容（二进制安全）
 //   archive.zip_extract(path, d)-> int     解压 zip 到目录，返回条目数
 //   archive.zip_create(path, d) -> bool    从 dict {条目名: 内容} 创建 zip
 //   archive.tgz_list(path)      -> list    列出 tar.gz 条目名
@@ -145,11 +145,12 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                     Some("list entries with `archive.zip_list(path)`"),
                 )
             })?;
-            let mut buf = String::new();
-            zf.read_to_string(&mut buf).map_err(|e| {
+            // 返回真正的 bytes（原 str 形态经 read_to_string 会拒绝/破坏非 UTF-8 条目）
+            let mut buf = Vec::new();
+            zf.read_to_end(&mut buf).map_err(|e| {
                 zerr(codes::SYSCALL, format!("cannot read zip entry `{}`: {}", entry, e), span, file, src, None::<&str>)
             })?;
-            Ok(Value::Str(buf))
+            Ok(Value::Bytes(buf))
         }
         "archive.zip_extract" => {
             let path = as_str(&args[0], 0, span, file, src)?;

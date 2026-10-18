@@ -1,5 +1,39 @@
 # Changelog
 
+## [Unreleased]
+
+### 新增
+- **VM 引擎完整支持 byte/bytes 值**：内置函数产出的字节值（read_bytes / crypto.base64_decode /
+  archive.zip_read / ptr.read_byte / bytes 索引）在 interp/VM 双引擎均可完整使用——显示 /
+  `==` / byte 排序比较 / 索引 / for-in 迭代 / `+` 拼接 / len 与解释器逐字节一致。VM 新增
+  `ISBYTES` 指令（文本 IR 往返同步；natgen lowering 恒 false，runtime 预留 `T_BYTES` 标签）；
+  推导式对 bytes 源的拒绝与 for-in 双变量 `requires a dict` 报错（list/bytes 两种文案）三处
+  引擎对齐。byte/bytes **字面量语法**（0b… / b"…" / byte()）仍仅解释器支持（VM/AOT/DLL
+  编译期报 H999）
+- **`hone build --obj` 仅 object 模式**：原生管线编译到 Cranelift object 即停（object 即最终产物，
+  不链接 exe）——`hone build --obj <script.hn> [-o <out>] [--cpu <name>] [--target <triple>]`，
+  默认产物名 `{}.nat.o`。用途：保留脚本 object 供调试 / 自行链接、交叉目标出 object
+  （无需目标 std 与链接器）；object 格式由目标决定（COFF / ELF）
+
+### 变更（byte/bytes 内置函数返回值修正，含破坏性变更）
+- **`read_bytes(path)` → `bytes`**（原 `list[int]`）：返回真正的字节序列（索引得 byte 值、
+  for-in 迭代字节、`+` 拼接、len 为字节数）；checker 静态返回类型同步
+- **`crypto.base64_decode(str)` → `bytes`**（原 `str`）：二进制安全（原实现经
+  from_utf8_lossy 会破坏非 UTF-8 内容，属 bug 修复）
+- **`archive.zip_read(path, entry)` → `bytes`**（原 `str`）：二进制安全（原实现经
+  read_to_string 会拒绝非 UTF-8 条目，属 bug 修复）；`archive.tgz_read` 维持 `str`（仅文本）
+- **`ptr.read_byte(p, offset)` → `byte` 值**（原 `int` 0-255）：与 int 严格隔离，回转用 to_int
+- **参数侧补充（非破坏）**：`crypto.base64_encode` 额外接受 `bytes`；`write_bytes` 额外接受
+  `bytes` 值；`ptr.write_byte` 额外接受 `byte` 值（原 list/int 形态均可用）
+- **VM 行为对齐**：`for a, b in <list/bytes>` 双变量迭代原在 VM 静默放行（第二变量取陈旧值），
+  现与解释器一致报错 `` `for k, v in` requires a dict, got a list/bytes ``
+- checker 新增双形态参数检查（expect_str_or_bytes / expect_int_or_byte）；LSP 补全描述同步
+
+### 变更
+- **`hone natgen --obj <o>` 语义统一为「仅 object」**：原先「改名中间 object 仍链接 exe」的用法
+  废弃；`--obj` 与 `-o` 不能同用（显式报错）。完整管线（`natgen <file.hn>` /
+  `build --exe --native`）行为与默认中间 object 名（`{}.nat.o`）不变
+
 ## [v0.8.0] — 2026-10-17
 
 ### 新增

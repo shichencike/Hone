@@ -1494,6 +1494,7 @@ impl Parser {
             };
             self.expect(&Tok::LParen, "`(`")?;
             let mut params = Vec::new();
+            let mut variadic = false;
             if !self.at(&Tok::RParen) {
                 loop {
                     let (ptok, _pspan) = self.next();
@@ -1520,6 +1521,12 @@ impl Parser {
                     params.push(FfiParam { name: pname, ty });
                     if self.at(&Tok::Comma) {
                         self.next();
+                        if self.at(&Tok::DotDotDot) {
+                            // 变参标记：`fn printf(fmt: str, ...) -> int`
+                            self.next();
+                            variadic = true;
+                            break;
+                        }
                         if self.at(&Tok::RParen) {
                             break;
                         }
@@ -1529,18 +1536,25 @@ impl Parser {
                 }
             }
             self.expect(&Tok::RParen, "`)`")?;
+            if variadic && params.is_empty() {
+                return Err(self.err_here(
+                    codes::SYNTAX,
+                    format!("`{}`: a variadic signature requires at least one named parameter before `...`", name),
+                    Some("form: `fn name(fmt: str, ...) -> ret;`"),
+                ));
+            }
             self.expect(&Tok::Arrow, "`->`")?;
             let (rtok, _) = self.next();
             let ret = self.ffi_ty_from_tok(&rtok)?;
             self.expect_semi()?;
-            sigs.push(FfiSig { name, params, ret, unsupported: None });
+            sigs.push(FfiSig { name, params, ret, variadic, unsupported: None });
         }
         self.expect(&Tok::RBrace, "`}`")?;
         Ok(sigs)
     }
 
     /// 将 token 解析为 FFI 类型。
-    fn ffi_ty_from_tok(&self, tok: &Tok) -> Result<FfiTy, ZError> {
+    fn ffi_ty_from_tok(&mut self, tok: &Tok) -> Result<FfiTy, ZError> {
         match tok {
             Tok::TInt => Ok(FfiTy::Int),
             Tok::TFloat => Ok(FfiTy::Float),
@@ -1548,15 +1562,53 @@ impl Parser {
             Tok::TStr => Ok(FfiTy::Str),
             Tok::Ident(s) if s == "ptr" => Ok(FfiTy::Ptr),
             Tok::Ident(s) if s == "void" => Ok(FfiTy::Void),
-            Tok::Fn => Err(self.err_here(
-                codes::SYNTAX,
-                "callback parameter types (`fn(...)`) are not supported yet",
-                Some("declare the callback as `ptr` and pass a function pointer obtained from the library"),
-            )),
+            Tok::Fn => {
+                // 回调原型：`fn(p: ty, ...) -> ret`（零依赖受限：0-4 个 int 类形参）
+                self.expect(&Tok::LParen, "`(`")?;
+                let mut cb_params = Vec::new();
+                if !self.at(&Tok::RParen) {
+                    loop {
+                        let (ptok, _) = self.next();
+                        match ptok {
+                            Tok::Ident(s) if s == "ptr" => cb_params.push(FfiTy::Ptr),
+                            Tok::Ident(s) if s == "str" => cb_params.push(FfiTy::Str),
+                            Tok::Ident(s) if s == "bool" => cb_params.push(FfiTy::Bool),
+                            Tok::TInt => cb_params.push(FfiTy::Int),
+                            other => {
+                                return Err(self.err_here(
+                                    codes::SYNTAX,
+                                    format!("callback parameter type {} is not supported", other.describe()),
+                                    Some("callback parameters support `int`/`bool`/`str`/`ptr` only"),
+                                ))
+                            }
+                        }
+                        if self.at(&Tok::Comma) {
+                            self.next();
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                self.expect(&Tok::RParen, "`)`")?;
+                self.expect(&Tok::Arrow, "`->`")?;
+                let (rtok, _) = self.next();
+                let cb_ret = self.ffi_ty_from_tok(&rtok)?;
+                match cb_ret {
+                    FfiTy::Int | FfiTy::Ptr | FfiTy::Void | FfiTy::Bool | FfiTy::Str => {}
+                    other => {
+                        return Err(self.err_here(
+                            codes::SYNTAX,
+                            format!("callback return type `{}` is not supported", other.name()),
+                            Some("callback return types support `int`/`bool`/`str`/`ptr`/`void`"),
+                        ))
+                    }
+                }
+                Ok(FfiTy::Callback { params: cb_params, ret: Box::new(cb_ret) })
+            }
             other => Err(self.err_here(
                 codes::SYNTAX,
                 format!("expected a type name, found {}", other.describe()),
-                Some("supported FFI types: `int`/`float`/`bool`/`str`/`ptr`, return types also allow `void`"),
+                Some("supported FFI types: `int`/`float`/`bool`/`str`/`ptr`, return types also allow `void`; callbacks: `fn(int) -> int`"),
             )),
         }
     }

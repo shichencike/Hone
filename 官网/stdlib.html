@@ -352,7 +352,7 @@ tasks = [
     <p>终端字符进度条标准库（纯 Hone 编写，零依赖）：渲染 <code class="inline">[####----] 45% 12/24</code> 样式，
       支持单行原地刷新（ANSI 重绘）、每帧新行模式（老终端兼容）、剩余时间估算。
       Hone 的 <code class="inline">print</code> 自带换行且字符串转义不支持 <code class="inline">\r</code>/<code class="inline">\x</code>，
-      单行刷新通过 <code class="inline">crypto.base64_decode("Gw==")</code> 构造 ESC 字符拼出
+      单行刷新通过 <code class="inline">to_str(char(27))</code> 按码点构造 ESC 字符拼出
       <code class="inline">ESC[1A</code>（上移一行）+ <code class="inline">ESC[K</code>（清行）实现；首帧用
       <code class="inline">shown</code> 字段避免上移越过屏幕顶部。</p>
     <table>

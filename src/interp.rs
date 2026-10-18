@@ -4,6 +4,7 @@
 // 类型锁定由 checker 静态保证，解释器专注求值。
 
 use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
 use std::ffi::{CStr, CString};
 use std::io::{self, Write};
 use std::os::raw::c_char;
@@ -648,6 +649,255 @@ macro_rules! ffi_dispatch {
             ffi_dispatch!([$($ri)*], $bits, $retf, $lib, $name, $cargs, $sym_err, [$($t,)* i64], [$($v,)* carg_i($cargs, $i)])
         }
     };
+}
+
+#[inline]
+fn carg_is_f(cargs: &[CArg], i: usize) -> bool {
+    matches!(cargs[i], CArg::F(_))
+}
+
+/// 变参（ctypes 式）FFI 调用：与 ffi_dispatch! 同模式，但尾参展开为 C 变参
+/// 函数指针类型 `unsafe extern "C" fn(A..., ...) -> R`（调用变参函数是稳定 Rust
+/// 合法语法；调用方按 varargs 约定设置寄存器/AL，与 C 调用点一致）。
+/// 固定参数 + 变参实参统一放在 $cargs 里按索引逐位取类别展开。
+macro_rules! ffi_variadic {
+    // 基础：全部索引位已消费，展开变参符号类型并调用
+    ([], $retf:expr, $lib:expr, $name:expr, $cargs:expr, $sym_err:expr, [$($t:ty),*], [$($v:expr),*]) => {
+        if $retf {
+            let sym: libloading::Symbol<unsafe extern "C" fn($($t,)* ...) -> f64> =
+                unsafe { $lib.get($name) }.map_err($sym_err)?;
+            CRet::F(unsafe { sym($($v),*) })
+        } else {
+            let sym: libloading::Symbol<unsafe extern "C" fn($($t,)* ...) -> i64> =
+                unsafe { $lib.get($name) }.map_err($sym_err)?;
+            CRet::I(unsafe { sym($($v),*) })
+        }
+    };
+    // 单元素：消费最后一个索引位后进入基础规则
+    ([$i:tt], $retf:expr, $lib:expr, $name:expr, $cargs:expr, $sym_err:expr, [$($t:ty),*], [$($v:expr),*]) => {
+        if carg_is_f($cargs, $i) {
+            ffi_variadic!([], $retf, $lib, $name, $cargs, $sym_err, [$($t,)* f64], [$($v,)* carg_f($cargs, $i)])
+        } else {
+            ffi_variadic!([], $retf, $lib, $name, $cargs, $sym_err, [$($t,)* i64], [$($v,)* carg_i($cargs, $i)])
+        }
+    };
+    // 多元素：消费头部索引位，继续递归
+    ([$i:tt, $($ri:tt)*], $retf:expr, $lib:expr, $name:expr, $cargs:expr, $sym_err:expr, [$($t:ty),*], [$($v:expr),*]) => {
+        if carg_is_f($cargs, $i) {
+            ffi_variadic!([$($ri)*], $retf, $lib, $name, $cargs, $sym_err, [$($t,)* f64], [$($v,)* carg_f($cargs, $i)])
+        } else {
+            ffi_variadic!([$($ri)*], $retf, $lib, $name, $cargs, $sym_err, [$($t,)* i64], [$($v,)* carg_i($cargs, $i)])
+        }
+    };
+}
+
+// ========== FFI 回调（零依赖受限方案） ==========
+// 同步回调：C 必须在 Hone 发起的本次 FFI 调用（同线程）内回调。trampoline 家族
+// 预生成（0-4 个整数类参数 × int/void 返回），把 C 传入的 i64 参数原样收下，经
+// thread_local 槽取回 Hone 可调用与原型，转换参数后用全新解释器实例执行 Hone 函数。
+// 异步回调（C 保存指针日后调用）不支持：槽取空后回调会得到明确的 H999 诊断。
+
+/// 回调窗口状态：C 回调进入 trampoline 时从中取回被代理的 Hone 可调用。
+struct CbCtx {
+    /// 回调原型（参数/返回类别）
+    cb: FfiTy,
+    /// Hone 可调用：lambda 值（二选一）
+    lambda: Option<Arc<LambdaVal>>,
+    /// Hone 可调用：全局函数名（二选一）
+    fname: Option<String>,
+    /// 回调体执行环境快照：函数/结构体/枚举/别名表 + 文件与源码
+    /// （回调在全新解释器实例中执行——C 调用期间持有当前 &mut Interp，不能复用）
+    fns: HashMap<String, Arc<FnDef>>,
+    structs: HashMap<String, Vec<(String, TyName, bool)>>,
+    enums: HashMap<String, Vec<String>>,
+    alias_map: HashMap<String, String>,
+    file: Arc<String>,
+    src: Arc<String>,
+}
+
+thread_local! {
+    /// 当前 FFI 调用的回调槽（单回调参数）。窗口语义：call_ffi_typed 安装、
+    /// 收尾清理；窗口内 C 可多次回调（如 qsort 比较器），槽位持续有效。
+    /// 嵌套窗口（回调体内再发起带回调的 FFI 调用）会覆盖外层槽位，不支持。
+    static CB_CTX: RefCell<Option<CbCtx>> = const { RefCell::new(None) };
+    /// 回调体内捕获的错误（外层 FFI 调用收尾时原样上抛，保留 Hone 侧定位）
+    static CB_ERR: RefCell<Option<ZError>> = const { RefCell::new(None) };
+    /// Str 返回的存储（C 读指针的生命周期 = 到下一次回调前）
+    static CB_STRRET: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
+
+/// trampoline 分派：C 传入 n 个整数类参数 → 按槽内原型转换 → 执行 Hone 可调用。
+/// 返回值按原型返回类别转 i64（C 侧读整数寄存器 / 指针）；失败返回 0 并记录诊断。
+fn cb_dispatch(a: &[i64]) -> i64 {
+    // 快照克隆（Arc/小表）：槽位保持安装，供同窗口内的后续回调复用
+    let Some((cb, lambda, fname, fns, structs, enums, alias_map, file, src)) = CB_CTX.with(|c| {
+        c.borrow().as_ref().map(|ctx| {
+            (
+                ctx.cb.clone(),
+                ctx.lambda.clone(),
+                ctx.fname.clone(),
+                ctx.fns.clone(),
+                ctx.structs.clone(),
+                ctx.enums.clone(),
+                ctx.alias_map.clone(),
+                ctx.file.clone(),
+                ctx.src.clone(),
+            )
+        })
+    }) else {
+        CB_ERR.with(|e| {
+            *e.borrow_mut() = Some(ZError::plain(
+                codes::NOT_IMPLEMENTED,
+                "callback invoked outside its FFI call window (async callbacks are not supported)",
+                Some("the callback pointer is only valid during the Hone FFI call that passed it"),
+            ))
+        });
+        return 0;
+    };
+    let FfiTy::Callback { params, ret } = &cb else {
+        CB_ERR.with(|e| {
+            *e.borrow_mut() = Some(ZError::plain(codes::INTERNAL, "internal: callback slot has no prototype", None::<&str>))
+        });
+        return 0;
+    };
+    if params.len() != a.len() {
+        CB_ERR.with(|e| {
+            *e.borrow_mut() = Some(ZError::plain(
+                codes::DLL_ARG,
+                format!("callback arity mismatch: prototype has {} parameters, C passed {}", params.len(), a.len()),
+                Some("check the C side call against the declared prototype"),
+            ))
+        });
+        return 0;
+    }
+    // 整数类参数 → Hone 值（按原型类别；str 参数视为 C 字符串指针读取）
+    let args: Vec<Value> = params
+        .iter()
+        .zip(a.iter())
+        .map(|(ty, v)| match ty {
+            FfiTy::Int => Value::Int(*v),
+            FfiTy::Bool => Value::Bool(*v != 0),
+            FfiTy::Str => {
+                if *v == 0 {
+                    Value::Str(String::new())
+                } else {
+                    Value::Str(unsafe { CStr::from_ptr(*v as *const c_char) }.to_string_lossy().into_owned())
+                }
+            }
+            FfiTy::Ptr => Value::Ptr(*v as usize),
+            other => unreachable!("callback prototype allows integer-class params only, got {}", other.name()),
+        })
+        .collect();
+    // 全新解释器实例执行回调体（快照环境：函数/结构体/枚举/别名）；panic 不得穿 C 栈
+    let span = Span { line: 1, col: 1, len: 0 };
+    let call_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut ip = Interp::new(&file, &src, false);
+        ip.fns = fns;
+        ip.structs = structs;
+        ip.enums = enums;
+        ip.alias_map = alias_map;
+        if let Some(f) = &lambda {
+            ip.exec_lambda(f, args, span)
+        } else if let Some(name) = &fname {
+            ip.call_fn(name, args, span)
+        } else {
+            Err(ZError::plain(codes::INTERNAL, "internal: callback slot has no callable", None::<&str>))
+        }
+    }));
+    let value = match call_result {
+        Ok(Ok(v)) => v,
+        Ok(Err(e)) => {
+            CB_ERR.with(|slot| *slot.borrow_mut() = Some(e));
+            return 0;
+        }
+        Err(_) => {
+            CB_ERR.with(|slot| {
+                *slot.borrow_mut() = Some(ZError::plain(codes::INTERNAL, "FFI callback panicked", None::<&str>))
+            });
+            return 0;
+        }
+    };
+    match ret.as_ref() {
+        FfiTy::Int => match value {
+            Value::Int(i) => i,
+            other => {
+                cb_ret_err("int", &other);
+                0
+            }
+        },
+        FfiTy::Bool => match value {
+            Value::Bool(b) => b as i64,
+            other => {
+                cb_ret_err("bool", &other);
+                0
+            }
+        },
+        FfiTy::Ptr => match value {
+            Value::Ptr(p) => p as i64,
+            Value::Int(i) => i,
+            other => {
+                cb_ret_err("ptr", &other);
+                0
+            }
+        },
+        FfiTy::Str => match value {
+            Value::Str(s) => {
+                // str 返回：转 C 字符串存入线程局部存储，返回指针（下一次回调前有效）
+                let mut buf = CB_STRRET.with(|b| std::mem::take(&mut *b.borrow_mut()));
+                buf.clear();
+                buf.extend_from_slice(s.as_bytes());
+                buf.push(0);
+                let ptr = buf.as_ptr() as i64;
+                CB_STRRET.with(|b| *b.borrow_mut() = buf);
+                ptr
+            }
+            other => {
+                cb_ret_err("str", &other);
+                0
+            }
+        },
+        FfiTy::Void | FfiTy::Float | FfiTy::Callback { .. } => 0,
+    }
+}
+
+/// 回调返回值类型不符：记录诊断（外层 FFI 调用收尾时上抛）。
+fn cb_ret_err(want: &str, got: &Value) {
+    CB_ERR.with(|e| {
+        *e.borrow_mut() = Some(ZError::plain(
+            codes::TYPE_MISMATCH,
+            format!("callback must return `{}`, got `{}`", want, got.type_name()),
+            Some("align the Hone function's return value with the declared callback prototype"),
+        ))
+    });
+}
+
+// trampoline 家族：0-4 个整数类参数 × i64 / void 返回（函数指针按 i64 传给 C）
+unsafe extern "C" fn cb0() -> i64 { cb_dispatch(&[]) }
+unsafe extern "C" fn cb1(a0: i64) -> i64 { cb_dispatch(&[a0]) }
+unsafe extern "C" fn cb2(a0: i64, a1: i64) -> i64 { cb_dispatch(&[a0, a1]) }
+unsafe extern "C" fn cb3(a0: i64, a1: i64, a2: i64) -> i64 { cb_dispatch(&[a0, a1, a2]) }
+unsafe extern "C" fn cb4(a0: i64, a1: i64, a2: i64, a3: i64) -> i64 { cb_dispatch(&[a0, a1, a2, a3]) }
+unsafe extern "C" fn cbv0() {}
+unsafe extern "C" fn cbv1(_a0: i64) {}
+unsafe extern "C" fn cbv2(_a0: i64, _a1: i64) {}
+unsafe extern "C" fn cbv3(_a0: i64, _a1: i64, _a2: i64) {}
+unsafe extern "C" fn cbv4(_a0: i64, _a1: i64, _a2: i64, _a3: i64) {}
+
+/// 按回调原型选取 trampoline 函数指针（n = 参数个数；void_ret = 返回 void）。
+fn cb_trampoline(n: usize, void_ret: bool) -> usize {
+    match (n, void_ret) {
+        (0, false) => cb0 as usize,
+        (1, false) => cb1 as usize,
+        (2, false) => cb2 as usize,
+        (3, false) => cb3 as usize,
+        (4, false) => cb4 as usize,
+        (0, true) => cbv0 as usize,
+        (1, true) => cbv1 as usize,
+        (2, true) => cbv2 as usize,
+        (3, true) => cbv3 as usize,
+        (4, true) => cbv4 as usize,
+        _ => 0,
+    }
 }
 
 /// 运行整个程序。debug 为 true 时 breakpoint; 生效。
@@ -1902,24 +2152,74 @@ impl Interp {
                 Some("declare a manual signature for this function, or use `ptr` for the unsupported parts"),
             ));
         }
-        if sig.params.len() != args.len() {
+        // 参数个数：定长要求精确相等；变参要求至少覆盖全部具名参数
+        if args.len() < sig.params.len() || (!sig.variadic && args.len() != sig.params.len()) {
+            let expected = if sig.variadic {
+                format!("at least {}", sig.params.len())
+            } else {
+                format!("{}", sig.params.len())
+            };
             return Err(self.runtime_err(
                 codes::DLL_ARG,
-                format!("`{}` expects {} arguments, got {}", func_name, sig.params.len(), args.len()),
+                format!("`{}` expects {} arguments, got {}", func_name, expected, args.len()),
                 span,
                 Some(format!(
-                    "declared signature: `fn {}({}) -> {}`",
+                    "declared signature: `fn {}({}{}) -> {}`",
                     sig.name,
                     sig.params.iter().map(|p| p.ty.name()).collect::<Vec<_>>().join(", "),
+                    if sig.variadic { ", ..." } else { "" },
                     sig.ret.name()
                 )),
+            ));
+        }
+        // 变参 + float 固定参数：变参通道按整数寄存器/栈传递，double 必须走 XMM，两者不能混排
+        if sig.variadic && sig.params.iter().any(|p| p.ty == FfiTy::Float) {
+            return Err(self.runtime_err(
+                codes::TYPE_MISMATCH,
+                format!("`{}`: `float` fixed parameters are not supported in variadic functions", func_name),
+                span,
+                Some("declare the fixed parameters as `int`/`str`/`ptr` (C varargs pass them in integer registers)"),
             ));
         }
         // 参数转换：str 参数需 CString 保持存活直到调用结束
         let mut cargs: Vec<CArg> = Vec::with_capacity(args.len());
         let mut cstrings: Vec<CString> = Vec::new();
-        for (p, a) in sig.params.iter().zip(args.iter()) {
-            match p.ty {
+        // 回调窗口是否已安装（调用后清理槽位）
+        let mut cb_installed = false;
+        for (i, a) in args.iter().enumerate() {
+            if i >= sig.params.len() {
+                // 变参实参（ctypes 式）：按运行时类型转换
+                match a {
+                    Value::Int(v) => cargs.push(CArg::I(*v)),
+                    Value::Bool(b) => cargs.push(CArg::I(if *b { 1 } else { 0 })),
+                    Value::Ptr(p) => cargs.push(CArg::I(*p as i64)),
+                    Value::Float(v) => cargs.push(CArg::F(*v)),
+                    Value::Str(s) => {
+                        let cs = CString::new(s.as_bytes()).map_err(|_| {
+                            self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                format!("`{}` variadic argument {} contains a NUL byte", func_name, i + 1),
+                                span,
+                                Some("C strings cannot contain embedded NUL characters"),
+                            )
+                        })?;
+                        let ptr = cs.as_ptr() as i64;
+                        cstrings.push(cs);
+                        cargs.push(CArg::I(ptr));
+                    }
+                    other => {
+                        return Err(self.runtime_err(
+                            codes::TYPE_MISMATCH,
+                            format!("`{}` variadic argument must be int/float/bool/str/ptr, got `{}`", func_name, other.type_name()),
+                            span,
+                            Some("variadic arguments are converted by their runtime type (ctypes-style)"),
+                        ))
+                    }
+                }
+                continue;
+            }
+            let p = &sig.params[i];
+            match &p.ty {
                 FfiTy::Int => match a {
                     Value::Int(v) => cargs.push(CArg::I(*v)),
                     other => {
@@ -1989,15 +2289,66 @@ impl Interp {
                         ))
                     }
                 },
+                FfiTy::Callback { params: cbp, ret: cbr } => {
+                    // 回调实参：Hone 可调用（lambda 或顶层函数名）→ trampoline 指针。
+                    // 同步回调：指针仅在本调用窗口内有效（C 必须在返回前回调，可多次回调）。
+                    let (lambda, fname) = match a {
+                        Value::Lambda(l) => (Some(l.clone()), None),
+                        Value::Str(fname) => {
+                            if !self.fns.contains_key(fname.as_str()) {
+                                return Err(self.runtime_err(
+                                    codes::UNDEFINED,
+                                    format!("callback function `{}` is not defined", fname),
+                                    span,
+                                    Some("pass a lambda `fn(a, b) { ... }` or a top-level function name"),
+                                ));
+                            }
+                            (None, Some(fname.clone()))
+                        }
+                        other => {
+                            return Err(self.runtime_err(
+                                codes::TYPE_MISMATCH,
+                                format!("`{}` parameter `{}` expects a callback (lambda or function name), got `{}`", func_name, p.name, other.type_name()),
+                                span,
+                                Some("pass a lambda `fn(a, b) { ... }` or a top-level function name"),
+                            ))
+                        }
+                    };
+                    if cbp.len() > 4 {
+                        return Err(self.runtime_err(
+                            codes::NOT_IMPLEMENTED,
+                            format!("`{}` parameter `{}`: callbacks support at most 4 parameters", func_name, p.name),
+                            span,
+                            Some("reduce the callback parameter count, or wrap it on the C side"),
+                        ));
+                    }
+                    let void_ret = matches!(cbr.as_ref(), FfiTy::Void);
+                    let tramp = cb_trampoline(cbp.len(), void_ret);
+                    // 安装回调窗口：原型 + 可调用 + 环境快照（回调在全新解释器实例中执行）
+                    CB_CTX.with(|c| {
+                        *c.borrow_mut() = Some(CbCtx {
+                            cb: p.ty.clone(),
+                            lambda,
+                            fname,
+                            fns: self.fns.clone(),
+                            structs: self.structs.clone(),
+                            enums: self.enums.clone(),
+                            alias_map: self.alias_map.clone(),
+                            file: Arc::new(self.file.clone()),
+                            src: Arc::new(self.src.clone()),
+                        })
+                    });
+                    cb_installed = true;
+                    cargs.push(CArg::I(tramp as i64));
+                }
                 FfiTy::Void => unreachable!("void is not a parameter type"),
             }
         }
         // 参数类别位：第 i 位 1 表示第 i 个参数为 float（double，走 XMM 寄存器）
-        let bits: u32 = sig
-            .params
+        let bits: u32 = cargs
             .iter()
             .enumerate()
-            .fold(0u32, |acc, (i, p)| if p.ty == FfiTy::Float { acc | (1 << i) } else { acc });
+            .fold(0u32, |acc, (i, c)| if matches!(c, CArg::F(_)) { acc | (1 << i) } else { acc });
         let retf = sig.ret == FfiTy::Float;
         let name = func_name.as_bytes();
         let lib = self.libs.get(lib_name).unwrap();
@@ -2009,25 +2360,51 @@ impl Interp {
                 Some("check the exported symbol name (e.g. `#[no_mangle] pub extern \"C\" fn`)"),
             )
         };
-        let cret = match args.len() {
-            0 => ffi_dispatch!([], bits, retf, lib, name, &cargs, &sym_err, [], []),
-            1 => ffi_dispatch!([0], bits, retf, lib, name, &cargs, &sym_err, [], []),
-            2 => ffi_dispatch!([0, 1], bits, retf, lib, name, &cargs, &sym_err, [], []),
-            3 => ffi_dispatch!([0, 1, 2], bits, retf, lib, name, &cargs, &sym_err, [], []),
-            4 => ffi_dispatch!([0, 1, 2, 3], bits, retf, lib, name, &cargs, &sym_err, [], []),
-            5 => ffi_dispatch!([0, 1, 2, 3, 4], bits, retf, lib, name, &cargs, &sym_err, [], []),
-            6 => ffi_dispatch!([0, 1, 2, 3, 4, 5], bits, retf, lib, name, &cargs, &sym_err, [], []),
-            7 => ffi_dispatch!([0, 1, 2, 3, 4, 5, 6], bits, retf, lib, name, &cargs, &sym_err, [], []),
-            8 => ffi_dispatch!([0, 1, 2, 3, 4, 5, 6, 7], bits, retf, lib, name, &cargs, &sym_err, [], []),
-            _ => {
-                return Err(self.runtime_err(
-                    codes::DLL_ARG,
-                    format!("`{}` takes at most 8 parameters", func_name),
-                    span,
-                    Some("the C ABI convention supports up to 8 scalar parameters"),
-                ))
+        let cret = if sig.variadic {
+            // 变参调用：实参按索引逐位展开为 C 变参函数指针类型（调用变参函数是稳定 Rust 合法语法）
+            match cargs.len() {
+                1 => ffi_variadic!([0], retf, lib, name, &cargs, &sym_err, [], []),
+                2 => ffi_variadic!([0, 1], retf, lib, name, &cargs, &sym_err, [], []),
+                3 => ffi_variadic!([0, 1, 2], retf, lib, name, &cargs, &sym_err, [], []),
+                4 => ffi_variadic!([0, 1, 2, 3], retf, lib, name, &cargs, &sym_err, [], []),
+                5 => ffi_variadic!([0, 1, 2, 3, 4], retf, lib, name, &cargs, &sym_err, [], []),
+                6 => ffi_variadic!([0, 1, 2, 3, 4, 5], retf, lib, name, &cargs, &sym_err, [], []),
+                7 => ffi_variadic!([0, 1, 2, 3, 4, 5, 6], retf, lib, name, &cargs, &sym_err, [], []),
+                8 => ffi_variadic!([0, 1, 2, 3, 4, 5, 6, 7], retf, lib, name, &cargs, &sym_err, [], []),
+                9 => ffi_variadic!([0, 1, 2, 3, 4, 5, 6, 7, 8], retf, lib, name, &cargs, &sym_err, [], []),
+                10 => ffi_variadic!([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], retf, lib, name, &cargs, &sym_err, [], []),
+                11 => ffi_variadic!([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], retf, lib, name, &cargs, &sym_err, [], []),
+                12 => ffi_variadic!([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], retf, lib, name, &cargs, &sym_err, [], []),
+                _ => {
+                    return Err(self.runtime_err(
+                        codes::DLL_ARG,
+                        format!("`{}` takes at most 12 arguments in a variadic call", func_name),
+                        span,
+                        Some("reduce the number of variadic arguments"),
+                    ))
+                }
+            }
+        } else {
+            match cargs.len() {
+                0 => ffi_dispatch!([], bits, retf, lib, name, &cargs, &sym_err, [], []),
+                1 => ffi_dispatch!([0], bits, retf, lib, name, &cargs, &sym_err, [], []),
+                2 => ffi_dispatch!([0, 1], bits, retf, lib, name, &cargs, &sym_err, [], []),
+                3 => ffi_dispatch!([0, 1, 2], bits, retf, lib, name, &cargs, &sym_err, [], []),
+                4 => ffi_dispatch!([0, 1, 2, 3], bits, retf, lib, name, &cargs, &sym_err, [], []),
+                5 => ffi_dispatch!([0, 1, 2, 3, 4], bits, retf, lib, name, &cargs, &sym_err, [], []),
+                6 => ffi_dispatch!([0, 1, 2, 3, 4, 5], bits, retf, lib, name, &cargs, &sym_err, [], []),
+                7 => ffi_dispatch!([0, 1, 2, 3, 4, 5, 6], bits, retf, lib, name, &cargs, &sym_err, [], []),
+                8 => ffi_dispatch!([0, 1, 2, 3, 4, 5, 6, 7], bits, retf, lib, name, &cargs, &sym_err, [], []),
+                _ => unreachable!("fixed arity checked above"),
             }
         };
+        // 回调窗口收尾：清理槽位；回调体内的错误原样上抛（保留 Hone 侧定位）
+        if cb_installed {
+            CB_CTX.with(|c| *c.borrow_mut() = None);
+            if let Some(e) = CB_ERR.with(|e| e.borrow_mut().take()) {
+                return Err(e);
+            }
+        }
         // cstrings 在此作用域内保持存活，调用完成后再释放
         Ok(match sig.ret {
             FfiTy::Int => Value::Int(match cret {
@@ -2059,6 +2436,11 @@ impl Interp {
                 Value::Str(s.to_string_lossy().into_owned())
             }
             FfiTy::Ptr => Value::Ptr(match cret {
+                CRet::I(v) => v as usize,
+                CRet::F(_) => unreachable!("return class mismatch"),
+            }),
+            // C 返回函数指针（回调原型）：按不透明指针值带回
+            FfiTy::Callback { .. } => Value::Ptr(match cret {
                 CRet::I(v) => v as usize,
                 CRet::F(_) => unreachable!("return class mismatch"),
             }),

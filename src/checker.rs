@@ -3134,6 +3134,8 @@ impl Checker {
                 FfiTy::Str => Some(Ty::Str),
                 // 不透明指针：静态阶段不限制（值为运行时地址）
                 FfiTy::Ptr => None,
+                // 回调参数：运行期校验（需函数名/lambda），静态阶段不限
+                FfiTy::Callback { .. } => None,
                 // 参数不允许 void（parser 已拦截）
                 FfiTy::Void => None,
             };
@@ -3160,6 +3162,8 @@ impl Checker {
             FfiTy::Bool => Ty::Bool,
             FfiTy::Str => Ty::Str,
             FfiTy::Ptr => Ty::Unknown,
+            // 返回回调原型（C 返回函数指针）：按不透明指针值对待
+            FfiTy::Callback { .. } => Ty::Unknown,
             FfiTy::Void => Ty::Void,
         };
         Ok(TyRes { ty, slot: None })
@@ -3509,6 +3513,62 @@ impl Checker {
         }
     }
 
+    /// 接受 str 或 bytes（双形态内置参数，如 `crypto.base64_encode`）。
+    /// 双形态参数不做 slot 归一（运行期两种形态均可）。
+    fn expect_str_or_bytes(&mut self, name: &str, args: &[TyRes], i: usize, span: Span, what: &str) -> Result<(), ZError> {
+        match args[i].ty {
+            Ty::Str | Ty::Bytes => Ok(()),
+            Ty::Unknown => {
+                if args[i].slot.is_some() {
+                    return Ok(());
+                }
+                if self.strict {
+                    return Err(self.zerr(
+                        codes::CANNOT_INFER,
+                        format!("cannot determine the type of {}, expected `str` or `bytes`", what),
+                        span,
+                        Some("add an explicit type annotation"),
+                    ));
+                }
+                Ok(())
+            }
+            other => Err(self.zerr(
+                codes::TYPE_MISMATCH,
+                format!("`{}` expects `str` or `bytes` for {}, got `{}`", name, what, other.name()),
+                span,
+                Some("pass a string or `bytes` value"),
+            )),
+        }
+    }
+
+    /// 接受 int 或 byte（双形态内置参数，如 `ptr.write_byte`）。
+    /// 双形态参数不做 slot 归一（运行期两种形态均可）。
+    fn expect_int_or_byte(&mut self, name: &str, args: &[TyRes], i: usize, span: Span, what: &str) -> Result<(), ZError> {
+        match args[i].ty {
+            Ty::Int | Ty::Byte => Ok(()),
+            Ty::Unknown => {
+                if args[i].slot.is_some() {
+                    return Ok(());
+                }
+                if self.strict {
+                    return Err(self.zerr(
+                        codes::CANNOT_INFER,
+                        format!("cannot determine the type of {}, expected `int` or `byte`", what),
+                        span,
+                        Some("add an explicit type annotation"),
+                    ));
+                }
+                Ok(())
+            }
+            other => Err(self.zerr(
+                codes::TYPE_MISMATCH,
+                format!("`{}` expects `int` or `byte` for {}, got `{}`", name, what, other.name()),
+                span,
+                Some("pass an integer or `byte` value"),
+            )),
+        }
+    }
+
     /// 接受 int 或 float（数值）。用于允许 `int` 字面量通过 `float` 参数的场景。
     fn expect_numeric(&mut self, name: &str, args: &[TyRes], i: usize, span: Span, what: &str) -> Result<(), ZError> {
         match args[i].ty {
@@ -3781,7 +3841,7 @@ impl Checker {
             "read_bytes" => {
                 self.arg_count(name, n, 1, span)?;
                 self.expect_str(name, args, 0, span, "the path")?;
-                Ok(TyRes { ty: Ty::Unknown, slot: None }) // 字节列表（元素类型运行期确定）
+                Ok(TyRes { ty: Ty::Bytes, slot: None }) // 字节序列（索引得 byte）
             }
             "write_file" => {
                 self.arg_count(name, n, 2, span)?;
@@ -3792,7 +3852,7 @@ impl Checker {
             "write_bytes" => {
                 self.arg_count(name, n, 2, span)?;
                 self.expect_str(name, args, 0, span, "the path")?;
-                self.expect_any(name, args, 1, span, "a list of byte values (int 0-255)")?;
+                self.expect_any(name, args, 1, span, "a `bytes` value or a list of byte values (int 0-255)")?;
                 Ok(TyRes { ty: Ty::Void, slot: None })
             }
             "http_post" => {
@@ -3897,11 +3957,18 @@ impl Checker {
                 self.expect_int(name, args, 1, span, "the byte offset")?;
                 Ok(TyRes { ty: Ty::Float, slot: None })
             }
-            "ptr.write_int" | "ptr.write_byte" => {
+            "ptr.write_int" => {
                 self.arg_count(name, n, 3, span)?;
                 self.expect_any(name, args, 0, span, "a `ptr` value")?;
                 self.expect_int(name, args, 1, span, "the byte offset")?;
                 self.expect_int(name, args, 2, span, "the value to write")?;
+                Ok(TyRes { ty: Ty::Void, slot: None })
+            }
+            "ptr.write_byte" => {
+                self.arg_count(name, n, 3, span)?;
+                self.expect_any(name, args, 0, span, "a `ptr` value")?;
+                self.expect_int(name, args, 1, span, "the byte offset")?;
+                self.expect_int_or_byte(name, args, 2, span, "the value to write")?;
                 Ok(TyRes { ty: Ty::Void, slot: None })
             }
             "ptr.write_float" => {
@@ -4173,10 +4240,20 @@ impl Checker {
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
             // crypto
-            "crypto.md5" | "crypto.sha1" | "crypto.sha256" | "crypto.base64_encode" | "crypto.base64_decode" => {
+            "crypto.md5" | "crypto.sha1" | "crypto.sha256" => {
                 self.arg_count(name, n, 1, span)?;
                 self.expect_str(name, args, 0, span, "the input text")?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "crypto.base64_encode" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str_or_bytes(name, args, 0, span, "the input")?;
+                Ok(TyRes { ty: Ty::Str, slot: None })
+            }
+            "crypto.base64_decode" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the base64 text")?;
+                Ok(TyRes { ty: Ty::Bytes, slot: None })
             }
             "crypto.hmac_sha256" => {
                 self.arg_count(name, n, 2, span)?;
@@ -4190,7 +4267,13 @@ impl Checker {
                 self.expect_str(name, args, 0, span, "the archive path")?;
                 Ok(TyRes { ty: Ty::Unknown, slot: None }) // 条目列表（动态类型）
             }
-            "archive.zip_read" | "archive.tgz_read" => {
+            "archive.zip_read" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the archive path")?;
+                self.expect_str(name, args, 1, span, "the entry name")?;
+                Ok(TyRes { ty: Ty::Bytes, slot: None })
+            }
+            "archive.tgz_read" => {
                 self.arg_count(name, n, 2, span)?;
                 self.expect_str(name, args, 0, span, "the archive path")?;
                 self.expect_str(name, args, 1, span, "the entry name")?;

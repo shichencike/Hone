@@ -299,7 +299,7 @@ hone/
 ```
 
 - 体积预算：每  目标运行时归档约 1~2MB（musl 下 rustc staticlib 经 strip 后），三目标合计 ~5MB，工具链总增量可控
-- 安装脚本（install.ps1 / install.sh）从"下载单个 exe"扩展为"下载 zip/tar.gz 工具链包"；`hone self-update` 同步升级整个包
+- 安装脚本（install.sh，Linux/Termux）从"下载单个 exe"扩展为"下载 zip/tar.gz 工具链包"；`hone self-update` 同步升级整个包（install.ps1 已移除，Windows 手动下载 full 包加入 PATH）
 - `HONE_TOOLCHAIN_DIR` 环境变量覆盖工具链目录（开发/嵌入式场景）
 
 ### 6.3 交叉编译的正确性约束

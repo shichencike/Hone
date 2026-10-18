@@ -66,7 +66,8 @@ pub enum Instr {
     Ge(usize, usize, usize),
     IsNull(usize, usize),        // dst, src
     IsDict(usize, usize),        // dst, src
-    IterCheck(usize, bool),      // src, is_comp（迭代源必须是 list/dict，否则报错）
+    IsBytes(usize, usize),       // dst, src（for-in 双变量：运行期区分 list / bytes 报错文案）
+    IterCheck(usize, bool),      // src, is_comp（迭代源必须是 list/dict/bytes，否则报错）
     Index(usize, usize, usize),    // dst, obj, key
     IndexSet(usize, usize, usize), // obj, key, val
     DestructGet(usize, usize, usize, usize, bool), // dst, obj, key, nvars, is_dict（解构专用：列表越界/字典缺键报错；nvars/is_dict 用于镜像解释器文案）
@@ -799,7 +800,7 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                 self.jmp(&lcond);
                 self.emit_label(&lend);
             }
-            Stmt::ForIn { var, var2, iter, body, .. } => {
+            Stmt::ForIn { var, var2, iter, body, span } => {
                 let riter_src = self.compile_expr(iter);
                 // 迭代源必须是 list/dict，否则报与解释器一致的错误（列号指向迭代源）。
                 let saved_span = self.cur_span.clone();
@@ -833,6 +834,23 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                 let rcnt = self.decl(&_syn);
                 let k0 = self.const_idx(Const::Int(0));
                 self.emit(Instr::LoadK(rcnt, k0));
+                // 双变量 for-in：list / bytes 均被解释器运行期拒绝（"requires a dict, got ..."），
+                // 用 IsBytes 运行期区分文案（span 指向 for 语句，镜像解释器）；dict 走下方 dict 分支。
+                let lbytes_err = if var2.is_some() {
+                    let risbytes = self.tmp();
+                    self.emit(Instr::IsBytes(risbytes, riter_src));
+                    let l = self.new_label("LbytesErr");
+                    self.jit(risbytes, &l);
+                    self.cur_span = span.clone();
+                    self.emit(Instr::Raise(
+                        codes::TYPE_MISMATCH,
+                        "`for k, v in` requires a dict, got a list".to_string(),
+                        Some("iterate lists with a single variable: `for x in list`".to_string()),
+                    ));
+                    Some(l)
+                } else {
+                    None
+                };
                 let lcond = self.new_label("Lcond");
                 let linc = self.new_label("Linc");
                 let lend2 = self.new_label("LlistEnd");
@@ -862,6 +880,18 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                 self.emit_label(&lend2);
                 self.exit();
                 self.jmp(&lend); // 列表路径结束，跳过下方的字典路径
+                // 双变量 + bytes：报错分支（标签置于列表路径末尾；循环体编译后 cur_span
+                // 已被最后一条语句改写，此处显式指回 for 语句）。
+                if let Some(l) = lbytes_err {
+                    self.emit_label(&l);
+                    self.cur_span = span.clone();
+                    self.emit(Instr::Raise(
+                        codes::TYPE_MISMATCH,
+                        "`for k, v in` requires a dict, got bytes".to_string(),
+                        Some("iterate bytes with a single variable: `for b in bs`".to_string()),
+                    ));
+                    self.jmp(&lend);
+                }
                 // 字典路径
                 self.emit_label(&ldict);
                 self.enter();
@@ -2148,6 +2178,10 @@ impl Vm {
                 self.frames[fi].regs[d] =
                     Value::Bool(matches!(self.frames[fi].regs[s], Value::Dict(_)));
             }
+            Instr::IsBytes(d, s) => {
+                self.frames[fi].regs[d] =
+                    Value::Bool(matches!(self.frames[fi].regs[s], Value::Bytes(_)));
+            }
             // G2.3 引擎对齐：条件严格 bool 校验（消息逐字镜像解释器对应分支，无 help）。
             Instr::CondCheck(r, kind) => {
                 let v = &self.frames[fi].regs[r];
@@ -2162,10 +2196,20 @@ impl Vm {
                 self.frames[fi].regs[d] = Value::Bool(matches!(v, Value::Bool(b) if *b == want));
             }
             Instr::IterCheck(s, is_comp) => {
-                if !matches!(
-                    self.frames[fi].regs[s],
-                    Value::List(_) | Value::Dict(_)
-                ) {
+                // 站点分派（镜像解释器）：推导式 ListComp/DictComp 无 bytes 分支（拒收）；
+                // `for in` 有 bytes 分支（单变量迭代字节）。
+                let ok = if is_comp {
+                    matches!(
+                        self.frames[fi].regs[s],
+                        Value::List(_) | Value::Dict(_)
+                    )
+                } else {
+                    matches!(
+                        self.frames[fi].regs[s],
+                        Value::List(_) | Value::Dict(_) | Value::Bytes(_)
+                    )
+                };
+                if !ok {
                     let what = if is_comp { "comprehension" } else { "`for in`" };
                     let tn = self.frames[fi].regs[s].type_name();
                     return Err(self.mk_err(
@@ -2778,7 +2822,9 @@ fn vm_help_for(code: &'static str, msg: &str) -> Option<String> {
             if m("cannot apply `") {
                 "Hone has no implicit type conversion".to_string()
             } else if m("cannot compare `") {
-                "comparison operators work on `int` / `float` / `char`".to_string()
+                "comparison operators work on `int` / `float` / `char` / `byte`".to_string()
+            } else if m("bytes length") {
+                "check the index against `len(bytes)`".to_string()
             } else if m("`for in` requires") {
                 "iterate a list with `for x in list` or a dict with `for k, v in dict`".to_string()
             } else if m("comprehension requires") {
@@ -2790,6 +2836,9 @@ fn vm_help_for(code: &'static str, msg: &str) -> Option<String> {
                 "check the index against `len(str)`".to_string()
             } else if m("out of bounds") {
                 "check the index against `len(list)`".to_string()
+            } else if m("`len` expects") {
+                "`len` returns the byte length of a string/bytes, or the element count of a list/dict"
+                    .to_string()
             } else if m("destructuring requires") {
                 "destructure a list with `a, b = [..]` or a dict with `{a, b} = dict`".to_string()
             } else if m("field access") {
@@ -2824,11 +2873,25 @@ fn value_to_str(v: &Value) -> String {
         Value::Bool(b) => b.to_string(),
         Value::Str(s) => s.clone(),
         Value::Char(c) => c.to_string(),
-        // 字节值 / 字节序列：以十六进制表示（与解释器 display 风格一致）
-        Value::Byte(b) => format!("0x{:02x}", b),
+        // 字节值：8 位二进制（镜像解释器 display）
+        Value::Byte(b) => format!("0b{:08b}", b),
+        // 字节序列：可打印 ASCII 原样（反斜杠/引号转义），其余 \xNN（镜像解释器 display）
         Value::Bytes(items) => {
-            let s: String = items.iter().map(|b| format!("{:02x}", b)).collect();
-            format!("b\"{}\"", s)
+            let inner: Vec<String> = items
+                .iter()
+                .map(|b| {
+                    if b.is_ascii_graphic() || *b == b' ' {
+                        match *b {
+                            b'\\' => "\\\\".to_string(),
+                            b'"' => "\\\"".to_string(),
+                            other => char::from(other).to_string(),
+                        }
+                    } else {
+                        format!("\\x{:02x}", b)
+                    }
+                })
+                .collect();
+            format!("b\"{}\"", inner.join(""))
         }
         // type 实例：Type(field: value, ...)
         Value::TypeInst(inst) => {
@@ -2905,6 +2968,12 @@ fn v_add(a: Value, b: Value, span: &Span, vm: &Vm, sym: &str, tn_a: &str, tn_b: 
             .ok_or_else(|| vm.mk_err(codes::INTEGER_OVERFLOW, "integer overflow".into(), span)),
         (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x + y)),
         (Value::Str(x), Value::Str(y)) => Ok(Value::Str(x + &y)),
+        // 字节序列拼接（+，镜像解释器 arith）
+        (Value::Bytes(x), Value::Bytes(y)) => {
+            let mut r = x;
+            r.extend_from_slice(&y);
+            Ok(Value::Bytes(r))
+        }
         _ => Err(vm.mk_err(
             codes::TYPE_MISMATCH,
             format!("cannot apply `{}` to `{}` and `{}`", sym, tn_a, tn_b),
@@ -3042,6 +3111,8 @@ fn v_eq(a: &Value, b: &Value, span: &Span, vm: &Vm) -> Result<bool, Value> {
         (Value::Bool(x), Value::Bool(y)) => Ok(x == y),
         (Value::Str(x), Value::Str(y)) => Ok(x == y),
         (Value::Char(x), Value::Char(y)) => Ok(x == y),
+        (Value::Byte(x), Value::Byte(y)) => Ok(x == y),
+        (Value::Bytes(x), Value::Bytes(y)) => Ok(x == y),
         (Value::List(x), Value::List(y)) => Ok(x == y),
         (Value::Dict(x), Value::Dict(y)) => Ok(x == y),
         (Value::Ptr(x), Value::Ptr(y)) => Ok(x == y),
@@ -3085,6 +3156,8 @@ fn v_cmp(
         },
         // 字符按 Unicode 码点比较
         (Value::Char(x), Value::Char(y)) => x.cmp(&y),
+        // 字节按数值比较（0-255，镜像解释器 values_cmp；bytes 不支持排序比较）
+        (Value::Byte(x), Value::Byte(y)) => x.cmp(&y),
         _ => {
             return Err(vm.mk_err(
                 codes::TYPE_MISMATCH,
@@ -3137,6 +3210,26 @@ fn v_index(obj: &Value, key: &Value, span: &Span, vm: &Vm) -> Result<Value, Valu
                 Err(vm.mk_err(
                     codes::TYPE_MISMATCH,
                     format!("list index must be an int, got `{}`", value_to_str(key)),
+                    span,
+                ))
+            }
+        }
+        // 字节序列按下标取单个字节（byte 值，与 int 严格隔离；镜像解释器 index_value）
+        Value::Bytes(b) => {
+            if let Value::Int(i) = key {
+                let idx = *i;
+                if idx < 0 || idx as usize >= b.len() {
+                    return Err(vm.mk_err(
+                        codes::TYPE_MISMATCH,
+                        format!("index {} out of bounds (bytes length {})", idx, b.len()),
+                        span,
+                    ));
+                }
+                Ok(Value::Byte(b[idx as usize]))
+            } else {
+                Err(vm.mk_err(
+                    codes::TYPE_MISMATCH,
+                    format!("list index must be an int, got `{}`", key.type_name()),
                     span,
                 ))
             }
@@ -3357,9 +3450,11 @@ fn v_len(v: &Value, span: &Span, vm: &Vm) -> Result<Value, Value> {
             d.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).count() as i64,
         )),
         Value::Str(s) => Ok(Value::Int(s.len() as i64)),
+        // 字节序列长度 = 字节数（与 str 同为字节口径，镜像解释器 len 内置）
+        Value::Bytes(b) => Ok(Value::Int(b.len() as i64)),
         other => Err(vm.mk_err(
             codes::TYPE_MISMATCH,
-            format!("`len` expects a string, list, or dict, got `{}`", value_to_str(other)),
+            format!("`len` expects a string, list, dict, or bytes, got `{}`", other.type_name()),
             span,
         )),
     }
@@ -3678,6 +3773,7 @@ fn instr_text(ins: &Instr, consts: &[Const]) -> String {
         Instr::Ge(d, a, b) => format!("GE      r{} r{} r{}", d, a, b),
         Instr::IsNull(d, s) => format!("ISNULL  r{} r{}", d, s),
         Instr::IsDict(d, s) => format!("ISDICT  r{} r{}", d, s),
+        Instr::IsBytes(d, s) => format!("ISBYTES r{} r{}", d, s),
         Instr::CondCheck(r, kind) => format!("CONDCHK r{} {}", r, kind),
         Instr::IsBoolVal(d, s, want) => {
             format!("ISBOOLV r{} r{} {}", d, s, if *want { "true" } else { "false" })
@@ -4258,6 +4354,10 @@ fn parse_instr(body: &str, consts: &[Const]) -> Result<Instr, String> {
         "ISDICT" => {
             need(2)?;
             Instr::IsDict(reg(toks[0])?, reg(toks[1])?)
+        }
+        "ISBYTES" => {
+            need(2)?;
+            Instr::IsBytes(reg(toks[0])?, reg(toks[1])?)
         }
         "CONDCHK" => {
             need(2)?;

@@ -6,6 +6,13 @@
 > 当前版本：v0.8.0（原生编译后端 —— `hone build --exe --native` 由 Cranelift 直出机器码可执行文件，
 > 交叉编译三目标；AOT 后端（`build --exe -c`）已移除。详见 CHANGELOG）
 
+## 安装
+
+从 [GitHub Releases](https://github.com/shichencike/Hone/releases) 下载对应平台的文件：
+
+- **Linux / Termux**：一键脚本 `curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh`，或手动下载 `hone-linux-x86_64.tar.gz` / `hone-termux-aarch64.tar.gz` 解压。
+- **Windows**：不提供一键脚本，请手动下载 `hone-windows-x86_64-full.zip`，解压到任意目录（例如 `C:\hone`），然后将其所在目录加入系统环境变量 `PATH`（「系统属性 → 高级 → 环境变量」中编辑 `Path`，新增该目录），新开的终端即生效。full 包自带原生编译工具链（`targets/`），随 hone.exe 同目录解压即启用。
+
 ## 构建
 
 ```bash
@@ -42,7 +49,9 @@ python tests/regress_ir.py     # 文本 IR 往返
 ### 原生编译后端（`hone build --exe --native`）
 
 Cranelift 把 VM 字节码直接 lower 为机器码，
-再经生成式 wrapper + rustc 链接成原生可执行文件。`hone natgen` 是等价别名（保留 `--obj` 调试中间物）。
+再经生成式 wrapper + rustc 链接成原生可执行文件。`hone natgen` 是等价别名；
+`hone build --obj <file.hn>` / `natgen <file.hn> --obj <o>` 仅产 object（不链接 exe，
+供调试 / 自行链接 / 交叉目标出 object）。
 
 - 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码**逐字节一致**，
   含完整错误渲染（`--> 文件:行:列` / 行号行 / caret / help）；回归见 `tests/regress4.py`
@@ -76,6 +85,7 @@ hone check <file.hn|目录> [--json] # 仅静态检查（解析+类型检查，�
 hone build --dll <file.hn> # 打包 C ABI 动态库（int/float/bool/str 类型映射，需系统 C 编译器）
 hone build --exe <file.hn> # 将脚本与解释器打包为自释放独立可执行文件（[-o <out>] [--icon <ico>]）
 hone build --exe --native <file.hn> # 原生编译后端：脚本 → Cranelift 机器码 → rustc 链接 → 原生可执行文件（需本机 Rust 工具链；hone natgen 为等价别名）
+hone build --obj <file.hn> # 仅编译为原生 object（Cranelift，不链接 exe；[-o <out>] [--cpu <name>] [--target <triple>]）
 hone explain <code>       # 查询错误码含义（如 hone explain H201）
 hone get                  # 读取当前目录 hone.json 清单，批量下载全部模块（类似 package.json / Cargo.toml）
 hone get <module> <url>   # 下载模块依赖并缓存到 ~/.hn/cache/，并写入/更新 hone.json 清单

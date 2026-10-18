@@ -476,7 +476,7 @@ result = <span class="f">regex.replace</span>(<span class="s">"world"</span>, <s
 <span class="f">print</span>(<span class="f">crypto.sha256</span>(<span class="s">"abc"</span>));   <span class="c">// ba7816bf8f01cfea414140de5dae2223...</span>
 <span class="f">print</span>(<span class="f">crypto.hmac_sha256</span>(<span class="s">"key"</span>, <span class="s">"msg"</span>));
 <span class="f">print</span>(<span class="f">crypto.base64_encode</span>(<span class="s">"hello"</span>));  <span class="c">// aGVsbG8=</span>
-<span class="f">print</span>(<span class="f">crypto.base64_decode</span>(<span class="s">"aGVsbG8="</span>)); <span class="c">// hello</span></code></pre>
+<span class="f">print</span>(<span class="f">crypto.base64_decode</span>(<span class="s">"aGVsbG8="</span>)); <span class="c">// b"hello"（bytes 值）</span></code></pre>
   </div>
 
   <div class="example">
@@ -540,7 +540,7 @@ resp = <span class="f">http_post</span>(<span class="s">"http://httpbin.org/post
     <div class="note">zip / tar.gz 的列表、读取、解压与创建；解压自动拒绝 `..` 穿越条目（防 zip-slip）</div>
 <pre><code><span class="f">archive.zip_create</span>(<span class="s">"pkg.zip"</span>, {<span class="s">"a.txt"</span>: <span class="s">"hello"</span>, <span class="s">"sub/b.txt"</span>: <span class="s">"nested"</span>});
 <span class="f">print</span>(<span class="f">to_str</span>(<span class="f">archive.zip_list</span>(<span class="s">"pkg.zip"</span>)));    <span class="c">// [a.txt, sub/b.txt]</span>
-<span class="f">print</span>(<span class="f">archive.zip_read</span>(<span class="s">"pkg.zip"</span>, <span class="s">"a.txt"</span>));   <span class="c">// hello</span>
+<span class="f">print</span>(<span class="f">archive.zip_read</span>(<span class="s">"pkg.zip"</span>, <span class="s">"a.txt"</span>));   <span class="c">// b"hello"（bytes 值）</span>
 <span class="f">archive.zip_extract</span>(<span class="s">"pkg.zip"</span>, <span class="s">"out"</span>);           <span class="c">// 解压到 out/</span>
 
 <span class="c">// tar.gz 同款：archive.tgz_list / tgz_read / tgz_extract / tgz_create</span></code></pre>

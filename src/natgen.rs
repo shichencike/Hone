@@ -693,6 +693,14 @@ impl<'x, 'f> ChunkLower<'x, 'f> {
                 let r = self.call1(self.rt.rt_bool, &[r0]);
                 self.store_slot(*d, r);
             }
+            Instr::IsBytes(d, _) => {
+                // runtime 值模型无 bytes 标签（byte/bytes 是解释器/VM 引擎独占形态，
+                // 见 runtime 标签表）：原生程序的 for-in 迭代源不可能是 bytes，恒 false
+                // （语义等价 LoadBool false；日后 runtime 支持 bytes 时再改为真判定）。
+                let f = self.bcx.ins().iconst(I64, 0);
+                let r = self.call1(self.rt.rt_bool, &[f]);
+                self.store_slot(*d, r);
+            }
             // G2.3：条件严格 bool 校验（镜像 VM CondCheck 执行臂；消息按站点）。
             Instr::CondCheck(r, kind) => {
                 let v = self.load_slot(*r);

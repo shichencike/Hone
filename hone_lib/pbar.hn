@@ -36,9 +36,10 @@
 
 // ============ 内部工具 ============
 
-// ESC 控制字符（0x1b）：Hone 字符串转义不支持 \x，用 base64 解码构造
+// ESC 控制字符（0x1b）：Hone 字符串转义不支持 \x/\u，按码点构造
+// （base64_decode 现返回 bytes，不能再直接拼 str）
 fn pbar_esc() -> str {
-    return crypto.base64_decode("Gw==");
+    return to_str(char(27));
 }
 
 // 数值钳制到 [lo, hi]

@@ -53,6 +53,8 @@ const T_DICT: u64 = 10;
 const T_ENUM: u64 = 11;
 const T_PTR: u64 = 12; // G2.9：ptr 值（a=地址；镜像 interp Value::Ptr）
 const T_FUTURE: u64 = 13; // G2.6：async 调用的 future（镜像 interp Value::Future）
+const T_BYTES: u64 = 14; // 预留：字节序列（镜像 interp Value::Bytes）；当前基线子集无产出源，
+                          // 仅 rt_itercheck 的 for-in 分支引用（不可达，留待 runtime 支持 bytes）
 
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -5622,13 +5624,14 @@ pub extern "C" fn rt_isnull(h: u64) -> u64 {
     u64::from(cell(h).t == T_NULL)
 }
 
-/// 迭代源检查（IterCheck lowering，镜像 VM 执行臂）：非 list/dict → H001。
+/// 迭代源检查（IterCheck lowering，镜像 VM 执行臂）：推导式非 list/dict → H001；
+/// `for in` 另收 bytes（值模型无 bytes 标签，该分支当前不可达，留待 runtime 支持 bytes）。
 /// is_comp=1 为推导式（"comprehension requires..."），0 为 `for in`。
 #[no_mangle]
 pub extern "C" fn rt_itercheck(src: u64, is_comp: u64, ci: u64, pc: u64) -> u64 {
     let (ci, pc) = (ci as u32, pc as u32);
     let c = cell(src);
-    if c.t != T_LIST && c.t != T_DICT {
+    if c.t != T_LIST && c.t != T_DICT && (is_comp != 0 || c.t != T_BYTES) {
         let what = if is_comp != 0 { "comprehension" } else { "`for in`" };
         return make_cell(err_h(
             "H001",

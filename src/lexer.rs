@@ -108,6 +108,8 @@ pub enum Tok {
     QuestionQuestion,
     /// 可选链 `?.`（obj 为 null 时短路返回 null）
     QuestionDot,
+    /// 变参省略号 `...`（仅 FFI 签名块）
+    DotDotDot,
     /// 三引号原始字符串 """..."""（保留换行，不做转义处理）
     MultiStr(String),
     Colon,
@@ -210,6 +212,7 @@ impl Tok {
             Tok::Question => "`?`".into(),
             Tok::QuestionQuestion => "`??`".into(),
             Tok::QuestionDot => "`?.`".into(),
+            Tok::DotDotDot => "`...`".into(),
             Tok::MultiStr(_) => "triple-quoted string".into(),
             Tok::Colon => "`:`".into(),
             Tok::Arrow => "`->`".into(),
@@ -627,7 +630,14 @@ impl Lexer {
             }
             '.' => {
                 self.bump();
-                Tok::Dot
+                if self.peek() == Some('.') && self.peek2() == Some('.') {
+                    // 变参省略号（FFI 签名块 `fn f(a: int, ...) -> ret`）
+                    self.bump();
+                    self.bump();
+                    Tok::DotDotDot
+                } else {
+                    Tok::Dot
+                }
             }
             '(' => {
                 self.bump();

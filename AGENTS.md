@@ -18,7 +18,7 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
 
 - 单 crate 流水线：lexer → parser → ast → checker → 四后端：`interp.rs`（AST 解释器）、`vm.rs`（字节码 VM）、`aot.rs`+`codegen.rs`（C 生成）、`natgen.rs`+`runtime/`（Cranelift 原生编译）。
 - `Value` 定义在 `interp.rs`，VM 与全部 builtins 复用之——改 Value/字典行为要同时顾及三引擎。
-- 铁律：**interp 与 VM 输出（含报错）必须逐字节一致**；错误码 Hxxx 集中在 `error.rs`，`H999`=功能未实现（VM/AOT/DLL 不支持 with、type 实例、byte/bytes、字段赋值等解释器特性时统一报 H999）。
+- 铁律：**interp 与 VM 输出（含报错）必须逐字节一致**；错误码 Hxxx 集中在 `error.rs`，`H999`=功能未实现（VM/AOT/DLL 不支持 with、type 实例、byte/bytes **字面量**（0b…/b"…"/byte()）、字段赋值等解释器特性时统一报 H999）。byte/bytes **值**（read_bytes/base64_decode/zip_read/ptr.read_byte/索引产出）interp/VM 双引擎全支持：VM 侧执行臂集中在 `vm.rs` 的 `v_add`/`v_eq`/`v_cmp`/`v_index`/`v_len`/`IterCheck`（按 is_comp 站点分派：推导式拒 bytes、for-in 收）与 `value_to_str`（display 基准 = 解释器：Byte 为 `0bNNNNNNNN`、Bytes 为可打印原样 + `\xNN`），改任一处须与解释器 `interp.rs` 对应函数（`arith`/`values_eq`/`values_cmp`/`index_value`）逐字对齐；for-in 双变量 list/bytes 报错走 `IsBytes` 指令 + `Raise`（文案含 list/bytes 两分支）。
 - 原生后端与 VM **共享同一套 `vm::Instr`**：加指令时 `vm.rs` 的执行臂 / `instr_text` / `parse_instr`（文本 IR 往返）与 `natgen.rs` 的 lowering 臂、`main.rs` 的 strtab 收集必须同步；漏一处会被 `regress_ir.py` / `regress4.py` 抓住。
   - 指令带**字符串操作数**（Call 名 / Field 名 / Raise 三段文本 / ThrowStr 文案 / enum 构造名等）才需 `main.rs` strtab 收集；纯数值操作数指令（如 `CondCheck` / `IsBoolVal`）不需要。
   - `Instr::Raise` 的**错误码**另有两处白名单，漏改会让 nat 静默渲染成 H990 或 IR 往返失败：`runtime/src/lib.rs` 的 `rt_raise` 码表、`vm.rs` `parse_instr` 的 `RAISE` 码表。
@@ -103,8 +103,10 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   `e_type`=「0200」、`e_machine` aarch64=「b700」，写成 `00b7` 永远不会通过）；③ full 包内容清单
   检查（运行时归档 / CRT / lld 是否齐全）。
   **不要**给该 job 加 `HONE_NAT_LINK=packaged`：Linux 侧打包链接缺 libLLVM（G3.8），只会以
-  加载期失败告终。publish 等待验证通过。安装脚本（install.sh / install.ps1）优先下载 full 包，
-  解压到 hone 同目录即启用原生编译工具链。
+  加载期失败告终。publish 等待验证通过。安装脚本仅存 install.sh（Linux/Termux），优先下载 full 包，
+  解压到 hone 同目录即启用原生编译工具链；**install.ps1 已移除**，Windows 安装 = 手动下载
+  `hone-windows-x86_64-full.zip` 解压后将其目录加入 PATH。Windows 构建产物在 release.yml 经
+  signtool 签名（secrets WINDOWS_CERT_PFX / WINDOWS_CERT_PASSWORD；缺失时跳过签名不失败）。
 - 条件与逻辑语义（改 `vm.rs` 编译臂时注意，解释器为准）：`if`/`while`/`do-while`/`for`/三元/推导式 `if` 过滤六处条件站点**运行期严格 bool**（`Instr::CondCheck`），`&&`/`||` 短路求值且右侧操作数严格 bool（`Instr::IsBoolVal` 判「恰为该布尔值」，不是 truthy）。
 
 ## 项目特有约定

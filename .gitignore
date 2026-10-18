@@ -70,3 +70,5 @@ src/bin/
 # 打包好的原生编译工具链（libhoneruntime.a + rust-lld + CRT，约 300MB；
 # 由 tests/tools/build_toolchain.py / release 流水线生成，随发行包分发，可再生，不入库）
 targets/
+build_out*.txt
+check_out.txt

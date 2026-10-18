@@ -240,7 +240,8 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             let addr = as_addr(&args[0], 0, span, file, src)?;
             let off = as_int(&args[1], 1, span, file, src)?;
             let p = check_range(addr, 1, off, "ptr.read_byte", span, file, src)? as *const u8;
-            Ok(Value::Int(unsafe { *p } as i64))
+            // 返回真正的 byte 值（与 int 严格隔离；回转用 to_int）
+            Ok(Value::Byte(unsafe { *p }))
         }
         "ptr.write_int" => {
             let addr = as_addr(&args[0], 0, span, file, src)?;
@@ -261,19 +262,36 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
         "ptr.write_byte" => {
             let addr = as_addr(&args[0], 0, span, file, src)?;
             let off = as_int(&args[1], 1, span, file, src)?;
-            let v = as_int(&args[2], 2, span, file, src)?;
-            if !(0..=255).contains(&v) {
-                return Err(zerr(
-                    codes::PTR_INVALID,
-                    format!("`ptr.write_byte`: value {} out of range 0..=255", v),
-                    span,
-                    file,
-                    src,
-                    Some("bytes are unsigned 8-bit values"),
-                ));
-            }
+            // 双形态：byte 值天然在 0..=255；int 需范围校验（与 as_int 类型口径一致）
+            let v: u8 = match &args[2] {
+                Value::Byte(b) => *b,
+                Value::Int(i) if (0..=255).contains(i) => *i as u8,
+                Value::Int(i) => {
+                    return Err(zerr(
+                        codes::PTR_INVALID,
+                        format!("`ptr.write_byte`: value {} out of range 0..=255", i),
+                        span,
+                        file,
+                        src,
+                        Some("bytes are unsigned 8-bit values"),
+                    ));
+                }
+                other => {
+                    return Err(zerr(
+                        codes::TYPE_MISMATCH,
+                        format!(
+                            "`ptr.*` expects an integer for argument 3, got `{}`",
+                            other.type_name()
+                        ),
+                        span,
+                        file,
+                        src,
+                        None::<&str>,
+                    ));
+                }
+            };
             let p = check_range(addr, 1, off, "ptr.write_byte", span, file, src)? as *mut u8;
-            unsafe { *p = v as u8 };
+            unsafe { *p = v };
             Ok(Value::Null)
         }
         _ => Err(zerr(

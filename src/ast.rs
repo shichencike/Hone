@@ -319,7 +319,7 @@ pub enum TyName {
 }
 
 /// load 签名块中的 C ABI 类型（typed FFI）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FfiTy {
     /// int64_t
     Int,
@@ -333,6 +333,9 @@ pub enum FfiTy {
     Ptr,
     /// void（仅作返回类型）
     Void,
+    /// C 回调原型（签名块形参写作 `fn(p: ty, ...) -> ret`）：解释器把 Hone 函数
+    /// 打包成 trampoline 地址传给 C（仅同步回调；零依赖方案限 4 参内 int 类形参）
+    Callback { params: Vec<FfiTy>, ret: Box<FfiTy> },
 }
 
 impl FfiTy {
@@ -344,6 +347,19 @@ impl FfiTy {
             FfiTy::Str => "str",
             FfiTy::Ptr => "ptr",
             FfiTy::Void => "void",
+            FfiTy::Callback { .. } => "fn",
+        }
+    }
+
+    /// 完整类型描述（回调原型展开为 `fn(T, ...) -> R` 形式；其余同 name）。
+    pub fn describe(&self) -> String {
+        match self {
+            FfiTy::Callback { params, ret } => format!(
+                "fn({}) -> {}",
+                params.iter().map(|t| t.name()).collect::<Vec<_>>().join(", "),
+                ret.name()
+            ),
+            other => other.name().to_string(),
         }
     }
 }
@@ -361,7 +377,9 @@ pub struct FfiSig {
     pub name: String,
     pub params: Vec<FfiParam>,
     pub ret: FfiTy,
-    /// 头文件解析失败的原型（如回调/变参/数组），调用时直接报错而非 ABI 崩溃
+    /// 变参函数（`...`）：固定参数按签名转换，其余实参按运行时类型转换（ctypes 式）
+    pub variadic: bool,
+    /// 头文件解析失败的原型（如数组参数/结构体按值），调用时直接报错而非 ABI 崩溃
     pub unsupported: Option<&'static str>,
 }
 

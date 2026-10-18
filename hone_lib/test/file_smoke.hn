@@ -8,7 +8,18 @@ data = [72, 0, 105, 255, 128, 13, 10, 0];
 
 write_bytes(p, data);
 got = read_bytes(p);
-assert(got == data, "binary round-trip mismatch, got " + to_str(len(got)) + " bytes");
+assert(type_of(got) == "bytes", "read_bytes should return `bytes`, got " + type_of(got));
+i = 0;
+mismatch = false;
+for d in data {
+    if (to_int(got[i]) != d) { mismatch = true; }
+    i = i + 1;
+}
+assert(!mismatch, "binary round-trip mismatch, got " + to_str(len(got)) + " bytes");
+
+// bytes 形态直接回写（read_bytes → write_bytes 往返）
+write_bytes(p, got);
+assert(read_bytes(p) == got, "bytes round-trip mismatch");
 
 // 文本读写不受影响
 tp = path.join(td, "t.txt");

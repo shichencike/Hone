@@ -15,8 +15,8 @@ Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.7.12）
 
 · 一键脚本（推荐）：
   · Linux / Termux：curl -fsSL https://github.com/shichencike/Hone/releases/latest/download/install.sh | sh
-  · Windows（PowerShell 5.1+）：irm https://github.com/shichencike/Hone/releases/latest/download/install.ps1 | iex
-· 手动下载：从 GitHub Releases 下载对应平台单文件二进制（Windows x86_64 / Linux x86_64 / Termux aarch64）
+· 手动下载：从 GitHub Releases 下载对应平台二进制（Windows x86_64 / Linux x86_64 / Termux aarch64）；
+  Windows 请下载 hone-windows-x86_64-full.zip，解压后将其所在目录加入系统环境变量 PATH（不提供一键脚本）
 · 源码构建：cargo build --release，产物为 target/release/hone（Windows 下为 hone.exe）
 
 验证安装：
@@ -110,9 +110,12 @@ Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.7.12）
   · str：UTF-8 字符串
   · char：单个 Unicode 字符（如 'a'，'中'），按码点比较与转换
   · byte：8 位无符号字节值（0..=255），与 int 严格隔离（无隐式转换），支持 ==/!=/</>/<=/>= 比较；
-    回转用 to_int(b) / char(b)；仅解释器支持（VM/AOT/DLL 报 H999）
+    回转用 to_int(b) / char(b)。字面量形式（0b… / byte()）仅解释器支持（VM/AOT/DLL 编译期报 H999）；
+    ptr.read_byte / bytes 索引产出的值在 interp/VM 双引擎均可完整使用
   · bytes：字节序列，支持 len / 索引（取 byte）/ 切片 / + 拼接 / == / for-in 迭代；
-    除 == 外的比较运算符（< > <= >=）运行时报 H001；仅解释器支持（VM/AOT/DLL 报 H999）
+    除 == 外的比较运算符（< > <= >=）运行时报 H001。字面量形式（b"…"）仅解释器支持（VM/AOT/DLL
+    编译期报 H999）；read_bytes / crypto.base64_decode / archive.zip_read 产出的值在 interp/VM
+    双引擎均可完整使用（显示/比较/索引/for-in/拼接/len 与解释器逐字节一致）
 · 字面量规则：
   · 整数：0，42，-1（无小数点）
   · 浮点数：必须包含小数点，如 3.14，-0.5，.2，2.0
@@ -761,7 +764,8 @@ hone watch <script.hn> 监控脚本文件变更自动重跑（跨平台轮询 mt
 hone build --dll <script.hn> 将脚本打包成 C ABI 动态库（DLL / SO / DYLIB）
 hone build --exe <script.hn> 打包独立可执行文件（解释器 + 脚本自释放，[-o <out>] [--icon <ico>]）
 hone build --exe --native <script.hn> 原生编译可执行文件（脚本 → Cranelift 机器码 → rustc 链接；需本机 Rust 工具链，见 4.6）
-hone natgen <script.hn> build --exe --native 的别名（[-o <out>] [--obj] 保留中间 object）
+hone build --obj <script.hn> 仅编译为原生 object（Cranelift，不链接 exe；[-o <out>] [--cpu <name>] [--target <triple>]，见 4.6）
+hone natgen <script.hn> build --exe --native 的别名（[-o <out>] [--cpu <name>] [--target <triple>]；--obj <o> 仅产 object 不链接）
 hone build --script <script.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）
 hone bind <header.h> 从 C 头文件生成 typed load 签名块（FFI 自动绑定）
 hone debug <script.hn> 断点调试模式（支持 breakpoint 关键字）
@@ -794,8 +798,8 @@ hone --help / --version 帮助信息 / 版本信息
 · read_file(path) → str：读取文本文件内容（文件为二进制/非法 UTF-8 时报错，二进制请用 read_bytes）
 · write_file(path, content)：写入文本文件
 · file_exists(path) → bool：检查文件是否存在
-· read_bytes(path) → list[int]：读取文件原始字节（每个元素为 0-255 的 int，二进制安全）
-· write_bytes(path, bytes)：将字节列表（int 0-255）原样写入文件
+· read_bytes(path) → bytes：读取文件原始字节（字节序列，二进制安全）
+· write_bytes(path, bytes)：将字节序列原样写入文件（接受 bytes 值或 int 0-255 列表）
 · len(value) → int：返回字符串长度（字节数）、列表/字典元素个数、bytes 字节数
 · type_of(value) → str：返回变量类型名称（"int"、"float"、"bool"、"str"、"char"、"byte"、"bytes"、"list"、"dict"、"null"、"error"、"ptr"）
 · byte(x) → byte：int（0..=255）显式转换为字节值（越界报 H002）；byte 原样返回
@@ -1013,16 +1017,17 @@ print(to_float("xyz"));         // 抛出 H007
 · crypto.sha1(str) → str：SHA-1 十六进制摘要
 · crypto.sha256(str) → str：SHA-256 十六进制摘要
 · crypto.hmac_sha256(key, msg) → str：HMAC-SHA256 十六进制（密钥与消息均为字符串）
-· crypto.base64_encode(str) → str：Base64 编码
-· crypto.base64_decode(str) → str：Base64 解码（输入非法报 H001）
+· crypto.base64_encode(str|bytes) → str：Base64 编码（接受 str 或 bytes）
+· crypto.base64_decode(str) → bytes：Base64 解码（输入非法报 H001）
 
 3.14 archive 压缩与归档模块
 
 · archive.zip_list(path) → list：列出 zip 条目名
-· archive.zip_read(path, entry) → str：读取 zip 中指定条目的文本
+· archive.zip_read(path, entry) → bytes：读取 zip 中指定条目的内容（二进制安全）
 · archive.zip_extract(path, dir) → int：解压 zip 到目录，返回文件条目数
 · archive.zip_create(path, entries) → bool：从 dict {条目名: 内容} 创建 zip
-· archive.tgz_list / tgz_read / tgz_extract / tgz_create：同上，针对 tar.gz
+· archive.tgz_list / tgz_extract / tgz_create：同上，针对 tar.gz
+· archive.tgz_read(path, entry) → str：读取 tar.gz 中指定条目的文本（仅文本；二进制条目报错）
 · 安全：解压时拒绝绝对路径与 `..` 穿越条目（防 zip-slip）
 
 3.15 ptr 指针类
@@ -1030,8 +1035,8 @@ print(to_float("xyz"));         // 抛出 H007
 · ptr.alloc(size) → ptr：分配 size 字节内存（对齐 8），失败返回 0
 · ptr.free(p) → bool：释放由 ptr.alloc 分配的内存
 · ptr.is_null(p) → bool / ptr.is_valid(p) → bool / ptr.size(p) → int：查询
-· ptr.read_int/read_float/read_byte(p, offset) → value：按偏移读取 8 字节整数 / 8 字节 double / 1 字节
-· ptr.write_int/ptr.write_float/ptr.write_byte(p, offset, v)：对应写入（write_byte 值域 0..=255）
+· ptr.read_int/read_float/read_byte(p, offset) → value：按偏移读取 8 字节整数 / 8 字节 double / 1 字节（byte 值）
+· ptr.write_int/ptr.write_float/ptr.write_byte(p, offset, v)：对应写入（write_byte 接受 byte 值或 int 0..=255）
 · 安全模型（防野指针）：分配表跟踪 —— 未分配、已释放（use-after-free）、重复释放（double-free）报 H304，
   越界访问报 H305，空指针读写报 H304；外部 FFI 句柄不在分配表中，free/read/write 拒绝操作
 
@@ -1277,7 +1282,12 @@ examples/guipro_adv_demo.hn（进阶控件：滑块/表格/树/画布/托盘/菜
 · 语法：load "路径" as 别名 { fn 函数名(参数: 类型, ...) -> 返回类型; ... }
 · 签名块显式声明 C ABI 参数与返回类型，调用时按声明精确转换，不再限制为 int64 单通道
 · 支持类型：int → int64_t，float → double，bool → C bool，str → const char*，ptr → void*
-· 返回类型额外支持 void；参数最多 8 个；回调（fn(...)）与可变参数（...）暂不支持
+· 返回类型额外支持 void；参数最多 8 个；变参（...）与受限回调（fn(int 类参数...) -> int 类返回，
+  0-4 参、float 形参/返回不支持）已支持（仅解释器引擎；VM/原生编译 H999）
+· 变参调用：固定参数按签名转换，其余实参按运行时类型转换（int/float/bool/str/ptr，
+  ctypes 式；单次调用最多 12 个实参；float 固定参数的变参函数不支持）
+· 回调：把 Hone 函数名或 lambda 传给回调形参即可（同步回调，仅限该次 FFI 调用窗口内有效，
+  异步回调报错）
 · 签名块要求 as 别名（作为调用前缀），以 } 结尾无需分号
 · 静态检查：签名块声明的函数调用会在检查阶段校验参数个数与类型（H001/H005），
   返回类型也参与类型推导（例如 m.cos(0.0) 的类型为 float）
@@ -1379,7 +1389,11 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 
 · 与 AOT（-c，经 C 中间文件）并列的第二条原生后端：`hone build --exe --native <script.hn>`
   直接用 Cranelift 把 VM 字节码 lower 为机器码（object），再经生成式 wrapper + rustc 链接成原生可执行文件
-· 命令形态：`hone natgen` 是 `build --exe --native` 的等价别名（额外保留 `--obj` 输出中间 object 供调试）
+· 命令形态：`hone natgen` 是 `build --exe --native` 的等价别名
+· 仅 object 模式：`hone build --obj <script.hn> [-o <out>]` 与 `hone natgen <script.hn> --obj <o>`
+  同语义——生成 Cranelift object 即停（object 即最终产物，不链接 exe），默认产物名 `{}.nat.o`
+  （相对当前目录）。用途：保留脚本 object 供调试 / 自行链接、交叉目标出 object
+  （无需目标 std 与链接器）；object 格式由目标决定（COFF / ELF）
 · 管线：解析 + 类型检查 → VM 字节码 → Cranelift object（每 chunk 一个函数，main 为 `__hn_main`）→
   rustc 一次链接（runtime 源码内嵌进 hone 二进制，干净机器自足）
 · 产物体积（M3 G3.3）：链接期 `-C opt-level=z -C codegen-units=1 -Wl,--gc-sections -Wl,--strip-all`，

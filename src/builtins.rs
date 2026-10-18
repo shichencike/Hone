@@ -1246,7 +1246,9 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "read_bytes" => {
             let p = as_str(&args[0], 0, name, span, file, src)?;
             match std::fs::read(p) {
-                Ok(bytes) => Ok(Value::List(bytes.into_iter().map(|b| Value::Int(b as i64)).collect())),
+                // 返回真正的 bytes 值（与 read_file 返回 str 对称）；
+                // 旧形态 list[int] 见 CHANGELOG（破坏性变更）
+                Ok(bytes) => Ok(Value::Bytes(bytes)),
                 Err(e) => {
                     // 细分文件错误：不存在 / 权限不足 / 被占用锁定 / 其他
                     let (code, hint): (&'static str, &'static str) = match e.kind() {
@@ -1270,58 +1272,62 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         }
         "write_bytes" => {
             let p = as_str(&args[0], 0, name, span, file, src)?;
-            let list = args.get(1).ok_or_else(|| arg_err(name, 2, 1, span, file, src))?;
-            let items = match list {
-                Value::List(items) => items,
+            let v = args.get(1).ok_or_else(|| arg_err(name, 2, 1, span, file, src))?;
+            // 双形态：bytes 值直接写；list[int 0-255] 逐元素校验后写（read_bytes 的逆操作）
+            let bytes = match v {
+                Value::Bytes(b) => b.clone(),
+                Value::List(items) => {
+                    let mut out = Vec::with_capacity(items.len());
+                    for (i, item) in items.iter().enumerate() {
+                        match item {
+                            Value::Int(b) if (0..=255).contains(b) => out.push(*b as u8),
+                            Value::Int(b) => {
+                                return Err(err(
+                                    codes::TYPE_MISMATCH,
+                                    format!(
+                                        "`{}` byte value at index {} is out of range: {} (expected 0-255)",
+                                        name, i, b
+                                    ),
+                                    span,
+                                    file,
+                                    src,
+                                    Some("each list element must be an integer in 0..=255"),
+                                ));
+                            }
+                            other => {
+                                return Err(err(
+                                    codes::TYPE_MISMATCH,
+                                    format!(
+                                        "`{}` expects integer byte values, found `{}` at index {}",
+                                        name,
+                                        other.type_name(),
+                                        i
+                                    ),
+                                    span,
+                                    file,
+                                    src,
+                                    Some("each list element must be an integer in 0..=255"),
+                                ));
+                            }
+                        }
+                    }
+                    out
+                }
                 other => {
                     return Err(err(
                         codes::TYPE_MISMATCH,
                         format!(
-                            "`{}` expects a list of byte values (int 0-255) for argument 2, got `{}`",
+                            "`{}` expects `bytes` or a list of byte values (int 0-255) for argument 2, got `{}`",
                             name,
                             other.type_name()
                         ),
                         span,
                         file,
                         src,
-                        Some("pass a list of integers in 0..=255, e.g. read_bytes of the file or [72, 105]"),
+                        Some("pass `bytes` (e.g. from `read_bytes`) or a list of integers in 0..=255"),
                     ));
                 }
             };
-            let mut bytes = Vec::with_capacity(items.len());
-            for (i, item) in items.iter().enumerate() {
-                match item {
-                    Value::Int(b) if (0..=255).contains(b) => bytes.push(*b as u8),
-                    Value::Int(b) => {
-                        return Err(err(
-                            codes::TYPE_MISMATCH,
-                            format!(
-                                "`{}` byte value at index {} is out of range: {} (expected 0-255)",
-                                name, i, b
-                            ),
-                            span,
-                            file,
-                            src,
-                            Some("each list element must be an integer in 0..=255"),
-                        ));
-                    }
-                    other => {
-                        return Err(err(
-                            codes::TYPE_MISMATCH,
-                            format!(
-                                "`{}` expects integer byte values, found `{}` at index {}",
-                                name,
-                                other.type_name(),
-                                i
-                            ),
-                            span,
-                            file,
-                            src,
-                            Some("each list element must be an integer in 0..=255"),
-                        ));
-                    }
-                }
-            }
             std::fs::write(p, bytes).map_err(|e| {
                 // 细分文件错误：不存在 / 权限不足 / 被占用锁定 / 其他
                 let (code, hint): (&'static str, &'static str) = match e.kind() {
@@ -1983,15 +1989,31 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             Ok(Value::Str(format!("{:x}", mac.finalize().into_bytes())))
         }
         "crypto.base64_encode" => {
-            let s = as_str(&args[0], 0, name, span, file, src)?;
+            // 双形态：str 按 UTF-8 编码；bytes 原样编码（二进制安全）
+            let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
+            let data: Vec<u8> = match v {
+                Value::Str(s) => s.as_bytes().to_vec(),
+                Value::Bytes(b) => b.clone(),
+                other => {
+                    return Err(err(
+                        codes::TYPE_MISMATCH,
+                        format!("`{}` expects a `str` or `bytes`, got `{}`", name, other.type_name()),
+                        span,
+                        file,
+                        src,
+                        Some("pass the text or `bytes` to encode"),
+                    ));
+                }
+            };
             use base64::Engine;
-            Ok(Value::Str(base64::engine::general_purpose::STANDARD.encode(s.as_bytes())))
+            Ok(Value::Str(base64::engine::general_purpose::STANDARD.encode(data)))
         }
         "crypto.base64_decode" => {
             let s = as_str(&args[0], 0, name, span, file, src)?;
             use base64::Engine;
             match base64::engine::general_purpose::STANDARD.decode(s.trim()) {
-                Ok(bytes) => Ok(Value::Str(String::from_utf8_lossy(&bytes).into_owned())),
+                // 返回真正的 bytes（原 str 形态经 from_utf8_lossy 会破坏非 UTF-8 二进制内容）
+                Ok(bytes) => Ok(Value::Bytes(bytes)),
                 Err(e) => Err(err(
                     codes::TYPE_MISMATCH,
                     format!("invalid base64 input: {}", e),

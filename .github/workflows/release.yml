@@ -75,6 +75,37 @@ jobs:
         run: |
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/hone.exe" "dist/${{ matrix.artifact }}" 2>/dev/null || cp "target/${{ matrix.target }}/release/hone" "dist/${{ matrix.artifact }}"
+      # Windows 二进制代码签名：从 Secrets 还原 .pfx → signtool 签名（SHA256 + RFC3161 时间戳）
+      # → signtool verify /pa 验证。Secrets 未配置（如 Fork 仓库）时打警告跳过，不使 CI 失败。
+      - name: sign windows exe (signtool)
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:WINDOWS_CERT_PFX) -or [string]::IsNullOrEmpty($env:WINDOWS_CERT_PASSWORD)) {
+            Write-Warning "WINDOWS_CERT_PFX / WINDOWS_CERT_PASSWORD secrets not set - skipping code signing (unsigned binary will be published)"
+            exit 0
+          }
+          # 1. 从环境变量还原 .pfx（Base64 → 二进制文件）
+          $pfx = "hone-codesign.pfx"
+          [IO.File]::WriteAllBytes("$PWD\$pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
+          # 2. 定位 Windows SDK 自带的 signtool.exe（取版本号最大的一个）
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match 'x64' } |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe not found under Windows Kits\10\bin" }
+          Write-Host "Using signtool: $($signtool.FullName)"
+          $exe = "dist\hone-windows-x86_64.exe"
+          # 3. 签名（/fd SHA256 摘要 + /tr RFC3161 时间戳 /td SHA256：证书过期后旧签名仍有效）
+          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $exe
+          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed with exit code $LASTEXITCODE" }
+          # 4. 验证签名，确保不会静默失败
+          & $signtool.FullName verify /pa $exe
+          if ($LASTEXITCODE -ne 0) { throw "signtool verify failed with exit code $LASTEXITCODE" }
+          Write-Host "Code signing verified OK"
+          Remove-Item $pfx -Force
       # G3.4：full 包 = 可执行文件 + targets/（安装脚本优先下载，解压即用）。
       - name: package full toolchain bundle (linux)
         if: matrix.name == 'linux-x86_64'
@@ -189,7 +220,6 @@ jobs:
           tar -czf "dist/pkg/hone-linux-x86_64.tar.gz" -C "dist/pkg" "hone-linux-x86_64"
           tar -czf "dist/pkg/hone-termux-aarch64.tar.gz" -C "dist/pkg" "hone-termux-aarch64"
           cp install.sh "dist/pkg/install.sh"
-          cp install.ps1 "dist/pkg/install.ps1"
           ls -la dist/pkg
           test -f dist/pkg/hone-windows-x86_64.exe
           cd dist/pkg
