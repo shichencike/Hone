@@ -1,7 +1,7 @@
 # Hone 原生编译后端 — 进度清单
 
 > 配套：`Hone原生编译后端设计.md`（设计）；本文件跟踪落地进度，按可独立验收的任务拆分。
-> 更新：2026-10-11
+> 更新：2026-10-18
 > 图例：`[x]` 完成 · `[ ]` 待办 · `[~]` 进行中 · `[!]` 已按用户指令裁剪/延后
 
 ## 总览
@@ -11,7 +11,7 @@
 | **M0 管线打通** | ✅ 完成 | T1–T10 全完成（三引擎逐字节对齐；`build --exe --native` + `natgen` 共用管线；文档已同步） |
 | **M1 核心语义** | ✅ 完成 | G1.1 RC+COW / G1.2 list / G1.3 dict / G1.4 for-in / G1.5 别名用例集 / G1.6 全量回归（三引擎）；审计暴露并修复 6 处引擎缺陷 |
 | **M2 功能对齐** | ✅ 完成 | G2.1 struct 完成（构造 / Field / `__struct__` 全路径过滤 / 相等语义；字段写入为 VM 编译期 H999 同源）；G2.2 enum 完成（构造 / match / 显示 / 相等 / 容器传参）；G2.3 match 完成（字面量 / 变体 / 载荷绑定 / 通配 / 无匹配 H005 / 绑定作用域 / 闭包捕获）+ 连带修掉 6 处既有 interp-VM 分歧；**G2.4 运算符重载完成**（15 个 `__op` 回退链，runtime 内实现，natgen 零改动）+ 连带修掉参数个数校验文案（重载路径可达）；**G2.5 alias / goto 完成**（alias 表进 runtime + natgen 编译期解析；连带修掉解释器「别名指向变量」分叉）；G2.7 H999 边界对齐完成（`instr_coverage` 单测强制）；G2.8 默认参数完成（`emit_default_prologue` 四路一致）；**G2.9 点号内置族完成**（runtime 模块内置分发层 + 纯 std 家族移植 + 外部 crate 族 H999 登记，`tests/m2/dotted.hn` 三引擎一致）；**G2.6 async-await 完成**（rc 原子化 + future 值模型 + spawn_async/await/gocall lowering + 三引擎逐字节对齐）（M2 全任务完成）|
-| **M3 集成与优化** | 🔵 进行中 | **G3.1 import / G3.3 体积裁剪 / G3.7 CPU 基线完成**；**G3.2 交叉编译完成**（`--target` 三目标 windows-gnu / x86_64-musl / aarch64-musl，经 rustc self-contained musl CRT + rust-lld 裸链接）；工具链打包 / CI 待办（G3.4/G3.6）|
+| **M3 集成与优化** | 🔵 进行中 | **G3.1 import / G3.2 交叉编译 / G3.3 体积裁剪 / G3.5 静态表入 object / G3.6 CI 与发布验证 / G3.7 CPU 基线完成**；**G3.4 已按新口径落地**：NAT 降级为**纯 .o 生成器**（natgen 出 `script.nat.o` + 内嵌运行时编 `libhoneruntime.a` + 系统 gcc 链接），随包工具链分发整族移除，**G3.8 随之作废**（详见「纯 .o 生成器口径变更（2026-10-18，第五轮）」）|
 
 **当前可运行产物**：`tests/m1/list.hn` / `tests/m1/dict.hn` / `tests/smoke/rc_alias.test.hn` / `tests/m2/struct.hn` / `tests/m2/enum.hn` / `tests/m2/match.hn` / `tests/m2/conditions.hn` / `tests/m2/overload.hn` / `tests/m2/alias_goto.hn` / `tests/m2/defaults.hn` / `tests/m2/dotted.hn` / `tests/m2/async_go.hn` / `tests/m2/imports.hn` → nat exe，三引擎逐字节对齐（含 list/dict 读写、for-in 迭代、别名 RC+COW 值语义、struct 构造/字段/隐藏键过滤/相等、enum 构造/match/显示/相等/容器与传参、match 全形态与绑定作用域、lambda 捕获、条件严格 bool 与 `&&`/`||` 短路、15 个 `__op` 运算符重载回退、alias 别名与 goto 跳转、默认参数序言、点号内置族 time/path/stat/matrix/csv/diff/yaml/plot/glob/env/db/log/ptr + H999 能力边界、async/await 与 go 并发、构建期 import 展开（本地路径 / 别名前缀 / 模块顶层副作用））。
 **复现**：`hone build --exe --native tests/m2/dotted.hn -o dt.exe && ./dt.exe`
@@ -565,12 +565,16 @@
 - [x] **G3.3 体积裁剪**：链接期 `-C opt-level=z` + `-C codegen-units=1` + `-Wl,--gc-sections` +
       `-Wl,--strip-all`；nat 产物 5.10MB → **~1.0–1.1MB**（≤3MB 达标）；无需「按脚本裁剪内置分发表」
       即已达标（详见 G3.3 实现进度）
-- [ ] **G3.4 工具链打包**：`targets/` 运行时归档（每目标 staticlib）+ CRT + lld 随 hone 分发；`HONE_TOOLCHAIN_DIR` 覆盖；安装脚本改 zip/tar.gz 包
-- [ ] **G3.5 静态表入 object**：const blob / span 表 / 函数注册表移入 script.o rodata（设计 §4.7，替换 wrapper 静态表）+ 启动 FNV 自检
-- [ ] **G3.6 CI 自动化**：`ci.yml` 增 nat 三引擎回归（`regress4.py`）；release 流水线发布三目标脚本产物 + 交叉产物 CI 二次验证
-- [ ] **G3.8 Linux 打包工具链自足化**：随包分发 `rust-lld` 的运行期依赖（`libLLVM.so`，体积按实测
-      权衡）或改用静态链接的 lld——在此之前 Linux 侧「无 rustc 打包链接」不可用（会自动改走
-      rustc 路径）；详见第四轮实现进度
+- [x] **G3.4 纯 .o 生成器**（原「工具链打包」口径已改）：natgen 出脚本 object + 内嵌运行时编
+      `libhoneruntime.a`（`--cfg hone_boot`，按源码 + 目标三元组 md5 缓存）+ 系统 gcc 链接；
+      `targets/` 分发树 / 随包 `rust-lld` / `HONE_TOOLCHAIN_DIR` / `HONE_NAT_LINK` 全部移除
+      （详见第五轮实现进度）
+- [x] **G3.5 静态表入 object**：const blob / span 表 / 函数注册表移入 `script.nat.o` rodata
+      （设计 §4.7）+ `hn_boot` 启动 FNV 自检（`HN_*` 24 个数据符号 + `HN_LENS` 长度目录）
+- [x] **G3.6 CI 自动化**：`ci.yml` 跑 nat 三引擎回归（`regress4.py`）；`release.yml::verify-nat`
+      用发布产物本身编 musl 产物并真跑 + aarch64 ELF 头校验 + full 包内容清单检查
+- [!] **G3.8 Linux 打包工具链自足化**：**作废**——工具链分发整族已移除，原生编译统一要求本机
+      rustc（含目标 std）与 gcc，无需再随包分发 `libLLVM.so`（详见第五轮实现进度）
 - [x] **G3.7 CPU 基线**：x86_64 ISA 默认 baseline+SSSE3（设计 §6.3，经 IsaBuilder 设置）；
       `--cpu baseline|ssse3|sse4.2|avx2` 预设（`build --exe --native` / `natgen` 均支持，详见 G3.7 实现进度）
 
@@ -770,6 +774,34 @@
   行为不变；`package_lld` 的依赖打印在 Linux 打包日志中可见（本机为 Windows，走 DLL 分支）。
   Linux 侧最终确认由 `release.yml` 的 `verify-nat` 承担。
 
+---
+
+### 纯 .o 生成器口径变更（2026-10-18，第五轮）—— G3.4 改口径落地、G3.8 作废
+
+- **口径变更（原「工具链打包」作废）**：不再随包分发编译工具链。`build_native`
+  （`build --exe --native` / `natgen`）产出**脚本 object** `script.nat.o`；内嵌运行时源码
+  （`runtime/src/lib.rs`）经 rustc 编成静态库 `libhoneruntime.a`（`--cfg hone_boot`，按源码内容 +
+  目标三元组 md5 缓存于 `~/.hone/cache/runtime/`，运行时源码不变时跨脚本复用）；最后交**系统 gcc**
+  链接：`gcc script.nat.o libhoneruntime.a -o script`（windows-gnu 需补 Rust std 依赖导入库
+  `-lws2_32 -lntdll -lbcrypt -luserenv -ladvapi32`）。本机无 rustc/gcc 时安装 Rust 工具链 +
+  MinGW-w64 即可。
+- **删除项**：`tests/tools/build_toolchain.py`、`targets/` 分发树、随包 `rust-lld`、
+  `HONE_NAT_LINK` / `HONE_TOOLCHAIN_DIR` 环境变量、`install.ps1`；full 包只剩 hone 本体
+  （Windows 安装改 `install.bat` 双击）。
+- **G3.4**：以「纯 .o + 本机 rustc/gcc」形态落地（原「`targets/` 归档 + CRT + lld 分发」作废）。
+  **G3.5**：静态表已由 `natgen::emit_static_tables` 编入 script.o 导出数据符号（`HN_*` 24 个 +
+  `HN_LENS`），`runtime` 的 `hn_boot`（`#[cfg(hone_boot)]`）在 `hn_entry` 首行自举注册 + FNV 自检。
+  **G3.6**：CI 已跑 `regress4.py`；`release.yml::verify-nat` 用发布产物本身编 x86_64-musl 产物并
+  **真跑**断言输出（job 内 `rustup target add x86_64-unknown-linux-musl`），另加 aarch64 ELF 头
+  校验（`od` 按文件字节序）与 full 包内容清单检查。
+  **G3.8**（Linux 打包 lld 自足化）随工具链分发移除而**作废**。
+- **交叉编译口径不变**：`--target <triple>` 仍走 rustc `link-self-contained` + 自带 musl CRT +
+  sysroot 内 rust-lld 裸链接（`-no-pie --gc-sections --strip-all`）；宿主 Linux（ELF）走 cc 驱动
+  `-Wl,` 参数且必须非 PIE（`-C relocation-model=static`）；交叉产物在 Windows 上不可运行，靠 CI
+  Linux job 二次验证。
+- **文档口径同步**：`README` / `hone.md` 4.6 / `AGENTS.md`（G3.4、G3.6）/ 官网 install、download、
+  docs / `CHANGELOG`（Unreleased）。
+
 
 
 
@@ -870,7 +902,7 @@
 | G3.1 import | 本地路径递归合并 + 远程缓存下载；跨文件同名报错 |
 | G3.2 裸链接/交叉编译 | rust-lld + 三目标（windows-gnu / linux-musl / aarch64-musl）；`--target` 选项 |
 | G3.3 体积裁剪 | `--gc-sections` + 静态内置裁剪；目标 ≤3MB |
-| G3.4 工具链打包 | staticlib 归档 + CRT + lld 分发；`HONE_TOOLCHAIN_DIR` |
+| G3.4 工具链打包 | **口径变更（2026-10-18）**：改为**纯 .o 生成器**（natgen 出 `script.nat.o` + 内嵌运行时编 `libhoneruntime.a` + 系统 gcc 链接），不再随包分发 CRT/lld（G3.8 作废） |
 | G3.5 静态表入 object | const blob / span 表 / 注册表移入 rodata；FNV 启动自检 |
 | G3.6 CI 自动化 | `ci.yml` 增 nat 三引擎回归；release 流水线三目标验证 |
 | G3.7 CPU 基线 | x86_64 baseline+SSSE3 + `--cpu` 选项 |

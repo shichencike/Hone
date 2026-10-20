@@ -56,6 +56,50 @@
 <h2><span class="hash">#</span>更新日志</h2>
 <p>各版本的新增 / 变更 / 修复 / 文档汇总。最新版本见顶部 <span class="ver-tag">v0.8.0</span> 区块。</p>
 <div class="release">
+<span class="ver-tag">Unreleased</span> <span class="badge-new">开发中</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>FFI 回调 + 变参全链路支持（解释器实测通过；VM/原生编译后端亦实现）</strong>：删 ffi_dispatch!/ ffi_variadic! 穷举宏（8190 类型实例化内存峰值），切换为 libffi 静态构建（ffi_prep_cif/ ffi_prep_cif_var/ffi_call + ffi_closure 回调）。支持 int/int32/float/float32/bool/str/ptr/void 全标量参数与返回，回调 0-8 参、变参无固定上限、float 固定参数的变参函数已支持。</li>
+<li><strong>int32/float32 新类型全链路</strong>：lexer/parser/header/checker/interp/VM/NAT/签名块/头文件绑定 全覆盖；C <code class="inline">int32_t</code>/<code class="inline">uint32_t</code> 映射 <code class="inline">int32</code>，C <code class="inline">float</code> 映射 <code class="inline">float32</code>。</li>
+<li><strong>NAT 降级纯 .o 生成器</strong>：natgen 出脚本 object，内嵌运行时源码经 rustc 编静态库 <code class="inline">libhoneruntime.a</code>（<code class="inline">--cfg hone_boot</code>，按源码+目标 md5 缓存），交<strong>系统 gcc</strong> 链接 (<code class="inline">gcc app.o libhoneruntime.a -o app</code>)。删打包工具链全家（build_toolchain.py/targets/rust-lld/ HONE_NAT_LINK/HONE_TOOLCHAIN_DIR），Linux 需本机 rustc+gcc，Windows 需 MinGW-w64。</li>
+<li><strong>install.bat 纯 ASCII 安装脚本</strong>：原生 curl.exe+tar.exe，镜像回退/sha256 校验/断点续传/PATH 去重/--uninstall 卸载/幂等，功能对齐 install.sh；Windows 安装 = 双击 install.bat。</li>
+<li><strong>官方 runtime-a 发布资产</strong>：Release 附带 <code class="inline">runtime-a.tar.gz</code>——为三个分发目标（x86_64-unknown-linux-musl / x86_64-pc-windows-gnu / aarch64-unknown-linux-musl）各预编译一份 <code class="inline">libhoneruntime-&lt;hash12&gt;.a</code>（<code class="inline">hone natgen --runtime-only [--target &lt;triple&gt;] [-o &lt;dir&gt;]</code> 产出）。解压后设 <code class="inline">HONE_RUNTIME_A</code> 指向该目录，同版本 hone 原生编译免本机 rustc。</li>
+<li><strong>CI 恢复多核极速</strong>：删 -j 1 与 swap/页面文件，保留 actions/cache@v4。</li>
+</ul>
+<h4><span class="flag doc">变更（破坏性变更）</span></h4>
+<ul>
+<li>移除 install.ps1 / build_toolchain.py / targets/ 工具链分发 / HONE_NAT_LINK 环境变量； full 包仅含 hone 本体（无 targets/）。</li>
+<li>头文件绑定不支持列表缩减：数组参数/结构体按值/long double 仍 unsupported； 变参与回调现已支持（hone bind 输出列为支持）。</li>
+<li>原生编译链接路径口径变更：不再随包分发工具链；本机无 rustc/gcc 时需安装 Rust+MinGW。</li>
+</ul>
+<h4><span class="flag doc">变更（byte/bytes 内置函数返回值修正，含破坏性变更）</span></h4>
+<ul>
+<li><strong><code class="inline">zlib.compress</code> / <code class="inline">zlib.gzip</code> → <code class="inline">bytes</code></strong>（原 base64 str）：压缩结果是二进制，直接返回字节序列；需要字符串形态用 <code class="inline">crypto.base64_encode</code> 显式编码；参数额外接受 <code class="inline">bytes</code>（str 按 UTF-8 字节）</li>
+<li><strong><code class="inline">zlib.decompress</code> / <code class="inline">zlib.gunzip</code> → <code class="inline">bytes</code></strong>（原 str）：解压不再强制 UTF-8（原 read_to_string 会拒绝非 UTF-8 内容）；输入接受 bytes，str 输入按 base64 兼容旧版形态</li>
+<li><strong><code class="inline">ws.request</code> → <code class="inline">list</code></strong>（原拼接 str）：返回消息列表，每条消息一个元素——文本帧为 str、二进制帧（opcode 0x2）为 bytes（原实现二进制帧被静默丢弃）</li>
+<li><strong>新增 <code class="inline">http_get_bytes(url)</code> / <code class="inline">http_post_bytes(url, body)</code> → <code class="inline">bytes</code></strong>：二进制响应体（图片 / PDF / zip 等）不经 UTF-8 边界；<code class="inline">http.request</code> 新增 <code class="inline">binary: true</code> 选项（响应体按原始字节返回），str 行为不变</li>
+<li><strong>新增 <code class="inline">archive.tgz_read_bytes(path, entry)</code> → <code class="inline">bytes</code></strong>：与 <code class="inline">zip_read</code> 对称（<code class="inline">tgz_read</code> 维持 str 仅文本）</li>
+<li><strong><code class="inline">read_bytes(path)</code> → <code class="inline">bytes</code></strong>（原 <code class="inline">list[int]</code>）：返回真正的字节序列（索引得 byte 值、for-in 迭代字节、<code class="inline">+</code> 拼接、len 为字节数）；checker 静态返回类型同步</li>
+<li><strong><code class="inline">crypto.base64_decode(str)</code> → <code class="inline">bytes</code></strong>（原 <code class="inline">str</code>）：二进制安全（原实现经 from_utf8_lossy 会破坏非 UTF-8 内容，属 bug 修复）</li>
+<li><strong><code class="inline">archive.zip_read(path, entry)</code> → <code class="inline">bytes</code></strong>（原 <code class="inline">str</code>）：二进制安全（原实现经 read_to_string 会拒绝非 UTF-8 条目，属 bug 修复）；<code class="inline">archive.tgz_read</code> 维持 <code class="inline">str</code>（仅文本）</li>
+<li><strong><code class="inline">ptr.read_byte(p, offset)</code> → <code class="inline">byte</code> 值</strong>（原 <code class="inline">int</code> 0-255）：与 int 严格隔离，回转用 to_int</li>
+<li><strong>参数侧补充（非破坏）</strong>：<code class="inline">crypto.base64_encode</code> 额外接受 <code class="inline">bytes</code>；<code class="inline">write_bytes</code> 额外接受 <code class="inline">bytes</code> 值；<code class="inline">ptr.write_byte</code> 额外接受 <code class="inline">byte</code> 值（原 list/int 形态均可用）</li>
+<li><strong>VM 行为对齐</strong>：<code class="inline">for a, b in &lt;list/bytes&gt;</code> 双变量迭代原在 VM 静默放行（第二变量取陈旧值）， 现与解释器一致报错 `<code class="inline"> </code>for k, v in<code class="inline"> requires a dict, got a list/bytes </code>`</li>
+<li>checker 新增双形态参数检查（expect_str_or_bytes / expect_int_or_byte）；LSP 补全描述同步</li>
+</ul>
+<h4><span class="flag chg">变更</span></h4>
+<ul>
+<li><strong><code class="inline">hone natgen --obj &lt;o&gt;</code> 语义统一为「仅 object」</strong>：原先「改名中间 object 仍链接 exe」的用法 废弃；<code class="inline">--obj</code> 与 <code class="inline">-o</code> 不能同用（显式报错）。完整管线（<code class="inline">natgen &lt;file.hn&gt;</code> / <code class="inline">build --exe --native</code>）行为与默认中间 object 名（<code class="inline">{}.nat.o</code>）不变</li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li><strong>FFI 口径全站对齐 libffi 实现</strong>：hone.md 4.1.1/4.1.2 补 <code class="inline">int32</code> → int32_t、<code class="inline">float32</code> → C float 映射（头文件绑定同步 <code class="inline">int32_t</code>/<code class="inline">uint32_t</code> → int32、C <code class="inline">float</code> → float32）；官网 docs/examples/faq 订正「回调与变参暂不支持」的旧表述（现已支持，回调限 0-8 个标量参、仅同步），头文件绑定 unsupported 列表缩至数组参数/结构体按值/long double</li>
+<li><strong>NAT 纯 .o 口径同步到进度 / 设计文档</strong>：进度清单 M3 任务组的 G3.4（口径变更）/ G3.5 / G3.6 标为 完成、G3.8 标为作废，并新增「纯 .o 生成器口径变更（第五轮）」实现进度；<code class="inline">Hone原生编译后端设计.md</code> 加实施说明（随包分发工具链方案未落地，构建机需 rustc + gcc，产物本身仍自足）</li>
+<li><strong>官网 changelog.html 由 CHANGELOG.md 重新生成</strong>：此前 [Unreleased] 段整段缺失</li>
+<li>hone.md 头行实现版本口径 v0.7.12 → v0.8.0</li>
+</ul>
+</div>
+<div class="release">
 <span class="ver-tag">v0.8.0</span>
 <span class="date">2026-10-17</span>
 <h4><span class="flag add">新增</span></h4>

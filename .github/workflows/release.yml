@@ -127,6 +127,36 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/
 
+  runtime-a:
+    name: prebuilt runtime libs (runtime-a)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      # 官方 runtime-a 下载项：用发布产物本身的 hone，为三个分发目标各预编译一份
+      # libhoneruntime-<hash12>.a（缓存键 = md5(内嵌运行时源码 + 目标三元组)）。
+      # 用户侧设 HONE_RUNTIME_A 指向解压目录即可免本机 rustc（同版本 hone 直接命中）。
+      # staticlib 只编不链，交叉目标仅需 rustup target add（无需 MinGW / musl CRT）。
+      - name: build runtime libs for three targets
+        shell: bash
+        run: |
+          set -e
+          chmod +x dist/hone-linux-x86_64/hone-linux-x86_64
+          rustup target add x86_64-unknown-linux-musl x86_64-pc-windows-gnu aarch64-unknown-linux-musl
+          HN=dist/hone-linux-x86_64/hone-linux-x86_64
+          mkdir -p runtime-a
+          for t in x86_64-unknown-linux-musl x86_64-pc-windows-gnu aarch64-unknown-linux-musl; do
+            lib=$($HN natgen --runtime-only --target "$t" -o runtime-a) || { echo "runtime-only failed for $t"; exit 1; }
+            echo "$t -> $(basename "$lib") ($(stat -c%s "$lib") bytes)"
+          done
+          tar -czf runtime-a.tar.gz -C runtime-a .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-a
+          path: runtime-a.tar.gz
+
   verify-nat:
     name: verify nat cross products
     needs: build
@@ -184,7 +214,7 @@ jobs:
 
   publish:
     name: publish release + homebrew + scoop
-    needs: [build, verify-nat]
+    needs: [build, verify-nat, runtime-a]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

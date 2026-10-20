@@ -495,7 +495,7 @@ fn print_help() {
     println!("  hone fmt [-w|-c] <file.hn>  代码格式化（Tab 缩进/运算符空格/大括号；-w 覆盖写，-c 只检查差异）");
     println!("  hone doc <file.hn>        从 fn/class 定义与上方 `//` 注释生成 Markdown API 文档");
     println!("  hone check <file.hn|目录> [--json] 仅静态检查（解析+类型检查，不执行）；目录递归扫全部 .hn，--json 输出诊断 JSON 数组，退出码 0/1 表达成败");
-    println!("  hone natgen <file.hn>  原生编译（build --exe --native 别名）：脚本 → Cranelift object → 链接原生可执行 [-o <out>] [--cpu <name>] [--target <triple>]；--obj <o> 仅产 object 不链接");
+    println!("  hone natgen <file.hn>  原生编译（build --exe --native 别名）：脚本 → Cranelift object → 链接原生可执行 [-o <out>] [--cpu <name>] [--target <triple>]；--obj <o> 仅产 object 不链接；--runtime-only [--target <triple>] [-o <dir>] 仅预编译运行时静态库");
     println!("  hone build --dll <file.hn> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
     println!("  hone build --exe <file.hn> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
     println!("  hone build --exe --native <file.hn> 原生编译为可执行文件（Cranelift→object→运行时静态库→系统 gcc 链接；[-o <out>] [--cpu <name>] [--target <triple>]）");
@@ -1477,9 +1477,14 @@ fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
     let mut cpu: Option<String> = None;
     let mut target: Option<String> = None;
     let mut path: Option<String> = None;
+    let mut runtime_only = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
+            "--runtime-only" => {
+                runtime_only = true;
+                i += 1;
+            }
             "--cpu" => {
                 cpu = Some(args.get(i + 1).cloned().ok_or_else(|| {
                     ZError::plain(
@@ -1532,7 +1537,7 @@ fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
                 return Err(ZError::plain(
                     codes::SYNTAX,
                     format!("unknown natgen option `{a}`"),
-                    Some("usage: hone natgen <file.hn> [-o <out>] [--obj <o>] [--cpu <name>] [--target <triple>]"),
+                    Some("usage: hone natgen <file.hn> [-o <out>] [--obj <o>] [--cpu <name>] [--target <triple>] | hone natgen --runtime-only [--target <triple>] [-o <dir>]"),
                 ));
             }
             a => {
@@ -1541,11 +1546,17 @@ fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
             }
         }
     }
+    // --runtime-only：仅预编译运行时静态库（libhoneruntime-<hash12>.a），无脚本参与。
+    // 官方发布用它为各目标预编 runtime-a 下载项；-o <dir> 把 .a 复制到指定目录。
+    if runtime_only {
+        return cmd_runtime_only(target.as_deref(), out.as_deref());
+    }
     let path = path.ok_or_else(|| {
         ZError::plain(
             codes::SYNTAX,
             "missing script path: `hone natgen <file.hn>`",
-            Some("usage: hone natgen <file.hn> [-o <out>] [--obj <o>] [--cpu <name>] [--target <triple>]"),
+            Some("usage: hone natgen <file.hn> [-o <out>] [--obj <o>] [--cpu <name>] [--target <triple>] | hone natgen --runtime-only [--target <triple>] [-o <dir>]",
+        ),
         )
     })?;
     // 统一 --obj 语义：`--obj <o>` = 仅 object 模式（不链接 exe），与 `hone build --obj` 同口径；
@@ -1809,27 +1820,76 @@ fn build_native(
     Ok(())
 }
 
+/// 预编译运行时静态库文件名（与 runtime_staticlib 的缓存键一致）：
+/// `libhoneruntime-<md5(源码+三元组)[..12]>.a`——同版本 hone 链接时直接命中同名缓存。
+fn runtime_lib_name(triple_s: &str) -> String {
+    use md5::Digest;
+    let mut h = md5::Md5::new();
+    h.update(NAT_RUNTIME_SRC.as_bytes());
+    h.update(triple_s.as_bytes());
+    format!("libhoneruntime-{}.a", &format!("{:x}", h.finalize())[..12])
+}
+
+/// hone natgen --runtime-only [--target <triple>] [-o <dir>]
+/// 仅预编译内嵌运行时静态库（无脚本参与）：官方发布据此为各目标产出 runtime-a 下载项，
+/// 用户侧把 .a 放进 HONE_RUNTIME_A 指向的目录即可免本机 rustc。默认目标 = 宿主。
+fn cmd_runtime_only(target: Option<&str>, out_dir: Option<&str>) -> Result<(), ZError> {
+    let host = target_lexicon::Triple::host().to_string();
+    let triple_s = match target {
+        Some(t) => t.parse::<target_lexicon::Triple>().map_err(|e| {
+            ZError::plain(
+                codes::SYNTAX,
+                format!("无效的 --target `{t}`: {e}"),
+                Some("例如 x86_64-pc-windows-gnu / x86_64-unknown-linux-musl"),
+            )
+        })?.to_string(),
+        None => host,
+    };
+    let lib = runtime_staticlib(&triple_s)?;
+    if let Some(dir) = out_dir {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| ZError::plain(codes::INTERNAL, format!("创建输出目录 `{dir}`: {e}"), None::<String>))?;
+        let dest = std::path::Path::new(dir).join(runtime_lib_name(&triple_s));
+        std::fs::copy(&lib, &dest)
+            .map_err(|e| ZError::plain(codes::INTERNAL, format!("复制运行时静态库到 `{}`: {e}", dest.display()), None::<String>))?;
+        println!("{}", dest.display());
+    } else {
+        println!("{}", lib.display());
+    }
+    Ok(())
+}
+
 /// 内嵌运行时静态库（exe 链接用）：NAT_RUNTIME_SRC 经 rustc 编为
 /// `--cfg hone_boot --crate-type staticlib` 的 libhoneruntime.a（含 C 入口 main）。
 /// 按「源码内容 + 目标三元组」md5 缓存于 ~/.hone/cache/runtime/——运行时源码不变
 /// 时跨脚本复用，不重复编译。交叉目标需已装该目标的 rust std。
 fn runtime_staticlib(triple_s: &str) -> Result<std::path::PathBuf, ZError> {
-    use md5::Digest;
     let host = target_lexicon::Triple::host().to_string();
     let cross = triple_s != host;
-    let mut h = md5::Md5::new();
-    h.update(NAT_RUNTIME_SRC.as_bytes());
-    h.update(triple_s.as_bytes());
-    let hash = format!("{:x}", h.finalize())[..12].to_string();
+    let name = runtime_lib_name(triple_s);
     let dir = crate::interp::hone_cache_dir().join("runtime");
     std::fs::create_dir_all(&dir)
         .map_err(|e| ZError::plain(codes::INTERNAL, format!("创建运行时缓存目录: {e}"), None::<String>))?;
-    let lib = dir.join(format!("libhoneruntime-{}.a", hash));
+    let lib = dir.join(&name);
     if lib.is_file() {
         return Ok(lib);
     }
+    // 预编译运行时查找（官方 runtime-a 下载项）：HONE_RUNTIME_A 指向含
+    // libhoneruntime-<hash12>.a 的目录，命中即落缓存——同版本 hone 免本机 rustc。
+    if let Ok(prebuilt_dir) = std::env::var("HONE_RUNTIME_A") {
+        let prebuilt = std::path::Path::new(&prebuilt_dir).join(&name);
+        if prebuilt.is_file() {
+            let tmp = dir.join(format!(".tmp-{}", name));
+            std::fs::copy(&prebuilt, &tmp)
+                .map_err(|e| ZError::plain(codes::INTERNAL, format!("复制预编译运行时 `{}`: {e}", prebuilt.display()), None::<String>))?;
+            std::fs::rename(&tmp, &lib)
+                .map_err(|e| ZError::plain(codes::INTERNAL, format!("落盘预编译运行时: {e}"), None::<String>))?;
+            eprintln!("[3b] 使用预编译运行时静态库: {}（{}）", lib.display(), triple_s);
+            return Ok(lib);
+        }
+    }
     // 编到临时名再改名：并发/中断不会留下半截 .a 被后续命中。
-    let tmp = dir.join(format!(".tmp-{}", hash));
+    let tmp = dir.join(format!(".tmp-{}", name));
     let mut cmd: Vec<std::ffi::OsString> = vec![
         "rustc".into(),
         "--edition".into(),

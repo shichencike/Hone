@@ -15,6 +15,12 @@
   HONE_NAT_LINK/HONE_TOOLCHAIN_DIR），Linux 需本机 rustc+gcc，Windows 需 MinGW-w64。
 - **install.bat 纯 ASCII 安装脚本**：原生 curl.exe+tar.exe，镜像回退/sha256 校验/断点续传/PATH
   去重/--uninstall 卸载/幂等，功能对齐 install.sh；Windows 安装 = 双击 install.bat。
+- **官方 runtime-a 发布资产**：Release 附带 `runtime-a.tar.gz`——为三个分发目标
+  （x86_64-unknown-linux-musl / x86_64-pc-windows-gnu / aarch64-unknown-linux-musl）各预编译一份
+  `libhoneruntime-<hash12>.a`（缓存键 = md5(内嵌运行时源码 + 目标三元组)，由 `hone natgen
+  --runtime-only [--target <triple>] [-o <dir>]` 产出；staticlib 只编不链，交叉仅需目标 rust std）。
+  用户侧解压后设 `HONE_RUNTIME_A` 指向该目录，同版本 hone 原生编译免本机 rustc（缓存未命中时自动
+  查找并落盘）。
 - **CI 恢复多核极速**：删 -j 1 与 swap/页面文件，保留 actions/cache@v4。
 
 ### 变更（破坏性变更）
@@ -25,6 +31,16 @@
 - 原生编译链接路径口径变更：不再随包分发工具链；本机无 rustc/gcc 时需安装 Rust+MinGW。
 
 ### 变更（byte/bytes 内置函数返回值修正，含破坏性变更）
+- **`zlib.compress` / `zlib.gzip` → `bytes`**（原 base64 str）：压缩结果是二进制，直接返回字节序列；
+  需要字符串形态用 `crypto.base64_encode` 显式编码；参数额外接受 `bytes`（str 按 UTF-8 字节）
+- **`zlib.decompress` / `zlib.gunzip` → `bytes`**（原 str）：解压不再强制 UTF-8（原
+  read_to_string 会拒绝非 UTF-8 内容）；输入接受 bytes，str 输入按 base64 兼容旧版形态
+- **`ws.request` → `list`**（原拼接 str）：返回消息列表，每条消息一个元素——文本帧为 str、
+  二进制帧（opcode 0x2）为 bytes（原实现二进制帧被静默丢弃）
+- **新增 `http_get_bytes(url)` / `http_post_bytes(url, body)` → `bytes`**：二进制响应体
+  （图片 / PDF / zip 等）不经 UTF-8 边界；`http_get` / `http_post` / `http.request` 的 str 行为不变，
+  `http.request` 新增 `binary: true` 选项（响应体按原始字节返回）
+- **新增 `archive.tgz_read_bytes(path, entry)` → `bytes`**：与 `zip_read` 对称（`tgz_read` 维持 str 仅文本）
 - **`read_bytes(path)` → `bytes`**（原 `list[int]`）：返回真正的字节序列（索引得 byte 值、
   for-in 迭代字节、`+` 拼接、len 为字节数）；checker 静态返回类型同步
 - **`crypto.base64_decode(str)` → `bytes`**（原 `str`）：二进制安全（原实现经
@@ -42,6 +58,17 @@
 - **`hone natgen --obj <o>` 语义统一为「仅 object」**：原先「改名中间 object 仍链接 exe」的用法
   废弃；`--obj` 与 `-o` 不能同用（显式报错）。完整管线（`natgen <file.hn>` /
   `build --exe --native`）行为与默认中间 object 名（`{}.nat.o`）不变
+
+### 文档
+- **FFI 口径全站对齐 libffi 实现**：hone.md 4.1.1/4.1.2 补 `int32` → int32_t、`float32` → C float
+  映射（头文件绑定同步 `int32_t`/`uint32_t` → int32、C `float` → float32）；官网 docs/examples/faq
+  订正「回调与变参暂不支持」的旧表述（现已支持，回调限 0-8 个标量参、仅同步），头文件绑定
+  unsupported 列表缩至数组参数/结构体按值/long double
+- **NAT 纯 .o 口径同步到进度 / 设计文档**：进度清单 M3 任务组的 G3.4（口径变更）/ G3.5 / G3.6 标为
+  完成、G3.8 标为作废，并新增「纯 .o 生成器口径变更（第五轮）」实现进度；`Hone原生编译后端设计.md`
+  加实施说明（随包分发工具链方案未落地，构建机需 rustc + gcc，产物本身仍自足）
+- **官网 changelog.html 由 CHANGELOG.md 重新生成**：此前 [Unreleased] 段整段缺失
+- hone.md 头行实现版本口径 v0.7.12 → v0.8.0
 
 ## [v0.8.0] — 2026-10-17
 

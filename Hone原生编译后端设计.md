@@ -4,6 +4,13 @@
 - 关联：`src/aot.rs`（现有 C 后端）、`src/vm.rs`（字节码 IR）、`src/builtins.rs`（内置函数）、`.github/workflows/release.yml`、`.cargo/config.toml`
 - 定位：Go 式原生编译 —— `hone build --exe` 一条命令产出本机机器码可执行文件，**构建过程零外部工具**（无 gcc/clang/cc，目标机无需 Rust），支持**交叉编译**
 
+> **实施说明（2026-10-18）**：本文 §5.1 / §6 中「随包分发编译工具链」的方案**未落地**。G3.4 最终
+> 口径为**纯 .o 生成器**——natgen 出 `script.nat.o`，内嵌运行时源码由本机 rustc 编 `libhoneruntime.a`
+> （`--cfg hone_boot`，按源码 + 目标缓存），最后交**系统 gcc** 链接；`targets/` 分发树、随包
+> `rust-lld`、`HONE_NAT_LINK` / `HONE_TOOLCHAIN_DIR` 均已移除，G3.8 作废。故 G1/G2 的
+> 「构建期零外部工具、目标机无需 Rust」在**构建机**上放宽为：需本机 rustc + gcc（产物本身仍自足）。
+> 落地细节见 `Hone原生编译后端进度.md` 第五轮实现进度与 `CHANGELOG.md` Unreleased。
+
 ---
 
 ## 一、目标

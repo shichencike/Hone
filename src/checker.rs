@@ -3872,11 +3872,22 @@ impl Checker {
                 self.expect_str(name, args, 1, span, "the request body")?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
+            "http_get_bytes" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_str(name, args, 0, span, "the URL/path")?;
+                Ok(TyRes { ty: Ty::Bytes, slot: None })
+            }
+            "http_post_bytes" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the URL")?;
+                self.expect_str(name, args, 1, span, "the request body")?;
+                Ok(TyRes { ty: Ty::Bytes, slot: None })
+            }
             "http.request" => {
                 self.arg_count(name, n, 2, span)?;
                 self.expect_str(name, args, 0, span, "the URL")?;
-                self.expect_any(name, args, 1, span, "an options dict {method, headers, body, timeout}")?;
-                Ok(TyRes { ty: Ty::Str, slot: None })
+                self.expect_any(name, args, 1, span, "an options dict {method, headers, body, timeout, binary}")?;
+                Ok(TyRes { ty: Ty::Unknown, slot: None }) // binary: true 时返回 bytes，默认 str
             }
             "http.sse_open" => {
                 self.arg_count(name, n, 2, span)?;
@@ -3911,7 +3922,7 @@ impl Checker {
                 if n == 3 {
                     self.expect_any(name, args, 2, span, "the timeout (seconds)")?;
                 }
-                Ok(TyRes { ty: Ty::Str, slot: None })
+                Ok(TyRes { ty: Ty::Unknown, slot: None }) // 消息列表（文本帧 str / 二进制帧 bytes 混合）
             }
             "sys.run" => {
                 self.arg_count(name, n, 1, span)?;
@@ -4290,6 +4301,12 @@ impl Checker {
                 self.expect_str(name, args, 1, span, "the entry name")?;
                 Ok(TyRes { ty: Ty::Str, slot: None })
             }
+            "archive.tgz_read_bytes" => {
+                self.arg_count(name, n, 2, span)?;
+                self.expect_str(name, args, 0, span, "the archive path")?;
+                self.expect_str(name, args, 1, span, "the entry name")?;
+                Ok(TyRes { ty: Ty::Bytes, slot: None })
+            }
             "archive.zip_extract" | "archive.tgz_extract" => {
                 self.arg_count(name, n, 2, span)?;
                 self.expect_str(name, args, 0, span, "the archive path")?;
@@ -4303,10 +4320,15 @@ impl Checker {
                 Ok(TyRes { ty: Ty::Bool, slot: None })
             }
             // ---------- zlib / gzip 压缩 ----------
-            "zlib.compress" | "zlib.decompress" | "zlib.gzip" | "zlib.gunzip" => {
+            "zlib.compress" | "zlib.gzip" => {
                 self.arg_count(name, n, 1, span)?;
-                self.expect_str(name, args, 0, span, "the input string")?;
-                Ok(TyRes { ty: Ty::Str, slot: None })
+                self.expect_any(name, args, 0, span, "a string or bytes value")?;
+                Ok(TyRes { ty: Ty::Bytes, slot: None })
+            }
+            "zlib.decompress" | "zlib.gunzip" => {
+                self.arg_count(name, n, 1, span)?;
+                self.expect_any(name, args, 0, span, "a bytes value (or a base64 str)")?;
+                Ok(TyRes { ty: Ty::Bytes, slot: None })
             }
             // ---------- csv 数据处理 ----------
             "csv.parse" | "csv.parse_dict" => {
@@ -4716,6 +4738,8 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "random.float",
         "http_get",
         "http_post",
+        "http_get_bytes",
+        "http_post_bytes",
         "http.request",
         "http.sse_open",
         "http.sse_next",
@@ -4773,6 +4797,7 @@ pub(crate) fn builtin_names() -> HashSet<&'static str> {
         "archive.zip_create",
         "archive.tgz_list",
         "archive.tgz_read",
+        "archive.tgz_read_bytes",
         "archive.tgz_extract",
         "archive.tgz_create",
         "zlib.compress",

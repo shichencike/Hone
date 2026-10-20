@@ -21,7 +21,7 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
 
 - 单 crate 流水线：lexer → parser → ast → checker → 四后端：`interp.rs`（AST 解释器）、`vm.rs`（字节码 VM）、`aot.rs`+`codegen.rs`（C 生成）、`natgen.rs`+`runtime/`（Cranelift 原生编译）。
 - `Value` 定义在 `interp.rs`，VM 与全部 builtins 复用之——改 Value/字典行为要同时顾及三引擎。
-- 铁律：**interp 与 VM 输出（含报错）必须逐字节一致**；错误码 Hxxx 集中在 `error.rs`，`H999`=功能未实现（VM/AOT/DLL 不支持 with、type 实例、byte/bytes **字面量**（0b…/b"…"/byte()）、字段赋值等解释器特性时统一报 H999）。byte/bytes **值**（read_bytes/base64_decode/zip_read/ptr.read_byte/索引产出）interp/VM 双引擎全支持：VM 侧执行臂集中在 `vm.rs` 的 `v_add`/`v_eq`/`v_cmp`/`v_index`/`v_len`/`IterCheck`（按 is_comp 站点分派：推导式拒 bytes、for-in 收）与 `value_to_str`（display 基准 = 解释器：Byte 为 `0bNNNNNNNN`、Bytes 为可打印原样 + `\xNN`），改任一处须与解释器 `interp.rs` 对应函数（`arith`/`values_eq`/`values_cmp`/`index_value`）逐字对齐；for-in 双变量 list/bytes 报错走 `IsBytes` 指令 + `Raise`（文案含 list/bytes 两分支）。
+- 铁律：**interp 与 VM 输出（含报错）必须逐字节一致**；错误码 Hxxx 集中在 `error.rs`，`H999`=功能未实现（VM/AOT/DLL 不支持 with、type 实例、byte/bytes **字面量**（0b…/b"…"/byte()）、字段赋值等解释器特性时统一报 H999）。byte/bytes **值**（read_bytes/base64_decode/zip_read/tgz_read_bytes/http_get_bytes/http_post_bytes/http.request binary/zlib.* 四函数/ws.request 消息列表/ptr.read_byte/索引产出）interp/VM 双引擎全支持：VM 侧执行臂集中在 `vm.rs` 的 `v_add`/`v_eq`/`v_cmp`/`v_index`/`v_len`/`IterCheck`（按 is_comp 站点分派：推导式拒 bytes、for-in 收）与 `value_to_str`（display 基准 = 解释器：Byte 为 `0bNNNNNNNN`、Bytes 为可打印原样 + `\xNN`），改任一处须与解释器 `interp.rs` 对应函数（`arith`/`values_eq`/`values_cmp`/`index_value`）逐字对齐；for-in 双变量 list/bytes 报错走 `IsBytes` 指令 + `Raise`（文案含 list/bytes 两分支）。
 - 原生后端与 VM **共享同一套 `vm::Instr`**：加指令时 `vm.rs` 的执行臂 / `instr_text` / `parse_instr`（文本 IR 往返）与 `natgen.rs` 的 lowering 臂、`main.rs` 的 strtab 收集必须同步；漏一处会被 `regress_ir.py` / `regress4.py` 抓住。
   - 指令带**字符串操作数**（Call 名 / Field 名 / Raise 三段文本 / ThrowStr 文案 / enum 构造名等）才需 `main.rs` strtab 收集；纯数值操作数指令（如 `CondCheck` / `IsBoolVal`）不需要。
   - `Instr::Raise` 的**错误码**另有两处白名单，漏改会让 nat 静默渲染成 H990 或 IR 往返失败：`runtime/src/lib.rs` 的 `rt_raise` 码表、`vm.rs` `parse_instr` 的 `RAISE` 码表。
@@ -36,6 +36,14 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   语义基准：VM `do_call`（先 resolve_alias → 再查局部变量 → 函数 → 内置）。
 - 参数个数校验三引擎统一到解释器文案（`expects at most N arguments, got M` /
   ``missing argument `c` of `f` `` + 定位 + help）——**不要**改回中文硬编码消息。
+- FFI（typed 签名块 / 头文件绑定 / 变参 / 回调）：动态调用与回调闭包统一走 **libffi**
+  （`libffi-sys`，默认从源码静态构建、无系统动态库依赖；MSVC 目标经预处理头 + cc，GNU/ELF 目标需
+  make + C 编译器）——`ffi_prep_cif` / `ffi_prep_cif_var` / `ffi_call` + `ffi_closure`；旧的
+  `ffi_dispatch!` / `ffi_variadic!` 穷举宏已删（8190 类型实例化内存峰值）。`int32` / `float32` 是
+  **FFI 专有类型名**（Hone 值按 int/float 走，checker 映射 `Ty::Int` / `Ty::Float`，调用时校验
+  32 位范围）；头文件绑定把 C `int32_t`/`uint32_t` 映射 `int32`、C `float` 映射 `float32`；
+  回调限 0-8 个标量参数且仅同步。改 FFI 类型/文案须同步 `ast.rs`(FfiTy) / `parser.rs`(ffi_ty_from_tok) /
+  `header.rs`(map_type) / `interp.rs` 四处。
 - 点号内置族（G2.9）：三套实现——interp/VM 共用 `builtins.rs` + 各 `*mod.rs`（基于
   `Value`），**runtime 另有一份 std-only 镜像**（`runtime/src/lib.rs` 的 `call_dotted`，
   基于句柄）。改任一家的行为/文案必须同步另一家。外部 crate 依赖的家族（regex/sqlite/
@@ -85,6 +93,12 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   `gcc script.nat.o libhoneruntime.a -o script`（windows-gnu 需补 Rust std 依赖导入库
   `-lws2_32 -lntdll -lbcrypt -luserenv -ladvapi32`）。不再分发预编译工具链（删 `build_toolchain.py` /
   `targets/` / `rust-lld` / `HONE_NAT_LINK` 等）；本机无 rustc/gcc 时安装 Rust 工具链与 MinGW-w64 即可。
+  - **预编译运行时（runtime-a 发布资产）**：`hone natgen --runtime-only [--target <triple>] [-o <dir>]`
+    仅预编译运行时静态库（无脚本参与），文件名 = 缓存键 `libhoneruntime-<md5(源码+triple)[..12]>.a`
+    （`runtime_lib_name()` 统一计算，勿在别处重复实现哈希）。官方 Release 的 `runtime-a.tar.gz` 为三个
+    分发目标（x86_64-unknown-linux-musl / x86_64-pc-windows-gnu / aarch64-unknown-linux-musl）各一份；
+    用户侧设 `HONE_RUNTIME_A` 指向解压目录，缓存未命中时 `runtime_staticlib()` 先查该目录命中即落盘
+    （同版本免本机 rustc；runtime 源码改动后哈希变化自然 miss，需同版本资产）。
   - `libhoneruntime.a` 由 `runtime_staticlib()` 以 `--cfg hone_boot` 编（缺该 cfg 则 `hn_boot`
     静态表自举不参与编译，产物运行期注册表为空）。runtime 有改动后缓存键变化自动重编。
   - 交叉编译：`--target <triple>` 选目标，走 rustc `link-self-contained` + 自带 musl CRT +
@@ -94,6 +108,8 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   nat 回归前 `rustup target add x86_64-unknown-linux-musl`——**漏装时 rustc 报 E0463
   `can't find crate for std`，16 例全 BUILD-FAIL**）；
   `release.yml` 构建三目标发布产物（linux tar.gz / windows zip，hone + install.sh/bat），
+  `runtime-a` job（needs build，ubuntu）用发布 hone 为三目标各预编译一份运行时静态库打包
+  `runtime-a.tar.gz` 上传（publish needs 含它，进 Release 资产，checksums 一并覆盖），
   `verify-nat` job 在 ubuntu runner 上：① 用**发布产物本身**编 x86_64-musl 产物并
   **真跑**断言输出（故先 `rustup target add x86_64-unknown-linux-musl`）；② aarch64 ELF 头校验
   （同法先装该目标 std；断言用 `od` 而非 `xxd`——runner 未必带 xxd，且**按文件字节序**写：

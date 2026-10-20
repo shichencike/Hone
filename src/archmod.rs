@@ -5,7 +5,8 @@
 //   archive.zip_extract(path, d)-> int     解压 zip 到目录，返回条目数
 //   archive.zip_create(path, d) -> bool    从 dict {条目名: 内容} 创建 zip
 //   archive.tgz_list(path)      -> list    列出 tar.gz 条目名
-//   archive.tgz_read(path, e)   -> str     读取 tar.gz 中指定条目的文本内容
+//   archive.tgz_read(path, e)   -> str     读取 tar.gz 中指定条目的文本内容（仅文本）
+//   archive.tgz_read_bytes(path, e) -> bytes 读取 tar.gz 中指定条目的原始字节
 //   archive.tgz_extract(path, d)-> int     解压 tar.gz 到目录，返回条目数
 //   archive.tgz_create(path, d) -> bool    从 dict {条目名: 内容} 创建 tar.gz
 //
@@ -30,6 +31,22 @@ fn as_str<'a>(v: &'a Value, arg: usize, span: Span, file: &str, src: &str) -> Re
         other => Err(zerr(
             codes::TYPE_MISMATCH,
             format!("`archive.*` expects a string for argument {}, got `{}`", arg + 1, other.type_name()),
+            span,
+            file,
+            src,
+            None::<&str>,
+        )),
+    }
+}
+
+/// 参数接受 str（按 UTF-8 字节）或 bytes（压缩输入通用形态）。
+fn as_bin(v: &Value, arg: usize, span: Span, file: &str, src: &str) -> Result<Vec<u8>, ZError> {
+    match v {
+        Value::Str(s) => Ok(s.as_bytes().to_vec()),
+        Value::Bytes(b) => Ok(b.clone()),
+        other => Err(zerr(
+            codes::TYPE_MISMATCH,
+            format!("`archive.*` expects a string or bytes for argument {}, got `{}`", arg + 1, other.type_name()),
             span,
             file,
             src,
@@ -257,6 +274,42 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                 )),
             }
         }
+        "archive.tgz_read_bytes" => {
+            // 与 zip_read 对称：二进制条目返回真正的 bytes（tgz_read 仅文本，非 UTF-8 条目报错）
+            let path = as_str(&args[0], 0, span, file, src)?;
+            let entry = as_str(&args[1], 1, span, file, src)?;
+            let f = open(path, span, file, src)?;
+            let gz = flate2::read::GzDecoder::new(f);
+            let mut ar = tar::Archive::new(gz);
+            let mut found: Option<Vec<u8>> = None;
+            for e in ar.entries().map_err(|e| {
+                zerr(codes::SYSCALL, format!("invalid tar.gz `{}`: {}", path, e), span, file, src, None::<&str>)
+            })? {
+                let mut e = e.map_err(|err| {
+                    zerr(codes::SYSCALL, format!("cannot read tar entry: {}", err), span, file, src, None::<&str>)
+                })?;
+                let n = e.path().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+                if n == entry {
+                    let mut buf = Vec::new();
+                    e.read_to_end(&mut buf).map_err(|err| {
+                        zerr(codes::SYSCALL, format!("cannot read tar entry `{}`: {}", entry, err), span, file, src, None::<&str>)
+                    })?;
+                    found = Some(buf);
+                    break;
+                }
+            }
+            match found {
+                Some(b) => Ok(Value::Bytes(b)),
+                None => Err(zerr(
+                    codes::NOT_FOUND,
+                    format!("tar.gz entry `{}` not found", entry),
+                    span,
+                    file,
+                    src,
+                    Some("list entries with `archive.tgz_list(path)`"),
+                )),
+            }
+        }
         "archive.tgz_extract" => {
             let path = as_str(&args[0], 0, span, file, src)?;
             let dir = as_str(&args[1], 1, span, file, src)?;
@@ -310,36 +363,44 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             })?;
             Ok(Value::Bool(true))
         }
-        // ---------- zlib / gzip 压缩（结果以 base64 返回，str 无法直接承载二进制） ----------
+        // ---------- zlib / gzip 压缩（返回真正的 bytes；str 无法直接承载二进制） ----------
         "zlib.compress" => {
-            let s = as_str(&args[0], 0, span, file, src)?;
-            let bytes = zlib_compress(s.as_bytes(), span, file, src)?;
-            use base64::Engine;
-            Ok(Value::Str(base64::engine::general_purpose::STANDARD.encode(bytes)))
+            let data = as_bin(&args[0], 0, span, file, src)?;
+            let bytes = zlib_compress(&data, span, file, src)?;
+            Ok(Value::Bytes(bytes))
         }
         "zlib.decompress" => {
-            let s = as_str(&args[0], 0, span, file, src)?;
-            use base64::Engine;
-            let raw = base64::engine::general_purpose::STANDARD
-                .decode(s)
-                .map_err(|e| zerr(codes::TYPE_MISMATCH, format!("invalid base64: {}", e), span, file, src, Some("`zlib.compress` 的输出可直接传给 `zlib.decompress`")))?;
+            // 输入为 bytes（zlib.compress 的输出）；str 输入按 base64 兼容（旧版压缩结果形态）
+            let raw = match &args[0] {
+                Value::Bytes(b) => b.clone(),
+                Value::Str(s) => {
+                    use base64::Engine;
+                    base64::engine::general_purpose::STANDARD
+                        .decode(s)
+                        .map_err(|e| zerr(codes::TYPE_MISMATCH, format!("invalid base64: {}", e), span, file, src, Some("`zlib.compress` 的输出可直接传给 `zlib.decompress`")))?}
+                other => return Err(zerr(codes::TYPE_MISMATCH, format!("`zlib.decompress` expects bytes, got `{}`", other.type_name()), span, file, src, None::<&str>)),
+            };
             let out = zlib_decompress(&raw, span, file, src)?;
-            Ok(Value::Str(out))
+            Ok(Value::Bytes(out))
         }
         "zlib.gzip" => {
-            let s = as_str(&args[0], 0, span, file, src)?;
-            let bytes = gzip_compress(s.as_bytes(), span, file, src)?;
-            use base64::Engine;
-            Ok(Value::Str(base64::engine::general_purpose::STANDARD.encode(bytes)))
+            let data = as_bin(&args[0], 0, span, file, src)?;
+            let bytes = gzip_compress(&data, span, file, src)?;
+            Ok(Value::Bytes(bytes))
         }
         "zlib.gunzip" => {
-            let s = as_str(&args[0], 0, span, file, src)?;
-            use base64::Engine;
-            let raw = base64::engine::general_purpose::STANDARD
-                .decode(s)
-                .map_err(|e| zerr(codes::TYPE_MISMATCH, format!("invalid base64: {}", e), span, file, src, Some("`zlib.gzip` 的输出可直接传给 `zlib.gunzip`")))?;
+            // 输入为 bytes（zlib.gzip 的输出）；str 输入按 base64 兼容（旧版压缩结果形态）
+            let raw = match &args[0] {
+                Value::Bytes(b) => b.clone(),
+                Value::Str(s) => {
+                    use base64::Engine;
+                    base64::engine::general_purpose::STANDARD
+                        .decode(s)
+                        .map_err(|e| zerr(codes::TYPE_MISMATCH, format!("invalid base64: {}", e), span, file, src, Some("`zlib.gzip` 的输出可直接传给 `zlib.gunzip`")))?}
+                other => return Err(zerr(codes::TYPE_MISMATCH, format!("`zlib.gunzip` expects bytes, got `{}`", other.type_name()), span, file, src, None::<&str>)),
+            };
             let out = gzip_decompress(&raw, span, file, src)?;
-            Ok(Value::Str(out))
+            Ok(Value::Bytes(out))
         }
         _ => Err(zerr(
             codes::NOT_IMPLEMENTED,
@@ -364,12 +425,12 @@ fn zlib_compress(data: &[u8], span: Span, file: &str, src: &str) -> Result<Vec<u
         .map_err(|e| zerr(codes::SYSCALL, format!("zlib compress failed: {}", e), span, file, src, None::<&str>))
 }
 
-/// zlib 解压为文本。
-fn zlib_decompress(data: &[u8], span: Span, file: &str, src: &str) -> Result<String, ZError> {
+/// zlib 解压为原始字节（不强制 UTF-8，压缩内容可为任意二进制）。
+fn zlib_decompress(data: &[u8], span: Span, file: &str, src: &str) -> Result<Vec<u8>, ZError> {
     use flate2::read::ZlibDecoder;
     let mut dec = ZlibDecoder::new(data);
-    let mut out = String::new();
-    dec.read_to_string(&mut out)
+    let mut out = Vec::new();
+    dec.read_to_end(&mut out)
         .map_err(|e| zerr(codes::SYSCALL, format!("zlib decompress failed: {}", e), span, file, src, Some("data may be corrupted or not zlib-compressed")))?;
     Ok(out)
 }
@@ -384,12 +445,12 @@ fn gzip_compress(data: &[u8], span: Span, file: &str, src: &str) -> Result<Vec<u
         .map_err(|e| zerr(codes::SYSCALL, format!("gzip compress failed: {}", e), span, file, src, None::<&str>))
 }
 
-/// gzip 解压为文本。
-fn gzip_decompress(data: &[u8], span: Span, file: &str, src: &str) -> Result<String, ZError> {
+/// gzip 解压为原始字节（不强制 UTF-8，压缩内容可为任意二进制）。
+fn gzip_decompress(data: &[u8], span: Span, file: &str, src: &str) -> Result<Vec<u8>, ZError> {
     use flate2::read::GzDecoder;
     let mut dec = GzDecoder::new(data);
-    let mut out = String::new();
-    dec.read_to_string(&mut out)
+    let mut out = Vec::new();
+    dec.read_to_end(&mut out)
         .map_err(|e| zerr(codes::SYSCALL, format!("gzip decompress failed: {}", e), span, file, src, Some("data may be corrupted or not gzip-compressed")))?;
     Ok(out)
 }

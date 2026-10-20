@@ -635,7 +635,7 @@ age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span cl
 
   <div class="example">
     <div class="title">7.3 typed FFI：load 签名块精确调用 C 函数（v0.4+）</div>
-    <div class="note">签名块显式声明参数/返回类型（int/float/bool/str/ptr/void），按声明精确转换；调用在检查阶段校验参数（H001/H005）</div>
+    <div class="note">签名块显式声明参数/返回类型（int/int32/float/float32/bool/str/ptr/void），按声明精确转换；变参与回调（0-8 标量参）亦支持；调用在检查阶段校验参数（H001/H005）</div>
 <pre><code><span class="k">load</span> <span class="s">"tests/hone_lib/target/release/hone_lib.dll"</span> <span class="k">as</span> m {
     <span class="c">// 仅描述 C 函数 ABI，不定义 Hone 函数体；返回类型允许 void</span>
     <span class="k">fn</span> <span class="f">lib_add_f</span>(a: <span class="k">float</span>, b: <span class="k">float</span>) -&gt; <span class="k">float</span>;
@@ -670,11 +670,10 @@ p = m.<span class="f">lib_echo_ptr</span>(<span class="n">0</span>);            
 <span class="c">// 离线生成签名块（输出到 stdout，unsupported 原型列为注释）</span>
 <span class="c">// hone bind tests/hone_lib/hone_lib.h</span>
 
-<span class="c">// 不支持的原型（回调/变参/数组/结构体按值）调用时直接报错，而非 ABI 崩溃</span>
-<span class="c">// print(m.lib_cb(0));   // H006: cannot be called: callback parameter</span>
-<span class="c">// print(m.lib_var("x")); // H006: cannot be called: variadic (`...`)</span></code></pre>
+<span class="c">// 不支持的原型（数组参数/结构体按值/long double）调用时直接报错，而非 ABI 崩溃；
+// 回调与变参现已支持（回调限 0-8 个标量参数、仅同步）</span></code></pre>
     <p>解析能力为纯 Rust 受限子集（无 libclang 依赖）：跳过注释/预处理/struct 定义/extern "C" 块，typedef 简单展开，
-      属性宏跳过；类型映射 int/size_t→int、float/double→float、bool→bool、char*→str、其余指针→ptr、void→void。
+      属性宏跳过；类型映射 int/size_t→int、int32_t/uint32_t→int32、double→float、C float→float32、bool→bool、char*→str、其余指针→ptr、void→void。
       完整示例见 <code class="inline">examples/ffi_header.hn</code>。</p>
   </div>
 

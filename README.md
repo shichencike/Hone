@@ -71,8 +71,10 @@ Cranelift 把 VM 字节码直接 lower 为机器码，
   本机 rustc 编成静态库 `libhoneruntime.a`（`--cfg hone_boot`，按源码+目标哈希缓存于
   `~/.hone/cache/runtime/`，运行时源码不变则跨脚本复用），最后交**系统 gcc** 链接为可执行文件
   （`gcc app.o libhoneruntime.a -o app`；windows-gnu 需补 Rust std 依赖导入库
-  `-lws2_32 -lntdll -lbcrypt -luserenv -ladvapi32`）。不再分发预编译工具链：本机无 rustc / gcc
-  时安装 Rust 工具链（`rustc`）与 MinGW-w64（Windows）即可。`hone build --exe -c`（C 后端）
+  `-lws2_32 -lntdll -lbcrypt -luserenv -ladvapi32`）。官方 Release 附带 **runtime-a** 下载项：
+  三个分发目标（x86_64-linux-musl / x86_64-windows-gnu / aarch64-linux-musl）各预编译一份运行时
+  静态库，解压后设 `HONE_RUNTIME_A` 指向该目录即可免本机 rustc（同版本 hone 直接命中）。本机无
+  rustc / gcc 时安装 Rust 工具链（`rustc`）与 MinGW-w64（Windows）即可。`hone build --exe -c`（C 后端）
   已在 v0.8.0 移除
 
 ## 用法
@@ -295,7 +297,7 @@ print(len(text));              // 24
 - 类型转换：`to_str` `to_int` `to_float`
 - 模块：`time.now` `time.sleep` `time.format`（UTC）、`time.parse`（解析
   `YYYY-MM-DD[THH:MM:SS]` 时间戳 → Unix 秒）、`random.int` `random.float`、`uuid.new`（UUID v4）
-- 网络：`http_get` `http_post`（支持 `http://` 与 `https://`，TLS 为纯 Rust 实现、内置 Mozilla 根证书）、`json_parse` `json_stringify`（标量）
+- 网络：`http_get` `http_post`（支持 `http://` 与 `https://`，TLS 为纯 Rust 实现、内置 Mozilla 根证书）、`http_get_bytes` `http_post_bytes`（二进制响应体返回 bytes）、`json_parse` `json_stringify`（标量）
 - 本地服务器：`server.listen(port)` 启动后台监听线程（0=自动分配端口，返回实际端口）、`server.poll()` 取出排队请求（返回 JSON 数组 `[{id,method,path,body}, ...]`）、`server.respond(id, body)` 发送响应体（HTTP 200）——纯 std::net 实现，Windows / Linux / Termux 跨平台一致，无 C 依赖
 - 系统：`sys.run` `sys.get_env`（跨平台）
 - 系统（Windows API，其他平台报 H999 或降级）：`sys.msgbox` `sys.beep` `sys.clipboard_set`
@@ -363,6 +365,10 @@ p("via alias");
 - `load` 签名块（typed FFI）：`load "lib" as m { fn f(a: int, b: str) -> ptr; ... }` 显式声明
   C ABI 类型，支持 int/int32/float/float32/bool/str/ptr/void，调用按声明精确转换，
   静态检查参数个数与类型；未声明签名的库函数仍按 int64 通道调用
+- 变参与回调：`fn f(a: int, ...)` 的变参函数与 `fn(cb: fn(int) -> int)` 的回调形参均支持，底层经
+  `libffi`（`libffi-sys`，源码静态构建，无系统动态库依赖）做动态调用与 closure 回调；回调限
+  0-8 个标量参数、仅同步（在该次 FFI 调用窗口内有效）；`int32`/`float32` 为 FFI 专有类型名
+  （Hone 值按 int/float 传，调用时校验 32 位范围）
 - `load "lib" as m from "header.h"`：从 C 头文件自动提取函数原型生成签名（受限解析器，跳过
   注释/预处理/struct 定义，typedef 简单展开；不支持数组参数/结构体按值/long double，
   变参与回调现已支持）；`hone bind <header.h>` 离线生成签名块

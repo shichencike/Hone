@@ -35,7 +35,8 @@ print(temp.remove(td));                  // true
 
 print("== zlib ==");
 c = zlib.compress("hello hello hello hello");
-print(zlib.decompress(c));               // hello hello hello hello
+print(is_bytes(c));                      // true（压缩结果为 bytes）
+print(zlib.decompress(c));               // hello hello hello hello（bytes，display 为可打印原样）
 g = zlib.gzip("gzip me");
 print(zlib.gunzip(g));                   // gzip me
 

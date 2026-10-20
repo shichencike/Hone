@@ -4657,7 +4657,7 @@ fn dotted_dispatch2(name: &str, argptr: u64, nargs: u64, ci: u32, pc: u32) -> Op
         | "sqlite.escape" | "sqlite.last_insert_id" | "sqlite.changes"
         | "zlib.compress" | "zlib.decompress" | "zlib.gzip" | "zlib.gunzip"
         | "archive.zip_list" | "archive.zip_read" | "archive.zip_extract" | "archive.zip_create"
-        | "archive.tgz_list" | "archive.tgz_read" | "archive.tgz_extract" | "archive.tgz_create"
+        | "archive.tgz_list" | "archive.tgz_read" | "archive.tgz_read_bytes" | "archive.tgz_extract" | "archive.tgz_create"
         | "http.request" | "http.sse_open" | "http.sse_next" | "http.sse_close"
         | "smtp.send" | "ws.request"
         | "crypto.md5" | "crypto.sha1" | "crypto.sha256" | "crypto.hmac_sha256"

@@ -422,15 +422,16 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             }
             // 发送文本帧（客户端必须掩码）
             ws_send_frame(&mut conn, 0x1, message.as_bytes(), span, file, src)?;
-            // 读取服务端帧，直到 close 帧或超时
-            let mut out = String::new();
+            // 读取服务端帧，直到 close 帧或超时；每条消息一个元素（文本帧 → str，二进制帧 → bytes）
+            let mut out: Vec<Value> = Vec::new();
             loop {
                 let frame = ws_read_frame(&mut conn, span, file, src);
                 match frame {
                     Ok((opcode, payload)) => {
                         match opcode {
-                            0x1 => out.push_str(&String::from_utf8_lossy(&payload)),
-                            0x8 => break, // close
+                            0x1 => out.push(Value::Str(String::from_utf8_lossy(&payload).into_owned())),
+                            0x2 => out.push(Value::Bytes(payload)), // 二进制帧：不再静默丢弃
+                            0x8 => break,                           // close
                             0x9 => {
                                 // ping -> pong
                                 let _ = ws_send_frame(&mut conn, 0xA, &payload, span, file, src);
@@ -441,7 +442,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                     Err(_) => break, // 超时或连接关闭
                 }
             }
-            Ok(Value::Str(out))
+            Ok(Value::List(out))
         }
         _ => Err(zerr(
             codes::NOT_IMPLEMENTED,

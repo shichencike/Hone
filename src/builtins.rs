@@ -270,6 +270,8 @@ pub fn is_builtin(name: &str) -> bool {
             | "random.float"
             | "http_get"
             | "http_post"
+            | "http_get_bytes"
+            | "http_post_bytes"
             | "http.request"
             | "http.sse_open"
             | "http.sse_next"
@@ -327,6 +329,7 @@ pub fn is_builtin(name: &str) -> bool {
             | "archive.zip_create"
             | "archive.tgz_list"
             | "archive.tgz_read"
+            | "archive.tgz_read_bytes"
             | "archive.tgz_extract"
             | "archive.tgz_create"
             | "zlib.compress"
@@ -1491,6 +1494,20 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let body = as_str(&args[1], 1, name, span, file, src)?;
             http_request(url, "POST", Some(body), span, file, src).map(Value::Str)
         }
+        "http_get_bytes" => {
+            // 二进制响应体（图片/PDF/zip 等）返回真正的 bytes，不经 UTF-8 边界
+            let url = as_str(&args[0], 0, name, span, file, src)?;
+            http_get_bytes(url, span, file, src).map(Value::Bytes)
+        }
+        "http_post_bytes" => {
+            let url = as_str(&args[0], 0, name, span, file, src)?;
+            let body = as_str(&args[1], 1, name, span, file, src)?;
+            let (head, mut body_bytes) = http_fetch_raw(url, "POST", Some(body), span, file, src)?;
+            if head.to_lowercase().contains("transfer-encoding: chunked") {
+                body_bytes = decode_chunked_bytes(&body_bytes);
+            }
+            Ok(Value::Bytes(body_bytes))
+        }
         "http.request" => {
             // 通用 HTTP 请求：http.request(url, {method?, headers?, body?, timeout?})
             let url = as_str(&args[0], 0, name, span, file, src)?;
@@ -1499,12 +1516,26 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let mut body: Option<String> = None;
             let mut headers: Vec<(String, String)> = Vec::new();
             let mut timeout: u64 = 15;
+            let mut binary = false;
             match opts {
                 Value::Dict(entries) => {
                     for (k, v) in entries {
                         match k.as_str() {
                             "method" => method = as_str(v, 0, name, span, file, src)?,
                             "body" => body = Some(as_str(v, 0, name, span, file, src)?.to_string()),
+                            "binary" => match v {
+                                Value::Bool(b) => binary = *b,
+                                _ => {
+                                    return Err(err(
+                                        codes::TYPE_MISMATCH,
+                                        "`http.request` binary must be a bool",
+                                        span,
+                                        file,
+                                        src,
+                                        Some("pass binary: true to receive the response body as bytes"),
+                                    ))
+                                }
+                            },
                             "headers" => {
                                 if let Value::Dict(hdrs) = v {
                                     for (hk, hv) in hdrs {
@@ -1555,11 +1586,18 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             }
             let header_refs: Vec<(&str, &str)> = headers.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
             let (head, body_bytes) = http_fetch_opts(url, method, body.as_deref(), &header_refs, timeout, span, file, src)?;
-            let mut text = String::from_utf8_lossy(&body_bytes).into_owned();
-            if head.to_lowercase().contains("transfer-encoding: chunked") {
-                text = decode_chunked(&text);
+            let chunked = head.to_lowercase().contains("transfer-encoding: chunked");
+            if binary {
+                // 二进制响应体：返回真正的 bytes，不经 UTF-8 边界
+                let out = if chunked { decode_chunked_bytes(&body_bytes) } else { body_bytes };
+                Ok(Value::Bytes(out))
+            } else {
+                let mut text = String::from_utf8_lossy(&body_bytes).into_owned();
+                if chunked {
+                    text = decode_chunked(&text);
+                }
+                Ok(Value::Str(text))
             }
-            Ok(Value::Str(text))
         }
         "http.sse_open" => {
             // 打开 SSE 长连接：http.sse_open(url, {method?, headers?, body?, timeout?}) -> int 句柄
@@ -1730,7 +1768,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         }
         // 压缩与归档（archmod 模块实现，zip/tar.gz 读写 + zlib/gzip 压缩）
         "archive.zip_list" | "archive.zip_read" | "archive.zip_extract" | "archive.zip_create"
-        | "archive.tgz_list" | "archive.tgz_read" | "archive.tgz_extract" | "archive.tgz_create"
+        | "archive.tgz_list" | "archive.tgz_read" | "archive.tgz_read_bytes" | "archive.tgz_extract" | "archive.tgz_create"
         | "zlib.compress" | "zlib.decompress" | "zlib.gzip" | "zlib.gunzip" => {
             crate::archmod::call(name, &args, span, file, src)
         }

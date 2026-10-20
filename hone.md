@@ -1,4 +1,4 @@
-Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.7.12）
+Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.8.0）
 
 项目代号：Hone
 设计者：时辰刺客
@@ -810,6 +810,8 @@ hone --help / --version 帮助信息 / 版本信息
 · http_get(url) → str：发送 HTTP GET 请求，返回响应体（支持 http:// 与 https://，TLS 为纯 Rust 实现、内置 Mozilla 根证书，
   校验失败自动回退系统根证书，可经 HONE_CA_BUNDLE / ~/.hn/ca.pem 信任私有 CA 的根证书与中间证书）
 · http_post(url, body) → str：发送 HTTP POST 请求（body 为字符串，支持 http:// 与 https://）
+· http_get_bytes(url) → bytes：发送 HTTP GET 请求，响应体按原始字节返回（图片 / PDF / zip 等二进制内容用）
+· http_post_bytes(url, body) → bytes：发送 HTTP POST 请求，响应体按原始字节返回
 · json_parse(str) → value：将 JSON 字符串解析为 Hone 值（自动映射为 int/float/bool/str）
 · json_stringify(value) → str：将 Hone 值序列化为 JSON 字符串
 
@@ -1028,6 +1030,7 @@ print(to_float("xyz"));         // 抛出 H007
 · archive.zip_create(path, entries) → bool：从 dict {条目名: 内容} 创建 zip
 · archive.tgz_list / tgz_extract / tgz_create：同上，针对 tar.gz
 · archive.tgz_read(path, entry) → str：读取 tar.gz 中指定条目的文本（仅文本；二进制条目报错）
+· archive.tgz_read_bytes(path, entry) → bytes：读取 tar.gz 中指定条目的原始字节（二进制条目用，与 zip_read 对称）
 · 安全：解压时拒绝绝对路径与 `..` 穿越条目（防 zip-slip）
 
 3.15 ptr 指针类
@@ -1082,18 +1085,19 @@ print(temp.remove(td));            // true
 
 3.19 zlib / gzip 压缩
 
-· zlib.compress(text) → str：zlib 压缩（RFC 1950），结果以 base64 返回
-· zlib.decompress(b64) → str：zlib 解压（输入为 zlib.compress 的 base64 输出）
-· zlib.gzip(text) → str：gzip 压缩（含文件头），结果以 base64 返回
-· zlib.gunzip(b64) → str：gzip 解压
+· zlib.compress(data) → bytes：zlib 压缩（RFC 1950），data 为 str（按 UTF-8 字节）或 bytes，返回压缩后字节序列
+· zlib.decompress(data) → bytes：zlib 解压（输入为 zlib.compress 的输出 bytes；str 输入按 base64 兼容旧版形态）
+· zlib.gzip(data) → bytes：gzip 压缩（含文件头），返回压缩后字节序列
+· zlib.gunzip(data) → bytes：gzip 解压（输入为 zlib.gzip 的输出 bytes；str 输入按 base64 兼容旧版形态）
 
-说明：Hone 的 str 无法直接承载二进制，压缩结果统一 base64 编码；解压输入即压缩输出。
+说明：压缩结果是二进制，四函数统一返回 bytes（不再 base64 编码）；需要字符串形态时用 crypto.base64_encode
+显式编码。解压不强制 UTF-8，内容可为任意二进制（需文本时用 to_str）。
 
 示例：
 
-
 c = zlib.compress("hello hello");
-print(zlib.decompress(c));         // hello hello
+print(is_bytes(c));                // true
+print(zlib.decompress(c));         // hello hello（bytes，display 为可打印原样）
 g = zlib.gzip("data");
 print(zlib.gunzip(g));             // data
 
@@ -1144,10 +1148,13 @@ print(to_str(regex.split("[,;]", "a,b;c"))); // ["a","b","c"]
 
 · http_get(url) → str：GET 请求（默认超时 15 秒，UA: hone/0.1.0）
 · http_post(url, body) → str：POST 请求（body 为字符串）
-· http.request(url, opts) → str：通用请求，opts 为 dict：
+· http_get_bytes(url) → bytes：GET 请求，响应体按原始字节返回（二进制内容用）
+· http_post_bytes(url, body) → bytes：POST 请求，响应体按原始字节返回
+· http.request(url, opts) → str | bytes：通用请求，opts 为 dict：
   · method：请求方法（默认 "GET"，可 "POST"/"PUT"/"DELETE" 等）
   · headers：自定义请求头 dict（可覆盖 User-Agent / Content-Type）
   · body：请求体字符串（method 为 POST 等时常用）
+  · binary：true 时响应体按原始字节返回 bytes（默认 false 返回 str）
   · timeout：超时秒数（int/float，默认 15）
 
 · TLS 根证书回退机制（https:// 与 wss:// 自动生效）：
@@ -1176,9 +1183,10 @@ print(r);
   · subject / body：主题与正文
   · user / password：提供时启用 AUTH LOGIN 认证
   · starttls：是否 STARTTLS 升级（默认 true；port 465 为隐式 TLS，自动跳过 STARTTLS）
-· ws.request(url, message[, timeout]) → str：WebSocket 一次性请求-响应
+· ws.request(url, message[, timeout]) → list：WebSocket 一次性请求-响应
   · 建立连接 + 握手（校验 Sec-WebSocket-Accept），发送一个文本帧，
-    读取服务端文本帧直到 close 帧或超时（默认 30 秒），返回拼接文本
+    读取服务端帧直到 close 帧或超时（默认 30 秒），返回消息列表：
+    每条消息一个元素——文本帧为 str、二进制帧（opcode 0x2）为 bytes
   · 支持 ws:// 与 wss://（TLS，纯 Rust rustls）
 
 示例：
@@ -1281,7 +1289,9 @@ examples/guipro_adv_demo.hn（进阶控件：滑块/表格/树/画布/托盘/菜
 
 · 语法：load "路径" as 别名 { fn 函数名(参数: 类型, ...) -> 返回类型; ... }
 · 签名块显式声明 C ABI 参数与返回类型，调用时按声明精确转换，不再限制为 int64 单通道
-· 支持类型：int → int64_t，float → double，bool → C bool，str → const char*，ptr → void*
+· 支持类型：int → int64_t，int32 → int32_t，float → double，float32 → C float，bool → C bool，
+  str → const char*，ptr → void*（int32/float32 是 FFI 专有类型名：Hone 侧值仍按 int/float 传，
+  调用时按声明校验 32 位范围）
 · 返回类型额外支持 void；参数最多 8 个；变参（...）与受限回调（fn(int/int32/float/float32/bool/str/ptr 类参数...) -> int/int32/float/float32/bool/str/ptr/void 类返回，0-8 参）已支持（解释器引擎实测通过；VM/原生编译后端亦实现）
 · 变参调用：固定参数按签名转换，其余实参按运行时类型转换（int/float/float32/bool/str/ptr，ctypes 式；float 固定参数的变参函数现已支持）
 · 回调：把 Hone 函数名或 lambda 传给回调形参即可（同步回调，仅限该次 FFI 调用窗口内有效，异步回调报错）
@@ -1318,7 +1328,8 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · 用法二（离线生成签名块，粘贴进脚本）：`hone bind <header.h>` 输出 load 签名块到 stdout
 · 解析能力（纯 Rust 受限子集，无 libclang 依赖）：
   - 跳过注释、预处理行（#...）、struct/enum/union 定义体与 extern "C" 裸块
-  - 类型映射：int/long/short/size_t 等 → int；float/double → float；bool/_Bool → bool；
+  - 类型映射：int/long/short/size_t 等 → int；int32_t/uint32_t（含 int32/uint32 typedef）→ int32；
+    double → float；C float → float32；bool/_Bool → bool；
     char* / const char* → str；其余指针（void*/struct X*/句柄）→ ptr；void → void
   - 简单 typedef 展开（如 sqlite3_int64 → long long int → int）
   - 属性宏跳过（__attribute__((...)) / __declspec / 全大写前缀宏如 SQLITE_API）
@@ -1475,8 +1486,11 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
   · struct 字段写入 `p.x = 3` 在 VM 与原生后端为编译期 H999，解释器支持（含 readonly 拦截）
   · 依赖外部 crate 的点号内置（regex / sqlite / http / ws / smtp / crypto / zlib / archive /
     plugin / guipro / sys-winapi）在原生后端报 H999（见 G2.9）
-  · 依赖本机 rustc（rustc 与 Rust std 的链接期依赖）；M3 G3.4 起改随 hone 分发的预编译工具链，
-    移除 rustc 依赖；交叉产物（linux-musl / aarch64-musl）**无法在 Windows 构建机运行**，
+  · 依赖本机 rustc（rustc 与 Rust std 的链接期依赖）；官方 Release 附带 **runtime-a** 下载项——
+    为 x86_64-linux-musl / x86_64-windows-gnu / aarch64-linux-musl 三目标各预编译一份运行时静态库
+    （`hone natgen --runtime-only [--target <triple>] [-o <dir>]` 产出，文件名 = 缓存键
+    `libhoneruntime-<hash12>.a`），解压后设 `HONE_RUNTIME_A` 指向该目录，同版本 hone 免本机 rustc；
+    交叉产物（linux-musl / aarch64-musl）**无法在 Windows 构建机运行**，
     其可运行性由 CI 的 Linux job 二次验证（G3.6）
   · `cow` 声明 / 形参与 VM 一致按引擎边界处理（解释器特性，见 1.3）
 · 与 AOT（-c）的分工：AOT 走 C 中间文件 + gcc/clang，体积几十 KB、零运行时依赖，但错误渲染为简化一行；
