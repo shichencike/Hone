@@ -276,7 +276,7 @@ found:
     <p>排查标签 / 跳转报错：<code class="inline">hone explain H105</code>。</p>
 
     <h3>宏 macro（H106）</h3>
-    <p>宏是<strong>解析期</strong>的代码生成工具：在解析之后、类型检查之前，由预处理阶段（<code class="inline">src/preproc.rs</code>）做<strong>纯 AST 替换</strong>。因此解释器 / 字节码 VM / 原生编译三个后端看到的是展开后的同一份代码，<strong>运行期不存在宏实体</strong>，行为完全一致。</p>
+    <p>宏是<strong>解析期</strong>的代码生成工具：在解析之后、类型检查之前，由预处理阶段（<code class="inline">src/preproc.rs</code>）做<strong>纯 AST 替换</strong>。因此解释器 / 字节码 VM 两个引擎看到的是展开后的同一份代码，<strong>运行期不存在宏实体</strong>，行为完全一致。</p>
     <p>两种形式，调用写法均与函数一致（<code class="inline">NAME(实参)</code>）：</p>
 <pre><code><span class="c">// 表达式宏：用于表达式位置</span>
 <span class="k">macro</span> <span class="f">SQ</span>(x) =&gt; x * x;
@@ -353,7 +353,7 @@ n = <span class="n">0</span>; <span class="f">INC</span>(n); <span class="f">pri
     <p><code class="inline">fn f(a, b = 10)</code>：调用时省略的<strong>尾部实参</strong>取默认值。
       必选参数（无默认值）必须位于默认参数之前（否则报错）；默认表达式在<strong>调用时求值</strong>，
       可引用其前面的参数（如 <code class="inline">fn f(a, b = a * 2)</code>）。参数个数检查按
-      「必选个数 ~ 总个数」区间；lambda 参数同样支持默认值；<code class="inline">hone build --dll</code> 暂不支持。</p>
+      「必选个数 ~ 总个数」区间；lambda 参数同样支持默认值。</p>
 <pre><code><span class="k">fn</span> <span class="f">greet</span>(name, greeting = <span class="s">"Hello"</span>) {
     <span class="k">return</span> greeting + <span class="s">", "</span> + name + <span class="s">"!"</span>;
 }
@@ -495,7 +495,7 @@ p = <span class="f">Point</span>(<span class="n">3</span>, <span class="n">2.5</
     <h2><span class="hash">#</span>7.7 多返回值 · 解构赋值 · 推导式 · 可选链</h2>
     <p><strong>多返回值</strong>：<code class="inline">return a, b, ...;</code> 一个函数可一次返回多个值，
       运行时打包为列表，由解构赋值接收；不解构时（<code class="inline">x = f();</code>）拿到打包后的列表。
-      仍支持单值 return 与空 return（返回 null）；<code class="inline">hone build --dll</code> 暂不支持：</p>
+      仍支持单值 return 与空 return（返回 null）：</p>
 <pre><code><span class="k">fn</span> <span class="f">divmod</span>(a, b) {
     <span class="k">return</span> a / b, a % b;
 }
@@ -540,8 +540,7 @@ rev = {<span class="f">to_str</span>(v): k <span class="k">for</span> k, v <span
       短路返回 null，否则等价普通字段访问；可链式 <code class="inline">a?.b?.c</code>，可与空值合并配合
       <code class="inline">a?.b ?? "默认值"</code>。混合链 <code class="inline">a?.b.c</code> 中
       <code class="inline">?.</code> 只短路其后一个字段，继续的普通字段访问在 null 上仍报错（与 JS 一致）。
-      obj 非 null 但字段不存在时同样报错；Hone 无 null 字面量，null 来自 void 函数调用等占位值；
-      <code class="inline">hone build --dll</code> 暂不支持：</p>
+      obj 非 null 但字段不存在时同样报错；Hone 无 null 字面量，null 来自 void 函数调用等占位值：</p>
 <pre><code><span class="k">fn</span> <span class="f">get_user</span>() {
     <span class="k">return</span> {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"age"</span>: <span class="n">7</span>};
 }
@@ -573,7 +572,7 @@ area = <span class="k">match</span> <span class="f">Shape</span>.Circle(<span cl
     _ =&gt; <span class="n">0</span>,
 };
 <span class="f">print</span>(area);   <span class="c">// 12.56636…</span></code></pre>
-    <p>全链路支持解析 / 静态检查 / 解释器 / 原生编译 / fmt / LSP；示例
+    <p>全链路支持解析 / 静态检查 / 解释器 / 字节码 VM / fmt / LSP；示例
       <code class="inline">examples/enum_demo.hn</code>。</p>
   </section>
 
@@ -587,8 +586,7 @@ area = <span class="k">match</span> <span class="f">Shape</span>.Circle(<span cl
       （<code class="inline">__neg/__not</code>）、内置 <code class="inline">len(x)</code>/
       <code class="inline">x[i]</code>（<code class="inline">__len/__index</code>）。
       重载函数与普通函数一样遵循返回类型锁定；定义了重载后涉及动态值的运算静态检查放宽
-      （交给运行时判定）。原生编译后端支持二元/一元重载（生成「内建组合 → 内建运算，否则 →
-      __op 调用」分派链）；示例 <code class="inline">examples/overload_demo.hn</code>：</p>
+      （交给运行时判定）；示例 <code class="inline">examples/overload_demo.hn</code>：</p>
 <pre><code><span class="k">fn</span> <span class="f">__add</span>(a, b) {
     <span class="k">if</span> (<span class="f">type_of</span>(a) == <span class="s">"dict"</span> &amp;&amp; <span class="f">type_of</span>(b) == <span class="s">"dict"</span>) {
         <span class="k">return</span> <span class="f">mk_complex</span>(<span class="f">c_re</span>(a) + <span class="f">c_re</span>(b), <span class="f">c_im</span>(a) + <span class="f">c_im</span>(b));
@@ -606,7 +604,6 @@ zs = z1 + z2;        <span class="c">// dict + dict 内建不支持 → __add</s
       阻塞等待 future 完成并返回其结果。错误传播：async 函数体内 throw / 运行时错误存入 future，
       await 时原样抛出（可 try/catch 捕获）。与 <code class="inline">go</code> 互补：
       go 发后不理、async/await 结构化并发（多个 async 并行启动、依次 await，总耗时约等于最慢者）。
-      <code class="inline">hone build --dll</code> 对 async/await 报「暂不支持」；
       示例 <code class="inline">examples/async_demo.hn</code>：</p>
 <pre><code><span class="k">async</span> <span class="k">fn</span> <span class="f">compute</span>(n) {
     <span class="k">return</span> n * <span class="n">2</span>;
@@ -774,10 +771,7 @@ age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span cl
       <tr><td><code>hone run --resume &lt;script.hn&gt;</code></td><td>恢复 db 检查点继续执行（db.set 自动落盘，脚本变更后检查点失效）</td></tr>
       <tr><td><code>hone debug &lt;script.hn&gt;</code></td><td>断点调试：breakpoint 打印变量快照，等待 Enter 继续</td></tr>
       <tr><td><code>hone fmt [-w|-c] &lt;file.hn&gt;</code></td><td>代码格式化（Tab 缩进、运算符空格、大括号位置；-w 覆盖写，-c 只检查差异）</td></tr>
-      <tr><td><code>hone build --dll &lt;file.hn&gt;</code></td><td>打包 C ABI 动态库；类型映射 int→int64_t、float→double、bool→bool、str→const char*；需系统 C 编译器</td></tr>
       <tr><td><code>hone build --exe &lt;file.hn&gt;</code></td><td>打包独立可执行文件（解释器+脚本自释放，<code>[-o &lt;out&gt;]</code>）。<strong>打包产物</strong>自身支持 <code>--version</code> 查看版本、<code>--keep-cache</code> 保留释放出的缓存</td></tr>
-      <tr><td><code>hone build --exe --native &lt;file.hn&gt;</code></td><td>原生编译后端：脚本 → Cranelift 机器码 → rustc 链接 → 原生可执行文件（三引擎逐字节对齐，需本机 Rust 工具链；<code>hone natgen</code> 为等价别名）</td></tr>
-      <tr><td><code>hone build --obj &lt;file.hn&gt;</code></td><td>仅编译为原生 object（Cranelift，不链接 exe；<code>[-o &lt;out&gt;]</code> <code>[--cpu &lt;name&gt;]</code> <code>[--target &lt;triple&gt;]</code>）；与 <code>hone natgen &lt;file.hn&gt; --obj &lt;o&gt;</code> 同语义，供调试 / 自行链接 / 交叉目标出 object</td></tr>
       <tr><td><code>hone build --script &lt;file.hn&gt;</code></td><td>生成仅脚本压缩包 <code>.hzp</code>（不内嵌解释器，<code>[-o &lt;out&gt;]</code>，用 <code>hone run</code> 执行）</td></tr>
       <tr><td><code>hone test [目录]</code></td><td>递归扫描 <code>*.test.hn</code> 运行测试并汇总 PASS/FAIL（配合 <code>assert</code> 断言，失败退出码非 0）</td></tr>
       <tr><td><code>hone check &lt;file.hn|目录&gt; [--json]</code></td><td>仅静态检查（解析 + 类型检查，不执行代码）；目录递归扫描全部 <code>.hn</code>（跳过隐藏/构建目录），单文件失败输出诊断、通过输出 <code>check OK</code>，<code>--json</code> 向 stdout 输出诊断 JSON 数组，退出码 0/1 表达成败（CI / 编辑器集成）</td></tr>
@@ -793,33 +787,6 @@ age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span cl
       <tr><td><code>hone watch &lt;script.hn&gt;</code></td><td>监控脚本文件变更自动重跑（[--interval=N] 毫秒，默认 500，Ctrl+C 退出）</td></tr>
       <tr><td><code>hone doc &lt;file.hn&gt;</code></td><td>从 fn / class 定义与上方 // 注释生成 Markdown API 文档</td></tr>
     </table>
-    <h3>原生编译后端</h3>
-    <p><code class="inline">hone build --exe --native</code>
-      用 Cranelift 把 VM 字节码直接 lower 为机器码，再经生成式 wrapper + rustc 链接。
-      三个执行后端（AST 解释器、寄存器式字节码 VM、原生编译）语义一致，差别只在性能与部署形态；
-      其中原生编译后端与解释器 / VM 做到 stdout + stderr + 退出码<strong>逐字节一致</strong>（含完整错误渲染），
-      回归见 <code class="inline">tests/regress4.py</code>。</p>
-    <p><strong>原生编译后端当前范围（M0 + M1 + M2 G2.1–G2.5）</strong>：标量全类型与运算、if/while/标签跳转、
-      函数递归 / lambda / 捕获（值语义）、try-catch / throw / 错误字段访问、list / dict 读写与
-      for-in 迭代（含推导式）、struct 构造与字段读取（隐藏 <code>__struct__</code> 标记键全路径
-      过滤；<code>==</code> 按同名 struct 判定）、enum 构造 / 显示 / 相等 / 进容器、
-      match 全形态（字面量与变体模式、载荷绑定、<code>_</code> 通配，无匹配分支 H005）、
-      条件严格 bool 与 <code>&amp;&amp;</code> / <code>||</code> 短路求值、运算符重载
-      （<code>__add</code> / <code>__eq</code> / <code>__neg</code> / <code>__len</code> 等 15 个
-      <code>__op</code> 回退）、alias 别名与 goto 标签跳转，以及内置子集
-      （print/len/append/keys/values/has_key/to_str/to_int/to_float/is_*/type_of/abs/max/min/
-      assert/assert_eq/read_file）；struct 字段写入与 VM 一致编译期 H999，其余子集外指令在编译期
-      报 H990「未实现」（M2 逐步放开）。依赖本机 rustc。</p>
-
-    <h4>C 字符串转义层</h4>
-    <p><code class="inline">--dll</code> 做「Hone AST → C」时用 <code class="inline">int64_t</code> /
-      <code class="inline">double</code> / <code class="inline">const char*</code> 直连 C ABI。
-      与值模型无关的机械部分（字符串字面量转义等）收敛在
-      <code class="inline">src/cgen_util.rs</code>（原与已移除的 AOT 后端共用，现由 <code class="inline">--dll</code> 单一使用）。</p>
-    <p>这一收敛修掉过一个<strong>静默 bug</strong>：<code class="inline">--dll</code> 原先用十六进制
-      <code class="inline">\x01</code> 转义控制字符，而 <strong>C 的 <code class="inline">\x</code> 转义是贪婪的</strong>——
-      <code class="inline">"\x01a"</code> 会被解析成单字节 <code class="inline">\x1a</code>，
-      含控制字符的字符串会被截短、内容错误且不报编译错误。现统一为三位八进制。</p>
 
     <h3>交互式解释器 hone repl</h3>
     <p><code class="inline">hone repl</code> 启动 Python 式交互环境：逐行执行、自动回显表达式结果，
@@ -1132,7 +1099,7 @@ handlers = <span class="f">guipro_on</span>(handlers, win, b1, <span class="s">"
         循环里 <code class="inline">l = append(l, x)</code> 是 O(n²)。累积数据时优先用 dict，或先确定规模再一次性构造</li>
       <li><strong>字符串拼接优先 f-string</strong>：<code class="inline">f"..."</code> 比 <code class="inline">+</code> 简洁；str 不可变，大量拼接每次都会生成新串</li>
       <li><strong>减少深拷贝</strong>：<code class="inline">clone</code> / <code class="inline">copy</code> 是递归深拷贝，只在需要独立副本时使用</li>
-      <li><strong>热点计算交给 C</strong>：瓶颈函数用 <code class="inline">load</code> 调用 C 库（FFI），或用 <code class="inline">hone build --dll</code> 导出后由 C 调用</li>
+      <li><strong>热点计算交给 C</strong>：瓶颈函数用 <code class="inline">load</code> 调用 C 库（FFI）</li>
       <li><strong>并行化</strong>：<code class="inline">go 函数名(参数);</code> 启动独立线程（值传递、不共享变量），
         适合可拆分的独立任务；线程间通信走文件 / HTTP / db</li>
       <li><strong>先用 hone prof 找热点</strong>：剖析模式输出各函数总耗时排名，优先优化耗时最长的；

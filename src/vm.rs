@@ -504,7 +504,6 @@ impl Compiler {
                 | Stmt::StructDef { .. }
                 | Stmt::EnumDef { .. }
                 | Stmt::Alias { .. }
-                | Stmt::Export { .. }
                 | Stmt::Import { .. }
                 | Stmt::Load { .. }
                 | Stmt::Use { .. } => {}
@@ -1055,8 +1054,7 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
             | Stmt::ClassDef { .. }
             | Stmt::StructDef { .. }
             | Stmt::EnumDef { .. }
-            | Stmt::Alias { .. }
-            | Stmt::Export { .. } => {}
+            | Stmt::Alias { .. } => {}
             Stmt::Go { callee, args, .. } => {
                 let n = args.len();
                 let base = self.tmp();

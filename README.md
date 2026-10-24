@@ -3,8 +3,7 @@
 轻量级、跨平台、可嵌入的脚本语言。用 Rust 实现，单文件可执行程序，开箱即用。
 
 > 设计规范：`hone.md`（v1.3）
-> 当前版本：v0.8.0（原生编译后端 —— `hone build --exe --native` 由 Cranelift 直出机器码可执行文件，
-> 交叉编译三目标；AOT 后端（`build --exe -c`）已移除。详见 CHANGELOG）
+> 当前版本：v0.8.0（原生编译后端与 AOT 后端均已移除，解释器 + VM 双引擎。详见 CHANGELOG）
 
 ## 安装
 
@@ -46,37 +45,6 @@ python tests/regress_ir.py     # 文本 IR 往返
 原地赋值更新（免每轮迭代的堆分配）、字符串拼接预分配容量（免 O(n²) 整串复制）。
 二进制体积约 3.7MB（strip + fat LTO + opt-level z）。基准脚本见 `bench/` 目录。
 
-### 原生编译后端（`hone build --exe --native`）
-
-Cranelift 把 VM 字节码直接 lower 为机器码，
-再经生成式 wrapper + rustc 链接成原生可执行文件。`hone natgen` 是等价别名；
-`hone build --obj <file.hn>` / `natgen <file.hn> --obj <o>` 仅产 object（不链接 exe，
-供调试 / 自行链接 / 交叉目标出 object）。
-
-- 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码**逐字节一致**，
-  含完整错误渲染（`--> 文件:行:列` / 行号行 / caret / help）；回归见 `tests/regress4.py`
-  （正常路径）与 `tests/regress_err.py`（错误诊断逐字符）
-- 值模型：句柄式（寄存器持 u64 句柄指向堆上 `HnCell`）+ 引用计数 + 写时复制（COW）；
-  lambda 按值捕获，错误经 ERR 句柄跨帧传播 + 静态 catch 映射（无 setjmp）
-- 当前支持范围（M0 + M1 + M2 G2.1–G2.5）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda / 捕获、
-  try-catch / throw / 错误字段访问、**list / dict 读写与 for-in 迭代**、列表与字典推导式、
-  **struct 构造与字段读取**（隐藏 `__struct__` 标记键全路径过滤；`==` 按同名 struct 判定）、
-  **enum 构造 / 显示 / 相等 / 进容器**、**match 全形态**（字面量与变体模式、载荷绑定、`_` 通配、
-  无匹配分支 H005）、**条件严格 bool 与 `&&`/`||` 短路求值**、**运算符重载（15 个 `__op` 回退）**、**alias 别名 / goto 标签跳转**、
-  **别名值语义（RC+COW，O(1) 拷贝）**、内置子集（print/len/append/keys/values/has_key/to_str/
-  to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq/read_file）；struct 字段写入与 VM 一致
-  编译期 H999；**默认参数**在 VM / 原生后端尚未实现（仅解释器支持），其余子集外指令编译期报
-  H990「未实现」（M2 逐步放开）
-- 链接路径（纯 .o 生成器，零黑盒）：natgen 出脚本 object 后，内嵌运行时源码（`runtime/src`）由
-  本机 rustc 编成静态库 `libhoneruntime.a`（`--cfg hone_boot`，按源码+目标哈希缓存于
-  `~/.hone/cache/runtime/`，运行时源码不变则跨脚本复用），最后交**系统 gcc** 链接为可执行文件
-  （`gcc app.o libhoneruntime.a -o app`；windows-gnu 需补 Rust std 依赖导入库
-  `-lws2_32 -lntdll -lbcrypt -luserenv -ladvapi32`）。官方 Release 附带 **runtime-a** 下载项：
-  三个分发目标（x86_64-linux-musl / x86_64-windows-gnu / aarch64-linux-musl）各预编译一份运行时
-  静态库，解压后设 `HONE_RUNTIME_A` 指向该目录即可免本机 rustc（同版本 hone 直接命中）。本机无
-  rustc / gcc 时安装 Rust 工具链（`rustc`）与 MinGW-w64（Windows）即可。`hone build --exe -c`（C 后端）
-  已在 v0.8.0 移除
-
 ## 用法
 
 ```bash
@@ -88,10 +56,7 @@ hone run --restart[=N] <script.hn> # 崩溃自动重启（N 为最大重启次�
 hone run --resume <script.hn> # 恢复上次 db 检查点并启用自动落盘（脚本变更后自动失效）
 hone fmt [-w] <file.hn>   # 代码格式化（Tab 缩进/运算符空格/大括号；-w 覆盖写，支持多文件）
 hone check <file.hn|目录> [--json] # 仅静态检查（解析+类型检查，不执行）；目录递归扫全部 .hn，--json 输出诊断 JSON，退出码 0/1
-hone build --dll <file.hn> # 打包 C ABI 动态库（int/float/bool/str 类型映射，需系统 C 编译器）
 hone build --exe <file.hn> # 将脚本与解释器打包为自释放独立可执行文件（[-o <out>] [--icon <ico>]）
-hone build --exe --native <file.hn> # 原生编译后端：脚本 → Cranelift 机器码 → rustc 链接 → 原生可执行文件（需本机 Rust 工具链；hone natgen 为等价别名）
-hone build --obj <file.hn> # 仅编译为原生 object（Cranelift，不链接 exe；[-o <out>] [--cpu <name>] [--target <triple>]）
 hone explain <code>       # 查询错误码含义（如 hone explain H201）
 hone get                  # 读取当前目录 hone.json 清单，批量下载全部模块（类似 package.json / Cargo.toml）
 hone get <module> <url>   # 下载模块依赖并缓存到 ~/.hn/cache/，并写入/更新 hone.json 清单
@@ -552,10 +517,6 @@ help: Hone types are locked after inference; no implicit conversion is allowed
 - 函数扁平化存在于全局符号表（不支持嵌套作用域内的函数遮蔽，嵌套定义会被提升）
 - 强制 Tab 缩进为 `hone fmt` 的格式化规则，解析器不强制
 - 子线程崩溃仅打印错误，不影响主线程
-- `@export` + `hone build --dll`：类型映射 int → int64_t、float → double、bool → bool、
-  str → const char*（支持数值/布尔/字符串运算、strcmp 比较、str 拼接与返回值 static 缓冲 2048B）；
-  导出函数建议显式标注参数与返回类型（无调用点时无法推导）；
-  需要系统 C 编译器（gcc/clang，可用 `CC` 环境变量指定），找不到时保留生成的 `.c` 源码并提示手动编译
 - `import` / `load` / `load lazy` / `use` / `alias` / `hone get` / `hone lsp` 已实现
   （lsp 提供诊断/补全/hover/跳转定义·类型定义/references/rename/签名帮助/折叠/
   文档·全局符号/格式化/语义高亮，冒烟测试见 `tests/lsp_smoke.py`；
@@ -564,9 +525,8 @@ help: Hone types are locked after inference; no implicit conversion is allowed
 - `try/catch/throw` 错误处理：捕获可恢复错误；catch 绑定的 `error` 类型变量含
   `code`/`message`/`file`/`line`/`col`/`context` 字段；`throw str` 构造 H600 用户错误，
   `throw error` 重抛
-- `goto` / 标签（H105）与 `macro`（H106）已实现：`goto` 在解释器与字节码 VM 下均支持，
-  原生编译后端（`--native`）亦支持标签跳转；宏在解析后的预处理阶段做纯 AST 展开，
-  三个后端行为完全一致。安全规则（同函数唯一 / 不跳进内层块 / 不跳过声明 / 宏体无环且不越界）
+- `goto` / 标签（H105）与 `macro`（H106）已实现：`goto` 在解释器与字节码 VM 下均支持；
+  宏在解析后的预处理阶段做纯 AST 展开，双引擎行为完全一致。安全规则（同函数唯一 / 不跳进内层块 / 不跳过声明 / 宏体无环且不越界）
   见 `hone.md` 1.4.1、1.4.2，示例见 `examples/goto_demo.hn`、`examples/macro_demo.hn`
 - `hone run --restart=N` / `--backoff=a,b,c` / `--restart-on=Hxxx` 自动重启策略
   （重启仅对可重入错误生效；默认最多 3 次，间隔 1/3/10 秒）
@@ -579,18 +539,18 @@ help: Hone types are locked after inference; no implicit conversion is allowed
   复合赋值 `+= -= *= /= %=`（str 仅支持 `+=`）、自增/自减 `++ --`、
   三元 `cond ? a : b`、空值合并 `a ?? b`、匿名函数 lambda（一等值/闭包，经变量名动态调用）、
   函数默认参数（尾部省略、默认表达式可引用前面参数）、三引号原始字符串 `"""..."""`；
-  lambda 与默认参数暂不支持 `hone build --dll`（报错提示改用解释模式）
+  默认参数暂不支持 VM（报错提示改用解释模式）
 
 ## 路线图
 
 - ✅ 阶段 1：词法分析器 / 解析器 / AST / 解释器 / 符号表与类型检查 / `hone run`
 - 🚧 阶段 2（基本完成）：`hone fmt` ✅、`breakpoint` ✅、`go` 多线程 ✅、
-  `sys` 模块 Windows API ✅、`hone build --dll`（int 子集）✅
+  `sys` 模块 Windows API ✅
 - 🚧 阶段 3（基本完成）：`import` 远程模块 ✅、`load lazy` 懒加载 ✅、
   `use` / `alias` ✅、可视化编辑器 ✅（editor/index.html）、`hone get` ✅、
   `hone lsp` ✅（`hone upgrade` 已移除）
 - ✅ 阶段 4：官网 ✅（已部署至 https://hone.xo.je，源文件在 `官网/` 目录）、
-  `--dll` float/str/bool 类型映射 ✅、GitHub 首次提交 ✅；推广待做
+  GitHub 首次提交 ✅；推广待做
 - 🚧 阶段 5（新增）：内置函数扩展（log/path/args/env/db/regex/crypto）✅、
   `tmp fn` 临时函数 ✅、`debug_print` 调试输出 ✅、`import as` 别名 ✅、
   `hone poop` 屎山检测 ✅、`try/catch/throw` 错误处理 ✅、

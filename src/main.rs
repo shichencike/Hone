@@ -5,9 +5,7 @@ mod ast;
 mod archmod;
 mod builtins;
 mod bundle;
-mod cgen_util;
 mod checker;
-mod codegen;
 mod datamod;
 mod error;
 mod fmt;
@@ -23,14 +21,7 @@ mod imports;
 mod interp;
 mod lexer;
 mod lsp;
-mod natgen;
 mod netmod;
-
-// 原生后端运行时（runtime/src/lib.rs，std-only 单文件）：嵌入二进制，
-// natgen 时写出临时目录参与产物链接（干净构建机无需本仓库）。
-pub(crate) const NAT_RUNTIME_SRC: &str = include_str!("../runtime/src/lib.rs");
-/// 内嵌运行时源码的真实路径（rustc 编 staticlib 的输入；include_str! 同源，改一处即两处）。
-pub(crate) const NAT_RUNTIME_SRC_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/runtime/src/lib.rs");
 mod parser;
 mod pluginmod;
 mod plotmod;
@@ -205,7 +196,6 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
         "fmt" => cmd_fmt(&args[1..]),
         "doc" => cmd_doc(&args[1..]),
         "check" => cmd_check(&args[1..]),
-        "natgen" => cmd_natgen(&args[1..]),
         "test" => cmd_test(&args[1..]),
         "watch" => cmd_watch(&args[1..]),
         "bind" => cmd_bind(&args[1..]),
@@ -495,11 +485,7 @@ fn print_help() {
     println!("  hone fmt [-w|-c] <file.hn>  代码格式化（Tab 缩进/运算符空格/大括号；-w 覆盖写，-c 只检查差异）");
     println!("  hone doc <file.hn>        从 fn/class 定义与上方 `//` 注释生成 Markdown API 文档");
     println!("  hone check <file.hn|目录> [--json] 仅静态检查（解析+类型检查，不执行）；目录递归扫全部 .hn，--json 输出诊断 JSON 数组，退出码 0/1 表达成败");
-    println!("  hone natgen <file.hn>  原生编译（build --exe --native 别名）：脚本 → Cranelift object → 链接原生可执行 [-o <out>] [--cpu <name>] [--target <triple>]；--obj <o> 仅产 object 不链接；--runtime-only [--target <triple>] [-o <dir>] 仅预编译运行时静态库");
-    println!("  hone build --dll <file.hn> 将脚本打包为 C ABI 动态库（int/float/bool/str 映射，需 C 编译器）");
     println!("  hone build --exe <file.hn> 将脚本与解释器打包为独立可执行文件（[-o <out>] [--icon <ico>]）");
-    println!("  hone build --exe --native <file.hn> 原生编译为可执行文件（Cranelift→object→运行时静态库→系统 gcc 链接；[-o <out>] [--cpu <name>] [--target <triple>]）");
-    println!("  hone build --obj <file.hn> 仅编译为原生 object（Cranelift，不链接 exe；[-o <out>] [--cpu <name>] [--target <triple>]）");
     println!("  hone build --script <file.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）");
     println!("  hone get                   读取当前目录 hone.json 清单，批量下载全部模块");
     println!("  hone get <module> <url>  下载模块依赖并缓存到 ~/.hone/cache/，并写入 hone.json 清单");
@@ -573,28 +559,15 @@ fn cmd_bind(args: &[String]) -> Result<(), ZError> {
     Ok(())
 }
 
-/// hone build --dll <script.hn> / hone build --exe <script.hn> / hone build --obj <script.hn>
+/// hone build --exe <script.hn> / hone build --script <script.hn>
 fn cmd_build(args: &[String]) -> Result<(), ZError> {
     match args.first().map(|s| s.as_str()) {
-        Some("--dll") => {
-            let path = args
-                .get(1)
-                .ok_or_else(|| {
-                    ZError::plain(
-                        codes::SYNTAX,
-                        "missing script path: `hone build --dll <script.hn>`",
-                        Some("run `hone --help` for usage"),
-                    )
-                })?;
-            cmd_build_dll(path)
-        }
         Some("--exe") => cmd_build_exe(&args[1..]),
-        Some("--obj") => cmd_build_obj(&args[1..]),
         Some("--script") => cmd_build_script(&args[1..]),
         _ => Err(ZError::plain(
             codes::SYNTAX,
-            "unknown build options: `hone build --dll <script.hn>`, `hone build --exe <script.hn>`, `hone build --obj <script.hn>` or `hone build --script <script.hn>`",
-            Some("`--dll` compiles to a shared library; `--exe` bundles the script with the interpreter; `--obj` compiles to a native object only (no link); `--script` packs the script alone"),
+            "unknown build options: `hone build --exe <script.hn>` or `hone build --script <script.hn>`",
+            Some("`--exe` bundles the script with the interpreter; `--script` packs the script alone"),
         )),
     }
 }
@@ -678,68 +651,8 @@ fn cmd_build_script(args: &[String]) -> Result<(), ZError> {
     Ok(())
 }
 
-/// hone build --obj <script.hn> [-o <out>] [--cpu <name>] [--target <triple>]
-/// 仅 object 模式：原生管线编译到 Cranelift object 即停（object 即最终产物，不链接 exe）。
-/// 用途：保留脚本 object 供调试 / 自行链接 / 交叉目标出 object（无需目标 std 与链接器）。
-/// 与 `hone natgen <file.hn> --obj <o>` 同语义（统一口径）。
-fn cmd_build_obj(args: &[String]) -> Result<(), ZError> {
-    let mut out: Option<String> = None;
-    let mut cpu: Option<String> = None;
-    let mut target: Option<String> = None;
-    let mut path: Option<String> = None;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--cpu" => {
-                i += 1;
-                cpu = args.get(i).cloned();
-            }
-            "--target" => {
-                i += 1;
-                target = args.get(i).cloned();
-            }
-            "-o" => {
-                i += 1;
-                out = args.get(i).cloned();
-            }
-            s if s.starts_with("--out=") => out = Some(s["--out=".len()..].to_string()),
-            s if s.starts_with("--cpu=") => cpu = Some(s["--cpu=".len()..].to_string()),
-            s if s.starts_with("--target=") => target = Some(s["--target=".len()..].to_string()),
-            s if s.starts_with('-') => {
-                return Err(ZError::plain(
-                    codes::SYNTAX,
-                    format!("unknown build option `{}`", s),
-                    Some("options: `-o <out>`, `--cpu <name>`, `--target <triple>`"),
-                ));
-            }
-            s => {
-                if path.is_none() {
-                    path = Some(s.to_string());
-                } else {
-                    return Err(ZError::plain(
-                        codes::SYNTAX,
-                        "too many arguments",
-                        Some("usage: `hone build --obj <script.hn> [-o <out>] [--cpu <name>] [--target <triple>]`"),
-                    ));
-                }
-            }
-        }
-        i += 1;
-    }
-    let path = path.ok_or_else(|| {
-        ZError::plain(
-            codes::SYNTAX,
-            "missing script path: `hone build --obj <script.hn>`",
-            Some("run `hone --help` for usage"),
-        )
-    })?;
-    build_native(&path, None, out, "build", cpu, target, NativeArtifact::Obj)
-}
-
-/// hone build --exe <script.hn> [-o <out>] [--icon <ico>] [--version] [--native]
-/// 默认：将当前 hone 运行时与脚本打包为单个自释放可执行文件（见 bundle.rs 格式）。
-/// --native：原生编译模式（natgen 管线别名入口，T7）——脚本经 Cranelift 编译为
-///     object 并与内嵌运行时链接成原生可执行（不依赖 C 编译器，需本机 rustc）。
+/// hone build --exe <script.hn> [-o <out>] [--icon <ico>] [--version]
+/// 将当前 hone 运行时与脚本打包为单个自释放可执行文件（见 bundle.rs 格式）。
 fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("hone build --exe (Hone v{})", VERSION);
@@ -748,21 +661,9 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     let mut out: Option<String> = None;
     let mut icon: Option<String> = None;
     let mut path: Option<String> = None;
-    let mut native_mode = false;
-    let mut cpu: Option<String> = None;
-    let mut target: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--native" => native_mode = true,
-            "--cpu" => {
-                i += 1;
-                cpu = args.get(i).cloned();
-            }
-            "--target" => {
-                i += 1;
-                target = args.get(i).cloned();
-            }
             "-o" => {
                 i += 1;
                 out = args.get(i).cloned();
@@ -773,13 +674,11 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
             }
             s if s.starts_with("--out=") => out = Some(s["--out=".len()..].to_string()),
             s if s.starts_with("--icon=") => icon = Some(s["--icon=".len()..].to_string()),
-            s if s.starts_with("--cpu=") => cpu = Some(s["--cpu=".len()..].to_string()),
-            s if s.starts_with("--target=") => target = Some(s["--target=".len()..].to_string()),
             s if s.starts_with('-') => {
                 return Err(ZError::plain(
                     codes::SYNTAX,
                     format!("unknown build option `{}`", s),
-                    Some("options: `--native`, `--cpu <name>`, `--target <triple>`, `-o <out>`, `--icon <ico>`, `--version`"),
+                    Some("options: `-o <out>`, `--icon <ico>`, `--version`"),
                 ));
             }
             s => {
@@ -789,7 +688,7 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
                     return Err(ZError::plain(
                         codes::SYNTAX,
                         "too many arguments",
-                        Some("usage: `hone build --exe <script.hn> [--native] [-o <out>]`"),
+                        Some("usage: `hone build --exe <script.hn> [-o <out>]`"),
                     ));
                 }
             }
@@ -805,9 +704,6 @@ fn cmd_build_exe(args: &[String]) -> Result<(), ZError> {
     })?;
     if let Some(ic) = &icon {
         eprintln!("[build] warning: `--icon` is not supported in this build, ignoring `{}`", ic);
-    }
-    if native_mode {
-        return build_native(&path, out, None, "build", cpu, target, NativeArtifact::Exe);
     }
 
     // 以当前 hone 可执行文件作为内嵌运行时
@@ -887,135 +783,6 @@ fn parse_version(v: &str) -> (u16, u16, u16) {
     let minor = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     let patch = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     (major, minor, patch)
-}
-
-/// 将 .hn 脚本打包为 C ABI 动态库。进度条使用 \r 轻量显示。
-fn cmd_build_dll(path: &str) -> Result<(), ZError> {
-    let src = std::fs::read_to_string(path).map_err(|e| {
-        ZError::plain(
-            codes::NOT_FOUND,
-            format!("cannot read `{}`: {}", path, e),
-            Some("check the path"),
-        )
-    })?;
-
-    print!("[1/4] 解析与类型检查...\r");
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    let program = parser::Parser::parse(path, &src)?;
-    checker::Checker::check(&program, path, &src)?;
-
-    let exports = codegen::collect_exports(&program);
-    if exports.is_empty() {
-        return Err(ZError::plain(
-            codes::NOT_IMPLEMENTED,
-            "no `@export` declaration found",
-            Some("add `@export 函数名;` to the script and rebuild"),
-        ));
-    }
-
-    print!("[2/4] 生成 C 代码...\r");
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    let c_code = codegen::generate(&program, &exports, path, &src)?;
-
-    let stem = std::path::Path::new(path)
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "hone_lib".to_string());
-    let cfile = format!("{}.c", stem);
-    std::fs::write(&cfile, &c_code).map_err(|e| {
-        ZError::plain(
-            codes::NOT_FOUND,
-            format!("cannot write `{}`: {}", cfile, e),
-            Some("check the directory permissions"),
-        )
-    })?;
-
-    print!("[3/4] 查找 C 编译器...\r");
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    let cc = match find_cc() {
-        Ok(cc) => cc,
-        Err(_) => {
-            println!();
-            return Err(ZError::plain(
-                codes::NOT_IMPLEMENTED,
-                "no C compiler found (gcc/clang), cannot compile the dynamic library",
-                Some(format!(
-                    "the generated C source is kept at `{}`; compile it manually with `gcc -shared -O2 -o <out> {}`",
-                    cfile, cfile
-                )),
-            ));
-        }
-    };
-
-    let ext = if cfg!(windows) {
-        "dll"
-    } else if cfg!(target_os = "macos") {
-        "dylib"
-    } else {
-        "so"
-    };
-    let out = format!("{}.{}", stem, ext);
-
-    print!("[4/4] 编译中（{}）...\r", cc);
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    let result = run_cc(&cc, &cfile, &out);
-    std::fs::remove_file(&cfile).ok();
-    result?;
-
-    println!();
-    println!("生成 {} 完成（导出: {}）", out, exports.join(", "));
-    Ok(())
-}
-
-/// 查找 C 编译器：CC 环境变量 > gcc > clang > cc。
-fn find_cc() -> Result<String, ZError> {
-    if let Ok(cc) = std::env::var("CC") {
-        if !cc.trim().is_empty() {
-            return Ok(cc);
-        }
-    }
-    for name in ["gcc", "clang", "cc"] {
-        let ok = std::process::Command::new(name)
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if ok {
-            return Ok(name.to_string());
-        }
-    }
-    Err(ZError::plain(
-        codes::NOT_IMPLEMENTED,
-        "no C compiler found (gcc/clang), cannot build the dynamic library",
-        Some("install gcc (e.g. MinGW-w64 on Windows), or set the `CC` environment variable"),
-    ))
-}
-
-fn run_cc(cc: &str, cfile: &str, out: &str) -> Result<(), ZError> {
-    let status = if cfg!(windows) {
-        std::process::Command::new(cc)
-            .args(["-shared", "-O2", "-o", out, cfile])
-            .status()
-    } else {
-        std::process::Command::new(cc)
-            .args(["-shared", "-fPIC", "-O2", "-o", out, cfile])
-            .status()
-    };
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(ZError::plain(
-            codes::NOT_IMPLEMENTED,
-            format!("C compiler exited with code {}", s.code().unwrap_or(-1)),
-            Some("check the generated C code, or install a complete toolchain"),
-        )),
-        Err(e) => Err(ZError::plain(
-            codes::NOT_IMPLEMENTED,
-            format!("cannot run C compiler `{}`: {}", cc, e),
-            None::<&str>,
-        )),
-    }
 }
 
 /// hone get [<module> <url>] [<script.hn>]
@@ -1467,478 +1234,6 @@ fn cmd_doc(args: &[String]) -> Result<(), ZError> {
     Ok(())
 }
 
-/// 原生管线：脚本 → VM 字节码 → Cranelift object（COFF / ELF 由目标决定，含
-/// __hn_main 入口）→ 与 Rust native 运行时链接成原生 exe。
-/// 用法: hone natgen <file.hn> [-o <out>] [--cpu <name>] [--target <triple>] [--obj <o>]
-/// `--obj <o>`：仅 object 模式——只产 object 到 <o>，不链接 exe（与 build --obj 统一语义）。
-fn cmd_natgen(args: &[String]) -> Result<(), ZError> {
-    let mut out: Option<String> = None;
-    let mut obj: Option<String> = None;
-    let mut cpu: Option<String> = None;
-    let mut target: Option<String> = None;
-    let mut path: Option<String> = None;
-    let mut runtime_only = false;
-    let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--runtime-only" => {
-                runtime_only = true;
-                i += 1;
-            }
-            "--cpu" => {
-                cpu = Some(args.get(i + 1).cloned().ok_or_else(|| {
-                    ZError::plain(
-                        codes::SYNTAX,
-                        "missing value for --cpu: `hone natgen <file.hn> --cpu <name>`",
-                        None::<String>,
-                    )
-                })?);
-                i += 2;
-            }
-            s if s.starts_with("--cpu=") => {
-                cpu = Some(s["--cpu=".len()..].to_string());
-                i += 1;
-            }
-            "--target" => {
-                target = Some(args.get(i + 1).cloned().ok_or_else(|| {
-                    ZError::plain(
-                        codes::SYNTAX,
-                        "missing value for --target: `hone natgen <file.hn> --target <triple>`",
-                        None::<String>,
-                    )
-                })?);
-                i += 2;
-            }
-            s if s.starts_with("--target=") => {
-                target = Some(s["--target=".len()..].to_string());
-                i += 1;
-            }
-            "-o" => {
-                out = Some(args.get(i + 1).cloned().ok_or_else(|| {
-                    ZError::plain(
-                        codes::SYNTAX,
-                        "missing value for -o: `hone natgen <file.hn> -o <out>`",
-                        None::<String>,
-                    )
-                })?);
-                i += 2;
-            }
-            "--obj" => {
-                obj = Some(args.get(i + 1).cloned().ok_or_else(|| {
-                    ZError::plain(
-                        codes::SYNTAX,
-                        "missing value for --obj: `hone natgen <file.hn> --obj <o>`",
-                        None::<String>,
-                    )
-                })?);
-                i += 2;
-            }
-            a if a.starts_with('-') => {
-                return Err(ZError::plain(
-                    codes::SYNTAX,
-                    format!("unknown natgen option `{a}`"),
-                    Some("usage: hone natgen <file.hn> [-o <out>] [--obj <o>] [--cpu <name>] [--target <triple>] | hone natgen --runtime-only [--target <triple>] [-o <dir>]"),
-                ));
-            }
-            a => {
-                path = Some(a.to_string());
-                i += 1;
-            }
-        }
-    }
-    // --runtime-only：仅预编译运行时静态库（libhoneruntime-<hash12>.a），无脚本参与。
-    // 官方发布用它为各目标预编 runtime-a 下载项；-o <dir> 把 .a 复制到指定目录。
-    if runtime_only {
-        return cmd_runtime_only(target.as_deref(), out.as_deref());
-    }
-    let path = path.ok_or_else(|| {
-        ZError::plain(
-            codes::SYNTAX,
-            "missing script path: `hone natgen <file.hn>`",
-            Some("usage: hone natgen <file.hn> [-o <out>] [--obj <o>] [--cpu <name>] [--target <triple>] | hone natgen --runtime-only [--target <triple>] [-o <dir>]",
-        ),
-        )
-    })?;
-    // 统一 --obj 语义：`--obj <o>` = 仅 object 模式（不链接 exe），与 `hone build --obj` 同口径；
-    // 原「改名中间 object 仍链接 exe」的用法已废弃。
-    if obj.is_some() && out.is_some() {
-        return Err(ZError::plain(
-            codes::SYNTAX,
-            "`--obj` 与 `-o` 不能同用：`--obj <o>` 为仅 object 模式（不链接 exe）",
-            Some("usage: hone natgen <file.hn> --obj <o>  |  hone natgen <file.hn> [-o <out>]"),
-        ));
-    }
-    // T7：管线与 `hone build --exe --native` 共用（build_native）；natgen 保留为别名。
-    if obj.is_some() {
-        build_native(&path, None, obj, "natgen", cpu, target, NativeArtifact::Obj)
-    } else {
-        build_native(&path, out, None, "natgen", cpu, target, NativeArtifact::Exe)
-    }
-}
-
-// ── 原生编译产物形态（NativeArtifact）──
-
-/// 原生编译管线的最终产物形态：
-/// Exe = 完整管线（object 为中间物 + 链接原生 exe）；Obj = 仅 object
-/// （object 即最终产物，生成后即停，不链接 exe）。
-#[derive(Copy, Clone, PartialEq, Eq)]
-enum NativeArtifact {
-    Exe,
-    Obj,
-}
-
-/// 共享原生编译管线（T7）：`hone natgen` 与 `hone build --exe --native` 共用入口。
-/// 阶段：解析+类型检查 → VM 字节码 → Cranelift object（x86_64 COFF / ELF 由目标决定，
-/// 含 `__hn_main` 与各用户函数）→ [仅 Exe 模式] 内嵌运行时静态库 + 系统 gcc 链接原生 exe。
-/// `label`：阶段输出前缀（"natgen" / "build"）；out/obj 为 None 时取默认名。
-/// `artifact`：产物形态——Exe 走完整管线；Obj 仅产 object（生成后提前返回，不链接）。
-fn build_native(
-    path: &str,
-    out: Option<String>,
-    obj: Option<String>,
-    label: &str,
-    cpu: Option<String>,
-    target: Option<String>,
-    artifact: NativeArtifact,
-) -> Result<(), ZError> {
-    let obj_only = artifact == NativeArtifact::Obj;
-    let total = if obj_only { 2 } else { 4 };
-    // G3.2：目标三元组——默认宿主目标；`--target` 指定交叉目标（交叉产物需目标 rust std 编运行时静态库）。
-    let host = target_lexicon::Triple::host();
-    let triple = match &target {
-        Some(t) => t.parse::<target_lexicon::Triple>().map_err(|e| {
-            ZError::plain(
-                codes::SYNTAX,
-                format!("无效的 --target `{t}`: {e}"),
-                Some("例如 x86_64-pc-windows-gnu / x86_64-unknown-linux-musl"),
-            )
-        })?,
-        None => host.clone(),
-    };
-    let triple_s = triple.to_string();
-    let cross = triple_s != host.to_string();
-    let src = std::fs::read_to_string(path).map_err(|e| {
-        ZError::plain(
-            codes::FILE_NOT_FOUND,
-            format!("cannot read `{}`: {}", path, e),
-            Some("check the path"),
-        )
-    })?;
-    eprintln!("[1/{total}] {label} 解析 + 类型检查: {path}");
-    let program = parser::Parser::parse(path, &src)?;
-    // G3.1：原生编译后端在构建期把顶层 import 递归展开、合并为单编译单元（设计 §7.3）。
-    let program = imports::resolve_imports(program, path, &src)?;
-    let _checked = checker::Checker::check(&program, path, &src)?;
-    let vm_mod = vm::compile_module(&program)?;
-    // 字符串静态表（T5 起）去重全集，编入生成式 wrapper（object 经 rt_str 按索引取句柄；
-    // M3 移入 object rodata，见 G3.5）。收集源：
-    //   1. 全部 chunk 的 Const::Str（字符串字面量）；
-    //   2. Call 指令函数名（rt_call 名分发用）；
-    //   3. 每 chunk 的 locals 名 + func_map 函数名（注册表 / 局部变量优先分发用）。
-    let mut strtab: Vec<String> = Vec::new();
-    let mut strtab_idx: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let mut push_str = |s: &str| -> usize {
-        if let Some(&i) = strtab_idx.get(s) {
-            i
-        } else {
-            let i = strtab.len();
-            strtab.push(s.to_string());
-            strtab_idx.insert(s.to_string(), i);
-            i
-        }
-    };
-    for c in &vm_mod.chunks {
-        for k in &c.consts {
-            if let vm::Const::Str(s) = k {
-                push_str(s);
-            }
-        }
-        for ins in &c.code {
-            if let vm::Instr::Call(_, func, _, _) = ins {
-                push_str(func);
-            }
-            // T6：Field 字段名 / ThrowStr 文案进 strtab（rt_field / rt_throwstr 名分发用）。
-            if let vm::Instr::Field(_, _, field) = ins {
-                push_str(field);
-            }
-            // G2.6：GoCall callee 名进 strtab（rt_gocall 名分发用；go 目标可能从不作为
-            // Call 名出现，漏收集会静默解析成 strtab[0]）。
-            if let vm::Instr::GoCall(func, _, _) = ins {
-                push_str(func);
-            }
-            if let vm::Instr::ThrowStr(s) = ins {
-                push_str(s);
-            }
-            // M1：Raise 的错误码 / 消息 / help 文本进 strtab（rt_raise 名分发用）。
-            if let vm::Instr::Raise(code, msg, help) = ins {
-                push_str(code);
-                push_str(msg);
-                if let Some(h) = help {
-                    push_str(h);
-                }
-            }
-        }
-        for name in c.locals.keys() {
-            push_str(name);
-        }
-    }
-    for name in vm_mod.func_map.keys() {
-        push_str(name);
-    }
-    // G2.1：struct 定义表进 strtab（构造名分发 + 字段名序列 + `__struct__` 标记键）。
-    // 标记键是隐藏键，脚本里不可能写出来，须在此显式收集（wrapper 侧 rt.rs 的
-    // HIDDEN_STRUCT_KEY 常量与之一致，runtime 按内容匹配取 strtab 索引）。
-    push_str("\u{0}__struct__");
-    for (name, fields) in vm_mod.struct_defs.iter() {
-        push_str(name);
-        for f in fields {
-            push_str(f);
-        }
-    }
-    // G2.2：enum 定义表进 strtab（构造/匹配名分发 + 枚举名/变体名序列）。
-    for (name, variants) in vm_mod.enum_defs.iter() {
-        push_str(name);
-        for (v, _) in variants {
-            push_str(v);
-        }
-    }
-    // G2.5：alias 的**原名**与新名都进 strtab。原名可能只出现在 alias 声明里
-    // （`alias len as mylen` 的 `len` 从不作为 Call 名出现），不显式收集会拿到
-    // 错误索引（unwrap_or(0)）→ runtime 把别名解析成无关的名字（症状：H002 说另一个函数名）。
-    for (orig, new_name) in &vm_mod.aliases {
-        push_str(orig);
-        push_str(new_name);
-    }
-    drop(push_str);
-    // 程序静态表（T4/G3.5）：span 表与 file/src 由 natgen emit_static_tables 直接
-    // 编入 script.o rodata（此前经生成式 wrapper 传入，G3.5 起固定 wrapper）。
-    let base = std::path::Path::new(&path)
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.to_string());
-    let obj = obj.unwrap_or_else(|| format!("{}.nat.o", base));
-    let out = out.unwrap_or_else(|| {
-        if cross {
-            // 交叉产物默认名带目标后缀（设计 §7.1）。
-            let ext = if matches!(triple.operating_system, target_lexicon::OperatingSystem::Windows) {
-                ".exe"
-            } else {
-                ""
-            };
-            format!("{base}-{triple_s}{ext}")
-        } else if cfg!(windows) {
-            format!("{}.exe", base)
-        } else {
-            base
-        }
-    });
-    eprintln!("[2/{total}] {label} 生成 object: {obj}（Cranelift，目标 {triple_s}）");
-    natgen::gen_object(&vm_mod, &strtab, &path, &src, std::path::Path::new(&obj), &triple_s, cpu.as_deref().unwrap_or("ssse3"))?;
-    if obj_only {
-        // 仅 object 模式（`build --obj` / `natgen --obj`）：object 即最终产物，不链接 exe。
-        if !std::path::Path::new(&obj).is_file() {
-            return Err(ZError::plain(
-                codes::INTERNAL,
-                "object 生成报告成功但产物不存在",
-                None::<String>,
-            ));
-        }
-        eprintln!("[{total}/{total}] {label} 完成: {obj}（仅 object，未链接 exe）");
-        return Ok(());
-    }
-    // 纯 .o 生成器口径（链接交还系统 gcc）：exe 模式 = 内嵌运行时源码经 rustc 编成
-    // 静态库 libhoneruntime.a（含 C 入口 main，按「源码内容 + 目标三元组」哈希缓存于
-    // ~/.hone/cache/runtime/）→ 系统 gcc 把 script.o 与静态库链接为可执行。零黑盒：
-    // 链接命令原样打印，用户可自行复现 / 接管。
-    let via = "内嵌运行时静态库 + 系统 gcc";
-    if cross {
-        eprintln!("[3/{total}] {label} 链接原生 exe: {out}（{via}，目标 {triple_s}）");
-    } else {
-        eprintln!("[3/{total}] {label} 链接原生 exe: {out}（{via}）");
-    }
-    let rtlib = runtime_staticlib(&triple_s)?;
-    let out_s = out.to_string();
-    let obj_s = obj.to_string();
-    // 链接参数按目标环境分派（Cranelift 产非 PIC 对象）：
-    //   ELF：必须非 PIE（-no-pie），否则 R_X86_64_32S 重定位报错；
-    //   windows-gnu（MinGW gcc 驱动）：参数经 -Wl,；
-    //   msvc（无 gcc）：报错指路（用户环境无 MinGW 时自行安装或改用 --obj 自链）。
-    let is_elf = matches!(triple.operating_system, target_lexicon::OperatingSystem::Linux);
-    let is_msvc = matches!(triple.environment, target_lexicon::Environment::Msvc);
-    if is_msvc {
-        return Err(ZError::plain(
-            codes::NOT_IMPLEMENTED,
-            "msvc 目标无系统 gcc 链接路径（H999）：Cranelift object + 运行时静态库需 GNU 链接器",
-            Some("改用 `hone natgen <file> --obj <o>` 仅产 object 自行链接，或安装 MinGW-w64 gcc"),
-        ));
-    }
-    let mut link_cmd = vec!["gcc".to_string(), obj_s.clone(), rtlib.display().to_string()];
-    if is_elf {
-        link_cmd.push("-no-pie".into());
-        link_cmd.push("-Wl,--gc-sections".into());
-        link_cmd.push("-Wl,--strip-all".into());
-    } else {
-        // windows-gnu：Rust std 依赖的导入库 gcc 驱动不自动带（rustc 自身链接才注入），
-        // 缺了会在链接期报 undefined reference（closesocket / NtReadFile / WSAGetLastError…）
-        link_cmd.push("-lws2_32".into());
-        link_cmd.push("-lntdll".into());
-        link_cmd.push("-lbcrypt".into());
-        link_cmd.push("-luserenv".into());
-        link_cmd.push("-ladvapi32".into());
-        link_cmd.push("-Wl,--gc-sections".into());
-        link_cmd.push("-Wl,--strip-all".into());
-    }
-    link_cmd.push("-o".into());
-    link_cmd.push(out_s.clone());
-    eprintln!("[link] {}", link_cmd.join(" "));
-    let lp = std::process::Command::new(&link_cmd[0])
-        .args(&link_cmd[1..])
-        .output()
-        .map_err(|e| {
-            ZError::plain(
-                codes::INTERNAL,
-                format!("gcc 启动失败: {e}"),
-                Some("需要系统 gcc（MinGW-w64 / 发行版 gcc）；或用 `--obj` 仅产 object 自行链接"),
-            )
-        })?;
-    if !lp.status.success() {
-        let err = String::from_utf8_lossy(&lp.stderr);
-        return Err(ZError::plain(
-            codes::INTERNAL,
-            format!("gcc 链接失败:\n{err}"),
-            Some("检查 gcc 版本与 object 目标三元组一致性；或用 `--obj` 仅产 object 自行链接"),
-        ));
-    }
-    if !std::path::Path::new(&out).is_file() {
-        return Err(ZError::plain(
-            codes::INTERNAL,
-            "gcc 报告成功但产物不存在",
-            None::<String>,
-        ));
-    }
-    eprintln!("[{total}/{total}] {label} 完成: {out}");
-    Ok(())
-}
-
-/// 预编译运行时静态库文件名（与 runtime_staticlib 的缓存键一致）：
-/// `libhoneruntime-<md5(源码+三元组)[..12]>.a`——同版本 hone 链接时直接命中同名缓存。
-fn runtime_lib_name(triple_s: &str) -> String {
-    use md5::Digest;
-    let mut h = md5::Md5::new();
-    h.update(NAT_RUNTIME_SRC.as_bytes());
-    h.update(triple_s.as_bytes());
-    format!("libhoneruntime-{}.a", &format!("{:x}", h.finalize())[..12])
-}
-
-/// hone natgen --runtime-only [--target <triple>] [-o <dir>]
-/// 仅预编译内嵌运行时静态库（无脚本参与）：官方发布据此为各目标产出 runtime-a 下载项，
-/// 用户侧把 .a 放进 HONE_RUNTIME_A 指向的目录即可免本机 rustc。默认目标 = 宿主。
-fn cmd_runtime_only(target: Option<&str>, out_dir: Option<&str>) -> Result<(), ZError> {
-    let host = target_lexicon::Triple::host().to_string();
-    let triple_s = match target {
-        Some(t) => t.parse::<target_lexicon::Triple>().map_err(|e| {
-            ZError::plain(
-                codes::SYNTAX,
-                format!("无效的 --target `{t}`: {e}"),
-                Some("例如 x86_64-pc-windows-gnu / x86_64-unknown-linux-musl"),
-            )
-        })?.to_string(),
-        None => host,
-    };
-    let lib = runtime_staticlib(&triple_s)?;
-    if let Some(dir) = out_dir {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| ZError::plain(codes::INTERNAL, format!("创建输出目录 `{dir}`: {e}"), None::<String>))?;
-        let dest = std::path::Path::new(dir).join(runtime_lib_name(&triple_s));
-        std::fs::copy(&lib, &dest)
-            .map_err(|e| ZError::plain(codes::INTERNAL, format!("复制运行时静态库到 `{}`: {e}", dest.display()), None::<String>))?;
-        println!("{}", dest.display());
-    } else {
-        println!("{}", lib.display());
-    }
-    Ok(())
-}
-
-/// 内嵌运行时静态库（exe 链接用）：NAT_RUNTIME_SRC 经 rustc 编为
-/// `--cfg hone_boot --crate-type staticlib` 的 libhoneruntime.a（含 C 入口 main）。
-/// 按「源码内容 + 目标三元组」md5 缓存于 ~/.hone/cache/runtime/——运行时源码不变
-/// 时跨脚本复用，不重复编译。交叉目标需已装该目标的 rust std。
-fn runtime_staticlib(triple_s: &str) -> Result<std::path::PathBuf, ZError> {
-    let host = target_lexicon::Triple::host().to_string();
-    let cross = triple_s != host;
-    let name = runtime_lib_name(triple_s);
-    let dir = crate::interp::hone_cache_dir().join("runtime");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| ZError::plain(codes::INTERNAL, format!("创建运行时缓存目录: {e}"), None::<String>))?;
-    let lib = dir.join(&name);
-    if lib.is_file() {
-        return Ok(lib);
-    }
-    // 预编译运行时查找（官方 runtime-a 下载项）：HONE_RUNTIME_A 指向含
-    // libhoneruntime-<hash12>.a 的目录，命中即落缓存——同版本 hone 免本机 rustc。
-    if let Ok(prebuilt_dir) = std::env::var("HONE_RUNTIME_A") {
-        let prebuilt = std::path::Path::new(&prebuilt_dir).join(&name);
-        if prebuilt.is_file() {
-            let tmp = dir.join(format!(".tmp-{}", name));
-            std::fs::copy(&prebuilt, &tmp)
-                .map_err(|e| ZError::plain(codes::INTERNAL, format!("复制预编译运行时 `{}`: {e}", prebuilt.display()), None::<String>))?;
-            std::fs::rename(&tmp, &lib)
-                .map_err(|e| ZError::plain(codes::INTERNAL, format!("落盘预编译运行时: {e}"), None::<String>))?;
-            eprintln!("[3b] 使用预编译运行时静态库: {}（{}）", lib.display(), triple_s);
-            return Ok(lib);
-        }
-    }
-    // 编到临时名再改名：并发/中断不会留下半截 .a 被后续命中。
-    let tmp = dir.join(format!(".tmp-{}", name));
-    let mut cmd: Vec<std::ffi::OsString> = vec![
-        "rustc".into(),
-        "--edition".into(),
-        "2021".into(),
-        "--cfg".into(),
-        "hone_boot".into(),
-        "--crate-type".into(),
-        "staticlib".into(),
-        "-C".into(),
-        "opt-level=z".into(),
-        "-C".into(),
-        "codegen-units=1".into(),
-        "-C".into(),
-        "panic=abort".into(),
-        "-o".into(),
-        tmp.clone().into_os_string(),
-    ];
-    if cross {
-        cmd.push("--target".into());
-        cmd.push(triple_s.into());
-    }
-    cmd.push(NAT_RUNTIME_SRC_PATH.into());
-    eprintln!("[3b] 编译内嵌运行时静态库: {}（缓存 {}）", triple_s, lib.display());
-    let p = std::process::Command::new(&cmd[0])
-        .args(&cmd[1..])
-        .output()
-        .map_err(|e| {
-            ZError::plain(
-                codes::INTERNAL,
-                format!("rustc 启动失败: {e}"),
-                Some("需要本机 rustc 工具链（运行时静态库编译一次后缓存复用）"),
-            )
-        })?;
-    if !p.status.success() {
-        let err = String::from_utf8_lossy(&p.stderr);
-        let hint = if cross {
-            format!(
-                "交叉目标 `{triple_s}` 需要该目标的 Rust std（`rustup target add {triple_s}`）；\
-                 Linux 侧交叉请用 musl 目标（glibc 目标不在分发矩阵内）"
-            )
-        } else {
-            "检查 rustc 工具链".to_string()
-        };
-        return Err(ZError::plain(codes::INTERNAL, format!("运行时静态库编译失败:\n{err}"), Some(hint)));
-    }
-    std::fs::rename(&tmp, &lib)
-        .map_err(|e| ZError::plain(codes::INTERNAL, format!("落盘运行时静态库: {e}"), None::<String>))?;
-    Ok(lib)
-}
 
 /// 末尾输出汇总；有失败即退出码非 0。
 /// --json：stdout 输出诊断 JSON 数组（每失败文件一项，全通过为 []），文本信息走 stderr，

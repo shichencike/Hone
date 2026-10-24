@@ -82,7 +82,7 @@
       <li>默认表达式在<strong>调用时求值</strong>，可引用其前面的参数（如 <code class="inline">fn f(a, b = a * 2)</code>）</li>
       <li>必选参数（无默认值）必须位于默认参数<strong>之前</strong>，否则编译报错</li>
       <li>参数个数按「必选个数 ~ 总个数」区间检查；lambda 参数同样支持默认值</li>
-      <li>限制：<code class="inline">hone build --dll</code> 暂不支持默认参数（报错提示改用解释模式）</li>
+      <li>限制：默认参数目前仅解释器支持；VM（<code class="inline">--vm</code>）下省略带默认值的参数报 <code class="inline">H011 missing argument</code></li>
     </ul>
   </section>
 

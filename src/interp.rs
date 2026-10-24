@@ -1692,7 +1692,6 @@ impl Interp {
                 }
                 Ok(Flow::Normal)
             }
-            Stmt::Export { .. } => Ok(Flow::Normal), // 仅 hone build --dll 使用
             Stmt::Import { name, url, alias, span } => self.exec_import(name, url, alias.as_deref(), *span),
             Stmt::Load { lazy, path, alias, from, sigs, span } => {
                 self.exec_load(*lazy, path, alias.as_deref(), from.as_deref(), sigs, *span)

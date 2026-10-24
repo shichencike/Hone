@@ -2,8 +2,15 @@
 
 ## [Unreleased]
 
+### 移除
+- **删除 DLL 后端与原生编译后端（nat）**：`hone build --dll` / `hone build --exe --native` /
+  `hone natgen` / `hone build --obj` / `@export` 语句全部移除；`natgen.rs`、`runtime/`
+  （honeruntime crate）与 cranelift / target-lexicon 依赖删除。引擎收敛为解释器 + VM 双引擎；
+  `hone load` 运行期动态库加载（H301/H302）不受影响。回归脚本相应改为双引擎
+  （`regress4.py` / `regress_err.py` / `probe_align.py`），`tests/tools/audit_err.py` 删除。
+
 ### 新增
-- **FFI 回调 + 变参全链路支持（解释器实测通过；VM/原生编译后端亦实现）**：删 ffi_dispatch!/
+- **FFI 回调 + 变参全链路支持（仅解释器实测通过；VM 不支持 load，报 H999）**：删 ffi_dispatch!/
   ffi_variadic! 穷举宏（8190 类型实例化内存峰值），切换为 libffi 静态构建（ffi_prep_cif/
   ffi_prep_cif_var/ffi_call + ffi_closure 回调）。支持 int/int32/float/float32/bool/str/ptr/void
   全标量参数与返回，回调 0-8 参、变参无固定上限、float 固定参数的变参函数已支持。

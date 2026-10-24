@@ -223,7 +223,7 @@ found:
     <p>排查标签 / 跳转报错：<code class="inline">hone explain H105</code>。</p>
 
     <h3>宏 macro（H106）</h3>
-    <p>宏是<strong>解析期</strong>的代码生成工具：在解析之后、类型检查之前，由预处理阶段（<code class="inline">src/preproc.rs</code>）做<strong>纯 AST 替换</strong>。因此解释器 / 字节码 VM / 原生编译三个后端看到的是展开后的同一份代码，<strong>运行期不存在宏实体</strong>，行为完全一致。</p>
+    <p>宏是<strong>解析期</strong>的代码生成工具：在解析之后、类型检查之前，由预处理阶段（<code class="inline">src/preproc.rs</code>）做<strong>纯 AST 替换</strong>。因此解释器 / 字节码 VM 两个引擎看到的是展开后的同一份代码，<strong>运行期不存在宏实体</strong>，行为完全一致。</p>
     <p>两种形式，调用写法均与函数一致（<code class="inline">NAME(实参)</code>）：</p>
 <pre><code><span class="c">// 表达式宏：用于表达式位置</span>
 <span class="k">macro</span> <span class="f">SQ</span>(x) =&gt; x * x;
@@ -299,7 +299,7 @@ n = <span class="n">0</span>; <span class="f">INC</span>(n); <span class="f">pri
     <p><code class="inline">fn f(a, b = 10)</code>：调用时省略的<strong>尾部实参</strong>取默认值。
       必选参数（无默认值）必须位于默认参数之前（否则报错）；默认表达式在<strong>调用时求值</strong>，
       可引用其前面的参数（如 <code class="inline">fn f(a, b = a * 2)</code>）。参数个数检查按
-      「必选个数 ~ 总个数」区间；lambda 参数同样支持默认值；<code class="inline">hone build --dll</code> 暂不支持。</p>
+      「必选个数 ~ 总个数」区间；lambda 参数同样支持默认值。</p>
 <pre><code><span class="k">fn</span> <span class="f">greet</span>(name, greeting = <span class="s">"Hello"</span>) {
     <span class="k">return</span> greeting + <span class="s">", "</span> + name + <span class="s">"!"</span>;
 }
@@ -440,7 +440,7 @@ p.y = <span class="n">9</span>;                <span class="c">// 普通字段�
     <h2><span class="hash">#</span>7.7 多返回值 · 解构赋值 · 推导式 · 可选链</h2>
     <p><strong>多返回值</strong>：<code class="inline">return a, b, ...;</code> 一个函数可一次返回多个值，
       运行时打包为列表，由解构赋值接收；不解构时（<code class="inline">x = f();</code>）拿到打包后的列表。
-      仍支持单值 return 与空 return（返回 null）；<code class="inline">hone build --dll</code> 暂不支持：</p>
+      仍支持单值 return 与空 return（返回 null）：</p>
 <pre><code><span class="k">fn</span> <span class="f">divmod</span>(a, b) {
     <span class="k">return</span> a / b, a % b;
 }
@@ -485,8 +485,7 @@ rev = {<span class="f">to_str</span>(v): k <span class="k">for</span> k, v <span
       短路返回 null，否则等价普通字段访问；可链式 <code class="inline">a?.b?.c</code>，可与空值合并配合
       <code class="inline">a?.b ?? "默认值"</code>。混合链 <code class="inline">a?.b.c</code> 中
       <code class="inline">?.</code> 只短路其后一个字段，继续的普通字段访问在 null 上仍报错（与 JS 一致）。
-      obj 非 null 但字段不存在时同样报错；Hone 无 null 字面量，null 来自 void 函数调用等占位值；
-      <code class="inline">hone build --dll</code> 暂不支持：</p>
+      obj 非 null 但字段不存在时同样报错；Hone 无 null 字面量，null 来自 void 函数调用等占位值：</p>
 <pre><code><span class="k">fn</span> <span class="f">get_user</span>() {
     <span class="k">return</span> {<span class="s">"name"</span>: <span class="s">"hone"</span>, <span class="s">"age"</span>: <span class="n">7</span>};
 }
@@ -517,7 +516,7 @@ area = <span class="k">match</span> <span class="f">Shape</span>.Circle(<span cl
     _ =&gt; <span class="n">0</span>,
 };
 <span class="f">print</span>(area);   <span class="c">// 12.56636…</span></code></pre>
-    <p>全链路支持解析 / 静态检查 / 解释器 / 原生编译 / fmt / LSP；示例
+    <p>全链路支持解析 / 静态检查 / 解释器 / 字节码 VM / fmt / LSP；示例
       <code class="inline">examples/enum_demo.hn</code>。</p>
   </section>
 <section id="overload">
@@ -530,8 +529,7 @@ area = <span class="k">match</span> <span class="f">Shape</span>.Circle(<span cl
       （<code class="inline">__neg/__not</code>）、内置 <code class="inline">len(x)</code>/
       <code class="inline">x[i]</code>（<code class="inline">__len/__index</code>）。
       重载函数与普通函数一样遵循返回类型锁定；定义了重载后涉及动态值的运算静态检查放宽
-      （交给运行时判定）。原生编译后端支持二元/一元重载（生成「内建组合 → 内建运算，否则 →
-      __op 调用」分派链）；示例 <code class="inline">examples/overload_demo.hn</code>：</p>
+      （交给运行时判定）；示例 <code class="inline">examples/overload_demo.hn</code>：</p>
 <pre><code><span class="k">fn</span> <span class="f">__add</span>(a, b) {
     <span class="k">if</span> (<span class="f">type_of</span>(a) == <span class="s">"dict"</span> &amp;&amp; <span class="f">type_of</span>(b) == <span class="s">"dict"</span>) {
         <span class="k">return</span> <span class="f">mk_complex</span>(<span class="f">c_re</span>(a) + <span class="f">c_re</span>(b), <span class="f">c_im</span>(a) + <span class="f">c_im</span>(b));
@@ -548,7 +546,6 @@ zs = z1 + z2;        <span class="c">// dict + dict 内建不支持 → __add</s
       阻塞等待 future 完成并返回其结果。错误传播：async 函数体内 throw / 运行时错误存入 future，
       await 时原样抛出（可 try/catch 捕获）。与 <code class="inline">go</code> 互补：
       go 发后不理、async/await 结构化并发（多个 async 并行启动、依次 await，总耗时约等于最慢者）。
-      <code class="inline">hone build --dll</code> 对 async/await 报「暂不支持」；
       示例 <code class="inline">examples/async_demo.hn</code>：</p>
 <pre><code><span class="k">async</span> <span class="k">fn</span> <span class="f">compute</span>(n) {
     <span class="k">return</span> n * <span class="n">2</span>;

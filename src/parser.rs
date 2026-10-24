@@ -342,7 +342,14 @@ impl Parser {
             Tok::Use => self.parse_use(),
             Tok::Import => self.parse_import(),
             Tok::Alias => self.parse_alias(),
-            Tok::At => self.parse_export(),
+            Tok::At => {
+                let (_, span) = self.next();
+                Err(self.err_here(
+                    codes::SYNTAX,
+                    "unknown `@` directive (the `@export` form has been removed)".to_string(),
+                    Some("remove the `@` directive; `@export` / `hone build --dll` no longer exist"),
+                ))
+            }
             Tok::Tmp => self.parse_tmp_fn(),
             Tok::Struct => self.parse_struct_def(),
             Tok::Class => self.parse_class_def(),
@@ -1287,35 +1294,6 @@ impl Parser {
         let value = self.parse_expr()?;
         self.expect_semi()?;
         Ok(Stmt::Throw { value, span })
-    }
-
-    /// @export 函数名;
-    fn parse_export(&mut self) -> Result<Stmt, ZError> {
-        let (_, span) = self.next(); // @
-        let (tok, _) = self.next();
-        match tok {
-            Tok::Ident(s) if s == "export" => {}
-            other => {
-                return Err(self.err_here(
-                    codes::SYNTAX,
-                    format!("expected `export` after `@`, found {}", other.describe()),
-                    Some("`@export` form: `@export function_name;`"),
-                ))
-            }
-        }
-        let (name_tok, _) = self.next();
-        let name = match name_tok {
-            Tok::Ident(s) => s,
-            other => {
-                return Err(self.err_here(
-                    codes::SYNTAX,
-                    format!("expected a function name after `@export`, found {}", other.describe()),
-                    Some("`@export` form: `@export function_name;`"),
-                ))
-            }
-        };
-        self.expect_semi()?;
-        Ok(Stmt::Export { name, span })
     }
 
     /// load ["lazy"] "路径" [as 别名] [ { fn 签名...; } ];

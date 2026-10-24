@@ -184,7 +184,7 @@ flag = <span class="n">1</span>;
 
   <div class="example">
     <div class="title">2.6 宏</div>
-    <div class="note">解析期纯 AST 替换，运行期无实体，解释器 / 字节码 VM / 原生编译三后端行为一致（期望输出：9 / hello macro / 12）</div>
+    <div class="note">解析期纯 AST 替换，运行期无实体，解释器 / 字节码 VM 双引擎行为一致（期望输出：9 / hello macro / 12）</div>
 <pre><code><span class="k">macro</span> <span class="f">SQ</span>(x) =&gt; x * x;
 <span class="k">macro</span> <span class="f">SAY</span>(msg) { <span class="f">print</span>(msg); }
 <span class="k">macro</span> <span class="f">INC</span>(x) { x = x + <span class="n">1</span>; }   <span class="c">// 形参作赋值目标：实参须为裸变量名</span>
@@ -617,20 +617,6 @@ age = <span class="f">ask_int</span>(<span class="s">"年龄: "</span>, <span cl
     <div class="note">以别名导入远程模块（URL 支持 http/https），函数名前缀自动替换</div>
 <pre><code><span class="k">import</span> <span class="s">"math_mod"</span> <span class="k">from</span> <span class="s">"http://example.com/math_mod.hn"</span> <span class="k">as</span> m;
 <span class="f">print</span>(<span class="f">m_add</span>(<span class="n">20</span>, <span class="n">22</span>));  <span class="c">// 42</span></code></pre>
-  </div>
-
-  <div class="example">
-    <div class="title">7.2 DLL 打包</div>
-    <div class="note">@export 标记导出，hone build --dll 生成 C ABI 动态库（可在 C / Python / Rust 中调用）</div>
-<pre><code><span class="c">// math.hn</span>
-<span class="k">fn</span> <span class="f">add</span>(a : <span class="k">int</span>, b : <span class="k">int</span>) -&gt; <span class="k">int</span> { <span class="k">return</span> a + b; }
-<span class="k">fn</span> <span class="f">avg</span>(a : <span class="k">float</span>, b : <span class="k">float</span>) -&gt; <span class="k">float</span> { <span class="k">return</span> (a + b) / <span class="n">2.0</span>; }
-<span class="k">fn</span> <span class="f">greet</span>(name : <span class="k">str</span>) -&gt; <span class="k">str</span> { <span class="k">return</span> <span class="s">"你好, "</span> + name + <span class="s">"!"</span>; }
-
-<span class="k">@export</span> <span class="f">add</span>;
-<span class="k">@export</span> <span class="f">avg</span>;
-<span class="k">@export</span> <span class="f">greet</span>;</code></pre>
-    <p>生成的 C ABI：<code class="inline">int64_t add(int64_t, int64_t)</code>、<code class="inline">double avg(double, double)</code>、<code class="inline">const char* greet(const char*)</code>。</p>
   </div>
 
   <div class="example">

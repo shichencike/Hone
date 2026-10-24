@@ -1264,17 +1264,6 @@ impl Checker {
                 }
                 Ok(())
             }
-            Stmt::Export { name, span } => {
-                if !self.fns.contains_key(name) {
-                    return Err(self.zerr(
-                        codes::UNDEFINED,
-                        format!("`@export` refers to undefined function `{}`", name),
-                        *span,
-                        Some("define the function with `fn` before exporting it"),
-                    ));
-                }
-                Ok(())
-            }
             Stmt::Import { span, .. } => {
                 // 模块函数在运行时下载后可用，此处标记外部动态加载
                 self.has_external = true;
@@ -1628,7 +1617,6 @@ impl Checker {
                 }
                 Ok(())
             }
-            Stmt::Export { .. } => Ok(()), // @export 只在顶层检查
             Stmt::Import { span, .. } => {
                 self.has_external = true;
                 let _ = span;
@@ -4644,7 +4632,6 @@ fn stmt_span(s: &Stmt) -> Span {
         | Stmt::DebugPrint { span, .. }
         | Stmt::ExprStmt { span, .. }
         | Stmt::Breakpoint { span, .. }
-        | Stmt::Export { span, .. }
         | Stmt::Import { span, .. }
         | Stmt::Load { span, .. }
         | Stmt::Use { span, .. }

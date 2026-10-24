@@ -44,8 +44,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends lua5.4
-      # nat 引擎基准逐负载 `build --exe --native`（宿主目标，runner 自带 gcc/rustc；
-      # 运行时静态库按源码+目标哈希缓存，9 负载只编一次）
       - name: run benchmarks
         run: HONE_BIN=target/release/hone python tests/bench_ci.py
       - name: upload results artifact

@@ -110,10 +110,10 @@ Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.8.0）
   · str：UTF-8 字符串
   · char：单个 Unicode 字符（如 'a'，'中'），按码点比较与转换
   · byte：8 位无符号字节值（0..=255），与 int 严格隔离（无隐式转换），支持 ==/!=/</>/<=/>= 比较；
-    回转用 to_int(b) / char(b)。字面量形式（0b… / byte()）仅解释器支持（VM/AOT/DLL 编译期报 H999）；
+    回转用 to_int(b) / char(b)。字面量形式（0b… / byte()）仅解释器支持（VM 编译期报 H999）；
     ptr.read_byte / bytes 索引产出的值在 interp/VM 双引擎均可完整使用
   · bytes：字节序列，支持 len / 索引（取 byte）/ 切片 / + 拼接 / == / for-in 迭代；
-    除 == 外的比较运算符（< > <= >=）运行时报 H001。字面量形式（b"…"）仅解释器支持（VM/AOT/DLL
+    除 == 外的比较运算符（< > <= >=）运行时报 H001。字面量形式（b"…"）仅解释器支持（VM
     编译期报 H999）；read_bytes / crypto.base64_decode / archive.zip_read 产出的值在 interp/VM
     双引擎均可完整使用（显示/比较/索引/for-in/拼接/len 与解释器逐字节一致）
 · 字面量规则：
@@ -139,7 +139,7 @@ Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.8.0）
 · 条件表达式必须显式返回 bool，禁止隐式转换（如 if (1) 视为非法）
   · 运行期兜底同规则：条件值非 bool（如 enum / struct / 字符串）时报 H001，消息按站点区分
     （if / while / do-while / for / ternary / 推导式 if 六种站点各有文案，均无 help 行），
-    三个引擎（解释器 / VM / 原生）逐字节一致
+    双引擎（解释器 / VM）逐字节一致
 · 逻辑运算 `&&` / `||`：**短路求值**（左侧已决定结果时右侧不求值，副作用不可见，
   `false && f()` 不调用 f；`true || f()` 同理）
   · 左侧短路判据：仅当左侧**恰为** `false`（`&&`）/ `true`（`||`）才短路；否则求值右侧，
@@ -186,7 +186,7 @@ Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.8.0）
     macro INC(x) { x = x + 1; }     // 形参作赋值目标：实参必须是裸变量名，INC(i) 合法
 · 宏调用一律带括号（与函数调用写法相同），因此不需要额外的调用语法
 · 展开规则：宏在**解析后、类型检查前**由预处理阶段做纯 AST 替换，运行期不存在宏；
-  所有执行后端（解释器 / 字节码 VM / AOT）看到的都是展开后的代码，行为完全一致
+  所有执行引擎（解释器 / 字节码 VM）看到的都是展开后的代码，行为完全一致
 · 安全约定（违反时报 H106）：
   1. 宏必须定义在**程序顶层**（函数 / 代码块 / 类 / 循环内定义宏一律报错）
   2. **先定义后使用**：按源码顺序展开。若调用的名字对应程序中更靠后的宏定义，
@@ -254,7 +254,7 @@ print(pick(10, 20, false));   // 20（T=int）
 · 构造：名称(值1, 值2, ...)，按字段顺序传参；检查阶段校验字段个数与类型（H001/H011）
 · 运行时字段访问校验字段存在性（未知字段报 H002），实例可作为 dict 使用（keys/values 等）
 · 只读字段：readonly 修饰的字段初始化后禁止再赋值（运行时拦截，违反报 H001；
-  VM/AOT 的字段赋值本身报 H999）；两种写法等价：readonly f: int 与 f: readonly int
+  VM 的字段赋值本身报 H999）；两种写法等价：readonly f: int 与 f: readonly int
 · 实例内部携带隐藏的 `__struct__` 标记键（区分 struct 实例与普通 dict）；
   该键不暴露给用户：len / keys / values / has_key / for-in / 推导式 / 解构 /
   == 比较 / to_str / json 序列化均按可见字段处理
@@ -345,7 +345,7 @@ print(Math.double(21));   // 42（类方法不受影响）
   · `_` 通配符（匹配任意值；重复出现报 H005，惯例放最后——放在前面则先命中、后续分支不可达）
 · match 是表达式（不能作语句），返回匹配分支的值；各分支类型可以不同，返回值为动态类型
 · **无匹配分支**（未命中且无 `_`）为运行期错误 H005：`no match arm matched the value`，
-  help 提示补 `_` 兜底（三个引擎逐字节一致）
+  help 提示补 `_` 兜底（双引擎逐字节一致）
 · 各分支类型可以不同，返回值为动态类型
 · 示例：
 
@@ -457,10 +457,8 @@ print(add5(10));       // 15
   · 默认表达式在调用时求值，可引用其前面的参数（如 fn f(a, b = a * 2)）
   · 参数个数检查：最少 = 必选参数个数，最多 = 总参数个数
   · lambda 参数同样支持默认值
-· 限制：hone build --dll 暂不支持默认参数（报错提示改用解释模式）
-· **引擎边界**：默认参数目前**仅解释器支持**；VM（`--vm`）与原生编译后端（`--native`）
-  尚未实现——省略带默认值的参数时报 `H011 missing argument \`b\` of \`f\``（而非取默认值）。
-  详见《Hone原生编译后端进度》G2.8
+· 限制：默认参数目前**仅解释器支持**；VM（`--vm`）尚未实现——省略带默认值的参数
+  时报 `H011 missing argument \`b\` of \`f\``（而非取默认值）。
 · 示例：
 
 fn greet(name, greeting = "Hello") {
@@ -503,7 +501,6 @@ print(len(text));    // 24
   · 仍支持单值 return expr; 与空 return;（返回 null）
   · 不解构时（x = f();）拿到打包后的列表
   · 各返回值不做类型强制统一（打包后为动态类型）
-· 限制：hone build --dll 暂不支持多返回值（C ABI 无法表达，报错提示改用解释模式）
 · 示例：
 
 fn divmod(a, b) {
@@ -556,7 +553,7 @@ q, r = divmod(17, 5);         // 与多返回值配合：q=3, r=2
 · 空字典字面量：`{}` 表示无条目的字典（与空列表 `[]` 对称），`len({}) == 0`。
   · 注意与「代码块 `{}`」区分：语句起始的 `{` 按块解析（含 `{a, b} = ...` 字典解构探测），
     表达式位置的 `{}` 才是空字典字面量
-  · 三后端（解释器 / VM / AOT）行为一致
+  · 双引擎（解释器 / VM）行为一致
   · 历史写法 `json_parse("{}")` 仍可用，但新代码推荐直接写 `{}`
 
 · 示例：
@@ -579,7 +576,6 @@ rev = {to_str(v): k for k, v in grades};      // {"90": "alice", "85": "bob"}
 · 混合链：a?.b.c（`?.` 只短路其后一个字段，继续的普通字段访问在 null 上仍报错，与 JS 语义一致）
 · 注意：obj 非 null 但字段不存在时仍报错（与普通字段访问一致）；
   Hone 无 null 字面量，null 来自 void 函数调用等占位值
-· 限制：hone build --dll 暂不支持可选链（报错提示改用解释模式）
 · 示例：
 
 fn get_user() {
@@ -611,14 +607,12 @@ print(v?.name ?? "匿名");  // 匿名（与空值合并配合）
   · `__op` 未定义时，不支持的运算维持原有报错（H001/H003）
   · 定义了重载后，涉及动态值（Unknown）的运算静态检查放宽（交给运行时判定），
     相等/比较操作数不再被强制成 int 等错误类型
-  · 回退触发条件（精确语义，三引擎一致）：
+  · 回退触发条件（精确语义，双引擎一致）：
     · 二元算术（`+ - * / %`）：内建失败 **且** 操作数不是「数字×数字 / str×str」组合 **且**
       错误码为 H001（除零 H009、溢出 H010 等内建错误**不**回退）
     · `==` / `!=`：内建比较的任何失败都回退
     · `< <= > >=`：内建失败 **且** 不是「数字对」（int×int / float×float）——错误码不限
     · 一元 `-x` / `!x`：仅 H001 回退；`len(x)` / `x[i]`：内建失败即回退
-  · AOT 原生编译支持二元/一元重载（生成「内建组合 → 内建运算，否则 → __op 调用」分派链）；
-    原生编译后端（`--native`，M2 G2.4）同样支持，回退链在 runtime 内完成
 · 示例（dict 模拟复数，见 examples/overload_demo.hn）：
 
 fn mk_complex(re, im) {
@@ -651,7 +645,6 @@ print(10 + 20);        // 30（int 内建不受影响）
   · 多个 async 并行启动、依次 await，总耗时约等于最慢者
   · 错误传播：async 函数体内 throw / 运行时错误存入 future，await 时原样抛出（可 try/catch 捕获）
   · future 可存储/传递；type_of 为 future；未 await 的 future 随脚本结束回收
-· 限制：hone build --dll 对 async/await 报「暂不支持」（单线程模型），请用解释器运行
 · 示例（完整见 examples/async_demo.hn）：
 
 async fn compute(n) {
@@ -683,7 +676,7 @@ try {
   · 字段引用语义：方法体内 self.f = x 的写入对调用方实例立即可见
   · extends 继承字段与方法；方法可覆盖父类同名方法
   · readonly 字段：两种写法等价（readonly f: int / f: readonly int），赋值报 H001
-  · 限制：type 实例 / 方法调用 / 字段赋值为解释器特性，VM / AOT / DLL 构建报 H999（用 hone run 运行）
+  · 限制：type 实例 / 方法调用 / 字段赋值为解释器特性，VM 构建报 H999（用 hone run 运行）
 · 示例（完整见 examples/with_type_demo.hn）：
 
 type Shape {
@@ -716,7 +709,7 @@ print(s.perimeter());   // 20（子类方法）
   · 进入：调 expr 的 __enter__()，返回值绑定 r（仅 with 块内可见）；不带 as 则不绑定
   · 退出：**无论正常退出还是块内报错**，都必调 __exit__()；错误不被吞（先执行 __exit__ 再向外传播）
   · 与 try/catch 正交：块内 throw 会先触发 __exit__ 再被外层 catch 捕获
-  · 限制：与 type 实例同（解释器特性，VM / AOT / DLL 报 H999）
+  · 限制：与 type 实例同（解释器特性，VM 报 H999）
 · 示例：
 
 type Guard {
@@ -746,11 +739,7 @@ hone fmt -w *.hn 直接覆盖写入源文件
 hone test [目录] 递归扫描 *.test.hn 测试文件，运行并汇总 PASS/FAIL（配合 assert/assert_eq 断言，按文件输出断言统计）
 hone check <file.hn|目录> [--json] 仅静态检查（解析 + 类型检查，不执行代码）；目录递归扫描全部 .hn（跳过隐藏/构建目录），--json 向 stdout 输出诊断 JSON 数组，退出码 0/1 表达成败（CI/编辑器集成）
 hone watch <script.hn> 监控脚本文件变更自动重跑（跨平台轮询 mtime+大小，[--interval=N] 毫秒，默认 500，Ctrl+C 退出）
-hone build --dll <script.hn> 将脚本打包成 C ABI 动态库（DLL / SO / DYLIB）
 hone build --exe <script.hn> 打包独立可执行文件（解释器 + 脚本自释放，[-o <out>] [--icon <ico>]）
-hone build --exe --native <script.hn> 原生编译可执行文件（脚本 → Cranelift 机器码 → rustc 链接；需本机 Rust 工具链，见 4.6）
-hone build --obj <script.hn> 仅编译为原生 object（Cranelift，不链接 exe；[-o <out>] [--cpu <name>] [--target <triple>]，见 4.6）
-hone natgen <script.hn> build --exe --native 的别名（[-o <out>] [--cpu <name>] [--target <triple>]；--obj <o> 仅产 object 不链接）
 hone build --script <script.hn> 生成仅脚本压缩包 .hzp（不内嵌解释器，[-o <out>]，用 hone run 执行）
 hone bind <header.h> 从 C 头文件生成 typed load 签名块（FFI 自动绑定）
 hone debug <script.hn> 断点调试模式（支持 breakpoint 关键字）
@@ -769,7 +758,7 @@ hone --help / --version 帮助信息 / 版本信息
 
 进度条策略：
 
-· 仅用于 hone build --dll（编译过程可能有等待）和 hone get（网络下载）
+· 仅用于 hone get（网络下载）
 · 使用 Rust 标准库的 print!("\r") 实现轻量进度显示，不引入第三方 TUI 库
 
 三、内置模块与功能
@@ -1277,7 +1266,7 @@ examples/guipro_adv_demo.hn（进阶控件：滑块/表格/树/画布/托盘/菜
 · 支持类型：int → int64_t，int32 → int32_t，float → double，float32 → C float，bool → C bool，
   str → const char*，ptr → void*（int32/float32 是 FFI 专有类型名：Hone 侧值仍按 int/float 传，
   调用时按声明校验 32 位范围）
-· 返回类型额外支持 void；参数最多 8 个；变参（...）与受限回调（fn(int/int32/float/float32/bool/str/ptr 类参数...) -> int/int32/float/float32/bool/str/ptr/void 类返回，0-8 参）已支持（解释器引擎实测通过；VM/原生编译后端亦实现）
+· 返回类型额外支持 void；参数最多 8 个；变参（...）与受限回调（fn(int/int32/float/float32/bool/str/ptr 类参数...) -> int/int32/float/float32/bool/str/ptr/void 类返回，0-8 参）已支持（**仅解释器**实测通过；VM 不支持 load，报 H999）
 · 变参调用：固定参数按签名转换，其余实参按运行时类型转换（int/float/float32/bool/str/ptr，ctypes 式；float 固定参数的变参函数现已支持）
 · 回调：把 Hone 函数名或 lambda 传给回调形参即可（同步回调，仅限该次 FFI 调用窗口内有效，异步回调报错）
 · 签名块要求 as 别名（作为调用前缀），以 } 结尾无需分号
@@ -1362,130 +1351,8 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 · 可指向 struct 构造名（alias Point as Pt;）与持有 lambda 的变量（alias gvar as g2;）——
   别名即「透明改名」，调用行为与原名完全一致，三个引擎一致
 · 别名作用域为文件级（当前 .hn 文件全局可见）
-· **引擎边界**：`alias time.now as t`（点号内置别名）在原生编译后端不可用——runtime 尚未实现
-  点号内置族（`time.*` / `random.*` / `sys.*` 等，直接写 `time.now()` 也报 H404），见进度文档 G2.9；
-  解释器与 VM 支持。另：把枚举**变体**别名当值读（`alias E.A as EA; e = EA;`）三引擎均报
-  H002——别名只覆盖可调用名
-
-4.5 DLL 打包（hone build --dll）
-
-· 将 .hn 脚本打包成标准 C ABI 动态库（DLL / SO / DYLIB）
-· 使用 @export 标记要导出的函数
-· 调用系统 C 编译器（查找顺序：`CC` 环境变量 > gcc > clang > cc），需用户自行安装工具链
-· 生成的动态库自包含，不依赖 Hone 解释器（内嵌微型运行时）
-· 类型映射：int → int，float → double，bool → bool，str → const char*
-· C 字符串转义等机械逻辑集中在 `src/cgen_util.rs`（原与已移除的 AOT 后端共用，
-  现由 `--dll` 单一使用），避免转义实现漂移
-· 错误时返回错误码，并写入错误缓冲区
-
-4.6 原生编译后端（hone build --exe --native）
-
-· 与 AOT（-c，经 C 中间文件）并列的第二条原生后端：`hone build --exe --native <script.hn>`
-  直接用 Cranelift 把 VM 字节码 lower 为机器码（object），再经**系统 gcc** 链接成原生可执行文件
-  （内嵌运行时源码经 rustc 编成静态库 `libhoneruntime.a`，按源码+目标哈希缓存至
-  `~/.hone/cache/runtime/`，运行时源码不变则跨脚本复用；链接命令：`gcc app.o libhoneruntime.a -o app`，
-  windows-gnu 需补 Rust std 依赖导入库 `-lws2_32 -lntdll -lbcrypt -luserenv -ladvapi32`）
-· 命令形态：`hone natgen` 是 `build --exe --native` 的等价别名
-· 仅 object 模式：`hone build --obj <script.hn> [-o <out>]` 与 `hone natgen <script.hn> --obj <o>`
-  同语义——生成 Cranelift object 即停（object 即最终产物，不链接 exe），默认产物名 `{}.nat.o`
-  （相对当前目录）。用途：保留脚本 object 供调试 / 自行链接、交叉目标出 object
-  （无需目标 std 与链接器）；object 格式由目标决定（COFF / ELF）
-· 管线：解析 + 类型检查 → VM 字节码 → Cranelift object（每 chunk 一个函数，main 为 `__hn_main`）→
-  内嵌运行时源码编静态库 → 系统 gcc 链接（纯 .o 生成器，零黑盒）
-· 产物体积：链接期 `-C opt-level=z -C codegen-units=1 -Wl,--gc-sections -Wl,--strip-all`（ELF）或
-  等价 gcc 参数（COFF），hello 约 1.0MB、M2 各用例约 1.1MB（设计目标 ≤3MB）
-· 链接路径：不再分发预编译工具链。本机无 rustc / gcc 时安装 Rust 工具链（`rustc`）与
-  MinGW-w64（Windows）即可。`HONE_NAT_LINK` 环境变量已移除
-· CPU 基线：x86_64 ISA 默认 baseline + SSSE3（设计 §6.3，避免 AVX 类指令在旧 CPU 非法）；
-  `--cpu baseline|ssse3|sse4.2|avx2` 可选（`build --exe --native` / `hone natgen`）
-· 交叉编译：`--target <triple>` 可选（`build --exe --native` / `hone natgen`）；支持
-  `x86_64-pc-windows-gnu`（宿主）/ `x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl`，
-  经 rustc `link-self-contained` 自带 musl CRT + rust-lld 裸链接产出；产物名默认带目标后缀。
-  链接参数按「目标 + 链接驱动」分派：宿主 Linux（ELF）需**非 PIE**
-  （`-C relocation-model=static -C link-arg=-no-pie`——Cranelift 产非 PIC 对象，平台默认 PIE
-  链接会报 `relocation R_X86_64_32S ... recompile with -fPIC`）、宿主 windows-gnu 经 MinGW gcc
-  （`-Wl,` 前缀）、宿主 msvc 经 link.exe（`/OPT:REF /OPT:ICF`）。ELF 交叉还须显式
-  `-C relocation-model=static`：rustc 对 musl 目标默认按 static-PIE 选启动 CRT（`rcrt1.o`），
-  只加 `-no-pie` 链接参数会得到「PIE 启动对象 + 非 PIE ELF」，产物会在启动时解引用空
-  `_DYNAMIC` 而 SIGSEGV。Linux 侧交叉只支持 musl 目标
-  （glibc 目标不在 CRT 分发矩阵内，rustc 会报 `link-self-contained is not supported on this target`）
-· 值模型：句柄式——寄存器持 u64 句柄指向堆上 `HnCell{rc,t,a,b,pkind,payload}`（跨 object ↔ rustc 只传 i64，
-  规避 Windows x64 对 >16B 结构体的隐藏 sret 指针 ABI）；引用计数 retain/release，槽写释放旧值；
-  str/err/fn 装箱，标量内联
-· 调用模型：统一走 `rt_call` 名分发（用户函数 / lambda / 内置表），lambda 按值捕获；错误经 ERR 句柄跨帧传播，
-  每个 fallible 指令后静态查「最近活跃 catch」映射跳 handler（无 setjmp），Throw/ThrowStr 归一 H600
-· 语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码**逐字节一致**（含完整错误渲染
-  `--> 文件名:行:列` / 行号行 / caret / help / 结尾空行）。回归入口两条：
-  `tests/regress4.py`（正常路径三引擎）与 `tests/regress_err.py`（错误诊断三引擎逐字符）；
-  开发期另有扫雷工具 `tests/tools/audit_err.py`（55 例错误文案 + help 行批量比对）
-· 当前支持范围（M0–M2 全量 G2.1–G2.9 + M3 G3.1/G3.3/G3.7）：
-  · 标量全类型：int / float / bool / char / str / null 常量、算术 / 比较 / 一元运算、str 拼接与 ==/!=
-  · 控制流：if-else / while / 标签跳转（Label+Jmp 覆盖 goto）
-  · 函数与 lambda：递归、向前引用、lambda 直调与作参、捕获（值语义）、闭包嵌套
-  · try-catch / throw：跨帧捕获、嵌套重抛、错误对象字段（e.code/.message/.file/.line/.col/.context）
-  · **容器（M1）**：list 字面量 / 索引读写 / append / len / 结构相等 / 嵌套与深索引 / 列表解构；
-    dict 字面量 / keys / values / has_key / len / 结构相等 / 嵌套 / 字典解构（含改名形式）/ 字典推导式
-  · **迭代（M1）**：`for x in list`、`for k in dict`、`for k, v in dict`，含循环体内break / continue；
-    列表与字典推导式（`[x for x in list]`、`{k: v for k, v in dict}`，含 `if` 过滤）
-  · **值语义（M1）**：RC+COW——变量读取为O(1) 引用计数，写入点过 COW 门（独占则原地写，
-    共享则浅拷独占副本），别名隔离与解释器深拷贝语义逐字节一致
-  · **struct（M2）**：`struct Point { x: int, y: int };` 定义后 `p = Point(1, 2)` 构造，
-    `p.x` 字段读取；实例内部携带隐藏 `__struct__` 标记键（=结构体名），display / len / keys /
-    values / has_key / for-in / 解构 / 相等 / 字段缺失报错列键 全部路径过滤不暴露；
-    `==`/`!=` 按「同名 struct 且可见字段逐对相等」判定（异名 struct 恒不等，与普通 dict 区分）；
-    字段写入 `p.x = 3` 与 VM 一致为编译期 H999（解释器 `hone run` 支持，含 readonly 拦截）
-  · **enum（M2 G2.2）**：`enum Color { Red, ... };` / 带载荷变体；两种构造入口
-    （点号零参 `Color.Red`、带参 `Shape.Circle(1.5)`）、`type_of` → `enum`、显示
-    `Name.Variant(v, …)`、相等（枚举名 + 变体 + 载荷递归，跨枚举同名变体恒不等）、进 list / dict
-  · **match（M2 G2.3）**：字面量模式（int / float / bool / str / char）、枚举变体模式
-    （无载荷 / 载荷绑定 / `_` 忽略载荷）、`_` 通配；无匹配分支运行期报 H005
-    （`no match arm matched the value`，help 提示补 `_`），与解释器逐字节一致
-  · **条件与短路（G2.3）**：if / while / do-while / for / 三元 / 推导式 `if` 过滤六处条件站点
-    严格 bool 校验（非 bool → H001，消息按站点）；`&&` / `||` 短路求值（右侧不求值，
-    副作用不可见）+ 操作数严格 bool，与解释器逐字节一致
-  · **运算符重载（G2.4）**：`__add` / `__sub` / `__mul` / `__div` / `__mod` / `__eq` / `__ne` /
-    `__lt` / `__le` / `__gt` / `__ge` / `__neg` / `__not` / `__len` / `__index` 回退链，
-    触发条件逐条镜像解释器（见 1.20）；native 不改 lowering，回退在 runtime 内完成
-  · **import 构建期解析（M3 G3.1）**：VM 与原生后端在**编译期**递归展开顶层 `import`
-    （本地路径相对 CWD；远程 http(s) 下载缓存到 `~/.hone/cache/`），合并为单编译单元。
-    模块函数按「模块名_」前缀注册，`as 别名` 整体替换前缀；模块顶层语句在导入位点执行一次
-    （模块作用域隔离）。循环 import 报错、同一模块去重；解释器仍走运行期 import（语义基准）
-  · **alias / goto（G2.5）**：`alias 原名 as 新名`（可叠加，可指向内置 / struct 构造 / 局部变量），
-    goto + 标签跳转
-  · **async / await 与 go（G2.6）**：`async fn` / `await`（future 值模型，runtime 引用计数原子化）
-    与 `go f()` 后台线程；与解释器 / VM 逐字节一致（含跨线程错误传播、多次 await 同一 future）
-  · **默认参数（G2.8）**：`fn f(a, b: int = 2)`——被调帧序言按实参数个数求默认值，
-    VM / nat / 解释器 / AOT 四路一致
-  · **点号内置族（G2.9）**：time / path / stat / matrix / csv / diff / yaml / plot / glob / env / db / log /
-    ptr / random / uuid / temp / server / sys.run 等纯 std 家族移植；依赖外部 crate 的家族（regex /
-    sqlite / http / ws / smtp / crypto / zlib / archive / plugin / guipro / sys-winapi）报 H999 能力边界
-  · 内置子集：print / len / append / keys / values / has_key / to_str / to_int / to_float / is_int /
-    is_float / is_bool / is_str / is_list / is_dict / is_null / type_of / abs / max / min / assert /
-    assert_eq / read_file（assert 失败 H700 文案对齐）
-  · 错误码对齐 VM：H001 / H002 / H006 / H007 / H009 / H010 / H011 / H401–H404 / H600 / H700
-  · 注意：`d["k"] = v` 这类dict 索引写入被类型检查器静态拒绝（索引须 int，而 dict 键恒为字符串
-    字面量），故 dict 在脚本层只读，取值走 for-in / keys / values / has_key
-· 当前限制（M3 起逐步放开）：
-  · 深层子集（切片写 / with 上下文 / 结构体·dict 字段赋值等）在**编译期**报 H999（功能未实现），
-    不产出错误二进制
-  · struct 字段写入 `p.x = 3` 在 VM 与原生后端为编译期 H999，解释器支持（含 readonly 拦截）
-  · 依赖外部 crate 的点号内置（regex / sqlite / http / ws / smtp / crypto / zlib / archive /
-    plugin / guipro / sys-winapi）在原生后端报 H999（见 G2.9）
-  · 依赖本机 rustc（rustc 与 Rust std 的链接期依赖）；官方 Release 附带 **runtime-a** 下载项——
-    为 x86_64-linux-musl / x86_64-windows-gnu / aarch64-linux-musl 三目标各预编译一份运行时静态库
-    （`hone natgen --runtime-only [--target <triple>] [-o <dir>]` 产出，文件名 = 缓存键
-    `libhoneruntime-<hash12>.a`），解压后设 `HONE_RUNTIME_A` 指向该目录，同版本 hone 免本机 rustc；
-    交叉产物（linux-musl / aarch64-musl）**无法在 Windows 构建机运行**，
-    其可运行性由 CI 的 Linux job 二次验证（G3.6）
-· 与 AOT（-c）的分工：AOT 走 C 中间文件 + gcc/clang，体积几十 KB、零运行时依赖，但错误渲染为简化一行；
-  native 走 Cranelift 机器码 + rustc，错误渲染与双引擎逐字节一致，语义对齐是它的首要目标。
-  二者互斥：`-c` 与 `--native` 同用报 H005 显式错误
-· 验证基线：`tests/m1/list.hn`、`tests/m1/dict.hn`、`tests/smoke/rc_alias.test.hn`、
-  `tests/m2/{struct,enum,match,conditions,overload,alias_goto,defaults,dotted,async_go,imports}.hn`
-  共 **16 例**（`regress4.py`）与 **68 例**错误用例（`regress_err.py`）三引擎逐字节一致
-  经 `hone build --exe --native <file>` 复现，interp / VM / nat 三引擎逐字节一致；
-  改代码后先 `cargo build`（target/ 旧二进制会静默沿用），
-  再跑 `python tests/regress4.py` 与 `python tests/regress_err.py`
+· **引擎边界**：`alias time.now as t`（点号内置别名）解释器与 VM 均支持。另：把枚举**变体**
+  别名当值读（`alias E.A as EA; e = EA;`）双引擎均报 H002——别名只覆盖可调用名
 
 五、错误处理与报错风格
 
@@ -1557,7 +1424,7 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
 6.1 体积目标
 
 · 单文件可执行程序 < 10 MB
-· 实测约 3.7 MB（release：fat LTO + opt-level z + strip；无内置 C 编译器，`--dll` 调用系统工具链）
+· 实测约 3.7 MB（release：fat LTO + opt-level z + strip）
 
 6.2 编译优化
 
@@ -1626,7 +1493,7 @@ Hone v0.1.0 – 初始版本
 · 支持基础语法：变量、if/while、函数
 · 类型：int、float、bool、str
 · 内置函数：print、read_file、http_get、json_parse、time、random、字符串处理、数学、类型转换
-· 工具链：hone fmt、hone build --dll
+· 工具链：hone fmt
 · 调试支持：breakpoint
 · 跨平台：Windows / Linux / macOS / Android
 
@@ -1646,7 +1513,6 @@ Hone v0.1.0 – 初始版本
 
 · hone fmt：代码格式化（Tab 缩进、大括号位置、运算符空格）
 · breakpoint：断点调试
-· hone build --dll：DLL 打包（调用系统 C 编译器）
 · sys 模块（Windows 常用 API 封装）
 · go 关键字（多线程）
 · time、random、字符串处理、数学、类型转换函数
@@ -1728,23 +1594,6 @@ fn main() {
 }
 
 
-DLL打包
-
-
-// math.hn
-fn add(a, b) {
-    return a + b;
-}
-
-@export add;
-
-
-bash
-hone build --dll math.hn
-
-
-生成 math.dll，可在 C / Python / Rust 中调用。
-
 多线程
 
 
@@ -1819,8 +1668,8 @@ hone_lib/img.hn 中的 new → img_new、to_ppm → img_to_ppm，见 examples/te
 · 函数扁平化存在于全局符号表（不支持 :: 多层路径、不支持嵌套遮蔽），
   模块函数靠前缀隔离命名空间，避免与主脚本函数重名（重名报「already defined」）
 · import 的模块顶层语句会在加载时执行一次，可在模块顶部放常量初始化
-· 引擎差异：解释器（`hone run`）在**运行期**拉取模块；VM（`--vm`）与原生编译后端（`--native`）
-  在**编译期**展开 import（本地路径相对当前工作目录；远程 http(s) 构建期下载并缓存到
+· 引擎差异：解释器（`hone run`）在**运行期**拉取模块；VM（`--vm`）在**编译期**展开 import
+  （本地路径相对当前工作目录；远程 http(s) 构建期下载并缓存到
   `~/.hone/cache/`），合并为单编译单元——远程模块首次构建失败时先 `hone get <script.hn>`
 · load 只用于 C 动态库；加载 .hn 源码一律用 import
 
@@ -1855,7 +1704,7 @@ hone_lib/img.hn 中的 new → img_new、to_ppm → img_to_ppm，见 examples/te
   · 例：统计词频用 dict（has_key + 自增），不要用列表 append + contains
 · 字符串拼接优先 f-string：f"..." 比 + 拼接更简洁；大量拼接场景注意 str 不可变、每次 + 都生成新串
 · 减少深拷贝：clone / copy 是递归深拷贝，大集合频繁拷贝有成本；只在需要独立副本时使用
-· 热点计算交给 C：性能瓶颈函数可用 load 调用 C 库（FFI），或用 hone build --dll 导出后由 C 调用
+· 热点计算交给 C：性能瓶颈函数可用 load 调用 C 库（FFI）
 · 并行化：go 函数名(参数); 启动独立线程（值传递、不共享变量），
   适合可拆分的独立任务（如批量请求）；线程间通信走文件 / HTTP / db，不要指望共享变量
 · 用 hone poop 找出复杂度最高的函数优先优化；优化前先用 hone test 固化行为
@@ -1973,7 +1822,7 @@ Hone 不是一门工业级语言，而是一把设计精巧的瑞士军刀。它
 2. 好用：内置常用功能（文件、网络、JSON、系统、时间、随机、字符串、数学、类型转换）
 3. 好带：单文件 < 10 MB，跨平台
 4. 好展示：可作为个人作品写在简历里、展示在 B 站上
-5. 好扩展：支持 DLL 打包、懒加载、多线程、调试
+5. 好扩展：支持懒加载、多线程、调试
 6. 不背包袱：不自举、不强制兼容、不预设规模
 
 ---

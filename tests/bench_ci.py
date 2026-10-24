@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""bench_ci.py — Hone 多引擎基准：9 负载 × hone(interp/VM/nat) vs Python vs Lua 5.4。
+"""bench_ci.py — Hone 多引擎基准：9 负载 × hone(interp/VM) vs Python vs Lua 5.4。
 
 CI（ci.yml bench 作业）与本机均可跑：
     HONE_BIN=target/release/hone python tests/bench_ci.py
@@ -12,7 +12,6 @@ CI（ci.yml bench 作业）与本机均可跑：
   官网/perf-data.json —— 官网/perf.html 前端读取渲染（含机器/版本/时间戳元信息）
   stdout —— 控制台对齐表格
 缺解释器（lua5.4 / python3）时跳过对应列并在 JSON 标注 null，不失败。
-nat 引擎：逐负载 `hone build --exe --native`（编译耗时计入准备阶段，不计入运行计时）。
 """
 import json
 import os
@@ -69,19 +68,6 @@ def engine_cmd(kind, script):
     if kind == "vm":
         return [HONE, str(script), "--vm"]
     raise ValueError(kind)
-
-
-def nat_build(script, name):
-    """nat 引擎：编译一次（耗时计入准备，不计运行计时），返回可执行路径。"""
-    exe = OUT_DIR / f"{name}_nat{'.exe' if os.name == 'nt' else ''}"
-    p = subprocess.run(
-        [str(HONE), "build", "--exe", "--native", str(script), "-o", str(exe)],
-        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
-    )
-    if p.returncode != 0 or not exe.is_file():
-        print(f"  nat 编译失败 {name}: {p.stderr.strip()[-300:]}", file=sys.stderr)
-        return None
-    return exe
 
 
 def best_of_built(cmd):
@@ -151,20 +137,18 @@ def main():
     lua_bin = "lua5.4"
     has_lua = shutil.which(lua_bin) is not None
     results = {}
-    header = f"{'基准':<14}{'interp':>10}{'VM':>10}{'nat':>10}{'python':>10}{'lua5.4':>10}"
+    header = f"{'基准':<14}{'interp':>10}{'VM':>10}{'python':>10}{'lua5.4':>10}"
     print(header)
     for name, hn, py, lua in BENCHES:
         row = {}
-        # 三引擎
+        # 双引擎
         for kind in ("interp", "vm"):
             row[kind] = run_best_ms(engine_cmd(kind, BENCH_DIR / hn))
-        nat_exe = nat_build(BENCH_DIR / hn, name)
-        row["nat"] = run_best_ms([nat_exe]) if nat_exe else None
         # 对比语言
         row["python"] = run_best_ms([sys.executable, BENCH_DIR / "py" / py])
         row["lua"] = run_best_ms([lua_bin, BENCH_DIR / "lua" / lua]) if has_lua else None
         results[name] = row
-        cells = "".join(f"{(row[k] if row[k] is not None else '-'):>10}" for k in ("interp", "vm", "nat", "python", "lua"))
+        cells = "".join(f"{(row[k] if row[k] is not None else '-'):>10}" for k in ("interp", "vm", "python", "lua"))
         print(f"{name:<14}{cells}")
 
     data = {"meta": meta, "results": results}

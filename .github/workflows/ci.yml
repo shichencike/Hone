@@ -43,16 +43,10 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then BIN=./target/release/hone.exe; else BIN=./target/release/hone; fi
           "$BIN" examples/hello.hn
           "$BIN" examples/fib.hn
-      # G3.6：原生编译后端三引擎回归（interp / VM / nat 逐字节；nat 每例单独
-      # rustc 链接，16 例约数分钟）。
-      # nat 目标：Linux 侧用 musl（设计 §6.3，glibc 不随 hone 分发 CRT）——须先
-      # `rustup target add x86_64-unknown-linux-musl`，否则 rustc 报 E0463
-      # （can't find crate for `std`）；regress4.py 在本机缺该目标时退回宿主目标。
-      - name: nat 三引擎回归 (regress4)
+      - name: 双引擎回归 (regress4)
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then BIN=target/release/hone.exe; else BIN=target/release/hone; fi
-          if [ "$RUNNER_OS" = "Linux" ]; then rustup target add x86_64-unknown-linux-musl; fi
           HONE_BIN="$BIN" python tests/regress4.py
 
   termux:

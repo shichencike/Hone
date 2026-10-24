@@ -1,19 +1,10 @@
 #!/usr/bin/env python3
-"""错误对齐回归：逐用例比对「解释器」/「VM」/「nat 原生编译」的错误输出是否逐字节一致。
+"""错误对齐回归：逐用例比对「解释器」/「VM」的错误输出是否逐字节一致。
 
 用法：在仓库根目录执行 python tests/regress_err.py
 约定：任何一处差异都视为失败（报错必须精准，行/列/文案/help 全对齐）。
-
-nat（build --exe --native）作为第三引擎接入（G1.6），两条比对路径：
-  1. 编译成功 → 跑产物，比对 (stdout+stderr, 退出码)。
-  2. 编译期拒 → 分两类：
-     a. checker 静态拦截：checker 是解释器/VM/AOT/nat 共用的前端，属同源行为，
-        剥离 build 的 [N/4] 阶段进度行后，报错文本应与 `hone run` 逐字节一致；
-     b. natgen 自身能力边界（lowering 阶段 H990/H999，M2 待落地）→ 列入
-        NAT_UNSUPPORTED 显式登记，不静默跳过（每项须写明待落地任务号）。
 """
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -125,52 +116,13 @@ CASES = {
     ),
 }
 
-# natgen 能力边界：lowering 阶段报 H990/H999（M2 任务组待落地），无法比对运行期错误。
-# 显式登记而非静默跳过——新增条目必须写明待落地任务号，避免「漏实现被当成通过」。
-NAT_UNSUPPORTED = {
-    # G2.9 点号内置族 H999 登记（std-only runtime 无法承载外部 crate 依赖的家族）：
-    # interp/VM 正常执行、nat 有意报 H999——能力边界口径，跳过 nat 比对而非静默漏测。
-    "dotted_h999_regex": "H999 原生编译后端暂不支持 regex.*（见 M2 G2.9 点号内置族：需 regex crate）",
-    "dotted_h999_sqlite": "H999 原生编译后端暂不支持 sqlite.*（见 M2 G2.9 点号内置族：需 FFI libsqlite3）",
-    "dotted_h999_http": "H999 原生编译后端暂不支持 http_get（见 M2 G2.9 点号内置族：需 rustls/TLS 栈）",
-}
-
 
 def run_hone(args, timeout=20):
     p = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     return ((p.stdout or "") + (p.stderr or ""), p.returncode)
 
 
-def strip_stage_lines(text: str) -> str:
-    """剥掉 build 的 [N/4] 阶段进度行（余下报错本体应与 `hone run` 一致）。"""
-    out = [ln for ln in text.splitlines() if not re.match(r"^\[\d/4\]", ln)]
-    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
-
-
-def nat_run(path: str, tmp: str):
-    """nat 第三引擎。返回 (结果, 状态)；结果 = (stdout+stderr, 退出码)。
-    状态：ok（编译成功已跑产物）/ build_reject（checker 同源拒）/ unsupported（natgen 边界）
-    """
-    exe = os.path.join(tmp, "nat_case.exe")
-    if os.path.exists(exe):
-        os.remove(exe)
-    obj = os.path.join(os.getcwd(), os.path.splitext(os.path.basename(path))[0] + ".nat.o")
-    text, rc = run_hone([BIN, "build", "--exe", "--native", path, "-o", exe], timeout=120)
-    if os.path.exists(obj):
-        os.remove(obj)
-    if rc == 0 and os.path.exists(exe):
-        res = run_hone([exe])
-        os.remove(exe)
-        return res, "ok"
-    if re.search(r"error\[H99[09]\]: natgen:", text):
-        return (text, rc), "unsupported"
-    return (strip_stage_lines(text), rc), "build_reject"
-
-
 def main():
-    have_nat = shutil.which("rustc") is not None
-    if not have_nat:
-        print("nat: 无 rustc，跳过第三引擎（仅比对 interp / VM）", file=sys.stderr)
     # 可选子集过滤：python tests/regress_err.py dotted_ 只跑名字含该子串的用例
     cases = CASES
     if len(sys.argv) > 1:
@@ -178,7 +130,6 @@ def main():
     tmp = tempfile.mkdtemp(prefix="hone_err_")
     passed = failed = 0
     fails = []
-    counts = {"ok": 0, "build_reject": 0, "unsupported": 0, "off": 0}
     try:
         for name, src in cases.items():
             path = os.path.join(tmp, name + ".hn")
@@ -193,16 +144,6 @@ def main():
                 print(f"TIMEOUT  {name}")
                 continue
             results = [("interp", base), ("vm", vm)]
-            if have_nat:
-                if name in NAT_UNSUPPORTED:
-                    counts["off"] += 1
-                else:
-                    try:
-                        nat, status = nat_run(path, tmp)
-                    except subprocess.TimeoutExpired:
-                        nat, status = ("[TIMEOUT]", -1), "ok"
-                    counts[status] = counts.get(status, 0) + 1
-                    results.append(("nat", nat))
             diffs = [(e, r[0]) for e, r in results[1:] if r != base]
             if not diffs:
                 passed += 1
@@ -214,17 +155,8 @@ def main():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    engines = "interp/VM" + ("/nat" if have_nat else "")
+    engines = "interp/VM"
     print(f"\nPASS={passed} FAIL={failed} (共 {len(CASES)} 个错误用例, 引擎 {engines})")
-    if have_nat:
-        print(f"nat 路径分布: 运行期(ok)={counts['ok']} "
-              f"checker同源拒(build_reject)={counts['build_reject']} "
-              f"能力边界(unsupported/登记跳过)={counts['unsupported']} "
-              f"显式跳过={counts['off']}")
-    if NAT_UNSUPPORTED:
-        print("nat 能力边界（显式登记，待落地后移除）:")
-        for n, why in NAT_UNSUPPORTED.items():
-            print(f"  {n}: {why}")
     for name, i, diffs in fails:
         print(f"\n--- {name} ---")
         print("interp:", repr(i))

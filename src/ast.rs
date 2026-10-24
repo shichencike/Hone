@@ -132,11 +132,6 @@ pub enum Stmt {
         /// 条件断点：仅当条件为 true 时暂停（None = 无条件）
         cond: Option<Box<Expr>>,
     },
-    /// @export 函数名;  标记导出到 C ABI 动态库
-    Export {
-        name: String,
-        span: Span,
-    },
     /// import "模块名" from "URL" [as 别名];  远程模块下载并缓存
     Import {
         name: String,
@@ -653,7 +648,6 @@ impl Stmt {
             | Stmt::DebugPrint { span, .. }
             | Stmt::ExprStmt { span, .. }
             | Stmt::Breakpoint { span, .. }
-            | Stmt::Export { span, .. }
             | Stmt::Import { span, .. }
             | Stmt::Load { span, .. }
             | Stmt::Use { span, .. }

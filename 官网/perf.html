@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>性能基准 — Hone 编程语言</title>
-<meta name="description" content="Hone 编程语言性能基准：interp/VM/nat 三引擎与 Python、Lua 5.4 的 9 维度对比（递归/纯循环/浮点/字符串/列表/字典/排序），CI 自动测量更新，含测试机器与版本号说明。">
+<meta name="description" content="Hone 编程语言性能基准：interp/VM 双引擎与 Python、Lua 5.4 的 9 维度对比（递归/纯循环/浮点/字符串/列表/字典/排序），CI 自动测量更新，含测试机器与版本号说明。">
 <meta name="theme-color" content="#0b0e14">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
@@ -53,7 +53,7 @@
 
 <main>
 
-  <h2><span class="hash">#</span>性能基准：Hone 三引擎 vs Python vs Lua 5.4</h2>
+  <h2><span class="hash">#</span>性能基准：Hone 双引擎 vs Python vs Lua 5.4</h2>
   <p>9 个维度、三语言等价实现，由 CI（<code>bench.yml</code>）在 ubuntu runner 上自动测量，
     <strong>数据文件 <code>perf-data.json</code> 随基准工作流自动提交更新</strong>。脚本源码见仓库
     <code>bench/</code>（<code>bench/lua/</code> 为 Lua 5.4 等价实现）；
@@ -73,10 +73,9 @@
         <th>基准（工作量）</th>
         <th>Hone interp</th>
         <th>Hone VM</th>
-        <th>Hone nat</th>
         <th>Python 3</th>
         <th>Lua 5.4</th>
-        <th>nat/Python</th>
+        <th>VM/Python</th>
       </tr>
       <tbody id="perf-rows"></tbody>
     </table>
@@ -89,10 +88,8 @@
       含解释器 / 运行时启动开销，小负载（str_replace 等）受启动成本影响明显。</li>
     <li>三语言脚本逐项等价：同一算法、同一工作量、确定性输入；源码见 <code>bench/*.hn</code>、
       <code>bench/py/</code>、<code>bench/lua/</code>。</li>
-    <li>三引擎口径：<strong>interp</strong> = <code>hone 脚本.hn</code>（AST 解释器）；
-      <strong>VM</strong> = <code>hone 脚本.hn --vm</code>（寄存器式字节码）；
-      <strong>nat</strong> = <code>hone build --exe --native</code> 的产物直接运行（Cranelift 机器码 + 系统 gcc 链接，
-      编译耗时不计入运行计时）。</li>
+    <li>双引擎口径：<strong>interp</strong> = <code>hone 脚本.hn</code>（AST 解释器）；
+      <strong>VM</strong> = <code>hone 脚本.hn --vm</code>（寄存器式字节码）。</li>
     <li>Hone 列表为<strong>值类型</strong>：<code>append</code> 与 <code>a[i] = x</code> 均按拷贝语义实现，
       故 <code>list_append</code>（构建 2 万元素）与 <code>sort</code>（冒泡 1000）对解释器为 O(n²) 负载，耗时显著偏高。</li>
     <li>Runner 规格随 GitHub 托管池浮动，绝对数值每次运行可能有小幅波动；<strong>相对比例</strong>更具参考意义。</li>
@@ -100,14 +97,13 @@
 
   <h3>要点解读</h3>
   <ul>
-    <li><strong>三引擎梯度</strong>：interp 最慢、VM 次之、<strong>nat（原生编译）最快</strong>——nat 通常领先 Python 同级或更快，
-      解释器约为 CPython 的 2~6 倍耗时（视负载）。</li>
+    <li><strong>引擎对比</strong>：VM 通常快于 interp，解释器约为 CPython 的 2~6 倍耗时（视负载）。</li>
     <li><strong>集合值类型语义</strong>：Hone 的列表按值拷贝（<code>append</code>、<code>a[i]=x</code> 均产生新列表），
-      构建/排序类负载对解释器/VM 为 O(n²)；nat 后端同语义，但常数更小。</li>
+      构建/排序类负载对解释器/VM 为 O(n²)。</li>
     <li><strong>Lua 5.4</strong>：寄存器 VM + 高效字符串内化，纯循环 / 字符串类负载通常强于 CPython；
       字符串拼接（<code>s = s .. "abc"</code> 整串重建）语义与 Python 相同，同为 O(n²)。</li>
-    <li><strong>结论</strong>：性能热点场景用 <code>hone build --exe --native</code> 编译运行，或 <code>hone prof</code>
-      定位后改用 C 扩展（<code>hone build --dll</code>）。</li>
+    <li><strong>结论</strong>：性能热点场景先 <code>hone prof</code> 定位，
+      必要时改用 C 扩展（<code>load</code> + typed FFI）。</li>
   </ul>
 
   <h3>历史手测记录（2026-08-19，Hone vs Python vs Rust）</h3>
@@ -185,8 +181,8 @@
       tbody.innerHTML = Object.keys(names).map(function (k) {
         var r = d.results[k] || {};
         return "<tr><td>" + names[k] + "</td><td>" + fmt(r.interp) + "</td><td>" + fmt(r.vm) +
-          "</td><td>" + fmt(r.nat) + "</td><td>" + fmt(r.python) + "</td><td>" + fmt(r.lua) +
-          "</td><td>" + ratio(r.nat, r.python) + "</td></tr>";
+          "</td><td>" + fmt(r.python) + "</td><td>" + fmt(r.lua) +
+          "</td><td>" + ratio(r.vm, r.python) + "</td></tr>";
       }).join("");
       document.getElementById("perf-status").textContent = "数据由 CI 基准工作流自动更新（" + (m.date || "") + "）";
     })

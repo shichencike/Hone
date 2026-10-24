@@ -288,29 +288,14 @@ def run(cmd, timeout=30):
     return (p.stdout or "") + (p.stderr or ""), p.returncode
 
 
-def strip_stage_lines(text: str) -> str:
-    """剥掉 build 的 [N/4] 阶段进度行。
-
-    checker 静态拒的脚本三引擎都会拒（checker 是共享前端），但 nat 走 build 管线，
-    报错前后会夹阶段进度行——不剥就会把「同源拒」误判成分歧（与 regress_err.py 同口径）。
-    """
-    out = [ln for ln in text.splitlines() if not re.match(r"^\[\d/4\]", ln)]
-    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--nat", action="store_true", help="追加 nat 第三引擎（慢：每例单独 build）")
     ap.add_argument("--only", choices=sorted(GROUPS), help="只跑某一组")
     args = ap.parse_args()
 
     if not os.path.exists(BIN):
         print(f"缺少 {BIN}：先 cargo build", file=sys.stderr)
         return 1
-    if args.nat and not any(
-        os.path.exists(os.path.join(p, "rustc.exe")) for p in os.environ.get("PATH", "").split(os.pathsep)
-    ):
-        print("nat: 无 rustc，跳过第三引擎", file=sys.stderr)
 
     tmp = tempfile.mkdtemp(prefix="hone_probe_")
     bad = total = 0
@@ -326,23 +311,7 @@ def main() -> int:
                     f.write(src)
                 i = run([BIN, "run", path])
                 v = run([BIN, "run", "--vm", path])
-                n = None
-                if args.nat:
-                    exe = os.path.join(tmp, "nat.exe")
-                    b = run([BIN, "build", "--exe", "--native", path, "-o", exe], timeout=180)
-                    if b[1] == 0 and os.path.exists(exe):
-                        n = run([exe])
-                        os.path.exists(exe) and os.remove(exe)
-                    else:
-                        # 编译期拒（含 checker 同源拒与 natgen H990 边界）：剥阶段行后比对。
-                        n = (strip_stage_lines(b[0]), b[1])
-                    obj = os.path.join(
-                        os.getcwd(), os.path.splitext(os.path.basename(path))[0] + ".nat.o"
-                    )
-                    os.path.exists(obj) and os.remove(obj)
                 res = {"interp": i, "vm": v}
-                if n is not None:
-                    res["nat"] = n
                 diffs = [(e, r) for e, r in res.items() if e != "interp" and r != i]
                 if diffs:
                     bad += 1
