@@ -97,7 +97,7 @@
 
   <h3>要点解读</h3>
   <ul>
-    <li><strong>引擎对比</strong>：VM 通常快于 interp，解释器约为 CPython 的 2~6 倍耗时（视负载）。</li>
+    <li><strong>引擎对比</strong>：VM 目前是未优化基线，多数负载慢于 interp（str_concat 慢约 5 倍），仅容器类负载（list_append、sort）略快；VM 优化路线图见 changelog。解释器相对 CPython 的倍率跨度很大（str_concat 约 1.1x，list_append 约 563x），取决于值语义容器操作的占比。</li>
     <li><strong>集合值类型语义</strong>：Hone 的列表按值拷贝（<code>append</code>、<code>a[i]=x</code> 均产生新列表），
       构建/排序类负载对解释器/VM 为 O(n²)。</li>
     <li><strong>Lua 5.4</strong>：寄存器 VM + 高效字符串内化，纯循环 / 字符串类负载通常强于 CPython；
@@ -108,7 +108,7 @@
 
   <h3>历史手测记录（2026-08-19，Hone vs Python vs Rust）</h3>
   <p>以下为早期同机手测数据（Intel m3-7Y30 低功耗 CPU，单次运行），保留作参考；
-    当前有效数据以上方 CI 自动表为准。</p>
+    当前有效数据以上方 CI 自动表为准。<strong>Hone 列为当时解释器数据，非当前 VM</strong>。</p>
   <table>
     <tr>
       <th>基准（工作量）</th>

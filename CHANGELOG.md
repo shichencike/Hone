@@ -3,10 +3,12 @@
 ## [Unreleased]
 
 ### 移除
-- **删除 DLL 后端与原生编译后端（nat）**：`hone build --dll` / `hone build --exe --native` /
-  `hone natgen` / `hone build --obj` / `@export` 语句全部移除；`natgen.rs`、`runtime/`
-  （honeruntime crate）与 cranelift / target-lexicon 依赖删除。引擎收敛为解释器 + VM 双引擎；
-  `hone load` 运行期动态库加载（H301/H302）不受影响。回归脚本相应改为双引擎
+- **移除 NAT（`build --exe --native` / `natgen`）与 DLL（`build --dll` / `@export`）后端**：
+  维护面积收敛到 interp + VM 双引擎；旧命令现报 H005，help 指向本条。v0.8.0 的 NAT 工作
+  作为历史保留（见 [v0.8.0] 段）。`hone load` 运行期动态库加载（H301/H302）不受影响。
+  本开发周期内曾落地的 NAT 工具链调整（纯 .o 生成器 / runtime-a 预编译资产 /
+  `natgen --obj` 语义统一 / 链接路径口径）随整体移除，不再单列；`natgen.rs`、`runtime/`
+  （honeruntime crate）与 cranelift / target-lexicon 依赖删除。回归脚本相应改为双引擎
   （`regress4.py` / `regress_err.py` / `probe_align.py`），`tests/tools/audit_err.py` 删除。
 
 ### 新增
@@ -14,20 +16,10 @@
   ffi_variadic! 穷举宏（8190 类型实例化内存峰值），切换为 libffi 静态构建（ffi_prep_cif/
   ffi_prep_cif_var/ffi_call + ffi_closure 回调）。支持 int/int32/float/float32/bool/str/ptr/void
   全标量参数与返回，回调 0-8 参、变参无固定上限、float 固定参数的变参函数已支持。
-- **int32/float32 新类型全链路**：lexer/parser/header/checker/interp/VM/NAT/签名块/头文件绑定
+- **int32/float32 新类型全链路**：lexer/parser/header/checker/interp/VM/签名块/头文件绑定
   全覆盖；C `int32_t`/`uint32_t` 映射 `int32`，C `float` 映射 `float32`。
-- **NAT 降级纯 .o 生成器**：natgen 出脚本 object，内嵌运行时源码经 rustc 编静态库
-  `libhoneruntime.a`（`--cfg hone_boot`，按源码+目标 md5 缓存），交**系统 gcc** 链接
-  (`gcc app.o libhoneruntime.a -o app`)。删打包工具链全家（build_toolchain.py/targets/rust-lld/
-  HONE_NAT_LINK/HONE_TOOLCHAIN_DIR），Linux 需本机 rustc+gcc，Windows 需 MinGW-w64。
 - **install.bat 纯 ASCII 安装脚本**：原生 curl.exe+tar.exe，镜像回退/sha256 校验/断点续传/PATH
   去重/--uninstall 卸载/幂等，功能对齐 install.sh；Windows 安装 = 双击 install.bat。
-- **官方 runtime-a 发布资产**：Release 附带 `runtime-a.tar.gz`——为三个分发目标
-  （x86_64-unknown-linux-musl / x86_64-pc-windows-gnu / aarch64-unknown-linux-musl）各预编译一份
-  `libhoneruntime-<hash12>.a`（缓存键 = md5(内嵌运行时源码 + 目标三元组)，由 `hone natgen
-  --runtime-only [--target <triple>] [-o <dir>]` 产出；staticlib 只编不链，交叉仅需目标 rust std）。
-  用户侧解压后设 `HONE_RUNTIME_A` 指向该目录，同版本 hone 原生编译免本机 rustc（缓存未命中时自动
-  查找并落盘）。
 - **CI 恢复多核极速**：删 -j 1 与 swap/页面文件，保留 actions/cache@v4。
 - **性能基准 CI 自动化**：新增 `bench.yml` 工作流——push master 且触及 src/runtime/bench/ 等路径时
   自动跑 9 负载基准（fib / loop×2 / str_concat / pi / list_append / dict_lookup / str_replace / sort ×
@@ -48,7 +40,6 @@
   full 包仅含 hone 本体（无 targets/）。
 - 头文件绑定不支持列表缩减：数组参数/结构体按值/long double 仍 unsupported；
   变参与回调现已支持（hone bind 输出列为支持）。
-- 原生编译链接路径口径变更：不再随包分发工具链；本机无 rustc/gcc 时需安装 Rust+MinGW。
 
 ### 变更（byte/bytes 内置函数返回值修正，含破坏性变更）
 - **`zlib.compress` / `zlib.gzip` → `bytes`**（原 base64 str）：压缩结果是二进制，直接返回字节序列；
@@ -74,19 +65,11 @@
   现与解释器一致报错 `` `for k, v in` requires a dict, got a list/bytes ``
 - checker 新增双形态参数检查（expect_str_or_bytes / expect_int_or_byte）；LSP 补全描述同步
 
-### 变更
-- **`hone natgen --obj <o>` 语义统一为「仅 object」**：原先「改名中间 object 仍链接 exe」的用法
-  废弃；`--obj` 与 `-o` 不能同用（显式报错）。完整管线（`natgen <file.hn>` /
-  `build --exe --native`）行为与默认中间 object 名（`{}.nat.o`）不变
-
 ### 文档
 - **FFI 口径全站对齐 libffi 实现**：hone.md 4.1.1/4.1.2 补 `int32` → int32_t、`float32` → C float
   映射（头文件绑定同步 `int32_t`/`uint32_t` → int32、C `float` → float32）；官网 docs/examples/faq
   订正「回调与变参暂不支持」的旧表述（现已支持，回调限 0-8 个标量参、仅同步），头文件绑定
   unsupported 列表缩至数组参数/结构体按值/long double
-- **NAT 纯 .o 口径同步到进度 / 设计文档**：进度清单 M3 任务组的 G3.4（口径变更）/ G3.5 / G3.6 标为
-  完成、G3.8 标为作废，并新增「纯 .o 生成器口径变更（第五轮）」实现进度；`Hone原生编译后端设计.md`
-  加实施说明（随包分发工具链方案未落地，构建机需 rustc + gcc，产物本身仍自足）
 - **官网 changelog.html 由 CHANGELOG.md 重新生成**：此前 [Unreleased] 段整段缺失
 - hone.md 头行实现版本口径 v0.7.12 → v0.8.0
 

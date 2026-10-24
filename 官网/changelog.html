@@ -57,13 +57,15 @@
 <p>各版本的新增 / 变更 / 修复 / 文档汇总。最新版本见顶部 <span class="ver-tag">v0.8.0</span> 区块。</p>
 <div class="release">
 <span class="ver-tag">Unreleased</span> <span class="badge-new">开发中</span>
+<h4><span class="flag rem">移除</span></h4>
+<ul>
+<li><strong>移除 NAT（<code class="inline">build --exe --native</code> / <code class="inline">natgen</code>）与 DLL（<code class="inline">build --dll</code> / <code class="inline">@export</code>）后端</strong>：维护面积收敛到 interp + VM 双引擎；旧命令现报 H005，help 指向本条。v0.8.0 的 NAT 工作作为历史保留（见下方 v0.8.0 区块）。<code class="inline">hone load</code> 运行期动态库加载（H301/H302）不受影响。本开发周期内曾落地的 NAT 工具链调整（纯 .o 生成器 / runtime-a 预编译资产 / <code class="inline">natgen --obj</code> 语义统一 / 链接路径口径）随整体移除，不再单列；<code class="inline">natgen.rs</code>、<code class="inline">runtime/</code>（honeruntime crate）与 cranelift / target-lexicon 依赖删除。回归脚本相应改为双引擎（<code class="inline">regress4.py</code> / <code class="inline">regress_err.py</code> / <code class="inline">probe_align.py</code>），<code class="inline">tests/tools/audit_err.py</code> 删除。</li>
+</ul>
 <h4><span class="flag add">新增</span></h4>
 <ul>
-<li><strong>FFI 回调 + 变参全链路支持（解释器实测通过；VM/原生编译后端亦实现）</strong>：删 ffi_dispatch!/ ffi_variadic! 穷举宏（8190 类型实例化内存峰值），切换为 libffi 静态构建（ffi_prep_cif/ ffi_prep_cif_var/ffi_call + ffi_closure 回调）。支持 int/int32/float/float32/bool/str/ptr/void 全标量参数与返回，回调 0-8 参、变参无固定上限、float 固定参数的变参函数已支持。</li>
-<li><strong>int32/float32 新类型全链路</strong>：lexer/parser/header/checker/interp/VM/NAT/签名块/头文件绑定 全覆盖；C <code class="inline">int32_t</code>/<code class="inline">uint32_t</code> 映射 <code class="inline">int32</code>，C <code class="inline">float</code> 映射 <code class="inline">float32</code>。</li>
-<li><strong>NAT 降级纯 .o 生成器</strong>：natgen 出脚本 object，内嵌运行时源码经 rustc 编静态库 <code class="inline">libhoneruntime.a</code>（<code class="inline">--cfg hone_boot</code>，按源码+目标 md5 缓存），交<strong>系统 gcc</strong> 链接 (<code class="inline">gcc app.o libhoneruntime.a -o app</code>)。删打包工具链全家（build_toolchain.py/targets/rust-lld/ HONE_NAT_LINK/HONE_TOOLCHAIN_DIR），Linux 需本机 rustc+gcc，Windows 需 MinGW-w64。</li>
+<li><strong>FFI 回调 + 变参全链路支持（仅解释器实测通过；VM 不支持 load，报 H999）</strong>：删 ffi_dispatch!/ ffi_variadic! 穷举宏（8190 类型实例化内存峰值），切换为 libffi 静态构建（ffi_prep_cif/ ffi_prep_cif_var/ffi_call + ffi_closure 回调）。支持 int/int32/float/float32/bool/str/ptr/void 全标量参数与返回，回调 0-8 参、变参无固定上限、float 固定参数的变参函数已支持。</li>
+<li><strong>int32/float32 新类型全链路</strong>：lexer/parser/header/checker/interp/VM/签名块/头文件绑定 全覆盖；C <code class="inline">int32_t</code>/<code class="inline">uint32_t</code> 映射 <code class="inline">int32</code>，C <code class="inline">float</code> 映射 <code class="inline">float32</code>。</li>
 <li><strong>install.bat 纯 ASCII 安装脚本</strong>：原生 curl.exe+tar.exe，镜像回退/sha256 校验/断点续传/PATH 去重/--uninstall 卸载/幂等，功能对齐 install.sh；Windows 安装 = 双击 install.bat。</li>
-<li><strong>官方 runtime-a 发布资产</strong>：Release 附带 <code class="inline">runtime-a.tar.gz</code>——为三个分发目标（x86_64-unknown-linux-musl / x86_64-pc-windows-gnu / aarch64-unknown-linux-musl）各预编译一份 <code class="inline">libhoneruntime-&lt;hash12&gt;.a</code>（<code class="inline">hone natgen --runtime-only [--target &lt;triple&gt;] [-o &lt;dir&gt;]</code> 产出）。解压后设 <code class="inline">HONE_RUNTIME_A</code> 指向该目录，同版本 hone 原生编译免本机 rustc。</li>
 <li><strong>CI 恢复多核极速</strong>：删 -j 1 与 swap/页面文件，保留 actions/cache@v4。</li>
 </ul>
 <h4><span class="flag doc">变更（破坏性变更）</span></h4>
@@ -71,7 +73,6 @@
 <li><strong>废弃 <code class="inline">cow</code> 声明（BREAKING）</strong>：<code class="inline">cow</code> 关键字语法整体移除——引用模型改造后，全部容器（list/dict/str/bytes）默认走 O(1) 句柄共享 + 写点自动隔离（<code class="inline">ensure_unique</code> 门控），别名不可见、可观察行为与旧值语义逐字节一致，<code class="inline">cow</code> 显式声明失去存在意义。代码中遇 <code class="inline">cow</code> 报 H005 语法错误（help 指引改用普通赋值，语义不变）；<code class="inline">cow</code> 形参同理。内部实现同步删除：<code class="inline">Value::Cow</code> 变体、COW 三件套、<code class="inline">Env.cow_vars</code>、VM/DLL 的 cow H999 边界；<code class="inline">fmt</code> 关键字表移除 cow；<code class="inline">tests/smoke/cow_read.hn</code> 随语法移除（断言已由普通值路径回归覆盖）。</li>
 <li>移除 install.ps1 / build_toolchain.py / targets/ 工具链分发 / HONE_NAT_LINK 环境变量； full 包仅含 hone 本体（无 targets/）。</li>
 <li>头文件绑定不支持列表缩减：数组参数/结构体按值/long double 仍 unsupported； 变参与回调现已支持（hone bind 输出列为支持）。</li>
-<li>原生编译链接路径口径变更：不再随包分发工具链；本机无 rustc/gcc 时需安装 Rust+MinGW。</li>
 </ul>
 <h4><span class="flag doc">变更（byte/bytes 内置函数返回值修正，含破坏性变更）</span></h4>
 <ul>
@@ -88,14 +89,9 @@
 <li><strong>VM 行为对齐</strong>：<code class="inline">for a, b in &lt;list/bytes&gt;</code> 双变量迭代原在 VM 静默放行（第二变量取陈旧值）， 现与解释器一致报错 `<code class="inline"> </code>for k, v in<code class="inline"> requires a dict, got a list/bytes </code>`</li>
 <li>checker 新增双形态参数检查（expect_str_or_bytes / expect_int_or_byte）；LSP 补全描述同步</li>
 </ul>
-<h4><span class="flag chg">变更</span></h4>
-<ul>
-<li><strong><code class="inline">hone natgen --obj &lt;o&gt;</code> 语义统一为「仅 object」</strong>：原先「改名中间 object 仍链接 exe」的用法 废弃；<code class="inline">--obj</code> 与 <code class="inline">-o</code> 不能同用（显式报错）。完整管线（<code class="inline">natgen &lt;file.hn&gt;</code> / <code class="inline">build --exe --native</code>）行为与默认中间 object 名（<code class="inline">{}.nat.o</code>）不变</li>
-</ul>
 <h4><span class="flag doc">文档</span></h4>
 <ul>
 <li><strong>FFI 口径全站对齐 libffi 实现</strong>：hone.md 4.1.1/4.1.2 补 <code class="inline">int32</code> → int32_t、<code class="inline">float32</code> → C float 映射（头文件绑定同步 <code class="inline">int32_t</code>/<code class="inline">uint32_t</code> → int32、C <code class="inline">float</code> → float32）；官网 docs/examples/faq 订正「回调与变参暂不支持」的旧表述（现已支持，回调限 0-8 个标量参、仅同步），头文件绑定 unsupported 列表缩至数组参数/结构体按值/long double</li>
-<li><strong>NAT 纯 .o 口径同步到进度 / 设计文档</strong>：进度清单 M3 任务组的 G3.4（口径变更）/ G3.5 / G3.6 标为 完成、G3.8 标为作废，并新增「纯 .o 生成器口径变更（第五轮）」实现进度；<code class="inline">Hone原生编译后端设计.md</code> 加实施说明（随包分发工具链方案未落地，构建机需 rustc + gcc，产物本身仍自足）</li>
 <li><strong>官网 changelog.html 由 CHANGELOG.md 重新生成</strong>：此前 [Unreleased] 段整段缺失</li>
 <li>hone.md 头行实现版本口径 v0.7.12 → v0.8.0</li>
 </ul>

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hone 编程语言 - 为效率而生，为乐趣而造</title>
-<meta name="description" content="Hone：轻量级、跨平台、可嵌入的脚本语言。用 Rust 实现，单文件可执行程序，静态强类型，开箱即用。">
+<meta name="description" content="Hone：轻量级、跨平台、开箱即用的脚本语言。用 Rust 实现，单文件可执行程序，静态强类型，开箱即用。">
 <meta name="theme-color" content="#0b0e14">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
@@ -57,7 +57,7 @@
   <div class="hero">
     <h1>Hone</h1>
     <p class="slogan">为效率而生，为乐趣而造</p>
-    <p class="desc">轻量级、跨平台、可嵌入的脚本语言 —— 用 Rust 实现，单文件可执行程序，开箱即用。</p>
+    <p class="desc">轻量级、跨平台、开箱即用的脚本语言 —— 用 Rust 实现，单文件可执行程序，开箱即用。</p>
     <div class="btns">
       <a class="btn primary" href="docs.html">阅读文档</a>
       <a class="btn" href="examples.html">查看示例</a>
@@ -75,7 +75,7 @@
       <div class="card"><h4>🛠 内置工具箱</h4><p>文件、HTTP、JSON、时间、随机、字符串、数学、系统 API 开箱即用。<br>新增：日志、路径、参数解析、环境变量、键值存储、正则、哈希、UUID、时间解析、标准输入（input / read_int / read_float）。</p></div>
       <div class="card"><h4>🧩 集合类型</h4><p>列表 <code class="inline">[1, 2, 3]</code>、字典 <code class="inline">{"k": v}</code> 开箱即用：<code class="inline">for-in</code> 遍历、<code class="inline">f"..."</code> 字符串插值、append / contains / keys / values 等集合函数。</p></div>
       <div class="card"><h4>⚡ 多线程与调试</h4><p><code class="inline">go task(1);</code> 一行启动线程；<code class="inline">breakpoint;</code> 断点；<code class="inline">debug_print</code> 调试输出；<code class="inline">tmp fn</code> 临时函数开发时自动忽略。</p></div>
-      <div class="card"><h4>🔌 可嵌入可扩展</h4><p>typed FFI 调用 C 库、load 动态库调用、import 远程模块、LSP 语言服务器。
+      <div class="card"><h4>🔌 可扩展与集成</h4><p>typed FFI 调用 C 库、load 动态库调用、import 远程模块、LSP 语言服务器。
         <a href="docs.html#manifest">模块清单 hone.json</a> 一条命令拉齐全部依赖（类似 package.json / Cargo.toml）。</p></div>
       <div class="card"><h4>🏷 class 类与泛型</h4><p><code class="inline">class Math { fn double(x) {...} }</code> 类成员函数不进全局符号表，经 <code class="inline">类.方法(...)</code> 调用；
         <code class="inline">fn identity[T](x: T) -&gt; T</code> 泛型函数按实参自动推导，编译期擦除、运行期零成本。</p></div>
