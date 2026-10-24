@@ -41,7 +41,7 @@ fn as_str<'a>(v: &'a Value, arg: usize, span: Span, file: &str, src: &str) -> Re
 fn opt_str(v: Option<&Value>, arg: usize, span: Span, file: &str, src: &str) -> Result<Option<String>, ZError> {
     match v {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::Str(s)) => Ok(Some(s.clone())),
+        Some(Value::Str(s)) => Ok(Some(s.to_string())),
         Some(other) => Err(zerr(
             codes::TYPE_MISMATCH,
             format!("expected a string or null for argument {}, got `{}`", arg + 1, other.type_name()),
@@ -196,10 +196,10 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             let mut matched: Vec<Value> = rels
                 .into_iter()
                 .filter(|rel| re.is_match(rel))
-                .map(Value::Str)
+                .map(Value::mk_str)
                 .collect();
             matched.sort_by(|a, b| a.display().cmp(&b.display()));
-            Ok(Value::List(matched))
+            Ok(Value::mk_list(matched))
         }
         "temp.dir" => {
             let prefix = opt_str(args.get(0), 0, span, file, src)?;
@@ -225,7 +225,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                     None::<&str>,
                 )
             })?;
-            Ok(Value::Str(path.to_string_lossy().to_string()))
+            Ok(Value::mk_str(path.to_string_lossy().to_string()))
         }
         "temp.file" => {
             let prefix = opt_str(args.get(0), 0, span, file, src)?;
@@ -251,7 +251,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                     None::<&str>,
                 )
             })?;
-            Ok(Value::Str(path.to_string_lossy().to_string()))
+            Ok(Value::mk_str(path.to_string_lossy().to_string()))
         }
         "temp.remove" => {
             let path = as_str(&args[0], 0, span, file, src)?;

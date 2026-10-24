@@ -105,13 +105,13 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                 .into_iter()
                 .map(|(op, line)| {
                     let entries = vec![
-                        ("op".to_string(), Value::Str(op.to_string())),
-                        ("line".to_string(), Value::Str(line)),
+                        ("op".to_string(), Value::mk_str(op.to_string())),
+                        ("line".to_string(), Value::mk_str(line)),
                     ];
-                    Value::Dict(entries)
+                    Value::mk_dict(entries)
                 })
                 .collect();
-            Ok(Value::List(items))
+            Ok(Value::mk_list(items))
         }
         "diff.unified" => {
             let a = as_str(&args[0], 0, span, file, src)?;
@@ -139,14 +139,14 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             let mut result = String::new();
             result.push_str(&header);
             result.push_str(&out);
-            Ok(Value::Str(result))
+            Ok(Value::mk_str(result))
         }
         "regex.find" => {
             let pattern = as_str(&args[0], 0, span, file, src)?;
             let text = as_str(&args[1], 1, span, file, src)?;
             let re = compile_re(pattern, "regex.find", span, file, src)?;
-            let matches: Vec<Value> = re.find_iter(text).map(|m| Value::Str(m.as_str().to_string())).collect();
-            Ok(Value::List(matches))
+            let matches: Vec<Value> = re.find_iter(text).map(|m| Value::mk_str(m.as_str().to_string())).collect();
+            Ok(Value::mk_list(matches))
         }
         "regex.groups" => {
             let pattern = as_str(&args[0], 0, span, file, src)?;
@@ -157,21 +157,21 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                     let mut groups: Vec<Value> = Vec::with_capacity(caps.len());
                     for i in 0..caps.len() {
                         match caps.get(i) {
-                            Some(m) => groups.push(Value::Str(m.as_str().to_string())),
+                            Some(m) => groups.push(Value::mk_str(m.as_str().to_string())),
                             None => groups.push(Value::Null), // 未参与匹配的可选组
                         }
                     }
-                    Ok(Value::List(groups))
+                    Ok(Value::mk_list(groups))
                 }
-                None => Ok(Value::List(Vec::new())), // 无匹配返回空列表
+                None => Ok(Value::mk_list(Vec::new())), // 无匹配返回空列表
             }
         }
         "regex.split" => {
             let pattern = as_str(&args[0], 0, span, file, src)?;
             let text = as_str(&args[1], 1, span, file, src)?;
             let re = compile_re(pattern, "regex.split", span, file, src)?;
-            let parts: Vec<Value> = re.split(text).map(|p| Value::Str(p.to_string())).collect();
-            Ok(Value::List(parts))
+            let parts: Vec<Value> = re.split(text).map(|p| Value::mk_str(p.to_string())).collect();
+            Ok(Value::mk_list(parts))
         }
         _ => Err(zerr(
             codes::NOT_IMPLEMENTED,

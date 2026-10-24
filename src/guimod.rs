@@ -70,9 +70,12 @@ fn as_int(v: &Value, arg: usize, span: Span, file: &str, src: &str) -> Result<i6
 
 // ---------- dict 辅助（Hone dict 为 Vec<(String, Value)> 保持插入顺序） ----------
 
-fn dict_get<'a>(d: &'a Value, key: &str) -> Option<&'a Value> {
+fn dict_get(d: &Value, key: &str) -> Option<Value> {
+    // 返回克隆值（引用模型下 clone 为 O(1) 句柄拷贝）：不跨守卫借用，
+    // 避免 Vec 重分配使引用悬垂。
     if let Value::Dict(entries) = d {
-        entries.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+        let entries = entries.read().unwrap();
+        entries.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
     } else {
         None
     }
@@ -80,7 +83,7 @@ fn dict_get<'a>(d: &'a Value, key: &str) -> Option<&'a Value> {
 
 fn dict_str(d: &Value, key: &str, span: Span, file: &str, src: &str) -> Result<String, ZError> {
     match dict_get(d, key) {
-        Some(Value::Str(s)) => Ok(s.clone()),
+        Some(Value::Str(s)) => Ok(s.to_string()),
         Some(other) => Err(zerr(
             codes::TYPE_MISMATCH,
             format!("widget field `{}` must be a string, got `{}`", key, other.type_name()),
@@ -95,7 +98,7 @@ fn dict_str(d: &Value, key: &str, span: Span, file: &str, src: &str) -> Result<S
 
 fn dict_int(d: &Value, key: &str, def: i64, span: Span, file: &str, src: &str) -> Result<i64, ZError> {
     match dict_get(d, key) {
-        Some(Value::Int(i)) => Ok(*i),
+        Some(Value::Int(i)) => Ok(i),
         Some(other) => Err(zerr(
             codes::TYPE_MISMATCH,
             format!("widget field `{}` must be an integer, got `{}`", key, other.type_name()),
@@ -778,9 +781,10 @@ mod platform {
         // select 填充选项
         if kind == "select" {
             if let Some(Value::List(opts)) = dict_get(d, "options") {
-                for o in opts {
+                let opts = opts.read().unwrap();
+                for o in opts.iter() {
                     if let Value::Str(s) = o {
-                        let ws = to_utf16(s);
+                        let ws = to_utf16(s.as_str());
                         unsafe {
                             SendMessageW(hctl, CB_ADDSTRING as UINT, 0, ws.as_ptr() as LPARAM);
                         }
@@ -1322,7 +1326,8 @@ mod platform {
             "tree" => {
                 let mut td = TreeData { nodes: HashMap::new(), next_node: 1 };
                 if let Some(Value::List(items)) = dict_get(d, "items") {
-                    for it in items {
+                    let items = items.read().unwrap();
+                    for it in items.iter() {
                         insert_tree_node(hctl, TVI_ROOT, it, &mut td, span, file, src)?;
                     }
                 }
@@ -1351,10 +1356,11 @@ mod platform {
             );
         }
         if let Some(Value::List(cols)) = dict_get(d, "columns") {
+            let cols = cols.read().unwrap();
             let mut ci = 0;
-            for c in cols {
+            for c in cols.iter() {
                 if let Value::Str(s) = c {
-                    let ws = to_utf16(s);
+                    let ws = to_utf16(s.as_str());
                     let mut col = LVCOLUMNW {
                         mask: LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM,
                         fmt: 0,
@@ -1376,9 +1382,11 @@ mod platform {
             }
         }
         if let Some(Value::List(rows)) = dict_get(d, "rows") {
-            for r in rows {
+            let rows = rows.read().unwrap();
+            for r in rows.iter() {
                 if let Value::List(cells) = r {
-                    insert_table_row(hctl, cells);
+                    let cells = cells.read().unwrap();
+                    insert_table_row(hctl, &cells);
                 }
             }
         }
@@ -1450,7 +1458,8 @@ mod platform {
         let hitem = unsafe { SendMessageW(hctl, TVM_INSERTITEMW, 0, &mut tv as *mut TVINSERTSTRUCTW as LPARAM) } as HTREEITEM;
         td.nodes.insert(node_id, hitem);
         if let Some(Value::List(children)) = dict_get(d, "items") {
-            for ch in children {
+            let children = children.read().unwrap();
+            for ch in children.iter() {
                 insert_tree_node(hctl, hitem, ch, td, span, file, src)?;
             }
         }
@@ -1684,7 +1693,7 @@ mod platform {
         }
         let evs = EVENTS.lock().unwrap().clone();
         EVENTS.lock().unwrap().clear();
-        Ok(Value::Str(format!("[{}]", evs.join(","))))
+        Ok(Value::mk_str(format!("[{}]", evs.join(","))))
     }
 
     fn set_text(win_id: i64, ctl_id: i64, text: &str, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
@@ -1701,7 +1710,7 @@ mod platform {
         let wins = WINDOWS.lock().unwrap();
         let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
         let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
-        Ok(Value::Str(get_ctl_text(hctl)))
+        Ok(Value::mk_str(get_ctl_text(hctl)))
     }
 
     fn close(win_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
@@ -1820,7 +1829,7 @@ mod platform {
         unsafe {
             GetWindowRect(hwnd, &mut rc);
         }
-        Ok(Value::Str(format!("{},{}", rc.left, rc.top)))
+        Ok(Value::mk_str(format!("{},{}", rc.left, rc.top)))
     }
 
     /// 光标屏幕坐标 "x,y"（跟随鼠标模式用）。
@@ -1829,7 +1838,7 @@ mod platform {
         unsafe {
             GetCursorPos(&mut p);
         }
-        Ok(Value::Str(format!("{},{}", p.x, p.y)))
+        Ok(Value::mk_str(format!("{},{}", p.x, p.y)))
     }
 
     /// 弹出右键菜单（items 为字符串列表），返回选中项文本；未选择返回 ""。
@@ -1837,10 +1846,11 @@ mod platform {
         let hwnd = pet_hwnd(win_id, span, file, src)?;
         let labels: Vec<String> = match items {
             Value::List(list) => {
+                let list = list.read().unwrap();
                 let mut out = Vec::with_capacity(list.len());
-                for v in list {
+                for v in list.iter() {
                     match v {
-                        Value::Str(s) => out.push(s.clone()),
+                        Value::Str(s) => out.push(s.to_string()),
                         other => {
                             return Err(zerr(
                                 codes::TYPE_MISMATCH,
@@ -1867,7 +1877,7 @@ mod platform {
             }
         };
         if labels.is_empty() {
-            return Ok(Value::Str(String::new()));
+            return Ok(Value::mk_str(String::new()));
         }
         let hmenu = unsafe { CreatePopupMenu() };
         if hmenu.is_null() {
@@ -1889,13 +1899,13 @@ mod platform {
             DestroyMenu(hmenu);
         }
         if sel == 0 {
-            return Ok(Value::Str(String::new()));
+            return Ok(Value::mk_str(String::new()));
         }
         let idx = (sel - 0x1000) as usize;
         if idx < labels.len() {
-            Ok(Value::Str(labels[idx].clone()))
+            Ok(Value::mk_str(labels[idx].clone()))
         } else {
-            Ok(Value::Str(String::new()))
+            Ok(Value::mk_str(String::new()))
         }
     }
 
@@ -1973,7 +1983,10 @@ mod platform {
         let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
         let hctl = win.ctl_hwnd.get(&ctl_id).copied().ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
         match row {
-            Value::List(cells) => insert_table_row(hctl, cells),
+            Value::List(cells) => {
+                let cells = cells.read().unwrap();
+                insert_table_row(hctl, &cells)
+            }
             _ => {
                 return Err(zerr(
                     codes::TYPE_MISMATCH,
@@ -2056,9 +2069,9 @@ mod platform {
                 break;
             }
             let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-            cells.push(Value::Str(String::from_utf16_lossy(&buf[..len])));
+            cells.push(Value::mk_str(String::from_utf16_lossy(&buf[..len])));
         }
-        Ok(Value::List(cells))
+        Ok(Value::mk_list(cells))
     }
 
     fn table_set(win_id: i64, ctl_id: i64, row: i64, col: i64, text: &str, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
@@ -2292,7 +2305,8 @@ mod platform {
             }
         };
         let menu = unsafe { CreateMenu() };
-        for item in list {
+        let list = list.read().unwrap();
+        for item in list.iter() {
             let text = dict_str(item, "text", span, file, src)?;
             if text == "-" {
                 unsafe {

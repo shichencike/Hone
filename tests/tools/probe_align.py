@@ -245,6 +245,28 @@ ASYNC = {
     "await_after_done": 'async fn f() { return 3; }\nfut = f();\ntime.sleep(0.2);\nprint(await fut);\nprint(await fut);\n',
 }
 
+# ── 值语义 / 别名（引用模型重构基线）：变异前隔离必须保值语义 ──
+# 锁定「b = a 共享后写 a 不影响 b」在三个引擎下逐字节一致——Value 换 Arc + 写点
+# make_unique 门控（REFACTOR_PLAN.md）前后本组输出必须零 diff。
+# dict 索引写被 checker 静态拒（同源），bytes 字面量 VM 报 H999，均不入本组；
+# cow 声明专项已由 tests/smoke/rc_alias.test.hn 覆盖（且阶段 5 将废弃 cow）。
+VALUE = {
+    "val_alias_write": 'a = [1, 2];\nb = a;\na[0] = 9;\nprint(to_str(a));\nprint(to_str(b));\n',
+    "val_alias_nested": 'm = [[1, 2], [3, 4]];\nn = m;\nm[0][1] = 9;\nprint(to_str(m));\nprint(to_str(n));\n',
+    "val_alias_chain3": 't = [[[1]]];\nu = t;\nt[0][0][0] = 5;\nprint(to_str(t));\nprint(to_str(u));\n',
+    "val_fn_pass": 'fn f(l) { l[0] = 9; return 0; }\na = [1, 2];\nf(a);\nprint(to_str(a));\n',
+    "val_fn_pass_nested": 'fn f(l) { l[0][0] = 9; return 0; }\na = [[1]];\nf(a);\nprint(to_str(a));\n',
+    "val_append_new": 'a = [1];\nb = append(a, 2);\nprint(to_str(a));\nprint(to_str(b));\n',
+    "val_rebind_isolate": 'a = [1];\nb = a;\na = [9];\nprint(to_str(a));\nprint(to_str(b));\n',
+    "val_loop_mutate_self": 'a = [1, 2, 3];\nfor (i = 0; i < len(a); i = i + 1) { a[i] = a[i] * 2; }\nprint(to_str(a));\n',
+    "val_lambda_mutate_capture": 'fn mk() {\n  l = [1];\n  f = fn() { l[0] = 9; return l[0]; };\n  print(to_str(f()));\n  return l;\n}\nprint(to_str(mk()));\n',
+    "val_two_alias_alternate": 'a = [1];\nb = a;\na[0] = 2;\nb[0] = 3;\nprint(to_str(a));\nprint(to_str(b));\n',
+    "val_str_alias": 's = "ab";\nt = s;\ns = s + "c";\nprint(s);\nprint(t);\n',
+    "val_elem_alias_write": 'a = [[1], [2]];\ne = a[1];\na[1][0] = 9;\nprint(to_str(e));\nprint(to_str(a));\n',
+    "val_alias_read_only": 'a = [1, 2, 3];\nb = a;\nprint(to_str(b[0] + b[2]));\nprint(to_str(len(b)));\n',
+    "val_deep_mixed": 'm = {"k": [1, 2]};\nv = 0;\nfor x in m { {k} = x; v = x; }\n{k2: lst} = v;\nlst[0] = 9;\nprint(to_str(m));\n',
+}
+
 GROUPS = {
     "defaults": DEFAULTS,
     "match": MATCH,
@@ -253,6 +275,7 @@ GROUPS = {
     "destruct": DESTRUCT,
     "overload": OVERLOAD,
     "alias": ALIAS,
+    "value": VALUE,
     "dotted": DOTTED,
     "async": ASYNC,
 }

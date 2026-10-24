@@ -240,7 +240,15 @@ impl Parser {
             Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr | Tok::TChar | Tok::TByte | Tok::TBytes | Tok::Readonly => {
                 self.parse_decl_c()
             }
-            Tok::Cow => self.parse_decl_cow(),
+            Tok::Cow => {
+                let (_, span) = self.next(); // cow
+                Err(self.err_at(
+                    &span,
+                    codes::SYNTAX,
+                    "`cow` declarations were removed; containers use value semantics with automatic write isolation",
+                    Some("declare normally instead, e.g. `x = [1, 2]` — semantics are unchanged for ordinary code"),
+                ))
+            }
             Tok::With => self.parse_with(),
             Tok::Type => self.parse_type_def(),
             Tok::New => self.parse_expr_stmt(),
@@ -396,77 +404,6 @@ impl Parser {
             init,
             span,
             readonly,
-            cow: false,
-        })
-    }
-
-    /// COW 容器声明：`cow x = [1, 2];` / `cow str x = "…";` / `cow readonly bytes x = b"…";`
-    /// list/dict 无类型关键字，类型由初始化表达式推断；str/bytes 可显式标注类型。
-    fn parse_decl_cow(&mut self) -> Result<Stmt, ZError> {
-        let (_, span) = self.next(); // cow
-        let readonly = if self.at(&Tok::Readonly) {
-            self.next();
-            true
-        } else {
-            false
-        };
-        // 类型标注可选：仅 str/bytes 有类型关键字，list/dict 只能推断
-        let (ty, name) = if matches!(self.peek(), Tok::TStr | Tok::TBytes) {
-            let (t, _) = self.next();
-            let ty = match t {
-                Tok::TStr => TyName::Str,
-                Tok::TBytes => TyName::Bytes,
-                _ => unreachable!(),
-            };
-            let (nt, ns) = self.next();
-            let name = match nt {
-                Tok::Ident(s) => s,
-                other => {
-                    return Err(self.err_at(
-                        &ns,
-                        codes::SYNTAX,
-                        format!("expected a variable name after type, found {}", other.describe()),
-                        Some("declaration form: `cow str x = \"…\"` or `cow x = [1, 2]`"),
-                    ))
-                }
-            };
-            (ty, name)
-        } else {
-            let (nt, ns) = self.next();
-            let name = match nt {
-                Tok::Ident(s) => s,
-                other => {
-                    return Err(self.err_at(
-                        &ns,
-                        codes::SYNTAX,
-                        format!("expected a variable name after `cow`, found {}", other.describe()),
-                        Some("declaration form: `cow x = [1, 2]` or `cow str x = \"…\"`"),
-                    ))
-                }
-            };
-            (TyName::Inferred, name)
-        };
-        let init = if self.at(&Tok::Assign) {
-            self.next();
-            Some(self.parse_expr()?)
-        } else {
-            None
-        };
-        if init.is_none() {
-            return Err(self.err_here(
-                codes::SYNTAX,
-                "cow declaration requires an initializer (the type is inferred from it)",
-                Some("e.g. `cow x = [1, 2]` or `cow str x = \"…\"`"),
-            ));
-        }
-        self.expect_semi()?;
-        Ok(Stmt::VarDecl {
-            name,
-            ty,
-            init,
-            span,
-            readonly,
-            cow: true,
         })
     }
 
@@ -491,13 +428,6 @@ impl Parser {
         } else {
             false
         };
-        // 类型位置 cow：x : cow str = "…"（与 `cow str x = "…";` 等价）
-        let cow = if self.at(&Tok::Cow) {
-            self.next();
-            true
-        } else {
-            false
-        };
         let ty = self.parse_type()?;
         let init = if self.at(&Tok::Assign) {
             self.next();
@@ -512,7 +442,6 @@ impl Parser {
             init,
             span,
             readonly,
-            cow,
         })
     }
 
@@ -607,7 +536,6 @@ impl Parser {
                     span: p_span,
                     default: None,
                     readonly: false,
-                    cow: false,
                 });
                 if self.at(&Tok::Comma) {
                     self.next();
@@ -1013,17 +941,12 @@ impl Parser {
         })
     }
 
-    /// 参数：name | name : type | type name | [readonly] 修饰（只读参数）| [cow] 修饰（COW 容器）
+    /// 参数：name | name : type | type name | [readonly] 修饰（只读参数）
     fn parse_param(&mut self) -> Result<Param, ZError> {
         let mut readonly = false;
-        let mut cow = false;
         let (tok, span) = if self.at(&Tok::Readonly) {
             self.next();
             readonly = true;
-            self.next()
-        } else if self.at(&Tok::Cow) {
-            self.next();
-            cow = true;
             self.next()
         } else {
             self.next()
@@ -1037,11 +960,6 @@ impl Parser {
                         self.next();
                         readonly = true;
                     }
-                    // x : cow str（cow 在类型前）
-                    if self.at(&Tok::Cow) {
-                        self.next();
-                        cow = true;
-                    }
                     Some(self.parse_type()?)
                 } else {
                     None
@@ -1053,7 +971,7 @@ impl Parser {
                 } else {
                     None
                 };
-                Ok(Param { name: s, ty, span, default, readonly, cow })
+                Ok(Param { name: s, ty, span, default, readonly })
             }
             Tok::TInt | Tok::TFloat | Tok::TBool | Tok::TStr | Tok::TChar | Tok::TByte | Tok::TBytes => {
                 let ty = match tok {
@@ -1091,7 +1009,6 @@ impl Parser {
                     span,
                     default,
                     readonly,
-                    cow,
                 })
             }
             other => Err(self.err_here(

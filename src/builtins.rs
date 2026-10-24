@@ -422,9 +422,6 @@ pub fn is_builtin(name: &str) -> bool {
 
 /// 调用内置函数。未知函数名由调用方保证不会到达（checker 已拦截）。
 pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
-    // COW 透明：容器实参在边界统一解包为普通值（独占零拷贝 / 共享深拷贝），
-    // 使全部 builtin 按内层 list/dict/str/bytes 统一处理，无需逐点适配 Cow 变体。
-    let args: Vec<Value> = args.into_iter().map(|a| a.unwrap_cow()).collect();
     match name {
         "print" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
@@ -435,10 +432,15 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             match v {
                 Value::Str(s) => Ok(Value::Int(s.len() as i64)),
-                Value::List(items) => Ok(Value::Int(items.len() as i64)),
+                Value::List(items) => Ok(Value::Int(items.read().unwrap().len() as i64)),
                 // 隐藏 `__struct__` 标记键不计入长度
                 Value::Dict(entries) => Ok(Value::Int(
-                    entries.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).count() as i64,
+                    entries
+                        .read()
+                        .unwrap()
+                        .iter()
+                        .filter(|(k, _)| !Value::is_hidden_struct_key(k))
+                        .count() as i64,
                 )),
                 Value::Bytes(b) => Ok(Value::Int(b.len() as i64)),
                 other => Err(err(
@@ -457,9 +459,9 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             match list {
                 // 列表是值类型：返回新列表，配合 `l = append(l, x)` 使用
                 Value::List(items) => {
-                    let mut new_items = items.clone();
+                    let mut new_items = items.read().unwrap().clone();
                     new_items.push(val.clone());
-                    Ok(Value::List(new_items))
+                    Ok(Value::mk_list(new_items))
                 }
                 other => Err(err(
                     codes::TYPE_MISMATCH,
@@ -472,19 +474,21 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             }
         }
         "clone" | "copy" => {
-            // 深度拷贝：递归复制集合（Value 的 Clone 对 List/Dict 即深拷贝），
-            // 后续对副本的 append/修改不影响原值。
+            // 深度拷贝：递归复制集合（引用模型下 Value::Clone 是句柄共享，
+            // 须走 deep_clone 保住「副本修改不影响原值」语义）。
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
-            Ok(v.clone())
+            Ok(v.deep_clone())
         }
         "contains" => {
             let list = args.get(0).ok_or_else(|| arg_err(name, 2, 0, span, file, src))?;
             let val = args.get(1).ok_or_else(|| arg_err(name, 2, 1, span, file, src))?;
             match list {
-                Value::List(items) => Ok(Value::Bool(items.iter().any(|i| values_eq(i, val)))),
+                Value::List(items) => Ok(Value::Bool(
+                    items.read().unwrap().iter().any(|i| values_eq(i, val)),
+                )),
                 Value::Str(s) => match val {
                     // 字符串包含：兼容 str_contains
-                    Value::Str(sub) => Ok(Value::Bool(s.contains(sub))),
+                    Value::Str(sub) => Ok(Value::Bool(s.contains(sub.as_str()))),
                     other => Err(err(
                         codes::TYPE_MISMATCH,
                         format!("`contains` on a string expects a string, got `{}`", other.type_name()),
@@ -509,7 +513,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let val = args.get(1).ok_or_else(|| arg_err(name, 2, 1, span, file, src))?;
             match list {
                 Value::List(items) => {
-                    for (i, item) in items.iter().enumerate() {
+                    for (i, item) in items.read().unwrap().iter().enumerate() {
                         if values_eq(item, val) {
                             return Ok(Value::Int(i as i64));
                         }
@@ -529,11 +533,13 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "keys" => {
             let d = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             match d {
-                Value::Dict(entries) => Ok(Value::List(
+                Value::Dict(entries) => Ok(Value::mk_list(
                     entries
+                        .read()
+                        .unwrap()
                         .iter()
                         .filter(|(k, _)| !Value::is_hidden_struct_key(k))
-                        .map(|(k, _)| Value::Str(k.clone()))
+                        .map(|(k, _)| Value::mk_str(k.clone()))
                         .collect(),
                 )),
                 other => Err(err(
@@ -549,8 +555,10 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "values" => {
             let d = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             match d {
-                Value::Dict(entries) => Ok(Value::List(
+                Value::Dict(entries) => Ok(Value::mk_list(
                     entries
+                        .read()
+                        .unwrap()
                         .iter()
                         .filter(|(k, _)| !Value::is_hidden_struct_key(k))
                         .map(|(_, v)| v.clone())
@@ -571,7 +579,12 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let k = as_str(&args[1], 1, name, span, file, src)?;
             match d {
                 Value::Dict(entries) => Ok(Value::Bool(
-                    entries.iter().filter(|(ek, _)| !Value::is_hidden_struct_key(ek)).any(|(ek, _)| ek == k),
+                    entries
+                        .read()
+                        .unwrap()
+                        .iter()
+                        .filter(|(ek, _)| !Value::is_hidden_struct_key(ek))
+                        .any(|(ek, _)| ek == k),
                 )),
                 other => Err(err(
                     codes::TYPE_MISMATCH,
@@ -585,7 +598,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         }
         "type_of" => {
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
-            Ok(Value::Str(v.type_name().to_string()))
+            Ok(Value::mk_str(v.type_name().to_string()))
         }
         "assert" => {
             // assert(条件[, 消息])：条件为 false 时抛 H700（测试框架用）
@@ -608,7 +621,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             } else {
                 ASSERT_FAIL.fetch_add(1, Ordering::Relaxed);
                 let msg = match args.get(1) {
-                    Some(Value::Str(s)) => s.clone(),
+                    Some(Value::Str(s)) => s.to_string(),
                     _ => "assertion failed".to_string(),
                 };
                 return Err(err(codes::ASSERT, msg, span, file, src, None::<&str>));
@@ -624,7 +637,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             if !values_eq(a, b) {
                 ASSERT_FAIL.fetch_add(1, Ordering::Relaxed);
                 let msg = match args.get(2) {
-                    Some(Value::Str(s)) => s.clone(),
+                    Some(Value::Str(s)) => s.to_string(),
                     _ => format!("assertion failed: {} != {}", a.display(), b.display()),
                 };
                 return Err(err(codes::ASSERT, msg, span, file, src, None::<&str>));
@@ -672,16 +685,16 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             // COW 透明：cow 容器按内层值转换
             match v.as_plain() {
                 Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Error(_) | Value::Ptr(_) => {
-                    Ok(Value::Str(v.display()))
+                    Ok(Value::mk_str(v.display()))
                 }
                 Value::Str(s) => Ok(Value::Str(s.clone())),
                 // char 转单字符字符串
-                Value::Char(c) => Ok(Value::Str(c.to_string())),
+                Value::Char(c) => Ok(Value::mk_str(c.to_string())),
                 // 字节/字节序列按编码转字符串：to_str(b, "utf-8"|"ascii"|"latin-1")，默认 utf-8
                 Value::Byte(_) | Value::Bytes(_) => {
                     let bytes: Vec<u8> = match v {
                         Value::Byte(b) => vec![*b],
-                        Value::Bytes(b) => b.clone(),
+                        Value::Bytes(b) => b.as_ref().clone(),
                         _ => unreachable!(),
                     };
                     let enc = match args.get(1) {
@@ -699,7 +712,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                         None => "utf-8",
                     };
                     match enc {
-                        "utf-8" => String::from_utf8(bytes).map(Value::Str).map_err(|_| {
+                        "utf-8" => String::from_utf8(bytes).map(Value::mk_str).map_err(|_| {
                             err(
                                 codes::TYPE_MISMATCH,
                                 "cannot decode bytes as `utf-8` (invalid UTF-8)",
@@ -720,10 +733,10 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                                     Some("use `\"utf-8\"` or `\"latin-1\"` for non-ASCII bytes"),
                                 ))
                             } else {
-                                Ok(Value::Str(bytes.iter().map(|b| *b as char).collect()))
+                                Ok(Value::mk_str(bytes.iter().map(|b| *b as char).collect::<String>()))
                             }
                         }
-                        "latin-1" => Ok(Value::Str(bytes.iter().map(|b| char::from(*b).to_string()).collect())),
+                        "latin-1" => Ok(Value::mk_str(bytes.iter().map(|b| char::from(*b).to_string()).collect::<String>())),
                         other => Err(err(
                             codes::TYPE_MISMATCH,
                             format!("unknown encoding `{}`", other),
@@ -735,9 +748,8 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                     }
                 }
                 Value::List(_) | Value::Dict(_) | Value::Lambda(_) | Value::Enum(_)
-                | Value::Future(_) | Value::TypeInst(_) => Ok(Value::Str(v.display())),
-                Value::Null => Ok(Value::Str("null".to_string())),
-                Value::Cow(_) => unreachable!("as_plain strips COW"),
+                | Value::Future(_) | Value::TypeInst(_) => Ok(Value::mk_str(v.display())),
+                Value::Null => Ok(Value::mk_str("null".to_string())),
             }
         }
         "to_int" => {
@@ -942,7 +954,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                         None => "utf-8",
                     };
                     match enc {
-                        "utf-8" => Ok(Value::Bytes(s.as_bytes().to_vec())),
+                        "utf-8" => Ok(Value::mk_bytes(s.as_bytes().to_vec())),
                         "ascii" => {
                             if s.bytes().any(|b| b >= 0x80) {
                                 Err(err(
@@ -954,7 +966,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                                     Some("use `\"utf-8\"` or `\"latin-1\"` for non-ASCII"),
                                 ))
                             } else {
-                                Ok(Value::Bytes(s.as_bytes().to_vec()))
+                                Ok(Value::mk_bytes(s.as_bytes().to_vec()))
                             }
                         }
                         "latin-1" => {
@@ -972,7 +984,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                                 }
                                 out.push(c as u32 as u8);
                             }
-                            Ok(Value::Bytes(out))
+                            Ok(Value::mk_bytes(out))
                         }
                         other => Err(err(
                             codes::TYPE_MISMATCH,
@@ -985,6 +997,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                     }
                 }
                 Value::List(items) => {
+                    let items = items.read().unwrap();
                     let mut out = Vec::new();
                     for (i, it) in items.iter().enumerate() {
                         match it {
@@ -1018,7 +1031,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                             }
                         }
                     }
-                    Ok(Value::Bytes(out))
+                    Ok(Value::mk_bytes(out))
                 }
                 other => Err(err(
                     codes::TYPE_MISMATCH,
@@ -1036,9 +1049,9 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             match v {
                 Value::Bytes(b) => {
                     let s: String = b.iter().map(|x| format!("{:02x}", x)).collect();
-                    Ok(Value::Str(s))
+                    Ok(Value::mk_str(s))
                 }
-                Value::Byte(b) => Ok(Value::Str(format!("{:02x}", b))),
+                Value::Byte(b) => Ok(Value::mk_str(format!("{:02x}", b))),
                 other => Err(err(
                     codes::TYPE_MISMATCH,
                     format!("`hex` expects a `bytes` or `byte`, got `{}`", other.type_name()),
@@ -1083,7 +1096,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                         })?;
                         out.push(b);
                     }
-                    Ok(Value::Bytes(out))
+                    Ok(Value::mk_bytes(out))
                 }
                 other => Err(err(
                     codes::TYPE_MISMATCH,
@@ -1163,7 +1176,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                     // 去掉行尾换行（兼容 \n 与 \r\n）
                     let text = line.trim_end_matches(['\r', '\n']).to_string();
                     match name {
-                        "input" => Ok(Value::Str(text)),
+                        "input" => Ok(Value::mk_str(text)),
                         "read_int" => text.trim().parse::<i64>().map(Value::Int).map_err(|_| {
                             err(
                                 codes::STR_TO_INT,
@@ -1198,7 +1211,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         }
         "read_file" => {
             let p = as_str(&args[0], 0, name, span, file, src)?;
-            std::fs::read_to_string(p).map(Value::Str).map_err(|e| {
+            std::fs::read_to_string(p).map(Value::mk_str).map_err(|e| {
                 // 细分文件错误：不存在 / 权限不足 / 被占用锁定 / 其他
                 let (code, hint): (&'static str, &'static str) = match e.kind() {
                     std::io::ErrorKind::NotFound => (codes::FILE_NOT_FOUND, "the file does not exist"),
@@ -1251,7 +1264,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             match std::fs::read(p) {
                 // 返回真正的 bytes 值（与 read_file 返回 str 对称）；
                 // 旧形态 list[int] 见 CHANGELOG（破坏性变更）
-                Ok(bytes) => Ok(Value::Bytes(bytes)),
+                Ok(bytes) => Ok(Value::mk_bytes(bytes)),
                 Err(e) => {
                     // 细分文件错误：不存在 / 权限不足 / 被占用锁定 / 其他
                     let (code, hint): (&'static str, &'static str) = match e.kind() {
@@ -1278,8 +1291,9 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let v = args.get(1).ok_or_else(|| arg_err(name, 2, 1, span, file, src))?;
             // 双形态：bytes 值直接写；list[int 0-255] 逐元素校验后写（read_bytes 的逆操作）
             let bytes = match v {
-                Value::Bytes(b) => b.clone(),
+                Value::Bytes(b) => b.as_ref().clone(),
                 Value::List(items) => {
+                    let items = items.read().unwrap();
                     let mut out = Vec::with_capacity(items.len());
                     for (i, item) in items.iter().enumerate() {
                         match item {
@@ -1399,11 +1413,11 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let s = as_str(&args[0], 0, name, span, file, src)?;
             let old = as_str(&args[1], 1, name, span, file, src)?;
             let new = as_str(&args[2], 2, name, span, file, src)?;
-            Ok(Value::Str(s.replace(old, new)))
+            Ok(Value::mk_str(s.replace(old, new)))
         }
         "str_trim" => {
             let s = as_str(&args[0], 0, name, span, file, src)?;
-            Ok(Value::Str(s.trim().to_string()))
+            Ok(Value::mk_str(s.trim().to_string()))
         }
         "time.now" => {
             let secs = SystemTime::now()
@@ -1430,7 +1444,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "time.format" => {
             let ts = as_int(&args[0], 0, name, span, file, src)?;
             let fmt = as_str(&args[1], 1, name, span, file, src)?;
-            Ok(Value::Str(format_timestamp(ts, fmt)))
+            Ok(Value::mk_str(format_timestamp(ts, fmt)))
         }
         "time.parse" => {
             let s = as_str(&args[0], 0, name, span, file, src)?;
@@ -1487,17 +1501,17 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "random.float" => Ok(Value::Float(random_float())),
         "http_get" => {
             let url = as_str(&args[0], 0, name, span, file, src)?;
-            http_request(url, "GET", None, span, file, src).map(Value::Str)
+            http_request(url, "GET", None, span, file, src).map(Value::mk_str)
         }
         "http_post" => {
             let url = as_str(&args[0], 0, name, span, file, src)?;
             let body = as_str(&args[1], 1, name, span, file, src)?;
-            http_request(url, "POST", Some(body), span, file, src).map(Value::Str)
+            http_request(url, "POST", Some(body), span, file, src).map(Value::mk_str)
         }
         "http_get_bytes" => {
             // 二进制响应体（图片/PDF/zip 等）返回真正的 bytes，不经 UTF-8 边界
             let url = as_str(&args[0], 0, name, span, file, src)?;
-            http_get_bytes(url, span, file, src).map(Value::Bytes)
+            http_get_bytes(url, span, file, src).map(Value::mk_bytes)
         }
         "http_post_bytes" => {
             let url = as_str(&args[0], 0, name, span, file, src)?;
@@ -1506,22 +1520,24 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             if head.to_lowercase().contains("transfer-encoding: chunked") {
                 body_bytes = decode_chunked_bytes(&body_bytes);
             }
-            Ok(Value::Bytes(body_bytes))
+            Ok(Value::mk_bytes(body_bytes))
         }
         "http.request" => {
             // 通用 HTTP 请求：http.request(url, {method?, headers?, body?, timeout?})
             let url = as_str(&args[0], 0, name, span, file, src)?;
             let opts = &args[1];
-            let mut method = "GET";
+            let mut method = "GET".to_string();
             let mut body: Option<String> = None;
             let mut headers: Vec<(String, String)> = Vec::new();
             let mut timeout: u64 = 15;
             let mut binary = false;
             match opts {
                 Value::Dict(entries) => {
-                    for (k, v) in entries {
+                    // 快照遍历（选项 dict 只读）
+                    let entries = entries.read().unwrap().clone();
+                    for (k, v) in &entries {
                         match k.as_str() {
-                            "method" => method = as_str(v, 0, name, span, file, src)?,
+                            "method" => method = as_str(v, 0, name, span, file, src)?.to_string(),
                             "body" => body = Some(as_str(v, 0, name, span, file, src)?.to_string()),
                             "binary" => match v {
                                 Value::Bool(b) => binary = *b,
@@ -1538,7 +1554,8 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                             },
                             "headers" => {
                                 if let Value::Dict(hdrs) = v {
-                                    for (hk, hv) in hdrs {
+                                    let hdrs = hdrs.read().unwrap();
+                                    for (hk, hv) in hdrs.iter() {
                                         let hv_s = as_str(hv, 0, name, span, file, src)?;
                                         headers.push((hk.clone(), hv_s.to_string()));
                                     }
@@ -1585,37 +1602,40 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 }
             }
             let header_refs: Vec<(&str, &str)> = headers.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
-            let (head, body_bytes) = http_fetch_opts(url, method, body.as_deref(), &header_refs, timeout, span, file, src)?;
+            let (head, body_bytes) = http_fetch_opts(url, &method, body.as_deref(), &header_refs, timeout, span, file, src)?;
             let chunked = head.to_lowercase().contains("transfer-encoding: chunked");
             if binary {
                 // 二进制响应体：返回真正的 bytes，不经 UTF-8 边界
                 let out = if chunked { decode_chunked_bytes(&body_bytes) } else { body_bytes };
-                Ok(Value::Bytes(out))
+                Ok(Value::mk_bytes(out))
             } else {
                 let mut text = String::from_utf8_lossy(&body_bytes).into_owned();
                 if chunked {
                     text = decode_chunked(&text);
                 }
-                Ok(Value::Str(text))
+                Ok(Value::mk_str(text))
             }
         }
         "http.sse_open" => {
             // 打开 SSE 长连接：http.sse_open(url, {method?, headers?, body?, timeout?}) -> int 句柄
             let url = as_str(&args[0], 0, name, span, file, src)?;
             let opts = &args[1];
-            let mut method = "GET";
+            let mut method = "GET".to_string();
             let mut body: Option<String> = None;
             let mut headers: Vec<(String, String)> = Vec::new();
             let mut timeout: u64 = 60;
             match opts {
                 Value::Dict(entries) => {
-                    for (k, v) in entries {
+                    // 快照遍历（选项 dict 只读）
+                    let entries = entries.read().unwrap().clone();
+                    for (k, v) in &entries {
                         match k.as_str() {
-                            "method" => method = as_str(v, 0, name, span, file, src)?,
+                            "method" => method = as_str(v, 0, name, span, file, src)?.to_string(),
                             "body" => body = Some(as_str(v, 0, name, span, file, src)?.to_string()),
                             "headers" => {
                                 if let Value::Dict(hdrs) = v {
-                                    for (hk, hv) in hdrs {
+                                    let hdrs = hdrs.read().unwrap();
+                                    for (hk, hv) in hdrs.iter() {
                                         let hv_s = as_str(hv, 0, name, span, file, src)?;
                                         headers.push((hk.clone(), hv_s.to_string()));
                                     }
@@ -1662,7 +1682,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 }
             }
             let header_refs: Vec<(&str, &str)> = headers.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
-            let (stream, leftover, chunked) = http_sse_connect(url, method, body.as_deref(), &header_refs, timeout, span, file, src)?;
+            let (stream, leftover, chunked) = http_sse_connect(url, &method, body.as_deref(), &header_refs, timeout, span, file, src)?;
             let id = SSE_NEXT_ID.fetch_add(1, Ordering::Relaxed);
             SSE_CONNS.lock().unwrap().insert(
                 id,
@@ -1713,8 +1733,8 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 }
             };
             match sse_read_event(conn, span, file, src) {
-                Ok(Some(data)) => Ok(Value::Str(data)),
-                Ok(None) => Ok(Value::Str(String::new())),
+                Ok(Some(data)) => Ok(Value::mk_str(data)),
+                Ok(None) => Ok(Value::mk_str(String::new())),
                 Err(e) => Err(e),
             }
         }
@@ -1743,14 +1763,14 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let s = as_str(&args[0], 0, name, span, file, src)?;
             json_to_value(s, span, file, src)
         }
-        "json_stringify" => value_to_json(&args[0], span, file, src).map(Value::Str),
+        "json_stringify" => value_to_json(&args[0], span, file, src).map(Value::mk_str),
         "sys.run" => {
             let cmd = as_str(&args[0], 0, name, span, file, src)?;
-            run_shell(cmd, span, file, src).map(Value::Str)
+            run_shell(cmd, span, file, src).map(Value::mk_str)
         }
         "sys.get_env" => {
             let k = as_str(&args[0], 0, name, span, file, src)?;
-            Ok(Value::Str(std::env::var(k).unwrap_or_default()))
+            Ok(Value::mk_str(std::env::var(k).unwrap_or_default()))
         }
         // Windows API 封装的 sys.* 函数（sysmod 模块实现）
         "sys.msgbox" | "sys.beep" | "sys.clipboard_set" | "sys.get_screen_size" | "sys.reg_read" | "sys.reg_write" => {
@@ -1846,7 +1866,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 parts.push(s);
             }
             let p: std::path::PathBuf = parts.iter().collect();
-            Ok(Value::Str(p.to_string_lossy().to_string()))
+            Ok(Value::mk_str(p.to_string_lossy().to_string()))
         }
         "path.dirname" => {
             let p = as_str(&args[0], 0, name, span, file, src)?;
@@ -1856,7 +1876,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 .filter(|d| !d.as_os_str().is_empty())
                 .map(|d| d.to_string_lossy().to_string())
                 .unwrap_or_else(|| ".".to_string());
-            Ok(Value::Str(parent))
+            Ok(Value::mk_str(parent))
         }
         "path.basename" => {
             let p = as_str(&args[0], 0, name, span, file, src)?;
@@ -1864,7 +1884,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "".to_string());
-            Ok(Value::Str(name))
+            Ok(Value::mk_str(name))
         }
         // ---------- args ----------
         "args.get" => {
@@ -1909,7 +1929,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                                     Some("use `true`/`false` or `1`/`0`"),
                                 )),
                             },
-                            "str" => Ok(Value::Str(v)),
+                            "str" => Ok(Value::mk_str(v)),
                             other => Err(err(
                                 codes::TYPE_MISMATCH,
                                 format!("unknown type `{}` for `args.get`", other),
@@ -1920,7 +1940,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                             )),
                         }
                     } else {
-                        Ok(Value::Str(v))
+                        Ok(Value::mk_str(v))
                     }
                 }
                 // 键不存在：有默认值参数则返回默认值，否则返回 null
@@ -1941,7 +1961,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         // ---------- env ----------
         "env.get" => {
             let key = as_str(&args[0], 0, name, span, file, src)?;
-            Ok(Value::Str(std::env::var(key).unwrap_or_default()))
+            Ok(Value::mk_str(std::env::var(key).unwrap_or_default()))
         }
         "env.set" => {
             let key = as_str(&args[0], 0, name, span, file, src)?;
@@ -1977,7 +1997,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
         "db.get" => {
             let key = as_str(&args[0], 0, name, span, file, src)?;
             let store = KV_STORE.lock().unwrap();
-            Ok(store.get(key).cloned().map(Value::Str).unwrap_or(Value::Null))
+            Ok(store.get(key).cloned().map(Value::mk_str).unwrap_or(Value::Null))
         }
         // ---------- regex ----------
         "regex.match" => {
@@ -1995,25 +2015,25 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
             let re = regex::Regex::new(pat).map_err(|e| {
                 err(codes::SYNTAX, format!("invalid regex `{}`: {}", pat, e), span, file, src, None::<&str>)
             })?;
-            Ok(Value::Str(re.replace_all(text, repl).to_string()))
+            Ok(Value::mk_str(re.replace_all(text, repl).to_string()))
         }
         // ---------- crypto ----------
         "crypto.md5" => {
             let s = as_str(&args[0], 0, name, span, file, src)?;
             let hash = md5::Md5::digest(s.as_bytes());
-            Ok(Value::Str(format!("{:x}", hash)))
+            Ok(Value::mk_str(format!("{:x}", hash)))
         }
         "crypto.sha1" => {
             let s = as_str(&args[0], 0, name, span, file, src)?;
             let hash = sha1::Sha1::digest(s.as_bytes());
-            Ok(Value::Str(format!("{:x}", hash)))
+            Ok(Value::mk_str(format!("{:x}", hash)))
         }
         "crypto.sha256" => {
             let s = as_str(&args[0], 0, name, span, file, src)?;
             let mut hasher = sha2::Sha256::new();
             hasher.update(s.as_bytes());
             let hash = hasher.finalize();
-            Ok(Value::Str(format!("{:x}", hash)))
+            Ok(Value::mk_str(format!("{:x}", hash)))
         }
         "crypto.hmac_sha256" => {
             // HMAC-SHA256(密钥, 消息)：密钥与消息均为字符串
@@ -2024,14 +2044,14 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 err(codes::TYPE_MISMATCH, "invalid HMAC key", span, file, src, None::<&str>)
             })?;
             mac.update(msg.as_bytes());
-            Ok(Value::Str(format!("{:x}", mac.finalize().into_bytes())))
+            Ok(Value::mk_str(format!("{:x}", mac.finalize().into_bytes())))
         }
         "crypto.base64_encode" => {
             // 双形态：str 按 UTF-8 编码；bytes 原样编码（二进制安全）
             let v = args.get(0).ok_or_else(|| arg_err(name, 1, 0, span, file, src))?;
             let data: Vec<u8> = match v {
                 Value::Str(s) => s.as_bytes().to_vec(),
-                Value::Bytes(b) => b.clone(),
+                Value::Bytes(b) => b.as_ref().clone(),
                 other => {
                     return Err(err(
                         codes::TYPE_MISMATCH,
@@ -2044,14 +2064,14 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 }
             };
             use base64::Engine;
-            Ok(Value::Str(base64::engine::general_purpose::STANDARD.encode(data)))
+            Ok(Value::mk_str(base64::engine::general_purpose::STANDARD.encode(data)))
         }
         "crypto.base64_decode" => {
             let s = as_str(&args[0], 0, name, span, file, src)?;
             use base64::Engine;
             match base64::engine::general_purpose::STANDARD.decode(s.trim()) {
                 // 返回真正的 bytes（原 str 形态经 from_utf8_lossy 会破坏非 UTF-8 二进制内容）
-                Ok(bytes) => Ok(Value::Bytes(bytes)),
+                Ok(bytes) => Ok(Value::mk_bytes(bytes)),
                 Err(e) => Err(err(
                     codes::TYPE_MISMATCH,
                     format!("invalid base64 input: {}", e),
@@ -2076,7 +2096,7 @@ pub fn call(name: &str, args: Vec<Value>, span: Span, file: &str, src: &str) -> 
                 "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
                 b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
             );
-            Ok(Value::Str(s))
+            Ok(Value::mk_str(s))
         }
         _ => Err(err(
             codes::UNDEFINED,
@@ -2107,7 +2127,7 @@ fn dict_values_eq(x: &[(String, Value)], y: &[(String, Value)]) -> bool {
         d.iter()
             .find(|(k, _)| Value::is_hidden_struct_key(k))
             .and_then(|(_, v)| match v {
-                Value::Str(s) => Some(s.clone()),
+                Value::Str(s) => Some(s.to_string()),
                 _ => None,
             })
     };
@@ -2136,9 +2156,13 @@ fn values_eq(a: &Value, b: &Value) -> bool {
         (Value::Str(x), Value::Str(y)) => x == y,
         (Value::Null, Value::Null) => true,
         (Value::List(x), Value::List(y)) => {
+            let (x, y) = (x.read().unwrap(), y.read().unwrap());
             x.len() == y.len() && x.iter().zip(y.iter()).all(|(i, j)| values_eq(i, j))
         }
-        (Value::Dict(x), Value::Dict(y)) => dict_values_eq(x, y),
+        (Value::Dict(x), Value::Dict(y)) => {
+            let (x, y) = (x.read().unwrap(), y.read().unwrap());
+            dict_values_eq(&x, &y)
+        }
         _ => false,
     }
 }
@@ -3401,34 +3425,32 @@ fn json_to_value(s: &str, span: Span, file: &str, src: &str) -> Result<Value, ZE
                 Err(err(codes::TYPE_MISMATCH, "invalid JSON number", span, file, src, None::<&str>))
             }
         }
-        serde_json::Value::String(s) => Ok(Value::Str(s)),
+        serde_json::Value::String(s) => Ok(Value::mk_str(s)),
         serde_json::Value::Array(items) => {
             let mut out = Vec::with_capacity(items.len());
             for it in items {
                 out.push(json_to_value(&it.to_string(), span, file, src)?);
             }
-            Ok(Value::List(out))
+            Ok(Value::mk_list(out))
         }
         serde_json::Value::Object(map) => {
             let mut out = Vec::with_capacity(map.len());
             for (k, v) in map {
                 out.push((k, json_to_value(&v.to_string(), span, file, src)?));
             }
-            Ok(Value::Dict(out))
+            Ok(Value::mk_dict(out))
         }
     }
 }
 
 fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String, ZError> {
-    // COW 透明：cow 容器按内层值序列化
-    let v = v.as_plain();
     let jv = match v {
         Value::Int(i) => serde_json::Value::Number((*i).into()),
         Value::Float(f) => serde_json::Number::from_f64(*f)
             .map(serde_json::Value::Number)
             .ok_or_else(|| err(codes::TYPE_MISMATCH, "cannot serialize NaN/infinity to JSON", span, file, src, None::<&str>))?,
         Value::Bool(b) => serde_json::Value::Bool(*b),
-        Value::Str(s) => serde_json::Value::String(s.clone()),
+        Value::Str(s) => serde_json::Value::String(s.to_string()),
         // char 序列化为单字符字符串（与 to_str 一致）
         Value::Char(c) => serde_json::Value::String(c.to_string()),
         // 枚举值序列化为显示字符串（Color.Red / Shape.Circle(1.5)），与 to_str 一致
@@ -3436,8 +3458,9 @@ fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String,
         // future 不可序列化：显示为字符串
         Value::Future(_) => serde_json::Value::String("future".to_string()),
         Value::List(items) => {
+            let items = items.read().unwrap();
             let mut arr = Vec::with_capacity(items.len());
-            for it in items {
+            for it in items.iter() {
                 arr.push(value_to_json(it, span, file, src).and_then(|s| {
                     serde_json::from_str(&s).map_err(|e| {
                         err(codes::TYPE_MISMATCH, format!("cannot serialize list item: {}", e), span, file, src, None::<&str>)
@@ -3449,7 +3472,7 @@ fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String,
         Value::Dict(entries) => {
             let mut map = serde_json::Map::new();
             // 隐藏 `__struct__` 标记键不序列化
-            for (k, v) in entries.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)) {
+            for (k, v) in entries.read().unwrap().iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)) {
                 let jv: serde_json::Value = value_to_json(v, span, file, src).and_then(|s| {
                     serde_json::from_str(&s).map_err(|e| {
                         err(codes::TYPE_MISMATCH, format!("cannot serialize dict value: {}", e), span, file, src, None::<&str>)
@@ -3510,7 +3533,6 @@ fn value_to_json(v: &Value, span: Span, file: &str, src: &str) -> Result<String,
                 Some("JSON supports int/float/bool/str/char/list/dict; build a dict of the fields to serialize"),
             ));
         }
-        Value::Cow(_) => unreachable!("as_plain strips COW"),
     };
     Ok(jv.to_string())
 }

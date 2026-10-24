@@ -204,13 +204,16 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             let mut user: Option<&str> = None;
             let mut password: Option<&str> = None;
             let mut starttls = true;
-            for (k, v) in opts {
+            // 快照遍历（选项 dict 只读）
+            let opts_snap = opts.read().unwrap().clone();
+            for (k, v) in &opts_snap {
                 match k.as_str() {
                     "from" => from = as_str(v, 0, span, file, src)?,
                     "to" => match v {
-                        Value::Str(s) => to.push(s.clone()),
+                        Value::Str(s) => to.push(s.to_string()),
                         Value::List(items) => {
-                            for it in items {
+                            let items = items.read().unwrap();
+                            for it in items.iter() {
                                 to.push(as_str(it, 0, span, file, src)?.to_string());
                             }
                         }
@@ -429,8 +432,8 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                 match frame {
                     Ok((opcode, payload)) => {
                         match opcode {
-                            0x1 => out.push(Value::Str(String::from_utf8_lossy(&payload).into_owned())),
-                            0x2 => out.push(Value::Bytes(payload)), // 二进制帧：不再静默丢弃
+                            0x1 => out.push(Value::mk_str(String::from_utf8_lossy(&payload).into_owned())),
+                            0x2 => out.push(Value::mk_bytes(payload)), // 二进制帧：不再静默丢弃
                             0x8 => break,                           // close
                             0x9 => {
                                 // ping -> pong
@@ -442,7 +445,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                     Err(_) => break, // 超时或连接关闭
                 }
             }
-            Ok(Value::List(out))
+            Ok(Value::mk_list(out))
         }
         _ => Err(zerr(
             codes::NOT_IMPLEMENTED,

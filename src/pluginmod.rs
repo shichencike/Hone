@@ -84,12 +84,12 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             let map = PLUGINS.lock().unwrap();
             let mut out = Vec::with_capacity(map.len());
             for (name, path) in map.iter() {
-                out.push(Value::Dict(vec![
-                    ("name".to_string(), Value::Str(name.clone())),
-                    ("path".to_string(), Value::Str(path.clone())),
+                out.push(Value::mk_dict(vec![
+                    ("name".to_string(), Value::mk_str(name.clone())),
+                    ("path".to_string(), Value::mk_str(path.clone())),
                 ]));
             }
-            Ok(Value::List(out))
+            Ok(Value::mk_list(out))
         }
         "plugin.unload" => {
             let alias = as_str(&args[0], 0, span, file, src)?;

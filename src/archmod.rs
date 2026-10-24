@@ -43,7 +43,7 @@ fn as_str<'a>(v: &'a Value, arg: usize, span: Span, file: &str, src: &str) -> Re
 fn as_bin(v: &Value, arg: usize, span: Span, file: &str, src: &str) -> Result<Vec<u8>, ZError> {
     match v {
         Value::Str(s) => Ok(s.as_bytes().to_vec()),
-        Value::Bytes(b) => Ok(b.clone()),
+        Value::Bytes(b) => Ok(b.as_ref().clone()),
         other => Err(zerr(
             codes::TYPE_MISMATCH,
             format!("`archive.*` expects a string or bytes for argument {}, got `{}`", arg + 1, other.type_name()),
@@ -102,8 +102,9 @@ fn open(path: &str, span: Span, file: &str, src: &str) -> Result<File, ZError> {
 fn entries_from_dict(v: &Value, span: Span, file: &str, src: &str) -> Result<Vec<(String, Vec<u8>)>, ZError> {
     match v {
         Value::Dict(entries) => {
+            let entries = entries.read().unwrap();
             let mut out = Vec::with_capacity(entries.len());
-            for (k, val) in entries {
+            for (k, val) in entries.iter() {
                 let content = match val {
                     Value::Str(s) => s.as_bytes().to_vec(),
                     other => {
@@ -142,8 +143,8 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             let z = zip::ZipArchive::new(f).map_err(|e| {
                 zerr(codes::SYSCALL, format!("invalid zip `{}`: {}", path, e), span, file, src, None::<&str>)
             })?;
-            let names: Vec<Value> = z.file_names().map(|n| Value::Str(n.to_string())).collect();
-            Ok(Value::List(names))
+            let names: Vec<Value> = z.file_names().map(|n| Value::mk_str(n.to_string())).collect();
+            Ok(Value::mk_list(names))
         }
         "archive.zip_read" => {
             let path = as_str(&args[0], 0, span, file, src)?;
@@ -167,7 +168,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             zf.read_to_end(&mut buf).map_err(|e| {
                 zerr(codes::SYSCALL, format!("cannot read zip entry `{}`: {}", entry, e), span, file, src, None::<&str>)
             })?;
-            Ok(Value::Bytes(buf))
+            Ok(Value::mk_bytes(buf))
         }
         "archive.zip_extract" => {
             let path = as_str(&args[0], 0, span, file, src)?;
@@ -234,10 +235,10 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                     zerr(codes::SYSCALL, format!("cannot read tar entry: {}", err), span, file, src, None::<&str>)
                 })?;
                 if let Ok(n) = e.path().map(|p| p.to_string_lossy().into_owned()) {
-                    names.push(Value::Str(n));
+                    names.push(Value::mk_str(n));
                 }
             }
-            Ok(Value::List(names))
+            Ok(Value::mk_list(names))
         }
         "archive.tgz_read" => {
             let path = as_str(&args[0], 0, span, file, src)?;
@@ -263,7 +264,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                 }
             }
             match found {
-                Some(s) => Ok(Value::Str(s)),
+                Some(s) => Ok(Value::mk_str(s)),
                 None => Err(zerr(
                     codes::NOT_FOUND,
                     format!("tar.gz entry `{}` not found", entry),
@@ -299,7 +300,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                 }
             }
             match found {
-                Some(b) => Ok(Value::Bytes(b)),
+                Some(b) => Ok(Value::mk_bytes(b)),
                 None => Err(zerr(
                     codes::NOT_FOUND,
                     format!("tar.gz entry `{}` not found", entry),
@@ -367,40 +368,40 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
         "zlib.compress" => {
             let data = as_bin(&args[0], 0, span, file, src)?;
             let bytes = zlib_compress(&data, span, file, src)?;
-            Ok(Value::Bytes(bytes))
+            Ok(Value::mk_bytes(bytes))
         }
         "zlib.decompress" => {
             // 输入为 bytes（zlib.compress 的输出）；str 输入按 base64 兼容（旧版压缩结果形态）
             let raw = match &args[0] {
-                Value::Bytes(b) => b.clone(),
+                Value::Bytes(b) => b.as_ref().clone(),
                 Value::Str(s) => {
                     use base64::Engine;
                     base64::engine::general_purpose::STANDARD
-                        .decode(s)
+                        .decode(s.as_bytes())
                         .map_err(|e| zerr(codes::TYPE_MISMATCH, format!("invalid base64: {}", e), span, file, src, Some("`zlib.compress` 的输出可直接传给 `zlib.decompress`")))?}
                 other => return Err(zerr(codes::TYPE_MISMATCH, format!("`zlib.decompress` expects bytes, got `{}`", other.type_name()), span, file, src, None::<&str>)),
             };
             let out = zlib_decompress(&raw, span, file, src)?;
-            Ok(Value::Bytes(out))
+            Ok(Value::mk_bytes(out))
         }
         "zlib.gzip" => {
             let data = as_bin(&args[0], 0, span, file, src)?;
             let bytes = gzip_compress(&data, span, file, src)?;
-            Ok(Value::Bytes(bytes))
+            Ok(Value::mk_bytes(bytes))
         }
         "zlib.gunzip" => {
             // 输入为 bytes（zlib.gzip 的输出）；str 输入按 base64 兼容（旧版压缩结果形态）
             let raw = match &args[0] {
-                Value::Bytes(b) => b.clone(),
+                Value::Bytes(b) => b.as_ref().clone(),
                 Value::Str(s) => {
                     use base64::Engine;
                     base64::engine::general_purpose::STANDARD
-                        .decode(s)
+                        .decode(s.as_bytes())
                         .map_err(|e| zerr(codes::TYPE_MISMATCH, format!("invalid base64: {}", e), span, file, src, Some("`zlib.gzip` 的输出可直接传给 `zlib.gunzip`")))?}
                 other => return Err(zerr(codes::TYPE_MISMATCH, format!("`zlib.gunzip` expects bytes, got `{}`", other.type_name()), span, file, src, None::<&str>)),
             };
             let out = gzip_decompress(&raw, span, file, src)?;
-            Ok(Value::Bytes(out))
+            Ok(Value::mk_bytes(out))
         }
         _ => Err(zerr(
             codes::NOT_IMPLEMENTED,

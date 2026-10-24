@@ -34,7 +34,7 @@ const KEYWORDS: &[&str] = &[
     "break", "continue", "try", "catch", "throw", "match", "struct", "class", "enum",
     "async", "await",
     "int", "float", "bool", "str", "load", "lazy", "use", "import", "alias", "as", "from",
-    "tmp", "readonly", "cow",
+    "tmp", "readonly",
 ];
 
 const BIN_OPS: &[&str] = &[

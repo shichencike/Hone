@@ -128,21 +128,6 @@ Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.8.0）
   · C 风格：readonly int x = 5;    类型位置写法：x : readonly int = 5;（两者等价）
   · 初始化后禁止再赋值（运行时拦截，违反报 H001）
   · 只读参数：fn f(readonly int y) { ... }（函数体内对 y 的赋值同样被拦截）
-· 写时复制容器（cow，copy-on-write）：
-  · 声明形式（必须带初始化；list/dict 无类型关键字，类型由初始化式推断；str/bytes 可显式标注）：
-    cow x = [1, 2];    cow str s = "hi";    cow b = {a: 1};
-    类型位置等价写法：x : cow str = "hi";    只读可叠加：cow readonly bytes b = b"…";
-  · 语义：cow 值携带只读共享缓冲（Arc 引用计数）；cow→cow 赋值共享同一缓冲（O(1)，无拷贝）；
-    cow→普通赋值在边界自动深拷贝（普通变量永不共享 cow 缓冲）
-  · 写时复制：对 cow 容器的**原地赋值**（索引赋值 a[i] = x、字段赋值 a.k = x）触发写路径——
-    独占（引用计数 1）直接原地写；共享则先深拷贝出私有缓冲再写，其他共享者不受影响
-  · str/bytes 不可变，仅零拷贝共享（无写路径）；list/dict 可变，写前检查唯一性
-  · += 等复合赋值不触发写时复制（按既有值语义处理）
-  · 透明性：type_of(cow 值) 报内层类型（"list"/"dict"/"str"/"bytes"）；len、==/!=、for-in、
-    推导式、切片、to_str/to_json/内置函数均按内层值工作，报错文案与普通值一致
-  · 回收：无追踪式垃圾回收；Arc 引用计数归零自动释放（含独占/共享路径）
-  · cow 形参：fn f(cow z) { ... }（实参为 cow 值时共享绑定；实参为普通值时按值语义隔离）
-  · 仅解释器支持：VM（--vm）/ DLL（build --dll）遇 cow 声明或形参报 H999
 
 1.4 控制流
 
@@ -1492,7 +1477,6 @@ print(m.cos(0.0));   // 类型来自头文件：cos(double) -> double → float
     `libhoneruntime-<hash12>.a`），解压后设 `HONE_RUNTIME_A` 指向该目录，同版本 hone 免本机 rustc；
     交叉产物（linux-musl / aarch64-musl）**无法在 Windows 构建机运行**，
     其可运行性由 CI 的 Linux job 二次验证（G3.6）
-  · `cow` 声明 / 形参与 VM 一致按引擎边界处理（解释器特性，见 1.3）
 · 与 AOT（-c）的分工：AOT 走 C 中间文件 + gcc/clang，体积几十 KB、零运行时依赖，但错误渲染为简化一行；
   native 走 Cranelift 机器码 + rustc，错误渲染与双引擎逐字节一致，语义对齐是它的首要目标。
   二者互斥：`-c` 与 `--native` 同用报 H005 显式错误

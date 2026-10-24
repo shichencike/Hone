@@ -52,8 +52,6 @@ pub enum Stmt {
         init: Option<Expr>,
         span: Span,
         readonly: bool,
-        /// 写时复制容器：`cow x = [1, 2];`（仅 list/dict/str/bytes）
-        cow: bool,
     },
     /// 裸代码块 { ... }
     Block {
@@ -297,8 +295,6 @@ pub struct Param {
     pub default: Option<Expr>,
     /// 只读参数：`fn f(x: readonly int)` 体内不可重新赋值
     pub readonly: bool,
-    /// 写时复制参数：`fn f(x: cow list)` 实参按共享传入，写时自动复制隔离
-    pub cow: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

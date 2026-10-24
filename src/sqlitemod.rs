@@ -198,7 +198,7 @@ fn column_value(api: &SqliteApi, stmt: *mut c_void, i: c_int) -> Value {
                 if p.is_null() {
                     Value::Null
                 } else {
-                    Value::Str(CStr::from_ptr(p).to_string_lossy().into_owned())
+                    Value::mk_str(CStr::from_ptr(p).to_string_lossy().into_owned())
                 }
             }
         }
@@ -322,7 +322,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                         let val = column_value(api, stmt, i);
                         entries.push((name, val));
                     }
-                    rows.push(Value::Dict(entries));
+                    rows.push(Value::mk_dict(entries));
                     if name == "sqlite.query_one" {
                         break;
                     }
@@ -338,12 +338,12 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             if name == "sqlite.query_one" {
                 Ok(rows.into_iter().next().unwrap_or(Value::Null))
             } else {
-                Ok(Value::List(rows))
+                Ok(Value::mk_list(rows))
             }
         }
         "sqlite.escape" => {
             let s = as_str(&args[0], 0, span, file, src)?;
-            Ok(Value::Str(s.replace('\'', "''")))
+            Ok(Value::mk_str(s.replace('\'', "''")))
         }
         "sqlite.last_insert_id" => {
             let handle = as_int(&args[0], 0, span, file, src)?;

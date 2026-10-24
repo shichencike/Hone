@@ -94,13 +94,13 @@ fn parse_csv(text: &str) -> Vec<Vec<String>> {
 
 /// 单行行 -> Value::List(Value::Str)
 fn row_to_value(row: &[String]) -> Value {
-    Value::List(row.iter().map(|s| Value::Str(s.clone())).collect())
+    Value::mk_list(row.iter().map(|s| Value::mk_str(s.clone())).collect())
 }
 
 /// 字段转字符串（stringify 用）。
 fn field_str(v: &Value) -> String {
     match v {
-        Value::Str(s) => s.clone(),
+        Value::Str(s) => s.to_string(),
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),
         Value::Bool(b) => b.to_string(),
@@ -121,7 +121,7 @@ fn escape_field(s: &str) -> String {
 /// 从 Value 提取行列表：list of list / list of dict（dict 键作为表头）。
 fn rows_from_value(v: &Value, span: Span, file: &str, src: &str) -> Result<Vec<Vec<String>>, ZError> {
     let rows_v = match v {
-        Value::List(rows) => rows,
+        Value::List(rows) => rows.read().unwrap(),
         other => {
             return Err(zerr(
                 codes::TYPE_MISMATCH,
@@ -137,16 +137,18 @@ fn rows_from_value(v: &Value, span: Span, file: &str, src: &str) -> Result<Vec<V
     for (ri, row_v) in rows_v.iter().enumerate() {
         match row_v {
             Value::List(cells) => {
+                let cells = cells.read().unwrap();
                 let mut row = Vec::with_capacity(cells.len());
-                for cell in cells {
+                for cell in cells.iter() {
                     row.push(field_str(cell));
                 }
                 out.push(row);
             }
             Value::Dict(entries) => {
                 // dict 行：键为表头。首行为表头时补一次；其余行按首行键序取值。
+                let entries = entries.read().unwrap();
                 let mut row = Vec::with_capacity(entries.len());
-                for (_, val) in entries {
+                for (_, val) in entries.iter() {
                     row.push(field_str(val));
                 }
                 out.push(row);
@@ -176,7 +178,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
         "csv.parse" => {
             let text = as_str(&args[0], 0, span, file, src)?;
             let rows = parse_csv(text);
-            Ok(Value::List(rows.iter().map(|r| row_to_value(r)).collect()))
+            Ok(Value::mk_list(rows.iter().map(|r| row_to_value(r)).collect()))
         }
         "csv.parse_dict" => {
             let text = as_str(&args[0], 0, span, file, src)?;
@@ -185,18 +187,18 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             let mut it = rows.into_iter();
             let headers = match it.next() {
                 Some(h) => h,
-                None => return Ok(Value::List(Vec::new())),
+                None => return Ok(Value::mk_list(Vec::new())),
             };
             let mut out: Vec<Value> = Vec::new();
             for row in it {
                 let mut entries: Vec<(String, Value)> = Vec::with_capacity(headers.len());
                 for (idx, h) in headers.iter().enumerate() {
                     let cell = row.get(idx).cloned().unwrap_or_default();
-                    entries.push((h.clone(), Value::Str(cell)));
+                    entries.push((h.clone(), Value::mk_str(cell)));
                 }
-                out.push(Value::Dict(entries));
+                out.push(Value::mk_dict(entries));
             }
-            Ok(Value::List(out))
+            Ok(Value::mk_list(out))
         }
         "csv.stringify" => {
             let rows = rows_from_value(&args[0], span, file, src)?;
@@ -206,7 +208,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                 out.push_str(&cells.join(","));
                 out.push('\n');
             }
-            Ok(Value::Str(out))
+            Ok(Value::mk_str(out))
         }
         _ => Err(zerr(
             codes::NOT_IMPLEMENTED,

@@ -123,20 +123,15 @@ bs = b"abc";                <span class="c">// bytes：字节序列</span></code
       <tr><td><code>list</code></td><td>动态列表（元素类型不锁定）</td><td><code>[1, "a", true]</code></td></tr>
       <tr><td><code>dict</code></td><td>动态字典（字符串键 → 任意值）</td><td><code>{"name": "hone", "ver": 1}</code></td></tr>
     </table>
-    <h3><span class="hash">#</span>3.1 写时复制容器（cow）</h3>
-    <p><code>cow</code> 声明关键字：集合值共享只读缓冲，写者首次写时深拷贝隔离（以 <code>Arc</code> 引用计数归零自动回收，无追踪式垃圾回收）。覆盖 <code>list</code> / <code>dict</code> / <code>str</code> / <code>bytes</code>。</p>
-<pre><code>cow x = [<span class="n">1</span>, <span class="n">2</span>];           <span class="c">// list，类型由初始化式推断</span>
-cow str s = <span class="s">"hi"</span>;         <span class="c">// str 显式标注</span>
-cow b = {a: <span class="n">1</span>};           <span class="c">// dict</span>
-x : cow str = <span class="s">"hi"</span>;         <span class="c">// 类型位置等价写法</span>
-cow readonly bytes buf = b<span class="s">"…"</span>; <span class="c">// 只读可叠加</span>
-<span class="k">fn</span> f(<span class="k">cow</span> z) { ... }         <span class="c">// cow 形参</span></code></pre>
+    <h3><span class="hash">#</span>3.1 容器值语义</h3>
+    <p>容器（<code>list</code> / <code>dict</code> / <code>str</code> / <code>bytes</code>）为值语义：赋值与传参 O(1) 共享内部缓冲，写点（索引赋值 <code>a[i] = x</code>、字段赋值 <code>a.k = x</code>）自动隔离——独占时原地写，共享时先复制出私有缓冲再写，别名不可见，可观察行为与逐元素深拷贝一致。写者与其他共享者互不影响。</p>
+<pre><code>xs = [<span class="n">1</span>, <span class="n">2</span>, <span class="n">3</span>];
+ys = xs;                  <span class="c">// O(1) 共享句柄</span>
+ys[<span class="n">0</span>] = <span class="n">99</span>;               <span class="c">// 写点自动隔离：xs 不受影响</span></code></pre>
     <ul>
-      <li><strong>共享与隔离</strong>：<code>cow→cow</code> 赋值共享同一缓冲（O(1)，无拷贝）；<code>cow→普通</code> 赋值在边界自动深拷贝，普通变量永不共享 cow 缓冲。</li>
-      <li><strong>写时复制</strong>：对 cow 容器的原地赋值（索引赋值 <code>a[i] = x</code>、字段赋值 <code>a.k = x</code>）触发写路径——独占（引用计数 1）直接原地写，共享则先深拷贝出私有缓冲再写，其他共享者不受影响。</li>
-      <li><strong>透明性</strong>：<code>type_of(cow 值)</code> 报内层类型（<code>"list"</code> / <code>"dict"</code> / <code>"str"</code> / <code>"bytes"</code>）；<code>len</code>、<code>==</code>/<code>!=</code>、for-in、推导式、切片、内置函数均按内层值工作，报错文案与普通值一致。</li>
-      <li><strong>限制</strong>：<code>str</code>/<code>bytes</code> 不可变，仅零拷贝共享（无写路径）；<code>list</code>/<code>dict</code> 可变，写前检查唯一性；<code>+=</code> 等复合赋值不触发写时复制（按既有值语义）。</li>
-      <li><strong>仅解释器支持</strong>：VM（<code>--vm</code>）/ DLL（<code>build --dll</code>）遇 <code>cow</code> 声明或形参报 <code>H999</code>（"cow works in interpreted mode only"）。</li>
+      <li><strong>别名不可见</strong>：<code>b = a</code> 后修改 <code>a</code> 不影响 <code>b</code>，与深拷贝值语义逐字节一致。</li>
+      <li><strong>写点自动隔离</strong>：仅原地赋值语句（索引赋值 / 字段赋值）触发隔离；<code>append</code> 等内置为函数式（返回新容器，不原地写）。</li>
+      <li><strong>无垃圾回收</strong>：内部 <code>Arc</code> 引用计数归零自动释放。</li>
     </ul>
   </section>
 <section id="operators">

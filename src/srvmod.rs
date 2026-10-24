@@ -85,7 +85,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             };
             listen(port, span, file, src).map(Value::Int)
         }
-        "server.poll" => Ok(Value::Str(poll())),
+        "server.poll" => Ok(Value::mk_str(poll())),
         "server.respond" => {
             let id = match args.get(0) {
                 Some(Value::Int(i)) => *i,

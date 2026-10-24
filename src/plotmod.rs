@@ -48,7 +48,13 @@ fn as_num(v: &Value, what: &str, span: Span, file: &str, src: &str) -> Result<f6
 
 fn num_list(v: &Value, what: &str, span: Span, file: &str, src: &str) -> Result<Vec<f64>, ZError> {
     match v {
-        Value::List(items) => items.iter().enumerate().map(|(i, x)| as_num(x, &format!("{} element {}", what, i + 1), span, file, src)).collect(),
+        Value::List(items) => items
+            .read()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .map(|(i, x)| as_num(x, &format!("{} element {}", what, i + 1), span, file, src))
+            .collect(),
         other => Err(zerr(
             codes::TYPE_MISMATCH,
             format!("`{}` expects a list of numbers, got `{}`", what, other.type_name()),
@@ -62,7 +68,13 @@ fn num_list(v: &Value, what: &str, span: Span, file: &str, src: &str) -> Result<
 
 fn str_list(v: &Value, what: &str, span: Span, file: &str, src: &str) -> Result<Vec<String>, ZError> {
     match v {
-        Value::List(items) => items.iter().enumerate().map(|(i, x)| Ok(as_str(x, i, span, file, src)?.to_string())).collect(),
+        Value::List(items) => items
+            .read()
+            .unwrap()
+            .iter()
+            .enumerate()
+            .map(|(i, x)| Ok(as_str(x, i, span, file, src)?.to_string()))
+            .collect(),
         other => Err(zerr(
             codes::TYPE_MISMATCH,
             format!("`{}` expects a list of strings, got `{}`", what, other.type_name()),
@@ -139,7 +151,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
             // 基线
             out.push_str(&format!("<line x1=\"{:.1}\" y1=\"{:.1}\" x2=\"{:.1}\" y2=\"{:.1}\" stroke=\"#999\" stroke-width=\"1\"/>\n", pad, pad + chart_h, pad + n as f64 * 60.0, pad + chart_h));
             out.push_str("</svg>\n");
-            Ok(Value::Str(out))
+            Ok(Value::mk_str(out))
         }
         "plot.line" => {
             let xs = num_list(&args[0], "plot.line xs", span, file, src)?;
@@ -190,7 +202,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
                 out.push_str(&format!("<circle cx=\"{:.1}\" cy=\"{:.1}\" r=\"3\" fill=\"#4c6ef5\"/>\n", px(xs[i]), py(ys[i])));
             }
             out.push_str("</svg>\n");
-            Ok(Value::Str(out))
+            Ok(Value::mk_str(out))
         }
         "yaml.parse" => {
             let text = as_str(&args[0], 0, span, file, src)?;
@@ -199,7 +211,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
         }
         "yaml.stringify" => {
             let out = stringify_yaml(&args[0], 0, span, file, src)?;
-            Ok(Value::Str(out))
+            Ok(Value::mk_str(out))
         }
         _ => Err(zerr(
             codes::NOT_IMPLEMENTED,
@@ -239,7 +251,7 @@ fn parse_scalar(s: &str) -> Value {
         || (t.starts_with('\'') && t.ends_with('\'') && t.len() >= 2)
     {
         let inner = &t[1..t.len() - 1];
-        return Value::Str(inner.to_string());
+        return Value::mk_str(inner.to_string());
     }
     match t {
         "true" | "True" | "TRUE" => return Value::Bool(true),
@@ -253,7 +265,7 @@ fn parse_scalar(s: &str) -> Value {
     if let Ok(f) = t.parse::<f64>() {
         return Value::Float(f);
     }
-    Value::Str(t.to_string())
+    Value::mk_str(t.to_string())
 }
 
 /// 解析一个块（map 或 list），indent 为该块的最小缩进。
@@ -301,12 +313,12 @@ fn parse_block(
                 }
                 // 后续同缩进的 "- " 项也可能属于同一 dict（如 "- a: 1" 后 "- b: 2"）——
                 // 这里简化为每个 "-" 独立元素；嵌套 dict 由 "- key:" 下一层承载。
-                items.push(Value::Dict(entries));
+                items.push(Value::mk_dict(entries));
             } else {
                 items.push(parse_scalar(&rest));
             }
         }
-        return Ok(Value::List(items));
+        return Ok(Value::mk_list(items));
     }
     // map：key: value 序列
     let mut entries: Vec<(String, Value)> = Vec::new();
@@ -340,7 +352,7 @@ fn parse_block(
             entries.push((k, parse_scalar(&v)));
         }
     }
-    Ok(Value::Dict(entries))
+    Ok(Value::mk_dict(entries))
 }
 
 /// 拆分 `key: value`，返回 (key, value)。value 可为空。
@@ -389,7 +401,7 @@ fn parse_yaml(text: &str, span: Span, file: &str, src: &str) -> Result<Value, ZE
 
 fn yaml_scalar(v: &Value) -> Option<String> {
     match v {
-        Value::Str(s) => Some(s.clone()),
+        Value::Str(s) => Some(s.to_string()),
         Value::Int(i) => Some(i.to_string()),
         Value::Float(f) => Some(f.to_string()),
         Value::Bool(b) => Some(b.to_string()),
@@ -410,11 +422,12 @@ fn stringify_yaml(v: &Value, depth: usize, span: Span, file: &str, src: &str) ->
     let pad = "  ".repeat(depth);
     match v {
         Value::Dict(entries) => {
+            let entries = entries.read().unwrap();
             if entries.is_empty() {
                 return Ok(format!("{}null", pad));
             }
             let mut out = String::new();
-            for (k, val) in entries {
+            for (k, val) in entries.iter() {
                 match yaml_scalar(val) {
                     Some(s) => out.push_str(&format!("{}{}: {}\n", pad, yaml_quote(k), s)),
                     None => {
@@ -429,11 +442,12 @@ fn stringify_yaml(v: &Value, depth: usize, span: Span, file: &str, src: &str) ->
             Ok(out)
         }
         Value::List(items) => {
+            let items = items.read().unwrap();
             if items.is_empty() {
                 return Ok(format!("{}[]", pad));
             }
             let mut out = String::new();
-            for item in items {
+            for item in items.iter() {
                 match yaml_scalar(item) {
                     Some(s) => out.push_str(&format!("{}- {}\n", pad, s)),
                     None => {

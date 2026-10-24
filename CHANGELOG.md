@@ -22,8 +22,21 @@
   用户侧解压后设 `HONE_RUNTIME_A` 指向该目录，同版本 hone 原生编译免本机 rustc（缓存未命中时自动
   查找并落盘）。
 - **CI 恢复多核极速**：删 -j 1 与 swap/页面文件，保留 actions/cache@v4。
+- **性能基准 CI 自动化**：新增 `bench.yml` 工作流——push master 且触及 src/runtime/bench/ 等路径时
+  自动跑 9 负载基准（fib / loop×2 / str_concat / pi / list_append / dict_lookup / str_replace / sort ×
+  hone interp/VM/nat 三引擎 vs CPython vs Lua 5.4），结果 JSON（含机器 / CPU / 版本号 / 时间戳）
+  自动提交回 `官网/perf-data.json`，perf.html 前端读取渲染（提交信息带 [skip ci] 防递归触发）。
+  新增 `bench/lua/` 九项 Lua 5.4 等价实现与 `tests/bench_ci.py`（本机可复现，无 lua5.4 时跳过该列）；
+  perf.html 改版：CI 自动数据表 + 测量方法说明 + 历史手测数据（vs Rust）保留。
 
 ### 变更（破坏性变更）
+- **废弃 `cow` 声明（BREAKING）**：`cow` 关键字语法整体移除——引用模型改造后，全部容器
+  （list/dict/str/bytes）默认走 O(1) 句柄共享 + 写点自动隔离（`ensure_unique` 门控），
+  别名不可见、可观察行为与旧值语义逐字节一致，`cow` 显式声明失去存在意义。
+  代码中遇 `cow` 报 H005 语法错误（help 指引改用普通赋值，语义不变）；`cow` 形参同理。
+  内部实现同步删除：`Value::Cow` 变体、`wrap_cow`/`unwrap_cow`/`isolate_cow` 三件套、
+  `Env.cow_vars`、VM/DLL 的 cow H999 边界与 `check_cow_usage`；`fmt` 关键字表移除 cow。
+  `tests/smoke/cow_read.hn` 随语法移除（其断言已由普通值路径回归覆盖）。
 - 移除 install.ps1 / build_toolchain.py / targets/ 工具链分发 / HONE_NAT_LINK 环境变量；
   full 包仅含 hone 本体（无 targets/）。
 - 头文件绑定不支持列表缩减：数组参数/结构体按值/long double 仍 unsupported；

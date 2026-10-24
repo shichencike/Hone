@@ -568,10 +568,6 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
         let mut pnames = Vec::new();
         let mut preg = Vec::new();
         for p in params {
-            if p.cow {
-                self.fail(codes::NOT_IMPLEMENTED, "VM: `cow` 形参暂不支持");
-                return;
-            }
             preg.push(self.decl(&p.name));
             pnames.push(p.name.clone());
         }
@@ -693,20 +689,16 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                 }
                 self.emit(Instr::Move(rvar, r));
             }
-            Stmt::VarDecl { name, init, cow, .. } => {
-                if *cow {
-                    self.fail(codes::NOT_IMPLEMENTED, "VM: `cow` 声明暂不支持");
-                } else {
-                    match init {
-                        Some(e) => {
-                            let rv = self.compile_expr(e);
-                            let r = self.decl(name);
-                            self.emit(Instr::Move(r, rv));
-                        }
-                        None => {
-                            let r = self.decl(name);
-                            self.emit(Instr::LoadNull(r));
-                        }
+            Stmt::VarDecl { name, init, .. } => {
+                match init {
+                    Some(e) => {
+                        let rv = self.compile_expr(e);
+                        let r = self.decl(name);
+                        self.emit(Instr::Move(r, rv));
+                    }
+                    None => {
+                        let r = self.decl(name);
+                        self.emit(Instr::LoadNull(r));
                     }
                 }
             }
@@ -2268,19 +2260,19 @@ impl Vm {
                 for i in 0..n {
                     v.push(self.frames[fi].regs[base + i].clone());
                 }
-                self.frames[fi].regs[d] = Value::List(v);
+                self.frames[fi].regs[d] = Value::mk_list(v);
             }
             Instr::NewDict(d, base, n) => {
                 let mut v = Vec::with_capacity(n);
                 for i in 0..n {
                     let key = match &self.frames[fi].regs[base + 2 * i] {
-                        Value::Str(s) => s.clone(),
+                        Value::Str(s) => s.to_string(),
                         other => value_to_str(other),
                     };
                     let val = self.frames[fi].regs[base + 2 * i + 1].clone();
                     v.push((key, val));
                 }
-                self.frames[fi].regs[d] = Value::Dict(v);
+                self.frames[fi].regs[d] = Value::mk_dict(v);
             }
             Instr::EnumElem(d, s, idx) => {
                 let v = self.frames[fi].regs[s].clone();
@@ -2367,7 +2359,7 @@ impl Vm {
                 // error 重抛同文件保留原始定位、跨文件退化并附原始位置；其余类型 H001。
                 match v {
                     Value::Str(s) => {
-                        return Err(self.mk_err(codes::THROW, s, span));
+                        return Err(self.mk_err(codes::THROW, s.to_string(), span));
                     }
                     Value::Error(e) => {
                         if e.file == self.file {
@@ -2533,12 +2525,12 @@ impl Vm {
         }
         if let Some(fields) = self.struct_defs.get(&func) {
             let mut d = Vec::new();
-            d.push(("\u{0}__struct__".to_string(), Value::Str(func.clone())));
+            d.push(("\u{0}__struct__".to_string(), Value::mk_str(func.clone())));
             for (i, f) in fields.iter().enumerate() {
                 let v = args.get(i).cloned().unwrap_or(Value::Null);
                 d.push((f.clone(), v));
             }
-            return Ok(Value::Dict(d));
+            return Ok(Value::mk_dict(d));
         }
         // len 重载：内建 `len` 失败（类型不支持）时回退 `__len`（与解释器 call_fn 一致）。
         if func == "len" && self.func_map.contains_key("__len") {
@@ -2780,7 +2772,7 @@ fn const_to_value(c: Const) -> Value {
         Const::Int(v) => Value::Int(v),
         Const::Float(v) => Value::Float(v),
         Const::Bool(v) => Value::Bool(v),
-        Const::Str(v) => Value::Str(v),
+        Const::Str(v) => Value::mk_str(v),
         Const::Char(v) => Value::Char(v),
         Const::Null => Value::Null,
     }
@@ -2866,12 +2858,11 @@ fn vm_help_for(code: &'static str, msg: &str) -> Option<String> {
 }
 
 fn value_to_str(v: &Value) -> String {
-    // COW 透明：cow 容器按内层值显示
     match v.as_plain() {
         Value::Int(i) => i.to_string(),
         Value::Float(f) => f.to_string(),
         Value::Bool(b) => b.to_string(),
-        Value::Str(s) => s.clone(),
+        Value::Str(s) => s.to_string(),
         Value::Char(c) => c.to_string(),
         // 字节值：8 位二进制（镜像解释器 display）
         Value::Byte(b) => format!("0b{:08b}", b),
@@ -2906,11 +2897,13 @@ fn value_to_str(v: &Value) -> String {
         }
         Value::Null => "null".to_string(),
         Value::List(l) => {
+            let l = l.read().unwrap();
             let parts: Vec<String> = l.iter().map(value_to_str).collect();
             format!("[{}]", parts.join(", "))
         }
         Value::Dict(d) => {
             // 隐藏 `__struct__` 标记键不显示（struct 实例内部携带）
+            let d = d.read().unwrap();
             let parts: Vec<String> = d
                 .iter()
                 .filter(|(k, _)| !Value::is_hidden_struct_key(k))
@@ -2930,7 +2923,6 @@ fn value_to_str(v: &Value) -> String {
             }
         }
         Value::Future(_) => "<future>".to_string(),
-        Value::Cow(_) => unreachable!("as_plain strips COW"),
     }
 }
 
@@ -2967,12 +2959,12 @@ fn v_add(a: Value, b: Value, span: &Span, vm: &Vm, sym: &str, tn_a: &str, tn_b: 
             .map(Value::Int)
             .ok_or_else(|| vm.mk_err(codes::INTEGER_OVERFLOW, "integer overflow".into(), span)),
         (Value::Float(x), Value::Float(y)) => Ok(Value::Float(x + y)),
-        (Value::Str(x), Value::Str(y)) => Ok(Value::Str(x + &y)),
+        (Value::Str(x), Value::Str(y)) => Ok(Value::mk_str(format!("{}{}", x, y))),
         // 字节序列拼接（+，镜像解释器 arith）
         (Value::Bytes(x), Value::Bytes(y)) => {
-            let mut r = x;
+            let mut r = x.as_ref().clone();
             r.extend_from_slice(&y);
-            Ok(Value::Bytes(r))
+            Ok(Value::mk_bytes(r))
         }
         _ => Err(vm.mk_err(
             codes::TYPE_MISMATCH,
@@ -3113,8 +3105,8 @@ fn v_eq(a: &Value, b: &Value, span: &Span, vm: &Vm) -> Result<bool, Value> {
         (Value::Char(x), Value::Char(y)) => Ok(x == y),
         (Value::Byte(x), Value::Byte(y)) => Ok(x == y),
         (Value::Bytes(x), Value::Bytes(y)) => Ok(x == y),
-        (Value::List(x), Value::List(y)) => Ok(x == y),
-        (Value::Dict(x), Value::Dict(y)) => Ok(x == y),
+        (Value::List(x), Value::List(y)) => Ok(*x.read().unwrap() == *y.read().unwrap()),
+        (Value::Dict(x), Value::Dict(y)) => Ok(*x.read().unwrap() == *y.read().unwrap()),
         (Value::Ptr(x), Value::Ptr(y)) => Ok(x == y),
         // ptr 与整数比较：`p == 0` 判断 NULL，`p == n` 比较句柄数值
         (Value::Ptr(x), Value::Int(y)) => Ok(*x as i64 == *y),
@@ -3178,6 +3170,7 @@ fn v_index(obj: &Value, key: &Value, span: &Span, vm: &Vm) -> Result<Value, Valu
         Value::List(l) => {
             if let Value::Int(i) = key {
                 let idx = *i;
+                let l = l.read().unwrap();
                 if idx < 0 || idx as usize >= l.len() {
                     return Err(vm.mk_err(
                         codes::TYPE_MISMATCH,
@@ -3205,7 +3198,7 @@ fn v_index(obj: &Value, key: &Value, span: &Span, vm: &Vm) -> Result<Value, Valu
                         span,
                     ));
                 }
-                Ok(Value::Str(chars[idx as usize].to_string()))
+                Ok(Value::mk_str(chars[idx as usize].to_string()))
             } else {
                 Err(vm.mk_err(
                     codes::TYPE_MISMATCH,
@@ -3236,7 +3229,7 @@ fn v_index(obj: &Value, key: &Value, span: &Span, vm: &Vm) -> Result<Value, Valu
         }
         Value::Dict(d) => {
             let k = match key {
-                Value::Str(s) => s.clone(),
+                Value::Str(s) => s.to_string(),
                 Value::Int(i) => i.to_string(),
                 other => {
                     return Err(vm.mk_err(
@@ -3246,8 +3239,9 @@ fn v_index(obj: &Value, key: &Value, span: &Span, vm: &Vm) -> Result<Value, Valu
                     ))
                 }
             };
-            for (kk, vv) in d {
-                if *kk == k {
+            let d = d.read().unwrap();
+            for (kk, vv) in d.iter() {
+                if kk == &k {
                     return Ok(vv.clone());
                 }
             }
@@ -3262,10 +3256,14 @@ fn v_index(obj: &Value, key: &Value, span: &Span, vm: &Vm) -> Result<Value, Valu
 }
 
 fn v_index_set(dst: &mut Value, key: &Value, val: Value, span: &Span, vm: &Vm) -> Result<(), Value> {
+    // 值语义闸口：共享容器先深拷贝隔离写者（镜像解释器 set_index_value 的快照+写回；
+    // 独占时零拷贝原地写）。str 不可变，不经此门。
+    dst.ensure_unique();
     match dst {
         Value::List(l) => {
             if let Value::Int(i) = key {
                 let idx = *i;
+                let mut l = l.write().unwrap();
                 if idx < 0 || idx as usize >= l.len() {
                     return Err(vm.mk_err(
                         codes::TYPE_MISMATCH,
@@ -3285,7 +3283,7 @@ fn v_index_set(dst: &mut Value, key: &Value, val: Value, span: &Span, vm: &Vm) -
         }
         Value::Dict(d) => {
             let k = match key {
-                Value::Str(s) => s.clone(),
+                Value::Str(s) => s.to_string(),
                 Value::Int(i) => i.to_string(),
                 other => {
                     return Err(vm.mk_err(
@@ -3295,6 +3293,7 @@ fn v_index_set(dst: &mut Value, key: &Value, val: Value, span: &Span, vm: &Vm) -
                     ))
                 }
             };
+            let mut d = d.write().unwrap();
             for item in d.iter_mut() {
                 if item.0 == k {
                     item.1 = val;
@@ -3336,6 +3335,7 @@ fn v_destruct_get(
             }
             if let Value::Int(i) = key {
                 let idx = *i;
+                let l = l.read().unwrap();
                 if idx < 0 || (idx as usize) >= l.len() {
                     return Err(vm.mk_err_with(
                         codes::TYPE_MISMATCH,
@@ -3369,7 +3369,7 @@ fn v_destruct_get(
                 ));
             }
             let k = match key {
-                Value::Str(s) => s.clone(),
+                Value::Str(s) => s.to_string(),
                 Value::Int(i) => i.to_string(),
                 other => {
                     return Err(vm.mk_err(
@@ -3379,8 +3379,9 @@ fn v_destruct_get(
                     ))
                 }
             };
-            for (kk, vv) in d {
-                if *kk == k {
+            let d = d.read().unwrap();
+            for (kk, vv) in d.iter() {
+                if kk == &k {
                     return Ok(vv.clone());
                 }
             }
@@ -3405,25 +3406,28 @@ fn v_destruct_get(
 
 fn v_field(obj: &Value, field: &str, span: &Span, vm: &Vm) -> Result<Value, Value> {
     match obj {
-        Value::Dict(d) => match d.iter().find(|(k, _)| !Value::is_hidden_struct_key(k) && k == field) {
-            Some((_, v)) => Ok(v.clone()),
-            None => Err(vm.mk_err(
-                codes::UNDEFINED,
-                format!(
-                    "unknown field `{}` (dict/struct has {})",
-                    field,
-                    d.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")
-                ),
-                span,
-            )),
-        },
+        Value::Dict(d) => {
+            let d = d.read().unwrap();
+            match d.iter().find(|(k, _)| !Value::is_hidden_struct_key(k) && k == field) {
+                Some((_, v)) => Ok(v.clone()),
+                None => Err(vm.mk_err(
+                    codes::UNDEFINED,
+                    format!(
+                        "unknown field `{}` (dict/struct has {})",
+                        field,
+                        d.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")
+                    ),
+                    span,
+                )),
+            }
+        }
         Value::Error(e) => match field {
-            "message" => Ok(Value::Str(e.message.clone())),
-            "code" => Ok(Value::Str(e.code.to_string())),
-            "file" => Ok(Value::Str(e.file.clone())),
+            "message" => Ok(Value::mk_str(e.message.clone())),
+            "code" => Ok(Value::mk_str(e.code.to_string())),
+            "file" => Ok(Value::mk_str(e.file.clone())),
             "line" => Ok(Value::Int(e.line as i64)),
             "col" => Ok(Value::Int(e.col as i64)),
-            "context" => Ok(Value::Str(e.context.clone())),
+            "context" => Ok(Value::mk_str(e.context.clone())),
             other => Err(vm.mk_err(
                 codes::UNDEFINED,
                 format!("unknown error field `{}`", other),
@@ -3444,10 +3448,10 @@ fn v_field(obj: &Value, field: &str, span: &Span, vm: &Vm) -> Result<Value, Valu
 
 fn v_len(v: &Value, span: &Span, vm: &Vm) -> Result<Value, Value> {
     match v {
-        Value::List(l) => Ok(Value::Int(l.len() as i64)),
+        Value::List(l) => Ok(Value::Int(l.read().unwrap().len() as i64)),
         // 隐藏 `__struct__` 标记键不计入长度
         Value::Dict(d) => Ok(Value::Int(
-            d.iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).count() as i64,
+            d.read().unwrap().iter().filter(|(k, _)| !Value::is_hidden_struct_key(k)).count() as i64,
         )),
         Value::Str(s) => Ok(Value::Int(s.len() as i64)),
         // 字节序列长度 = 字节数（与 str 同为字节口径，镜像解释器 len 内置）
@@ -3465,11 +3469,13 @@ fn v_keys(v: &Value, span: &Span, vm: &Vm) -> Result<Value, Value> {
         Value::Dict(d) => {
             // 隐藏 `__struct__` 标记键不暴露（for-in / keys 共用此路径）
             let keys: Vec<Value> = d
+                .read()
+                .unwrap()
                 .iter()
                 .filter(|(k, _)| !Value::is_hidden_struct_key(k))
-                .map(|(k, _)| Value::Str(k.clone()))
+                .map(|(k, _)| Value::mk_str(k.clone()))
                 .collect();
-            Ok(Value::List(keys))
+            Ok(Value::mk_list(keys))
         }
         _ => Err(vm.mk_err(
             codes::TYPE_MISMATCH,

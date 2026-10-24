@@ -44,6 +44,8 @@ fn as_num(v: &Value, what: &str, span: Span, file: &str, src: &str) -> Result<f6
 fn num_list(v: &Value, what: &str, span: Span, file: &str, src: &str) -> Result<Vec<f64>, ZError> {
     match v {
         Value::List(items) => items
+            .read()
+            .unwrap()
             .iter()
             .enumerate()
             .map(|(i, x)| as_num(x, &format!("{} element {}", what, i + 1), span, file, src))
@@ -63,6 +65,7 @@ fn num_list(v: &Value, what: &str, span: Span, file: &str, src: &str) -> Result<
 fn matrix(v: &Value, what: &str, span: Span, file: &str, src: &str) -> Result<Vec<Vec<f64>>, ZError> {
     match v {
         Value::List(rows) => {
+            let rows = rows.read().unwrap();
             let mut out = Vec::with_capacity(rows.len());
             for (ri, row) in rows.iter().enumerate() {
                 let nums = num_list(row, &format!("{} row {}", what, ri + 1), span, file, src)?;
@@ -113,9 +116,9 @@ fn to_value(x: f64) -> Value {
 }
 
 fn matrix_to_value(m: &[Vec<f64>]) -> Value {
-    Value::List(
+    Value::mk_list(
         m.iter()
-            .map(|row| Value::List(row.iter().map(|x| to_value(*x)).collect()))
+            .map(|row| Value::mk_list(row.iter().map(|x| to_value(*x)).collect()))
             .collect(),
     )
 }
@@ -200,7 +203,7 @@ pub fn call(name: &str, args: &[Value], span: Span, file: &str, src: &str) -> Re
         "matrix.transpose" => {
             let m = matrix(&args[0], "matrix.transpose", span, file, src)?;
             if m.is_empty() {
-                return Ok(Value::List(Vec::new()));
+                return Ok(Value::mk_list(Vec::new()));
             }
             let rows = m.len();
             let cols = m[0].len();
