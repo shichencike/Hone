@@ -1,0 +1,47 @@
+// pbar_demo.hn - hone_lib/pbar.hn 进度条标准库演示
+// 运行: hone examples/pbar_demo.hn
+import "pbar" from "./hone_lib/pbar.hn";
+
+print("== 单行原地刷新（ANSI 重绘）==");
+pb = pbar_new(100, 30, "下载");
+i = 0;
+while (i <= 100) {
+    pb = pbar_update(pb, i);
+    pb = pbar_show(pb);
+    time.sleep(0.03);
+    i = i + 5;
+}
+pbar_finish(pb);
+
+print("");
+print("== 增量推进 + 剩余时间估算 ==");
+pb2 = pbar_new(24, 24, "安装");
+i = 0;
+while (i < 24) {
+    pb2 = pbar_advance(pb2, 1);
+    pb2 = pbar_show(pb2);
+    time.sleep(0.08);
+    i = i + 1;
+}
+pbar_finish(pb2);
+
+print("");
+print("== 每帧新行模式（老终端兼容）==");
+pb3 = pbar_new(10, 20, "检查");
+i = 0;
+while (i <= 10) {
+    pb3 = pbar_update(pb3, i);
+    pbar_line(pb3);
+    i = i + 2;
+}
+
+print("");
+print("== 查询接口 ==");
+pb4 = pbar_new(8, 10, "测试");
+pb4 = pbar_update(pb4, 4);
+print("百分比: " + to_str(pbar_pct(pb4)));      // 50
+print("完成? " + to_str(pbar_done(pb4)));       // false
+print(pbar_render_full(pb4, time.now()));       // 含剩余时间
+pb4 = pbar_update(pb4, 8);
+print("完成? " + to_str(pbar_done(pb4)));       // true
+print(pbar_render(pb4));                        // [##########] 100% 8/8

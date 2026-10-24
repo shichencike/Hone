@@ -1,0 +1,7 @@
+// break_err_demo.hn - break 非法用法（应被静态检查拒绝）
+// 运行: hone examples/break_err_demo.hn （应报错 H005）
+fn test_bad() -> int {
+    break;
+    return 0;
+}
+print("unreachable");

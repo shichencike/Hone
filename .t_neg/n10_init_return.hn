@@ -1,0 +1,2 @@
+type R { v: int, fn init(self) { return 5; } };
+r = new R();

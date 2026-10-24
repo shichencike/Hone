@@ -1,0 +1,49 @@
+// T2 值模型回归：标量全类型承载 + 算术/比较 + 字符串常量 + null（void 占位）。
+// 对齐范围：int/float/bool/char/null 的 display 与运算；str 常量加载与 print；
+// 除零/溢出/类型不匹配的错误值（M0 文案级，T4 起逐字节渲染）。
+// 未覆盖（T3/T5）：str 拼接、str 比较、to_str 等 builtin、f-string。
+
+// int
+print(1);
+print(42 - 12);
+print(7 * 8);
+print(100 / 7);
+print(17 % 5);
+print(-5);
+print(2 + 3 * 4);
+
+// float
+print(1.5);
+print(2.5 + 0.25);
+print(3.0 - 1.25);
+print(2.5 * 4.0);
+print(1.0 / 4.0);
+print(7.0 / 2.0);
+print(-2.5);
+print(7.5 % 2.0);
+
+// bool
+print(true);
+print(false);
+print(true == false);
+print(true != false);
+print(!true);
+print(!false);
+
+// char
+print('a');
+print('中');
+print('a' == 'a');
+print('a' == 'b');
+print('a' < 'b');
+print('z' > 'a');
+
+// null（无字面量：void 函数返回值占位）
+fn void_fn() {
+    print("void body");
+}
+print(void_fn());
+
+// 字符串常量（rodata box，LoadK = rt_str 建句柄）
+print("Hello Hone!");
+print("中文混排 test");

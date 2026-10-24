@@ -1,0 +1,11 @@
+// G3.1 用例模块：导入时顶层语句执行一次；函数为纯函数（不引用模块顶层变量）。
+// 供 tests/m2/imports.hn 通过 `import "imports_mod" from "./tests/m2/imports_mod.hn";` 引入。
+print("[mod] side effect");
+
+fn mod_double(x : int) -> int {
+    return x * 2;
+}
+
+fn mod_add(a : int, b : int) -> int {
+    return a + b;
+}

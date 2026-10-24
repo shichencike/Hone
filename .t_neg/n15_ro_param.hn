@@ -1,0 +1,5 @@
+fn f(readonly int a) {
+    a = 2;
+    return a;
+}
+print(f(1));

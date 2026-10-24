@@ -1,0 +1,66 @@
+name: Bench
+
+# 性能基准：push master 且触及解释器/VM/原生后端/基准脚本时跑，
+# 结果写入 官网/perf-data.json 自动提交回仓库（perf.html 前端读取渲染）。
+# ① 路径过滤在 workflow 级 `on.push.paths`（job 级不支持）；
+# ② 提交信息带 [skip ci]，且 perf-data.json 不在触发路径内——双保险防递归触发。
+on:
+  push:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "runtime/**"
+      - "bench/**"
+      - "tests/bench_ci.py"
+      - "Cargo.lock"
+      - ".github/workflows/bench.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  bench:
+    name: benchmark (hone vs python vs lua5.4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # 官方 cache：与 ci.yml test job 的 key 一致（宿主 target，可复用增量）
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: build
+        run: cargo build --release --locked
+      # 对比语言：Python 用 runner 自带 3.x（版本实测写进结果），Lua 装 5.4
+      - name: install lua5.4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lua5.4
+      - name: run benchmarks
+        run: HONE_BIN=target/release/hone python tests/bench_ci.py
+      - name: upload results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-data
+          path: 官网/perf-data.json
+      # 结果自动提交回仓库（perf.html 读取渲染）：仅在有变化时提交
+      - name: commit results
+        shell: bash
+        run: |
+          git config user.name "hone-bench-bot"
+          git config user.email "noreply@atomgit.com"
+          git add 官网/perf-data.json
+          if git diff --cached --quiet; then
+            echo "性能数据无变化，跳过提交"
+          else
+            git commit -m "[skip ci] bench: 更新性能基准数据（${GITHUB_SHA::7}）"
+            git push
+          fi

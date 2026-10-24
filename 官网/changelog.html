@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hone 更新日志</title>
+<meta name="description" content="Hone 编程语言各版本更新日志：新增、变更、修复与文档。">
+<meta name="theme-color" content="#0b0e14">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <button class="menu-btn" onclick="toggleNav()" aria-label="菜单">&#9776;</button>
+  <span class="logo"><span class="mark">&#9889;</span> Hone</span>
+  <span class="spacer"></span>
+  <span class="right">
+    <span class="ver">v0.8.0</span>
+    <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">&#9728;</span><span class="ti-dark">&#127769;</span></button>
+  </span>
+</header>
+
+<aside class="sidebar" id="sidebar">
+  <nav>
+    <div class="nav-group">
+      <div class="nav-title">入门</div>
+      <a href="index.html">首页</a>
+      <a href="install.html">安装</a>
+      <a href="download.html">下载</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">学习</div>
+      <a href="tutorial.html">教程</a>
+      <a href="examples.html">示例</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">参考</div>
+      <a href="docs.html">文档</a>
+      <a href="language.html">语言参考</a>
+      <a href="stdlib.html">标准库</a>
+      <a href="perf.html">性能</a>
+      <a href="lsp.html">LSP / 编辑器</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">项目</div>
+      <a href="changelog.html" class="active">更新日志</a>
+      <a href="faq.html">FAQ</a>
+      <a href="about.html">关于</a>
+    </div>
+
+  </nav>
+</aside>
+<div class="sidebar-backdrop" id="navBackdrop"></div>
+
+<main>
+<h2><span class="hash">#</span>更新日志</h2>
+<p>各版本的新增 / 变更 / 修复 / 文档汇总。最新版本见顶部 <span class="ver-tag">v0.8.0</span> 区块。</p>
+<div class="release">
+<span class="ver-tag">Unreleased</span> <span class="badge-new">开发中</span>
+<h4><span class="flag rem">移除</span></h4>
+<ul>
+<li><strong>移除 NAT（<code class="inline">build --exe --native</code> / <code class="inline">natgen</code>）与 DLL（<code class="inline">build --dll</code> / <code class="inline">@export</code>）后端</strong>：维护面积收敛到 interp + VM 双引擎；旧命令现报 H005，help 指向本条。v0.8.0 的 NAT 工作作为历史保留（见下方 v0.8.0 区块）。<code class="inline">hone load</code> 运行期动态库加载（H301/H302）不受影响。本开发周期内曾落地的 NAT 工具链调整（纯 .o 生成器 / runtime-a 预编译资产 / <code class="inline">natgen --obj</code> 语义统一 / 链接路径口径）随整体移除，不再单列；<code class="inline">natgen.rs</code>、<code class="inline">runtime/</code>（honeruntime crate）与 cranelift / target-lexicon 依赖删除。回归脚本相应改为双引擎（<code class="inline">regress4.py</code> / <code class="inline">regress_err.py</code> / <code class="inline">probe_align.py</code>），<code class="inline">tests/tools/audit_err.py</code> 删除。</li>
+</ul>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>FFI 回调 + 变参全链路支持（仅解释器实测通过；VM 不支持 load，报 H999）</strong>：删 ffi_dispatch!/ ffi_variadic! 穷举宏（8190 类型实例化内存峰值），切换为 libffi 静态构建（ffi_prep_cif/ ffi_prep_cif_var/ffi_call + ffi_closure 回调）。支持 int/int32/float/float32/bool/str/ptr/void 全标量参数与返回，回调 0-8 参、变参无固定上限、float 固定参数的变参函数已支持。</li>
+<li><strong>int32/float32 新类型全链路</strong>：lexer/parser/header/checker/interp/VM/签名块/头文件绑定 全覆盖；C <code class="inline">int32_t</code>/<code class="inline">uint32_t</code> 映射 <code class="inline">int32</code>，C <code class="inline">float</code> 映射 <code class="inline">float32</code>。</li>
+<li><strong>install.bat 纯 ASCII 安装脚本</strong>：原生 curl.exe+tar.exe，镜像回退/sha256 校验/断点续传/PATH 去重/--uninstall 卸载/幂等，功能对齐 install.sh；Windows 安装 = 双击 install.bat。</li>
+<li><strong>CI 恢复多核极速</strong>：删 -j 1 与 swap/页面文件，保留 actions/cache@v4。</li>
+</ul>
+<h4><span class="flag doc">变更（破坏性变更）</span></h4>
+<ul>
+<li><strong>废弃 <code class="inline">cow</code> 声明（BREAKING）</strong>：<code class="inline">cow</code> 关键字语法整体移除——引用模型改造后，全部容器（list/dict/str/bytes）默认走 O(1) 句柄共享 + 写点自动隔离（<code class="inline">ensure_unique</code> 门控），别名不可见、可观察行为与旧值语义逐字节一致，<code class="inline">cow</code> 显式声明失去存在意义。代码中遇 <code class="inline">cow</code> 报 H005 语法错误（help 指引改用普通赋值，语义不变）；<code class="inline">cow</code> 形参同理。内部实现同步删除：<code class="inline">Value::Cow</code> 变体、COW 三件套、<code class="inline">Env.cow_vars</code>、VM/DLL 的 cow H999 边界；<code class="inline">fmt</code> 关键字表移除 cow；<code class="inline">tests/smoke/cow_read.hn</code> 随语法移除（断言已由普通值路径回归覆盖）。</li>
+<li>移除 install.ps1 / build_toolchain.py / targets/ 工具链分发 / HONE_NAT_LINK 环境变量； full 包仅含 hone 本体（无 targets/）。</li>
+<li>头文件绑定不支持列表缩减：数组参数/结构体按值/long double 仍 unsupported； 变参与回调现已支持（hone bind 输出列为支持）。</li>
+</ul>
+<h4><span class="flag doc">变更（byte/bytes 内置函数返回值修正，含破坏性变更）</span></h4>
+<ul>
+<li><strong><code class="inline">zlib.compress</code> / <code class="inline">zlib.gzip</code> → <code class="inline">bytes</code></strong>（原 base64 str）：压缩结果是二进制，直接返回字节序列；需要字符串形态用 <code class="inline">crypto.base64_encode</code> 显式编码；参数额外接受 <code class="inline">bytes</code>（str 按 UTF-8 字节）</li>
+<li><strong><code class="inline">zlib.decompress</code> / <code class="inline">zlib.gunzip</code> → <code class="inline">bytes</code></strong>（原 str）：解压不再强制 UTF-8（原 read_to_string 会拒绝非 UTF-8 内容）；输入接受 bytes，str 输入按 base64 兼容旧版形态</li>
+<li><strong><code class="inline">ws.request</code> → <code class="inline">list</code></strong>（原拼接 str）：返回消息列表，每条消息一个元素——文本帧为 str、二进制帧（opcode 0x2）为 bytes（原实现二进制帧被静默丢弃）</li>
+<li><strong>新增 <code class="inline">http_get_bytes(url)</code> / <code class="inline">http_post_bytes(url, body)</code> → <code class="inline">bytes</code></strong>：二进制响应体（图片 / PDF / zip 等）不经 UTF-8 边界；<code class="inline">http.request</code> 新增 <code class="inline">binary: true</code> 选项（响应体按原始字节返回），str 行为不变</li>
+<li><strong>新增 <code class="inline">archive.tgz_read_bytes(path, entry)</code> → <code class="inline">bytes</code></strong>：与 <code class="inline">zip_read</code> 对称（<code class="inline">tgz_read</code> 维持 str 仅文本）</li>
+<li><strong><code class="inline">read_bytes(path)</code> → <code class="inline">bytes</code></strong>（原 <code class="inline">list[int]</code>）：返回真正的字节序列（索引得 byte 值、for-in 迭代字节、<code class="inline">+</code> 拼接、len 为字节数）；checker 静态返回类型同步</li>
+<li><strong><code class="inline">crypto.base64_decode(str)</code> → <code class="inline">bytes</code></strong>（原 <code class="inline">str</code>）：二进制安全（原实现经 from_utf8_lossy 会破坏非 UTF-8 内容，属 bug 修复）</li>
+<li><strong><code class="inline">archive.zip_read(path, entry)</code> → <code class="inline">bytes</code></strong>（原 <code class="inline">str</code>）：二进制安全（原实现经 read_to_string 会拒绝非 UTF-8 条目，属 bug 修复）；<code class="inline">archive.tgz_read</code> 维持 <code class="inline">str</code>（仅文本）</li>
+<li><strong><code class="inline">ptr.read_byte(p, offset)</code> → <code class="inline">byte</code> 值</strong>（原 <code class="inline">int</code> 0-255）：与 int 严格隔离，回转用 to_int</li>
+<li><strong>参数侧补充（非破坏）</strong>：<code class="inline">crypto.base64_encode</code> 额外接受 <code class="inline">bytes</code>；<code class="inline">write_bytes</code> 额外接受 <code class="inline">bytes</code> 值；<code class="inline">ptr.write_byte</code> 额外接受 <code class="inline">byte</code> 值（原 list/int 形态均可用）</li>
+<li><strong>VM 行为对齐</strong>：<code class="inline">for a, b in &lt;list/bytes&gt;</code> 双变量迭代原在 VM 静默放行（第二变量取陈旧值）， 现与解释器一致报错 `<code class="inline"> </code>for k, v in<code class="inline"> requires a dict, got a list/bytes </code>`</li>
+<li>checker 新增双形态参数检查（expect_str_or_bytes / expect_int_or_byte）；LSP 补全描述同步</li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li><strong>FFI 口径全站对齐 libffi 实现</strong>：hone.md 4.1.1/4.1.2 补 <code class="inline">int32</code> → int32_t、<code class="inline">float32</code> → C float 映射（头文件绑定同步 <code class="inline">int32_t</code>/<code class="inline">uint32_t</code> → int32、C <code class="inline">float</code> → float32）；官网 docs/examples/faq 订正「回调与变参暂不支持」的旧表述（现已支持，回调限 0-8 个标量参、仅同步），头文件绑定 unsupported 列表缩至数组参数/结构体按值/long double</li>
+<li><strong>官网 changelog.html 由 CHANGELOG.md 重新生成</strong>：此前 [Unreleased] 段整段缺失</li>
+<li>hone.md 头行实现版本口径 v0.7.12 → v0.8.0</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.8.0</span>
+<span class="date">2026-10-17</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>原生编译后端（<code class="inline">hone build --exe --native</code> / <code class="inline">hone natgen</code>）</strong>：第三条执行路径——用 Cranelift 把 VM 字节码直接 lower 为机器码，再经生成式 wrapper + rustc 链接成原生可执行文件<ul>
+<li>不依赖系统 C 编译器（直接由 Cranelift 出机器码 + rustc 链接；<code class="inline">--dll</code> 才需要 C 编译器）</li>
+<li>值模型：句柄式（寄存器持 u64 句柄指向堆上 <code class="inline">HnCell</code>，跨 object ↔ rustc 只传 i64，规避 Windows x64 隐藏 sret 指针 ABI）；引用计数 retain/release，槽写释放旧值</li>
+<li>调用模型：统一 <code class="inline">rt_call</code> 名分发（用户函数 / lambda / 内置表），lambda 按值捕获；错误经 ERR 句柄 跨帧传播 + 静态 catch 映射（无 setjmp），Throw/ThrowStr 归一 H600</li>
+<li>语义对齐铁律：interp / VM / nat 三引擎 stdout + stderr + 退出码逐字节一致，含完整错误渲染 （<code class="inline">--&gt; 文件:行:列</code> / 行号行 / caret / help）</li>
+<li>当前支持范围（M0 + M1 + M2 G2.1–G2.5）：标量全类型与运算、if/while/标签跳转、函数递归 / lambda / 捕获（值语义）、try-catch / throw / 错误字段访问、<strong>list / dict 读写与 for-in 迭代</strong>、 <strong>struct 构造与字段读取</strong>（<code class="inline">__struct__</code> 隐藏标记键全路径过滤；<code class="inline">==</code> 按同名 struct 判定， 异名 struct 恒不等；字段写入与 VM 一致编译期 H999）、<strong>enum 构造 / 显示 / 相等 / 进容器</strong>、 <strong>match 全形态</strong>（字面量模式、变体模式与载荷绑定、<code class="inline">_</code> 通配、无匹配分支 H005）、 <strong>条件严格 bool 与 <code class="inline">&amp;&amp;</code>/<code class="inline">||</code> 短路求值</strong>、<strong>运算符重载（15 个 <code class="inline">__op</code> 回退链）</strong>、 <strong>alias（别名解析，可叠加；可指向内置 / struct 构造 / 变量）</strong>、<strong>goto 标签跳转</strong>、 内置子集（print/len/append/ keys/values/has_key/to_str/to_int/to_float/is_*/type_of/abs/max/min/assert/assert_eq/read_file）； 子集外指令编译期报 H990「未实现」（M2 逐步放开）</li>
+<li>语义对齐修正：native 后端 <code class="inline">==</code>/<code class="inline">!=</code> 对 dict 的隐藏 <code class="inline">__struct__</code> 标记键原按「过滤后比较」处理， 异名 struct 同值误判相等（VM/interp 均判 false）——改为「双侧标记键均存在 → 同名且可见字段 逐对相等」，三引擎对齐</li>
+<li>依赖本机 rustc（M3 起改预编译工具链移除）；runtime 源码内嵌进 hone 二进制，干净机器自足</li>
+<li>回归：<code class="inline">tests/regress4.py</code>（正常路径三引擎）、<code class="inline">tests/regress_err.py</code>（错误诊断三引擎逐字符）； 开发期扫雷工具 <code class="inline">tests/tools/audit_err.py</code>（55 例错误文案 + help 行批量比对）</li>
+<li>顺手修复：VM lambda 捕获实参寄存器绑定 bug（原按 <code class="inline">ncap+i</code> 偏移，捕获/参数寄存器不从 0 起排时 实参填错位，<code class="inline">base + x</code> 报 int+null）</li>
+<li>设计 / 进度：<code class="inline">Hone原生编译后端设计.md</code>、<code class="inline">Hone原生编译后端进度.md</code></li>
+</ul></li>
+<li><strong>原生编译后端 M2 收尾（G2.6 async-await / G2.8 默认参数 / G2.9 点号内置族）与 M3 G3.1 import</strong>：<ul>
+<li>G3.1：VM（<code class="inline">--vm</code>）与原生后端（<code class="inline">--native</code>）在<strong>编译期</strong>递归展开顶层 <code class="inline">import</code> （本地路径相对当前工作目录；远程 http(s) 下载缓存到 <code class="inline">~/.hone/cache/</code>），合并为单编译单元； 模块函数按「模块名_」前缀注册、<code class="inline">as 别名</code> 整体换前缀、模块顶层语句在导入位点执行一次； 同名定义报错、循环 import 报错、同一模块去重。解释器仍走运行期 import（语义基准）</li>
+<li>修复 natgen 缺陷：函数入口块与 pc=0 段块原为同一块，当函数首语句为 <code class="inline">while</code>（循环头在 pc 0） 时回边跳转到 entry 块触发 Cranelift 校验失败（<code class="inline">invalid reference to entry block</code>）—— 入口块独立为序言、末尾跳入 pc=0 段块（<code class="inline">math_gcd</code> 等 hone_lib 函数撞出）</li>
+</ul></li>
+<li><strong>原生编译后端产物体积裁剪（M3 G3.3）</strong>：链接期 <code class="inline">-C opt-level=z</code> + <code class="inline">-C codegen-units=1</code> + <code class="inline">-Wl,--gc-sections</code> + <code class="inline">-Wl,--strip-all</code>，nat 产物 hello 5.10MB → <strong>1.03MB</strong>（<code class="inline">tests/m2/*</code> 各 1.1MB 量级， 达标 ≤3MB）；<code class="inline">HONE_NAT_FLAGS</code> 可覆盖链接参数<ul>
+<li>修复 natgen 缺陷：默认参数形参装载判据写成 <code class="inline">nargs &lt; j</code>，漏掉 <code class="inline">j == nargs</code>（恰未提供）档—— 读到调用方未打包区的脏句柄、序言释放时 <code class="inline">cell_release</code> 段错误（原 <code class="inline">-O</code> 下靠栈布局运气掩盖）。 改为判据 <code class="inline">j &lt; nargs</code>、未提供时地址钳 <code class="inline">argptr+0</code> 且值取 <code class="inline">rt_null</code></li>
+</ul></li>
+<li><strong>原生编译后端 CPU 基线（M3 G3.7）</strong>：x86_64 ISA 默认 baseline + SSSE3（设计 §6.3，避免 AVX 类 指令在旧 CPU 非法）；新增 <code class="inline">--cpu baseline|ssse3|sse4.2|avx2</code>（<code class="inline">build --exe --native</code> / <code class="inline">natgen</code>）。 ISA 专属旗标经 <code class="inline">isa::lookup</code> 的 <code class="inline">IsaBuilder</code>（<code class="inline">Configurable::set</code>）设置，非全局 settings builder</li>
+<li><strong>原生编译后端交叉编译（M3 G3.2）</strong>：新增 <code class="inline">--target &lt;triple&gt;</code>（<code class="inline">build --exe --native</code> / <code class="inline">natgen</code>）， 默认宿主目标；支持 <code class="inline">x86_64-pc-windows-gnu</code> / <code class="inline">x86_64-unknown-linux-musl</code> / <code class="inline">aarch64-unknown-linux-musl</code>。 交叉经 rustc <code class="inline">-C link-self-contained=yes</code>（自带 musl CRT）+ <code class="inline">-C linker=&lt;sysroot rust-lld&gt;</code> + 裸 <code class="inline">--gc-sections</code>/<code class="inline">--strip-all</code> + <code class="inline">-no-pie</code>（Cranelift 产非 PIC 对象）产出；aarch64 需 cranelift-codegen 开 <code class="inline">arm64</code> 特性。产物名默认带目标后缀</li>
+</ul>
+<h4><span class="flag fix">修复</span></h4>
+<ul>
+<li><strong>原生编译后端的能力边界报错口径统一为 H999</strong>（M2 G2.7）：此前未实现的指令报 <code class="inline">H990 internal</code> 「指令未实现（M0 子集外，T3/T5+ 落地）」（文案早已过时），现报 <code class="inline">H999 原生编译后端暂不支持 \</code>await\<code class="inline">（见 M2 G2.6 async-await）</code> + help「用解释器运行同一脚本」， 与 VM / DLL 对同类特性（<code class="inline">with</code>、字段赋值）的 H999 口径一致</li>
+<li><strong>新增单测强制「每个字节码指令都有显式决策」</strong>（G2.7）：<code class="inline">Instr</code> 的每个变体都必须有 lowering 臂 / 块级处理，或在 <code class="inline">NOT_IMPLEMENTED</code> 表里带理由登记——新增指令若漏决策，测试直接失败并列出漏项， 不再静默落到兜底 H990</li>
+<li><strong>原生编译后端支持 alias / goto</strong>（M2 G2.5）：<code class="inline">alias 原名 as 新名</code> 在原生后端可用—— runtime 增加别名表（<code class="inline">call_global</code> 入口解析，可叠加），natgen Call lowering 编译期解析别名 以决定走 <code class="inline">rt_callv</code>（局部变量目标）还是 <code class="inline">rt_call</code>（全局目标）；goto（Label+Jmp）基线已覆盖， 本轮补用例固化</li>
+<li><strong><code class="inline">alias len as mylen</code> 这类「别名指向内置」的形态在原生后端原先报 H002</strong>， 现可用；连带修掉一处极隐蔽的 wrapper 缺陷——别名的<strong>原名</strong>若从未作为调用名出现 （<code class="inline">len</code> 只出现在 alias 声明里）就会拿到错误的 strtab 索引，症状是报错指向一个<strong>无关的函数名</strong></li>
+<li><strong>解释器「别名指向变量」形态对齐 VM</strong>：VM 的 <code class="inline">do_call</code> 把 <code class="inline">resolve_alias</code> 放在局部变量查找 之前，解释器却只在 <code class="inline">call_fn</code> 末尾查函数表 —— <code class="inline">alias gvar as g2; g2(1)</code> 解释器报 H002、 VM 正常。改为一律「先解析别名（可叠加）再走完整分派」，「别名即透明改名」三引擎成立</li>
+<li><strong>原生编译后端支持运算符重载</strong>（M2 G2.4）：<code class="inline">__add</code> / <code class="inline">__sub</code> / <code class="inline">__mul</code> / <code class="inline">__div</code> / <code class="inline">__mod</code> / <code class="inline">__eq</code> / <code class="inline">__ne</code> / <code class="inline">__lt</code> / <code class="inline">__le</code> / <code class="inline">__gt</code> / <code class="inline">__ge</code> / <code class="inline">__neg</code> / <code class="inline">__not</code> / <code class="inline">__len</code> / <code class="inline">__index</code> 回退链（触发条件逐条镜像解释器：算术限「非数字/str 组合 + H001」，比较限「非数字对」， 除零/溢出等内建错误不回退）；实现落在 runtime，字节码与 lowering 无需改动</li>
+<li><strong>参数个数校验三引擎对齐</strong>：<code class="inline">fn f(a)</code> 被以 2 个实参调用（经运算符重载路径可达）时， VM 与原生后端原报中文硬编码消息且无定位无 help，现统一为解释器文案 （<code class="inline">expects at most N arguments, got M</code> / `<code class="inline">missing argument </code>c<code class="inline"> of </code>f<code class="inline"> </code>`）+ 定位 + help</li>
+<li><strong><code class="inline">&amp;&amp;</code> / <code class="inline">||</code> 改为真正的短路求值</strong>（此前 VM 在分支前无条件求值右侧）：<code class="inline">false &amp;&amp; f()</code> / <code class="inline">true || f()</code> 原先仍调用 <code class="inline">f</code>（副作用可见），且 <code class="inline">true || (1 / 0 == 0)</code> 原先触发除零——现与解释器一致： 左侧恰为 <code class="inline">false</code>（<code class="inline">&amp;&amp;</code>）/ <code class="inline">true</code>（<code class="inline">||</code>）才短路，否则求值右侧</li>
+<li><strong>条件站点严格 bool 校验</strong>（解释器运行期兜底，VM 原先按 truthy 静默放行）：if / while / do-while / for / 三元 / 推导式 <code class="inline">if</code> 过滤六处，非 bool 条件（enum、struct、字符串等动态值） 改报 H001 且消息按站点区分；<code class="inline">do { } while (enum)</code> 原先死循环</li>
+<li><strong>逻辑操作数严格 bool</strong>：<code class="inline">&amp;&amp;</code> / <code class="inline">||</code> 右侧非 bool 报 H001「logical operators require <code class="inline">bool</code> operands」（原先当 truthy 处理并直接返回该值）</li>
+<li><strong>match 无匹配分支的错误码对齐</strong>：原 VM 抛字面串 → H600「match failed: 无匹配分支 (H005)」， 与解释器的 H005「no match arm matched the value」+ help 不一致——改走 <code class="inline">Instr::Raise</code>， 三引擎逐字节一致（runtime 侧 <code class="inline">rt_raise</code> 错误码白名单与文本 IR 装配同步补 H005）</li>
+<li><strong>match 绑定变量作用域</strong>：绑定原先插进所在作用域且从不弹出，会顶掉外层同名变量 （绑定后外层变量在 VM 侧被改写，解释器分支结束即出作用域）；改为「临时区声明 + 分支作用域」， 外层同名变量不受影响</li>
+<li><strong>lambda 捕获取内层同名变量</strong>：捕获表原先按「外→内」遍历且首见即取，遮蔽场景下捕获到被遮蔽的 外层值（<code class="inline">match</code> 绑定遮蔽外层名时，闭包拿到外层值而非绑定值）——改为与 <code class="inline">lookup</code> 同序（内层优先）</li>
+<li><strong>解构非容器值的错误文案</strong>：VM 原用值显示（<code class="inline">got 5</code>），解释器用类型名（<code class="inline">got int</code>）——VM 改用 <code class="inline">type_name()</code>，三引擎一致（既有用例被 <code class="inline">print</code> 参数数静态错误掩盖，本轮补运行期用例）</li>
+<li><strong>解释器整数取负溢出改抛 H010</strong>：<code class="inline">-x</code> 遇 <code class="inline">i64::MIN</code> 原先直接 panic（<code class="inline">attempt to negate with overflow</code>），与 VM / nat 后端行为不一致——改为 <code class="inline">checked_neg</code> 并报H010（带 help），三引擎统一</li>
+<li><strong>VM 推导式双变量在列表源上的行为对齐解释器</strong>：<code class="inline">[x for k, v in list]</code> / <code class="inline">{k: v for k, v in list}</code> 原先静默退化为单变量（且编译期因列表路径未声明第二变量报「未定义变量」）；新增 <code class="inline">Instr::Raise</code> 指令复现解释器报错「推导式 <code class="inline">for k, v in</code> 要求 dict，得到 list」，natgen 同步 <code class="inline">rt_raise</code></li>
+<li><strong>VM 嵌套索引赋值</strong>：<code class="inline">m[i][j] = x</code> 原先报H999「仅支持单层索引赋值」，现按解释器的递归写回语义 展开为「从深到浅」的 IndexSet 链</li>
+<li><strong>VM 解构错误文案对齐解释器</strong>：区分列表 / 字典解构形态不符（各有专属 help）、列表元素数不足时 报实际变量数并补help</li>
+<li><strong>CI 的 nat 三引擎回归（Linux job）16 例全灭</strong>：回归脚本在 Linux 上强制 <code class="inline">--target x86_64-unknown-linux-musl</code>，而 runner 未装该目标的 Rust std，rustc 报 <code class="inline">E0463: can't find crate for 'std'</code>。三处一起修：<ul>
+<li><code class="inline">ci.yml</code>：nat 回归步骤在 Linux 上先 <code class="inline">rustup target add x86_64-unknown-linux-musl</code>（Linux 侧 回归口径为 musl，见设计 §6.3；glibc 目标不在 CRT 分发矩阵内）</li>
+<li><code class="inline">regress4.py</code>：nat 目标改为「已装 musl 用 musl，否则用宿主目标」，且首选目标编译失败时 退回宿主目标重试一次并打印 <code class="inline">FALLBACK</code>（不静默；摘要行新增 <code class="inline">FALLBACK(退回宿主目标)</code>）</li>
+<li><code class="inline">build_native</code>（<code class="inline">src/main.rs</code>）：链接参数改按<strong>目标 + 链接驱动</strong>分派，而非「是否交叉」—— 宿主 Linux（ELF）此前漏了非 PIE 处理，Cranelift 产出的非 PIC 对象在平台默认 PIE 链接下会报 <code class="inline">relocation R_X86_64_32S ... can not be used when making a PIE object; recompile with -fPIC</code> （musl 交叉路径早已带 <code class="inline">-no-pie</code>，宿主路径漏了）。宿主 ELF 现用 <code class="inline">-C relocation-model=static -C link-arg=-no-pie</code>；宿主 msvc 不再收到链接器不认识的 GNU/ld 风格参数（改用 link.exe 的 <code class="inline">/OPT:REF /OPT:ICF</code>）</li>
+<li>交叉链接失败的 help 行不再说「本机仅宿主目标可用」（误导），改为指名三条出路： <code class="inline">rustup target add &lt;triple&gt;</code>、sysroot 内的 rust-lld、glibc 目标不在 CRT 矩阵内（改用 musl 或 G3.4 打包工具链）</li>
+</ul></li>
+<li><strong>nat 交叉产物在 Linux 上「启动即 SIGSEGV」（CI 16 例全 -11、零输出）</strong>：rustc 对 musl 目标默认按 <strong>static-PIE</strong> 选启动 CRT（<code class="inline">rcrt1.o</code> + <code class="inline">crtbeginS.o</code> + <code class="inline">-pie --no-dynamic-linker</code>），而 <code class="inline">-C link-arg=-no-pie</code> 只影响链接器末端的开关、<strong>改不了选哪个 crt1</strong>——两者混用会产出 「<code class="inline">rcrt1.o</code> 自重定位启动 + ET_EXEC（无 PT_DYNAMIC，<code class="inline">_DYNAMIC=0</code>）」的产物，<code class="inline">_start</code> 一开始扫 dynamic 段就解引用空指针。修法：交叉路径补 <strong><code class="inline">-C relocation-model=static</code></strong>，让 rustc 自己按非 PIE 选 <code class="inline">crt1.o</code>/<code class="inline">crtbegin.o</code>  （与打包工具链路径 G3.4 的产物入口逐字节一致，已用两条链接路径产物的 入口点字节比对验证）。</li>
+<li><strong>发布流水线的 <code class="inline">verify-nat</code> 从未真正跑过发布验证（v0.8.0 首次发布即卡在此）</strong>：先是该 job 里 <code class="inline">build_native</code> 默认走 rustc 交叉链接、需要 musl std（未安装）→ <code class="inline">E0463</code>；改为强制走随包工具链 后又暴露<strong>Linux 侧 <code class="inline">targets/lld/rust-lld</code> 并不自足</strong>（动态依赖 sysroot 的 <code class="inline">libLLVM.so</code>， 随包未分发）→ 加载期失败。最终定型：<code class="inline">verify-nat</code> 用<strong>发布产物本身</strong>编 musl 产物并真跑 （rustc 路径，job 内 <code class="inline">rustup target add</code>），另加 <strong>full 包内容清单检查</strong>；新增 <strong><code class="inline">HONE_NAT_LINK=rustc|packaged</code></strong> 开关（默认 auto）与 rust-lld 缺依赖库时的指名 help。 Linux 打包工具链自足化（随包分发 lld 的运行期依赖）登记为 <strong>G3.8</strong> 待办。</li>
+<li><strong><code class="inline">release.yml</code> 的 aarch64 ELF 头校验断言写错字节序，从来不可能通过</strong>：<code class="inline">xxd -p</code> 打印的是 <strong>文件字节序</strong>，aarch64 的 <code class="inline">e_machine=0x00b7</code> 在文件里是 <code class="inline">b7 00</code>，而断言写的是 <code class="inline">00b7</code> （<code class="inline">e_type</code> 那行恰好写对了）——此前该步骤总在更早的链接阶段失败，所以一直没暴露。现改用 <code class="inline">od</code>（runner 未必带 <code class="inline">xxd</code>）并<strong>先把头部 20 字节打出来</strong>再逐项断言（<code class="inline">e_ident[EI_CLASS]</code>= ELFCLASS64 / <code class="inline">e_type</code>=ET_EXEC / <code class="inline">e_machine</code>=aarch64），失败信息带实得值。 G3.8 口径定案（用户决定）：本版不随包分发 <code class="inline">libLLVM</code>，Linux 无 rustc 时请安装 Rust 工具链。</li>
+<li><strong>发布页被 full 包内容污染</strong>：<code class="inline">publish</code> 用 <code class="inline">find dist -type f -exec cp {} dist/pkg/</code> 摊平全部产物， 而 full 包解出的 <code class="inline">*/full/targets/</code> 是整棵工具链树，于是 <code class="inline">rust-lld.exe</code>、<code class="inline">libhoneruntime.a</code>、 各目标 <code class="inline">crt1.o</code> / <code class="inline">crt2.o</code> 全被当成独立资产挂上 release（v0.8.0 首跑踩到；同名文件还互相覆盖， 只能剩下每类一个）。改为排除 <code class="inline">*/full/*</code>，只上传三个平台产物、两个 full 包与安装脚本。</li>
+</ul>
+<h4><span class="flag chg">变更</span></h4>
+<ul>
+<li><strong>新增两条字节码指令</strong>：<code class="inline">Instr::CondCheck(reg, kind)</code>（条件严格 bool 校验，kind 区分 if / while / do-while / for / ternary / 逻辑运算 / 推导式 if 七个站点）与 <code class="inline">Instr::IsBoolVal(dst, src, want)</code>（值是否恰为 <code class="inline">Bool(want)</code>，供 <code class="inline">&amp;&amp;</code>/<code class="inline">||</code> 短路判定）。 natgen 同步 lowering 到 <code class="inline">rt_condcheck</code> / <code class="inline">rt_isboolval</code>；文本 IR 形态为 <code class="inline">CONDCHK r{reg} {kind}</code> 与 <code class="inline">ISBOOLV r{dst} r{src} {true|false}</code>（<code class="inline">hone run --disasm</code> 往返一致）</li>
+<li><strong><code class="inline">Instr::DestructGet</code> 增字段</strong>：签名由 <code class="inline">(dst, obj, key)</code> 扩为 <code class="inline">(dst, obj, key, nvars, is_dict)</code>， 供 VM 侧复现解释器的解构报错文案（文本 IR 往返格式同步为 <code class="inline">DESTRUCTGET r{d} r{o} r{k} {n} {list|dict}</code>）</li>
+</ul>
+<h4><span class="flag rem">移除</span></h4>
+<ul>
+<li><strong>移除 AOT 原生编译后端（<code class="inline">hone build --exe -c</code>）</strong>：整条「脚本 → C 中间文件 → gcc/clang → 原生可执行文件」的编译路径从此不再提供。移除内容与边界如下：<ul>
+<li>删除 <code class="inline">src/aot.rs</code>（AOT 的 C 代码生成与内嵌 C 运行时，约 2900 行）；删除 <code class="inline">src/main.rs</code> 中 <code class="inline">-c</code> / <code class="inline">--keep-c</code> 的参数解析、<code class="inline">cmd_build_exe_aot()</code> 与 <code class="inline">run_cc_exe()</code> 两个函数，以及 <code class="inline">--help</code> 与选项错误提示中的 <code class="inline">-c</code> / <code class="inline">--keep-c</code> 文案</li>
+<li><code class="inline">hone build --exe</code> 现只保留两条路径：默认的<strong>自释放打包</strong>（解释器 + 脚本）与 <code class="inline">--native</code> （Cranelift 原生编译）；原先「<code class="inline">-c</code> 与 <code class="inline">--native</code> 互斥」的 H005 校验随 AOT 一并移除。 对已写死 <code class="inline">-c</code> 的旧命令，现按「未知选项」显式报错，不再静默产生 AOT 产物</li>
+<li><strong><code class="inline">--dll</code> 相关配置与参数完全未改动</strong>：<code class="inline">hone build --dll</code> 的 C 代码生成（<code class="inline">src/codegen.rs</code>）、 类型映射（int→int64_t / float→double / bool→bool / str→const char*）、<code class="inline">@export</code> 导出、 动态库扩展名分派（dll / so / dylib）行为均保持原样</li>
+<li>与值模型无关、两个 C 后端原先共用的机械层 <code class="inline">src/cgen_util.rs</code>（C 字符串转义）<strong>保留</strong>， 现由 <code class="inline">--dll</code> 单一使用（含 4 个单元测试，锁死控制字符转义回归）</li>
+<li><code class="inline">--dll</code> 依赖的 C 编译器查找 <code class="inline">find_cc()</code>（<code class="inline">CC</code> 环境变量 &gt; gcc &gt; clang &gt; cc）与调用 <code class="inline">run_cc()</code> 逻辑不变——这两个函数是 <code class="inline">--dll</code> 与 AOT 共用，移除 AOT 后仍由 <code class="inline">--dll</code> 使用，故保留</li>
+<li>文档同步：<code class="inline">README.md</code>、<code class="inline">hone.md</code>（原 4.6「AOT 原生编译」与 4.8「AOT 性能实测」两节删除， 章节号顺延）、<code class="inline">AGENTS.md</code>、官网相关页</li>
+</ul></li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.7.12</span>
+<span class="date">2026-09-25</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>with 上下文管理器</strong>：<code class="inline">with expr as r { ... }</code>，进入时调 <code class="inline">__enter__()</code> （返回值绑定 <code class="inline">r</code>，仅块内可见），退出时（<strong>含报错路径</strong>）必调 <code class="inline">__exit__()</code>，错误不被吞<ul>
+<li>与 try/catch 正交：块内 throw 会先执行 <code class="inline">__exit__</code> 再向外传播</li>
+<li>示例 <code class="inline">examples/with_type_demo.hn</code></li>
+</ul></li>
+<li><strong>type 实例类</strong>：<code class="inline">type 名称 [extends 父类] { 字段: 类型, ...; fn 方法(self, ...) { ... } };</code><ul>
+<li>所有方法（含 <code class="inline">init</code>/<code class="inline">__enter__</code>/<code class="inline">__exit__</code>）必须把 <code class="inline">self</code> 作为<strong>显式首参</strong>，调用自动填充实例</li>
+<li>构造 <code class="inline">new Type(实参...)</code>：实参绑定 <code class="inline">init</code> 的参数（去掉 self）；无 <code class="inline">init</code> 时按 <strong>继承链字段顺序</strong>（父类在前）绑定</li>
+<li>字段引用语义：方法体内 <code class="inline">self.f = x</code> 的写入对调用方实例立即可见</li>
+<li><code class="inline">extends</code> 继承字段与方法；<code class="inline">readonly</code> 字段两种写法等价：<code class="inline">readonly f: int</code> / <code class="inline">f: readonly int</code></li>
+<li>与 <code class="inline">struct</code>（纯数据 dict，位置构造）互补：type 提供方法、继承与构造器</li>
+<li>示例 <code class="inline">examples/with_type_demo.hn</code></li>
+</ul></li>
+<li><strong>byte / bytes 字节类型</strong><ul>
+<li><code class="inline">byte</code>：8 位无符号值，字面量 <code class="inline">0b1010001</code> 或 <code class="inline">byte(int)</code> 显式转换（越界报错）； 与 int 严格隔离（无隐式转换），<code class="inline">to_int(b)</code> / <code class="inline">char(b)</code> 回转</li>
+<li><code class="inline">bytes</code>：字节序列，字面量 <code class="inline">b"abc"</code>；支持 <code class="inline">len</code> / 索引（取 byte）/ 切片 / <code class="inline">+</code> 拼接 / <code class="inline">==</code> / 迭代；<code class="inline">hex(b)</code> / <code class="inline">unhex(s)</code> / <code class="inline">to_bytes(str, enc?)</code>（默认 utf-8，支持 latin-1）/ <code class="inline">to_str(bytes, enc?)</code> / <code class="inline">to_bytes([int...])</code></li>
+<li>新增谓词 <code class="inline">is_byte</code> / <code class="inline">is_bytes</code>；<code class="inline">type_of</code> 返回 <code class="inline">byte</code> / <code class="inline">bytes</code></li>
+<li>JSON 序列化对 byte/bytes/type 实例明确报错（提示先转 str/hex 或组 dict）</li>
+<li>示例 <code class="inline">examples/byte_demo.hn</code></li>
+</ul></li>
+<li><strong>readonly 只读修饰</strong><ul>
+<li>只读变量 <code class="inline">readonly int x = 5;</code>（两种写法等价：<code class="inline">x : readonly int = 5;</code>）</li>
+<li>只读参数 <code class="inline">fn f(readonly int y) { ... }</code></li>
+<li>struct 只读字段、type 只读字段（静态拦截 + 运行时兜底）</li>
+</ul></li>
+<li><strong>切片</strong>：<code class="inline">a[i:j]</code>（list / bytes；任一端点可省略：<code class="inline">a[i:]</code> / <code class="inline">a[:j]</code>）， 与 <code class="inline">a[i]</code> 索引同位置可链式（str 暂不支持切片，按码点用 <code class="inline">char_at</code> 逐字符取）</li>
+<li><strong>LSP 文本能力补全</strong>（<code class="inline">hone lsp</code>，LSP over stdio）：在既有的诊断 / 补全 / hover / 跳转定义 / 语义高亮基础上，新增 8 项标准文本能力，均无新增依赖<ul>
+<li><strong>references</strong>（<code class="inline">textDocument/references</code>）：跨<strong>所有已打开文档</strong>查找符号引用， 词法 token 精确匹配（<code class="inline">includeDeclaration</code> 时含定义处）</li>
+<li><strong>rename</strong>（<code class="inline">textDocument/rename</code>）：返回跨文档 <code class="inline">WorkspaceEdit</code>，一次改全部引用； 无引用时返回 <code class="inline">null</code></li>
+<li><strong>signatureHelp</strong>（<code class="inline">textDocument/signatureHelp</code>）：<code class="inline">(</code>/<code class="inline">,</code> 触发的调用签名帮助， 解析光标所在调用的函数名与激活参数下标，展示用户函数 / 模块函数签名</li>
+<li><strong>foldingRange</strong>（<code class="inline">textDocument/foldingRange</code>）：多行大括号块（含 match 体）与 跨行注释（<code class="inline">/* */</code>、<code class="inline">"""</code>）折叠</li>
+<li><strong>documentSymbol</strong>（<code class="inline">textDocument/documentSymbol</code>）：AST 驱动的文档大纲 （fn / async fn / class / struct / enum / type，含嵌套成员）</li>
+<li><strong>workspace/symbol</strong>（<code class="inline">workspace/symbol</code>）：跨文档全局符号搜索（子串匹配名称）</li>
+<li><strong>formatting</strong>（<code class="inline">textDocument/formatting</code>）：复用 <code class="inline">hone fmt</code> 格式化器，与 CLI 行为一致</li>
+<li><strong>typeDefinition</strong>（<code class="inline">textDocument/typeDefinition</code>）：类型定义跳转（struct / enum / type / class）</li>
+<li>协议错误遵循 LSP 规范：<code class="inline">-32700</code> Parse error、<code class="inline">-32601</code> Method not found、 <code class="inline">-32602</code> Invalid params；未实现能力（如 documentHighlight）返回 <code class="inline">-32601</code></li>
+<li>端到端冒烟测试见 <code class="inline">tests/lsp_smoke.py</code>（stdio 启动服务器，验证全部能力 + 协议错误码）</li>
+<li>各编辑器（VS Code / Neovim / Helix / Emacs / Kakoune）接入配置见官网「LSP / 编辑器」页（官网/lsp.html）</li>
+</ul></li>
+<li><strong>hone check 静态检查命令</strong>：<code class="inline">hone check &lt;file.hn|目录&gt; [--json]</code> 只做解析 + 类型检查、 不执行代码<ul>
+<li>单文件：通过输出 <code class="inline">check OK: &lt;file&gt;</code>（退出码 0）；失败输出诊断到 stderr，退出码非 0</li>
+<li>目录：递归扫描全部 <code class="inline">.hn</code>（跳过隐藏目录与 target/node_modules 等构建目录）， 逐个检查（单文件失败不中断），末尾输出 <code class="inline">N files, X passed, Y failed</code> 汇总</li>
+<li><code class="inline">--json</code>：诊断 JSON 数组输出到 stdout（每失败文件一项，全通过为 <code class="inline">[]</code>）， 便于 CI / 编辑器集成</li>
+<li>失败退出时输出汇总错误码 H900（单条诊断保留原错误码 H001/H005 等）</li>
+</ul></li>
+<li><strong>cow 写时复制容器（COW）</strong>：<code class="inline">cow</code> 声明关键字，集合值共享只读缓冲、写者首次写时深拷贝隔离， 以 <code class="inline">Arc</code> 引用计数归零自动回收（无追踪式垃圾回收）<ul>
+<li>覆盖 <code class="inline">list</code> / <code class="inline">dict</code> / <code class="inline">str</code> / <code class="inline">bytes</code>；<code class="inline">str</code>/<code class="inline">bytes</code> 不可变故为零拷贝共享， <code class="inline">list</code>/<code class="inline">dict</code> 可变故写前检查唯一性（独占直接原地写，共享则深拷贝隔离）</li>
+<li>声明形式（均需初始化，list/dict 类型由初始化式推断，str/bytes 可显式标注）： <code class="inline">cow x = [1, 2];</code> / <code class="inline">cow str s = "hi";</code> / 类型位置 <code class="inline">x : cow str = "hi";</code>（等价）</li>
+<li>只读可叠加：<code class="inline">cow readonly bytes b = b"…";</code>；cow 形参：<code class="inline">fn f(cow z) { ... }</code></li>
+<li>共享与隔离：<code class="inline">cow→cow</code> 赋值共享缓冲（O(1)）；<code class="inline">cow→普通</code> 赋值在边界自动深拷贝， 普通变量永远不共享 cow 缓冲</li>
+<li>透明性：<code class="inline">type_of</code> 报内层类型（<code class="inline">type_of(cow x)</code> → <code class="inline">"list"</code>）、<code class="inline">len</code> / <code class="inline">==</code> / 迭代 / 推导式 / 切片 / 内置函数均按内层值工作，报错文案不变</li>
+<li>写操作范围：仅原地赋值语句（<code class="inline">a[i] = x</code> 索引赋值、<code class="inline">a.k = x</code> 字段赋值）； <code class="inline">+=</code> 等复合赋值不触发写时复制（按既有值语义）</li>
+<li>仅解释器支持：VM（<code class="inline">--vm</code>）/ AOT（<code class="inline">build --exe -c</code>）/ DLL（<code class="inline">build --dll</code>） 遇 <code class="inline">cow</code> 声明或形参报 H999（"cow works in interpreted mode only"）</li>
+<li>冒烟测试 <code class="inline">tests/smoke/cow_read.hn</code></li>
+</ul></li>
+<li><strong>cow 语言参考</strong>：语言规格 <code class="inline">hone.md</code> 补充 cow 写时复制容器规范 （声明形式 / <code class="inline">cow readonly</code> 只读叠加 / <code class="inline">cow</code> 形参 / <code class="inline">type_of</code> 透明性 / 各引擎 H999 限制）</li>
+</ul>
+<h4><span class="flag chg">变更</span></h4>
+<ul>
+<li>字段赋值 <code class="inline">obj.f = v</code>：<code class="inline">+</code>/<code class="inline">-</code>/<code class="inline">*</code>/<code class="inline">/</code>/<code class="inline">%</code> 复合赋值在 AST 层展开为 <code class="inline">obj.f = obj.f op v</code>（各后端统一只见普通字段赋值）</li>
+<li>解释器 <code class="inline">Value</code> 新增 <code class="inline">Byte(u8)</code> / <code class="inline">Bytes(Vec&lt;u8&gt;)</code> / <code class="inline">TypeInst</code> 变体； struct 字段表记录 readonly 标志</li>
+<li>AOT（<code class="inline">build --exe -c</code>）/ VM（<code class="inline">--vm</code>）/ DLL（<code class="inline">build --dll</code>）：type 实例、with、 字段赋值、字节字面量为解释器特性，按既有"不支持即报 H999"模式兜底 （goto 在 AOT 的同一处理方式）</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.7.11</span>
+<span class="date">2026-09-13</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>goto / 标签（H105）</strong>：<code class="inline">名字:</code> 定义标签，<code class="inline">goto 名字;</code> 跳转（可手工搭循环、一次性跳出 多层嵌套）。编译期安全校验，运行期绝不跳到未定义位置：<ul>
+<li>标签必须与 <code class="inline">goto</code> 同函数、同名唯一；只能跳到从跳转点向外层可见的标签， <strong>无法跳进 if/循环等内层语句块</strong></li>
+<li><strong>禁止向前跳过变量绑定</strong>（<code class="inline">x = ...</code> / <code class="inline">int x = ...</code> / 解构赋值），避免读到未初始化变量</li>
+<li>标签写法与类型注解 <code class="inline">x : int = 10;</code> 无歧义：冒号后同行还有内容即按类型注解解析</li>
+<li>解释器（<code class="inline">Flow::Goto</code> 逐层向外解析标签）与字节码 VM（编译为 <code class="inline">usr_&lt;名字&gt;</code> 标签 + JMP） 行为逐字节一致；AOT 原生编译暂不支持 <code class="inline">goto</code>（报 H999 并提示改用解释器/VM）</li>
+<li>示例 <code class="inline">examples/goto_demo.hn</code>；回归 <code class="inline">regress3.py</code> / <code class="inline">regress_ir.py</code> 均纳入比对</li>
+</ul></li>
+<li><strong>宏 macro（H106）</strong>：表达式宏 <code class="inline">macro NAME(形参) =&gt; 表达式;</code> 与语句宏 <code class="inline">macro NAME(形参) { 语句... }</code>，调用写法与函数一致（<code class="inline">NAME(...)</code>）<ul>
+<li>解析后、类型检查前由新增的预处理阶段（<code class="inline">src/preproc.rs</code>）做<strong>纯 AST 替换</strong>， 因此解释器 / 字节码 VM / AOT 三个后端行为完全一致，运行期不存在宏</li>
+<li>安全约定：宏只能在<strong>顶层</strong>定义、<strong>先定义后使用</strong>（若调用的名字对应更靠后的宏定义， 直接报 H106 并指出定义行号，提示把定义上移）；<strong>宏体在定义点展开</strong>（只能引用更早的宏 ⇒ 引用无环，不可能无限展开，无需深度上限）；宏名不得与函数/async fn/结构体/类/枚举 或其他宏重名；实参个数必须匹配</li>
+<li>表达式宏体内禁用 <code class="inline">++</code>/<code class="inline">--</code> 与 lambda，形参不得用作被调用函数名； 语句宏展开为<strong>独立作用域块</strong>（变量不外泄），体内禁用 <code class="inline">return</code>/<code class="inline">goto</code>/标签/嵌套 macro， <code class="inline">break</code>/<code class="inline">continue</code> 仅限宏体自身的循环</li>
+<li>形参可作简单赋值目标（<code class="inline">INC(i)</code> → <code class="inline">i = i + 1;</code>），实参须为裸变量名</li>
+<li>示例 <code class="inline">examples/macro_demo.hn</code></li>
+</ul></li>
+<li><strong>空字典字面量 <code class="inline">{}</code></strong>：表达式位置的 <code class="inline">{}</code> 产出无条目字典，与空列表 <code class="inline">[]</code> 对称<ul>
+<li>此前 <code class="inline">a = {};</code> 报 H005，<code class="inline">a = dict();</code> 报 H002，只能用 <code class="inline">json_parse("{}")</code> 绕过， 与 <code class="inline">a = []</code> 的正常行为不对称；现已修复</li>
+<li>语句起始的 <code class="inline">{</code> 仍按代码块解析（含 <code class="inline">{a, b} = ...</code> 字典解构探测），两条路径互不干扰： 表达式走 <code class="inline">parse_primary_atom</code>，语句走独立分支</li>
+<li>四个后端天然一致，无需各自特判：解释器 → <code class="inline">Value::Dict(vec![])</code>、 VM → <code class="inline">NEWDICT r? [..+0*2]</code>、AOT → <code class="inline">hn_dict_new()</code>（无后续 <code class="inline">hn_dict_set</code>）、 checker → 空循环返回 <code class="inline">Ty::Unknown</code></li>
+<li><code class="inline">hone_lib/process.hn</code> 中此前的 <code class="inline">json_parse("{}")</code> 绕过写法还原为 <code class="inline">return {};</code></li>
+<li>示例 <code class="inline">examples/empty_dict.hn</code>（7 组用例，双后端逐字节一致）</li>
+</ul></li>
+<li>新增错误码 <code class="inline">H105</code>（标签/跳转）、<code class="inline">H106</code>（宏），<code class="inline">hone explain H105/H106</code> 提供修复建议</li>
+</ul>
+<h4><span class="flag chg">变更</span></h4>
+<ul>
+<li><code class="inline">src/preproc.rs</code>（新增）：所有解析入口（<code class="inline">Parser::parse</code>）统一挂载「宏展开 + 跳转校验」， 保证 <code class="inline">hone run</code> / <code class="inline">--vm</code> / <code class="inline">--disasm</code> / AOT / LSP / REPL 走同一份语义</li>
+<li><strong>新增 <code class="inline">src/cgen_util.rs</code>：两个 C 后端共用 C 字符串转义；同时修复 <code class="inline">--dll</code> 的真实缺陷</strong><ul>
+<li><code class="inline">aot.rs</code>（<code class="inline">--exe -c</code>）与 <code class="inline">codegen.rs</code>（<code class="inline">--dll</code>）的值模型不同（前者统一装箱 <code class="inline">HnValue</code>， 后者用 <code class="inline">int64_t</code>/<code class="inline">const char*</code> 对接 C ABI），<strong>代码生成主体无法合并</strong>； 但纯机械的转义工具与值模型无关，两份各自维护必然漂移</li>
+<li><strong>修掉的 bug</strong>：<code class="inline">codegen.rs</code> 原先用十六进制 <code class="inline">\x{:02x}</code> 转义控制字符， 而 <strong>C 的 <code class="inline">\x</code> 转义是贪婪的</strong>——<code class="inline">"\x01a"</code> 会被编译器解析成单字节 <code class="inline">\x1a</code>（实测 strlen=1、 首字节 26），导致含控制字符且后随十六进制数字的字符串<strong>被静默截短、内容错误</strong>； <code class="inline">aot.rs</code> 侧用的是三位八进制 <code class="inline">\001</code> 故未受影响。现统一为三位八进制（固定补足 3 位）</li>
+<li>新增 4 个单元测试，其中 <code class="inline">control_char_does_not_swallow_following_hex_digit</code> 专门锁死该回归（若退化为 <code class="inline">\x</code> 写法即失败）</li>
+<li>净减少约 20 行重复代码；<code class="inline">src/main.rs</code> 加 <code class="inline">mod cgen_util;</code></li>
+</ul></li>
+<li><strong>AOT 后端评估完成（结论：保留并投入，不移除）</strong>：实测推翻「AOT 性价比不高、应移除」的 初始假设，AOT 原生编译（<code class="inline">hone build --exe -c</code>）相对解释器有数量级优势：<ul>
+<li>fib(26) 递归：AOT <strong>267 ms</strong> / 解释器 2530 ms → <strong>9.5×</strong></li>
+<li>循环累加 200 万次：AOT <strong>514 ms</strong> / 解释器 6203 ms → <strong>12.1×</strong></li>
+<li>循环累加 2000 万次：AOT <strong>2962 ms</strong> / <code class="inline">rustc -O</code> 274 ms → AOT 约为 Rust 的 1/10.8 （差距来自生成代码的<strong>值语义装箱</strong>，见下条）</li>
+<li>编译器为 MinGW-w64 gcc 16.2.0（<code class="inline">CC</code> 指向 <code class="inline">gcc.exe</code>）；产物约 <strong>58.6 KB</strong></li>
+<li><strong>已知性能短板（如实记录）</strong>：AOT 生成的 C 对每个整数运算都做 <code class="inline">hn_int()</code> 装箱 + <code class="inline">hn_copy()</code> 深拷贝 + <code class="inline">hn_free_value()</code> 释放， 因此热循环无法被 gcc 优化成寄存器运算；这是「值语义列表/字典」与 「统一装箱 <code class="inline">HnValue</code>」的必然代价，不是编译器参数问题。 未做优化前不宜对外宣称「接近 C 的性能」</li>
+<li>未采用「翻译为 Rust 再编译」路径：需重写 2836 行翻译层，且 Rust 全量编译约 7 分钟 （gcc 约 2 秒），性价比明显更低</li>
+</ul></li>
+<li><code class="inline">hone.md</code> 修正两处<strong>与实现不符</strong>的描述：<code class="inline">--dll</code> 原先写作「内置 TinyCC（约 200 KB）， 无需用户安装外部工具链」，实测 <code class="inline">Cargo.toml</code> 无任何 C 编译器依赖、<code class="inline">src/main.rs</code> 的 <code class="inline">find_cc()</code> 走 <code class="inline">CC</code> 环境变量 &gt; gcc &gt; clang &gt; cc，<strong>与 AOT 一样依赖系统 C 编译器</strong>； 体积目标中「含 TinyCC 约 200 KB」的估算同步修正为实测 3.7 MB</li>
+<li>回归基线更新：示例 72 个（参与比对 56 / SKIP 16）。<code class="inline">regress3.py</code> <strong>PASS=47 / FLAKY=5 / FAIL=0</strong>、 <code class="inline">regress_err.py</code> <strong>PASS=37 / FAIL=0</strong>、<code class="inline">regress_ir.py</code> <strong>OK=38 / FLAKY=5 / BAD=0</strong>； 真实逻辑差异为 0</li>
+<li><strong>回归脚本分类表统一（新增 <code class="inline">tests/regress_common.py</code>）</strong>：<code class="inline">regress3.py</code> 与 <code class="inline">regress_ir.py</code> 原先各自维护一份 SKIP 集合，两份逐渐漂移——<code class="inline">regress_ir.py</code> 少列了全部 import 依赖项 （<code class="inline">smoke_spider</code>、5 个 <code class="inline">test_*_lib</code>）也没有 FLAKY 概念，导致长期有 9 个 BAD 误报， 把「按设计不支持」伪装成「真实往返不等价」。现抽出 <code class="inline">SKIP</code> / <code class="inline">FLAKY</code> / <code class="inline">should_skip()</code> 作为唯一事实来源，两个脚本共同导入；<code class="inline">regress_ir.py</code> 同时补上 FLAKY 分支与 <code class="inline">TimeoutExpired</code> 的解码兜底（原先直接拼接 <code class="inline">e.stdout</code>，超时输出可能是 <code class="inline">None</code> 而抛异常）</li>
+<li><code class="inline">regress3.py</code> 将 <code class="inline">https_demo</code> 纳入 SKIP：该示例访问外网，返回内容随网络变化（非逻辑差异）， 纳入 SKIP 以保证基线可复现；同时新增<strong>容错重试</strong>（首次不一致重跑至多 2 次，任一次一致即 PASS 并记入 <code class="inline">FLAKY</code> 行），消除 <code class="inline">threads</code> / <code class="inline">async_demo</code> 线程完成顺序造成的偶发误报</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.7.10</span>
+<span class="date">2026-08-30</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>char 字符类型</strong>：单个 Unicode 字符，全链路支持（词法/AST/解析/静态检查/解释器）<ul>
+<li>字面量：单引号 <code class="inline">'a'</code> / <code class="inline">'\n'</code> / <code class="inline">'\''</code> / <code class="inline">'中'</code>（转义同字符串 + <code class="inline">\'</code>；必须恰好一个字符， 空/多字符报 H005）；类型注解 <code class="inline">char c = 'x';</code>（C 风格与 <code class="inline">c : char;</code> 风格均支持）， <code class="inline">x : char;</code> 无初值时默认 <code class="inline">'\0'</code></li>
+<li>比较：<code class="inline">==</code> / <code class="inline">!=</code> / <code class="inline">&lt;</code> / <code class="inline">&lt;=</code> / <code class="inline">&gt;</code> / <code class="inline">&gt;=</code> 按 Unicode 码点比较（<code class="inline">'中' &gt; 'a'</code>）； 不参与算术运算（<code class="inline">'a' + 1</code> 报 H001）；与 int/str 等禁止隐式转换（H001 类型锁定）</li>
+<li>内置函数：<code class="inline">ord(c)</code>（字符 → 码点 int）、<code class="inline">char(i)</code>（码点 int → 字符，越界/代理区报错）、 <code class="inline">char_at(s, i)</code>（按 Unicode 字符取串中第 i 个字符 → char，越界报错；区别于 <code class="inline">s[i]</code> 返回单字符 str）、 <code class="inline">char_upper(c)</code> / <code class="inline">char_lower(c)</code>（大小写，多字符映射如 ß→SS 取首字符）、 <code class="inline">char_is_digit(c)</code> / <code class="inline">char_is_alpha(c)</code> / <code class="inline">char_is_space(c)</code>（字符分类）</li>
+<li>集成：<code class="inline">to_str(c)</code> → 单字符字符串；<code class="inline">type_of('a')</code> → <code class="inline">"char"</code>；JSON 序列化为字符串； match 模式支持字符字面量；fmt 格式化兼容；<code class="inline">--dll</code> 导出按码点 int 映射； AOT 原生编译暂不支持（报「暂不支持」，见 H999）；示例 <code class="inline">examples/char_demo.hn</code></li>
+</ul></li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.7.9</span>
+<span class="date">2026-08-30</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>枚举类型 enum + match 变体模式</strong>：<code class="inline">enum Name { A, B(int), C(float, float) };</code> 声明枚举， 简单变体无载荷、带载荷变体携带多个类型化字段<ul>
+<li>变体访问/构造：<code class="inline">Color.Red</code>（简单变体）、<code class="inline">Shape.Circle(1.5)</code>（带载荷，按载荷顺序传参， 检查阶段校验个数与类型）；值显示为 <code class="inline">Color.Red</code> / <code class="inline">Shape.Circle(1.5)</code></li>
+<li><code class="inline">==</code> / <code class="inline">!=</code> 比较 类型 + 变体 + 载荷（不同枚举互不相等，载荷逐项比较）</li>
+<li>match 变体模式：<code class="inline">Color.Red</code>（无载荷）或 <code class="inline">Shape.Circle(r)</code>（载荷绑定到分支体变量， <code class="inline">_</code> 忽略某项；绑定变量仅本分支内可见），与字面量/<code class="inline">_</code> 通配符模式共存</li>
+<li>枚举名全局唯一（与 struct/class 重名报错）；变体名在枚举内唯一</li>
+<li>全链路支持：解析/AST、静态检查（变体存在性、载荷个数与类型）、解释器运行时、 AOT 原生编译（C 运行时新增 HnEnum 判别式 + 载荷，匹配走类型名 + tag 快路径）、 fmt 格式化、LSP（悬停/大纲/语义高亮）；示例 <code class="inline">examples/enum_demo.hn</code></li>
+</ul></li>
+<li><strong>运算符重载（__op 特殊函数）</strong>：顶层定义 <code class="inline">fn __add(a, b)</code> 等特殊函数，仅在内建运算 不支持的操作数组合时被调用；内置类型固有行为完全不受影响<ul>
+<li>支持映射：二元 <code class="inline">+ - * / % == != &lt; &lt;= &gt; &gt;=</code> → <code class="inline">__add/__sub/__mul/__div/__mod/ __eq/__ne/__lt/__le/__gt/__ge</code>；一元 <code class="inline">-x</code>/<code class="inline">!x</code> → <code class="inline">__neg/__not</code>； 内置 <code class="inline">len(x)</code>/<code class="inline">x[i]</code> → <code class="inline">__len/__index</code></li>
+<li>典型用途：给 dict/struct 实例或 enum 值自定义运算（复数、向量、货币等）</li>
+<li>静态检查同步放宽：定义了重载后，涉及动态值（Unknown）的运算不再强制推断类型、 相等/比较操作数不再被误强制成 int 等错误类型（避免破坏后续加法推断）</li>
+<li>AOT 原生编译支持二元/一元重载（生成「内建组合 → 内建运算，否则 → __op 调用」分派链）； 示例 <code class="inline">examples/overload_demo.hn</code></li>
+</ul></li>
+<li><strong>hone watch 热重载</strong>：<code class="inline">hone watch &lt;script.hn&gt; [--interval=N]</code> 监控脚本文件变更自动重跑； 跨平台轮询文件 mtime + 大小（std 实现，Windows/Linux/Termux 一致，零新增依赖）， 每次运行带 HH:MM:SS 时间戳，Ctrl+C 退出</li>
+<li><strong>测试框架增强</strong>：新增断言函数 <code class="inline">assert_eq(实际, 期望[, 消息])</code>（相等语义与 <code class="inline">==</code> 一致）； <code class="inline">hone test</code> 输出按文件的断言统计（PASS/FAIL 文件后附 通过/总数），汇总行含总断言通过数； assert / assert_eq 进程级计数（含 go 子线程），支持 REPL 与子进程场景</li>
+<li><strong>异步函数 async fn + await</strong>：<code class="inline">async fn name(参数) { ... }</code> 定义异步函数，调用时在后台线程执行 并立即返回 future（不阻塞调用方）；<code class="inline">await expr</code> 阻塞等待 future 完成并返回结果<ul>
+<li>错误传播：async 函数体内 throw/运行时错误存入 future，await 时原样抛出（可 try/catch 捕获）</li>
+<li>与 go 互补：go 发后不理（fire-and-forget），async/await 结构化并发（等待结果）； 多个 async 并行启动、依次 await 的总耗时约等于最慢者</li>
+<li>类型检查/AOT/DLL 构建同步支持：AOT 与 --dll 对 async/await 报「暂不支持」； 示例 <code class="inline">examples/async_demo.hn</code></li>
+</ul></li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.7.8</span>
+<span class="date">2026-08-29</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>文件二进制读写</strong>：新增内置函数 <code class="inline">read_bytes(path)</code> → list[int]（读取文件原始字节，每个元素为 0-255 的 int，二进制安全，不再受 UTF-8 限制）与 <code class="inline">write_bytes(path, bytes)</code>（将字节列表原样写入， 元素须为 0-255 的 int，越界/非整数报类型错误）；解释器、AOT 原生编译、LSP 悬停文档同步支持</li>
+</ul>
+<h4><span class="flag doc">重构</span></h4>
+<ul>
+<li><strong>hone_lib/pet.hn 桌宠改原生窗口</strong>：不再依赖 PowerShell/WinForms 与 state.json/events.json 文件轮询，改为运行时 guipro 模块新增的 <code class="inline">guipro.pet_*</code> 原生 Win32 窗口内置函数—— <code class="inline">pet_window</code>（无边框 + 品红键透明 + 置顶 + 不抢焦点）/ <code class="inline">pet_frame</code>（RGB 文本推帧， Rust 端最近邻放大 + 水平翻转）/ <code class="inline">pet_text</code>（气泡）/ <code class="inline">pet_move</code> / <code class="inline">pet_pos</code> / <code class="inline">pet_cursor</code> / <code class="inline">pet_menu</code>（右键原生弹出菜单，返回选中项）/ <code class="inline">pet_close</code></li>
+<li>交互改走 <code class="inline">guipro.poll</code> 事件队列：click / dblclick / drag（Rust 端 SetCapture 拖拽窗口）/ rclick；跟随鼠标改用 <code class="inline">pet_cursor</code> 直接读光标；帧由磁盘 PPM 缓存改为内存 RGB 文本 （<code class="inline">pet_frame_rgb</code> / <code class="inline">pet_frames_rgb</code>），换装即时重建；外部 PPM 帧目录替换仍支持</li>
+<li>窗口随 Hone 进程生命周期，Ctrl+C 不再残留 PowerShell 孤儿窗口；示例： <code class="inline">examples/pet_demo.hn</code></li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.7.6</span>
+<span class="date">2026-08-26</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>AOT 原生编译</strong>：<code class="inline">hone build --exe -c &lt;script.hn&gt;</code> 将 .hn 脚本编译为 C 中间文件，再用系统 C 编译器（gcc/clang/cc，可用 <code class="inline">CC</code> 环境变量指定）生成原生可执行文件；生成前先做语法与类型检查</li>
+<li>编译参数 <code class="inline">-Os -ffunction-sections -fdata-sections</code> + 链接期死代码消除，未用到的内置函数不占体积， 常见脚本约 50~70 KB；默认删除中间 .c 文件，<code class="inline">--keep-c</code> 保留便于检查，输出名用 <code class="inline">[-o &lt;out&gt;]</code></li>
+<li>值语义与解释器一致（列表/字典深拷贝、lambda 按值捕获、索引赋值克隆写回），支持函数/递归/类方法/ 结构体/lambda/异常/推导式/解构/多返回值/match/可选链/复合赋值等全语言特性</li>
+<li>内置函数支持核心集（print/len/to_str/集合/字符串/文件/时间/随机等）； http/crypto/sqlite/guipro 等重内置与 import/load/go 在编译期报「暂不支持」（附定位与建议）</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.7.5</span>
+<span class="date">2026-08-26</span>
+<h4><span class="flag doc">工具链增强</span></h4>
+<ul>
+<li><strong>LSP 语义高亮</strong>：新增 <code class="inline">textDocument/semanticTokens/full</code>（semantic tokens），复用词法分析器精准 token 流， 智能分类高亮——关键字 / 类型（<code class="inline">int/float/bool/str</code>）/ 函数（定义名带 declaration 修饰符、调用、内置函数）/ 变量 / 字符串（含 <code class="inline">f"..."</code> 插值串与 <code class="inline">"""</code> 多行串）/ 数字 / 注释（<code class="inline">//</code> 与跨行 <code class="inline">/* */</code>）/ 命名空间（<code class="inline">time.</code> 等模块名）/ 类 / 结构体，输出标准 LSP delta 编码</li>
+<li>词法失败（如未闭合字符串）时自动退化为仅注释高亮，不影响编辑；无新增依赖</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.7.4</span>
+<span class="date">2026-08-26</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>guipro 进阶控件</strong>：滑块 slider / 表格 table / 树 tree / 画布 canvas，支持读写 （guipro_table_* / guipro_tree_* / guipro_canvas_*）与事件；示例 examples/guipro_adv_demo.hn （滑块/表格/树/画布/托盘/菜单）</li>
+<li><strong>托盘图标与菜单栏</strong>：guipro_tray_add/tray_tip/tray_remove（Windows 用 Shell_NotifyIcon， Linux X11 用 XEmbed 系统托盘协议）、guipro_menu 菜单栏（menu 事件 value=菜单路径）</li>
+<li><strong>Linux X11 自绘后端</strong>：GTK3 缺失时自动回退 libX11.so.6 动态加载的单窗口自绘后端， 覆盖全部控件与事件（含托盘 XEmbed）；本机 Windows 亦可 cargo check 编译验证</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.7.3</span>
+<span class="date">2026-08-25</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>hone_lib/guipro.hn 原生图形界面标准库</strong>（gui.hn 的升级版）：原生窗口 + 原生控件，不再依赖浏览器。 Windows 用 Win32 标准控件（user32/gdi32，零新增依赖、不增体积），Linux 运行时动态加载 GTK3 （缺失时 msgbox 降级 zenity/xmessage）；控件：button / label / input / select / checkbox / radio + VBox 布局； 事件：click / change / close / resize，闭包分发 + <code class="inline">guipro_timer</code> 定时器 + 原生消息框； 示例：<code class="inline">examples/guipro_demo.hn</code>（20 秒后自动关闭演示）</li>
+<li>架构：内置 <code class="inline">guipro.*</code> 原语（checker 签名表 + builtins 分发）只推送事件队列，闭包分发在 Hone 层 <code class="inline">guipro_run</code> 主循环完成（builtins::call 无解释器上下文）；事件注册表函数式传递（Hone 函数内不能改全局变量）</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.7.2</span>
+<span class="date">2026-08-25</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>hone_lib/pet.hn 桌宠标准库</strong>（Windows）：Hone 驱动状态机 + PowerShell 透明置顶窗渲染， 内置像素猫 8 帧动画（idle 眨眼 / walk 走路镜像 / sleep 睡觉 / happy 开心 / surprise 惊讶）， 说话气泡、点击/拖拽交互、右键菜单（换装/静音/跟随鼠标/隐藏显示台词/退出）、全屏游荡、 自动入睡、整点报时、CPU/内存播报（wmic）；支持自定义台词 JSON 与外部 PPM 帧目录替换； 提供阻塞 <code class="inline">pet_run(cfg)</code> 与非阻塞 <code class="inline">pet_tick(st)</code> 两种形态；示例：<code class="inline">examples/pet_demo.hn</code></li>
+<li>性能：帧构建用 <code class="inline">ptr.alloc</code> 缓冲 + 24×24 内联整数判定 + 2× 最近邻放大到 48×48， 8 帧约 2s（对比推导式 rows 约 10s）；规避 Hone 列表值类型 O(w*h) 逐像素拷贝</li>
+<li>说明：Hone 无原生窗口 API，窗口渲染/鼠标事件由运行时生成的 <code class="inline">pet_window.ps1</code> （WinForms 透明置顶窗）承担，Hone 与窗口以文件轮询通信（state.json / events.json）； 仅支持 Windows（PowerShell 5.1+），与 gui.hn 同类，非纯 Hone 实现</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.7.1</span>
+<span class="date">2026-08-19</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>hone_lib/img.hn 图片标准库</strong>（纯 Hone 编写）：像素网格 <code class="inline">{"w","h","rows"}</code> 表示 + 创建/绘图（<code class="inline">img_new</code>、<code class="inline">img_fill</code>、<code class="inline">img_rect</code>、<code class="inline">img_line</code>、<code class="inline">img_circle</code>、<code class="inline">img_gradient_h/v</code>、 <code class="inline">img_checker</code>、<code class="inline">img_noise</code>）+ 滤镜（<code class="inline">img_grayscale</code>、<code class="inline">img_invert</code>、<code class="inline">img_brightness</code>、 <code class="inline">img_contrast</code>、<code class="inline">img_threshold</code>）+ 变换（<code class="inline">img_flip_h/v</code>、<code class="inline">img_rotate90</code>、<code class="inline">img_crop</code>、 <code class="inline">img_scale</code>）+ PPM P3 读写（<code class="inline">img_to_ppm</code>、<code class="inline">img_save_ppm</code>、<code class="inline">img_from_ppm</code>、<code class="inline">img_load_ppm</code>） 与 SVG 输出（<code class="inline">img_to_svg</code>、<code class="inline">img_save_svg</code>）；示例：<code class="inline">examples/test_img_lib.hn</code></li>
+<li>说明：Hone 的 str 无法承载二进制，故采用文本格式 PPM P3 与 SVG，不支持 PNG/BMP； 列表为值类型，绘图/滤镜适合 ≤128×128 的小图</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.7.0</span>
+<span class="date">2026-08-19</span>
+<h4><span class="flag doc">工具链增强</span></h4>
+<ul>
+<li><strong>LSP 增强</strong>：上下文感知补全（<code class="inline">time.</code> 等模块成员 / 文档变量 / 用户函数）、悬停文档（内置函数签名+说明）、 跳转定义（<code class="inline">textDocument/definition</code>）、文档大纲（<code class="inline">documentSymbol</code>），serverInfo 升至 0.2.0</li>
+<li><strong>调试器增强</strong>：条件断点 <code class="inline">breakpoint if (expr);</code>（条件为 bool 才暂停，checker 静态校验）； 断点提示支持交互命令 <code class="inline">c</code> 继续 / <code class="inline">q</code> 退出（正常结束不报错）/ <code class="inline">l</code> 重列快照 / <code class="inline">p &lt;expr&gt;</code> 即时求值 / <code class="inline">w &lt;name&gt;</code> 监视变量 / <code class="inline">u &lt;name&gt;</code> 取消监视</li>
+<li><strong>prof 剖析增强</strong>：新增<strong>自耗时</strong>（调用栈排除子调用）与<strong>占比</strong>列、 调用图输出（调用方 → 被调方 → 次数，按次数降序）、总览行（总耗时 / 总调用次数）</li>
+<li><strong>fmt 格式化增强</strong>：新增 <code class="inline">-c/--check</code> 检查模式（逐文件报告 OK/NEEDS FMT，有差异退出码非 0，CI 友好），与 <code class="inline">-w</code> 互斥</li>
+<li><strong>新增 <code class="inline">hone doc</code> 工具</strong>：扫描 <code class="inline">fn</code>/<code class="inline">class</code> 定义及其上方 <code class="inline">//</code> 注释，生成 Markdown API 文档（支持多行签名、泛型名）</li>
+<li><strong>修复</strong>：debug 构建主线程栈溢出——Windows 主线程默认 1MB 栈 + 未优化构建巨大栈帧， 递归脚本（如 <code class="inline">bench/fib.hn</code> 的 fib(26)，深度仅 ~20 层）即爆栈； 改为在 64MB 栈专用线程上执行命令逻辑（跨平台，虚拟内存预留），fib(26) 在 debug 构建下恢复正常</li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li>README（版本号 v0.7.0、fmt/doc 用法）、官网（版本徽章/页脚/HONE_VERSION 示例同步 v0.7.0）、 changelog.html（v0.7.0 条目）</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.6.8</span>
+<span class="date">2026-08-18</span>
+<h4><span class="flag doc">新增（新语法）</span></h4>
+<ul>
+<li><strong>多返回值</strong>：<code class="inline">return a, b, ...;</code> 一次返回多个值，运行时打包为列表，由解构赋值接收</li>
+<li><strong>解构赋值</strong>：列表 <code class="inline">a, b = [1, 2]</code> 按位置绑定；字典 <code class="inline">{a, b} = dict</code> / 改名 <code class="inline">{a: x, b: y} = dict</code> 按键取出</li>
+<li><strong>列表/字典推导式</strong>：<code class="inline">[expr for x in iter (if cond)]</code> 与 <code class="inline">{key: value for ...}</code> 一行生成集合 （字典推导式键必须为 str，动态键用 to_str 转换）</li>
+<li><strong>可选链 <code class="inline">?.</code></strong>：<code class="inline">a?.b</code> 在 a 为 null 时短路返回 null，可链式 <code class="inline">a?.b?.c</code>；混合链 <code class="inline">a?.b.c</code> 与 JS 语义一致</li>
+<li>新增示例 <code class="inline">examples/new_syntax_demo.hn</code>（44 项断言全部通过）</li>
+</ul>
+<h4><span class="flag doc">新增（TLS 根证书回退）</span></h4>
+<ul>
+<li><strong>系统根证书回退</strong>：内置 Mozilla 根证书校验失败时自动重连，回退到系统根证书 （Windows ROOT 证书库 / Linux·Termux 系统 CA bundle，Termux 额外扫描 Android cacerts 目录）， 防内置根证书过期导致 https/wss 无法连接</li>
+<li><strong>用户信任根</strong>：<code class="inline">HONE_CA_BUNDLE</code> 环境变量指定 PEM 文件（缺省 <code class="inline">~/.hn/ca.pem</code>）， 可信任私有 CA 的<strong>根证书与中间证书</strong>（自签名 / 内网证书场景）</li>
+<li><strong>中间证书注入</strong>：用户 CA 文件中的中间证书参与链构建（自定义 rustls ServerCertVerifier）， 服务器即使不随链发送中间证书也能完成验证</li>
+<li>覆盖 <code class="inline">http_get</code> / <code class="inline">http_post</code> / <code class="inline">http.request</code>、<code class="inline">smtp.send</code>（隐式 TLS 与 STARTTLS）、<code class="inline">ws.request</code>（wss://）</li>
+<li>新增依赖 <code class="inline">rustls-webpki</code>（链构建）与 winapi <code class="inline">wincrypt</code>（Windows 证书库枚举）</li>
+<li>新增端到端测试 <code class="inline">tests/tls_fallback.sh</code>（本地 CA 链 5 项断言全部通过）</li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li>hone.md（1.16-1.19 新语法、3.22 TLS 回退说明）、README、 官网 docs.html（§7.7 新语法、内置函数参考 TLS 说明）/ tutorial.html（可选链交叉引用）/ changelog.html（v0.6.8 条目）同步更新</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.6.6</span>
+<span class="date">2026-08-17</span>
+<h4><span class="flag doc">新增（性能分析）</span></h4>
+<ul>
+<li><strong><code class="inline">hone prof &lt;script.hn&gt;</code></strong>：以剖析模式运行脚本，统计每个用户函数的 总耗时 / 调用次数 / 平均耗时（纳秒级计时），按总耗时降序输出控制台表格</li>
+<li>lambda 调用统一归入 <code class="inline">(lambda)</code> 条目；未调用任何用户函数时提示 <code class="inline">(未调用任何用户函数)</code></li>
+<li>剖析仅在 prof 模式下启用（<code class="inline">Interp.prof = None</code> 关闭），普通运行零开销</li>
+<li>示例：<code class="inline">hone prof examples/fib.hn</code> 找出热点函数后，配合 <code class="inline">hone poop</code> 评估复杂度优先优化</li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li>hone.md（工具链命令）、README（命令清单）、 官网 docs.html（§15 工具链）/ index.html（快速开始命令表）/ changelog.html（v0.6.6 条目）同步更新</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.6.5</span>
+<span class="date">2026-08-17</span>
+<h4><span class="flag doc">新增（模块清单 hone.json）</span></h4>
+<ul>
+<li><strong>模块清单 <code class="inline">hone.json</code></strong>（类似 package.json / Cargo.toml）：项目根目录集中声明 <code class="inline">name</code> / <code class="inline">version</code> / <code class="inline">modules</code> 依赖（模块名 → 源码 URL 或本地路径）</li>
+<li><code class="inline">hone get</code>（不带参数）：读取当前目录 <code class="inline">hone.json</code> 清单，批量下载全部模块到 ~/.hone/cache/</li>
+<li><code class="inline">hone get &lt;module&gt; &lt;url&gt;</code>：下载单个模块并自动写入 / 更新 <code class="inline">hone.json</code> 清单 （新建时 name 取目录名、version 默认 0.1.0）</li>
+<li>模块 URL 非 http/https 开头按本地路径处理，直接读取源码（不联网），便于同仓库共享 hone_lib 等模块； 清单缺失报 <code class="inline">error[H404]</code>、JSON 语法错误报 <code class="inline">error[H005]</code>、modules 为空报 <code class="inline">error[H005]</code></li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li>hone.md（4.3.1 模块清单教程、工具链命令、进阶章节）、README（命令与导入章节）、 官网 docs.html（§15 工具链）/ index.html（快速开始命令表）/ changelog.html（v0.6.5 条目）同步更新</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.6.4</span>
+<span class="date">2026-08-17</span>
+<h4><span class="flag doc">新增（标准输入函数）</span></h4>
+<ul>
+<li><strong><code class="inline">input(prompt?)</code></strong>：从标准输入读取一行返回 <code class="inline">str</code>（去除行尾换行），可选提示文本（须为 <code class="inline">str</code>， 如 <code class="inline">input("请输入名字: ")</code>）；EOF（管道关闭 / Ctrl+Z / Ctrl+D）抛 <code class="inline">error[H306]</code>，可用 try-catch 捕获降级</li>
+<li><strong><code class="inline">read_int(prompt?)</code> / <code class="inline">read_float(prompt?)</code></strong>：读取一行并解析为 <code class="inline">int</code> / <code class="inline">float</code>， 格式非法分别抛 <code class="inline">error[H006]</code> / <code class="inline">error[H007]</code></li>
+<li>新增错误码 <strong>H306</strong>（标准输入读取失败 / EOF），<code class="inline">hone explain H306</code> 可查说明</li>
+<li>新增示例 <code class="inline">examples/input_demo.hn</code>（input / read_int / read_float / EOF try-catch 演示）、 <code class="inline">examples/input_default_demo.hn</code>（输入默认值 / EOF 降级演示）</li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li>README（内置功能 + 错误码表）、hone.md（3.1 基础内置函数、3.1.1 输入默认值教程、5.2 错误码）、 官网 docs.html（§8 内置函数参考 + 输入默认值教程）/ stdlib.html / changelog.html / examples.html（5.15 输入默认值示例）/ index.html 同步更新</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.6.3</span>
+<span class="date">2026-08-16</span>
+<h4><span class="flag doc">新增（新语法）</span></h4>
+<ul>
+<li><strong>continue 关键字</strong>：跳过本次循环剩余语句，直接进入下一次迭代（与 <code class="inline">break</code> 相对，仅循环体内合法）</li>
+<li><strong>C 风格 for</strong>：<code class="inline">for (init; cond; step) { ... }</code> 三段式循环，各段均可省略（<code class="inline">for (;;)</code> 无限循环配合 <code class="inline">break</code>）</li>
+<li><strong>do-while 循环</strong>：<code class="inline">do { ... } while (cond);</code> 先执行循环体再判断条件（至少执行一次）</li>
+<li><strong>复合赋值</strong>：<code class="inline">+=</code> <code class="inline">-=</code> <code class="inline">*=</code> <code class="inline">/=</code> <code class="inline">%=</code>（等价于 <code class="inline">x = x op y</code>，str 仅支持 <code class="inline">+=</code> 拼接）； <strong>自增/自减</strong>：<code class="inline">i++</code> <code class="inline">i--</code>（后缀返回旧值）、<code class="inline">++i</code> <code class="inline">--i</code>（前缀返回新值）</li>
+<li><strong>三元表达式</strong>：<code class="inline">cond ? a : b</code>（右结合可嵌套，分支同型返回该类型）</li>
+<li><strong>空值合并</strong>：<code class="inline">a ?? b</code>（a 为 null 时取 b，短路求值；null 来自 void 函数调用等占位值）</li>
+<li><strong>匿名函数 lambda</strong>：<code class="inline">fn(x) { ... }</code> 作为一等值——可赋值给变量、作为参数传递、作为返回值（闭包工厂）； 创建时按值捕获当前作用域变量（闭包），经变量名动态调用；参数支持类型注解与默认值</li>
+<li><strong>函数默认参数</strong>：<code class="inline">fn f(a, b = 10) { ... }</code> 调用可省略尾部实参； 默认表达式在调用时求值、可引用其前面的参数（<code class="inline">b = a * 2</code>）；必选参数必须位于默认参数之前； 参数个数检查按「必选个数 ~ 总个数」区间；lambda 同样支持；<code class="inline">hone build --dll</code> 暂不支持（明确报错）</li>
+<li><strong>三引号原始字符串</strong>：<code class="inline">"""..."""</code> 多行字符串，不做转义处理、原样保留换行与缩进</li>
+<li>新增综合示例 <code class="inline">examples/new_syntax_demo.hn</code>（覆盖全部新语法，含 fmt 往返验证）</li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li>hone.md（1.4 控制流、1.11–1.15 新语法章节）、官网 changelog.html 同步更新</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.6.1</span>
+<span class="date">2026-08-14</span>
+<h4><span class="flag doc">性能（解释器深度优化）</span></h4>
+<ul>
+<li>函数定义改为 <code class="inline">Arc&lt;FnDef&gt;</code> 共享：消除每次调用的 AST 深拷贝（递归 fib(26) 约 3.4s → 1.6s）</li>
+<li>while / for-in 循环作用域复用 + 原地赋值更新：消除每轮迭代的堆分配与 String 分配 （2000 万次纯循环 71s → 42s；字符串拼接 20 万次 90s → 20s，拼接改为预分配容量、免 O(n²) 整串复制）</li>
+<li>函数调用环境按参数个数预分配；解释器整体基准提升约 40%–78%，语义完全不变</li>
+<li>移除 <code class="inline">once_cell</code> 依赖，改用标准库 <code class="inline">LazyLock</code>；清理 <code class="inline">FfiSig</code>/<code class="inline">FfiParam</code> 死字段（编译警告清零）</li>
+<li>官网（<code class="inline">官网/</code>）兼容 Android 8.1（Chrome 61 级 WebView）：flex <code class="inline">gap</code> 改为 margin 间距</li>
+</ul>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>alias 别名增强</strong>：原名支持点号路径（<code class="inline">alias time.now as tnow;</code> 之后可 <code class="inline">tnow(...)</code> 调用）， 别名可叠加（别名再起别名）、可指向内置函数（<code class="inline">alias print as p;</code>）； 新增示例 <code class="inline">examples/alias_demo.hn</code></li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li>hone.md（4.4 别名、6.2 编译优化实测说明）、README（性能基准表 + alias 用法 + 版本号同步）、 官网 docs.html / examples.html / changelog.html / index.html 同步更新</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.6.0</span>
+<span class="date">2026-08-09</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><strong>class 类</strong>：<code class="inline">class 名称 { fn 方法(...) { ... } }</code> 将相关函数组织成命名空间，经 <code class="inline">类.方法(...)</code> 调用； 成员函数不进全局符号表（裸名调用报 H002，不污染全局命名空间，同名全局函数可与类方法共存）； 类内互调用限定名（<code class="inline">Math.fib(n-1)</code>）；类名与 struct 名不重复；支持参数/返回值/递归/<code class="inline">-&gt; type</code> 注解</li>
+<li><strong>泛型</strong>：<code class="inline">fn name[T, U](参数) -&gt; T</code> 在函数名后声明类型参数，参数/返回注解可引用（<code class="inline">x: T</code>）； 调用时按实参自动推导，同一泛型函数可不同类型多次调用、互不锁定；<strong>编译期擦除</strong>——运行期零成本、 不产生重复代码；类方法同样支持泛型；未声明类型参数报 H002、重复类型参数报 H005</li>
+<li><strong>标准库大规模扩展</strong>（内置函数，开箱即用）：<ul>
+<li>数据处理：<code class="inline">csv.parse</code> / <code class="inline">csv.parse_dict</code> / <code class="inline">csv.stringify</code>（RFC 4180）、<code class="inline">yaml.parse</code> / <code class="inline">yaml.stringify</code></li>
+<li>系统工具：<code class="inline">glob.match</code> / <code class="inline">glob.list</code>（glob 匹配）、<code class="inline">temp.dir</code> / <code class="inline">temp.file</code> / <code class="inline">temp.remove</code></li>
+<li>压缩：<code class="inline">zlib.compress</code> / <code class="inline">zlib.decompress</code> / <code class="inline">zlib.gzip</code> / <code class="inline">zlib.gunzip</code>（结果 base64 编码）</li>
+<li>科学计算：<code class="inline">stat.*</code>（sum/mean/median/variance/stddev/min/max）、<code class="inline">matrix.*</code>（identity/transpose/add/mul/scale）</li>
+<li>文本处理：<code class="inline">diff.lines</code> / <code class="inline">diff.unified</code>（LCS 对比）、<code class="inline">regex.find</code> / <code class="inline">regex.groups</code> / <code class="inline">regex.split</code></li>
+<li>时间增强：<code class="inline">time.add</code> / <code class="inline">time.diff</code> / <code class="inline">time.weekday</code>（ISO 1-7），<code class="inline">time.format</code> 新增 <code class="inline">WW</code> 星期占位符</li>
+<li>网络：<code class="inline">http.request</code>（通用请求：method/headers/body/timeout，可自定义 User-Agent）、 <code class="inline">smtp.send</code>（发邮件，STARTTLS / 隐式 TLS / AUTH LOGIN）、<code class="inline">ws.request</code>（WebSocket 请求-响应，支持 wss://）</li>
+<li>绘图：<code class="inline">plot.bar</code> / <code class="inline">plot.line</code>（生成 SVG 图表文本，可保存为 .svg）</li>
+<li>数据库：<code class="inline">sqlite.*</code>（open/close/exec/query/query_one/escape/last_insert_id/changes， 运行时通过 libloading 加载系统 libsqlite3，保持零 C 构建依赖）</li>
+</ul></li>
+<li>语言特性：点号后允许关键字作为模块成员名（如 <code class="inline">glob.match</code>、<code class="inline">random.int</code>、<code class="inline">plugin.load</code>）</li>
+<li>新增示例 <code class="inline">examples/stdlib_test.hn</code>、<code class="inline">examples/class_test.hn</code>、<code class="inline">examples/generic_test.hn</code></li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li>README、hone.md、官网 docs.html / stdlib.html / changelog.html：补充 class 类、泛型与全部新标准库模块</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.5.0</span>
+<span class="date">2026-08-08</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li>语言特性：<code class="inline">struct</code> 结构体（确定数据形态，构造校验字段个数与类型）、<code class="inline">match</code> 模式匹配（字面量 + <code class="inline">_</code> 通配符）、 <code class="inline">|&gt;</code> 管道操作符（可链式，解析期转为普通调用）</li>
+<li>内置函数扩展：<code class="inline">clone</code> / <code class="inline">copy</code> 深度拷贝、<code class="inline">assert</code> 断言（H700）、<code class="inline">args.get(key, type, default)</code> 类型转换与默认值、 <code class="inline">server.respond(id, body, status)</code> 自定义 HTTP 状态码</li>
+<li>指针类 <code class="inline">ptr.*</code>：<code class="inline">ptr.alloc/free/is_null/is_valid/size/read_*/write_*</code> 内存分配与读写；分配表跟踪防野指针</li>
+<li>压缩与归档 <code class="inline">archive.*</code>：zip / tar.gz 的列表、读取、解压与创建（防 zip-slip 穿越）</li>
+<li>加密与哈希：<code class="inline">crypto.sha1</code> / <code class="inline">crypto.hmac_sha256</code> / <code class="inline">crypto.base64_encode</code> / <code class="inline">crypto.base64_decode</code></li>
+<li>插件系统 <code class="inline">plugin.*</code>：运行期动态注册，调用走 C ABI 通道</li>
+<li>测试框架：<code class="inline">hone test [目录]</code> 递归扫描 <code class="inline">*.test.hn</code> 运行并汇总 PASS/FAIL</li>
+<li>打包格式：<code class="inline">hone build --script</code> 生成仅脚本压缩包 <code class="inline">.hzp</code>（<code class="inline">hone run</code> 执行）</li>
+<li>自动更新：<code class="inline">hone self-update [url]</code> 下载最新二进制替换当前程序</li>
+</ul>
+<h4><span class="flag chg">变更</span></h4>
+<ul>
+<li>移除 <code class="inline">hone upgrade</code> 命令（旧语法迁移工具不再提供）</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.4.0</span>
+<span class="date">2026-08-08</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li>typed FFI：<code class="inline">load "lib" as m { fn f(p: ty, ...) -&gt; ret; ... }</code> 签名块显式声明 C ABI 参数与返回类型， 支持 <code class="inline">int</code>（int64_t）/ <code class="inline">float</code>（double）/ <code class="inline">bool</code> / <code class="inline">str</code>（const char*）/ <code class="inline">ptr</code>（void*）/ <code class="inline">void</code> （返回），调用时按声明精确转换，替代此前全 int64 单通道；参数最多 8 个，支持任意 int/float 混合 位置（按类别位展开二分分派，Windows / Linux / Termux ABI 一致）</li>
+<li>静态检查：签名块声明的函数调用在检查阶段校验参数个数与类型（H001/H005），返回类型参与类型推导； 未声明签名的库函数保持旧 int64 通道调用（完全向后兼容）</li>
+<li>新类型 <code class="inline">ptr</code>：FFI 返回值/参数可传递不透明句柄，<code class="inline">p == 0</code> 判断 NULL；to_str(p) 输出 0x 十六进制</li>
+<li>头文件自动绑定：<code class="inline">load "lib" as m from "header.h";</code> 从 C 头文件提取函数原型自动生成签名 （受限解析器：跳过注释/预处理/struct 定义/extern "C" 块，typedef 简单展开，属性宏跳过； 类型映射 int/size_t→int、float/double→float、bool→bool、char*→str、其余指针→ptr、void→void； 回调/变参/数组/结构体按值/long double 标记 unsupported，调用时直接报错而非 ABI 崩溃）</li>
+<li>新命令 <code class="inline">hone bind &lt;header.h&gt;</code>：离线生成 typed load 签名块（可直接粘贴进脚本）</li>
+<li>新增示例 <code class="inline">examples/ffi_demo.hn</code>（typed FFI 全类型演示）、<code class="inline">examples/ffi_header.hn</code>（from 头文件 自动绑定演示）；<code class="inline">tests/hone_lib</code> 扩展导出 float/str/bool/ptr/void 测试函数并新增 hone_lib.h</li>
+</ul>
+<h4><span class="flag chg">变更</span></h4>
+<ul>
+<li>语言更名：Zap → Hone（二进制 <code class="inline">hone</code>、扩展名 <code class="inline">.hn</code>、错误码 <code class="inline">Hxxx</code>、缓存目录 <code class="inline">~/.hone</code>）</li>
+<li>新增 GitHub Actions CI（Windows/Linux 构建测试 + Termux aarch64 交叉编译）与 tag 触发自动发布 （三平台二进制 + 校验和 + 一键安装脚本 → GitHub Releases 附件）</li>
+<li>新增一键安装脚本 install.sh / install.ps1（sha256 校验）</li>
+<li>官网部署至 https://hone.xo.je</li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li>README、hone.md：load 章节补充签名块语法、类型映射与限制（回调 fn(...) 与可变参数 ... 暂不支持）、 from 头文件自动绑定与 hone bind 用法</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.3.0</span>
+<span class="date">2026-08-07</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><code class="inline">server.listen(port)</code> / <code class="inline">server.poll()</code> / <code class="inline">server.respond(id, body)</code> 本地 HTTP 服务器内置函数：纯 std::net 实现，Windows / Linux / Termux 跨平台一致，无 C 依赖；后台线程只做 TCP 收发与请求排队，Hone 脚本在主线程轮询响应，与解释器单线程模型完全兼容</li>
+<li>图形界面库 <code class="inline">hone_lib/gui.hn</code>（纯 Hone 编写）：浏览器渲染 + 本地服务器双向交互，控件 <code class="inline">gui_button</code> / <code class="inline">gui_label</code> / <code class="inline">gui_input</code> / <code class="inline">gui_select</code> / <code class="inline">gui_html</code>，事件回调约定 <code class="inline">on_event(id, value)</code>，返回值按 JSON 协议更新页面元素</li>
+<li>新增示例 <code class="inline">examples/gui_demo.hn</code>（GUI 演示）、<code class="inline">examples/server_demo.hn</code>（server API 演示）、<code class="inline">examples/server_selftest.hn</code>（进程内自测）</li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li>README：新增"图形界面库"章节，内置函数表补充 server.* 说明</li>
+</ul>
+</div>
+<div class="release">
+<span class="ver-tag">v0.2.0</span>
+<span class="date">2026-08-07</span>
+<h4><span class="flag add">新增</span></h4>
+<ul>
+<li><code class="inline">http_get</code> / <code class="inline">http_post</code> 支持 <code class="inline">https://</code>：TLS 采用 rustls + rustls-rustcrypto（纯 Rust 实现，无 C 依赖），内置 Mozilla 根证书，Windows / Linux / Termux 跨平台行为一致，无需系统依赖</li>
+<li>新增示例 <code class="inline">examples/https_demo.hn</code>：展示 https GET、http POST、JSON 解析与错误捕获</li>
+</ul>
+<h4><span class="flag fix">修复</span></h4>
+<ul>
+<li>类型检查：<code class="inline">http_post</code> 的返回类型标注由 <code class="inline">void</code> 修正为 <code class="inline">str</code>（与运行时返回响应体一致），此前将返回值传给其他函数会被静态检查误报</li>
+</ul>
+<h4><span class="flag doc">文档</span></h4>
+<ul>
+<li>README、hone.md：更新网络功能说明（支持 http/https、纯 Rust TLS、内置根证书）</li>
+<li>官网 docs.html / examples.html：内置函数表标注 https 支持，新增"HTTP 网络请求"示例</li>
+</ul>
+<h4><span class="flag doc">构建</span></h4>
+<ul>
+<li><code class="inline">bin/</code> 三平台二进制重新编译（Windows x86_64 宿主编译；Linux x86_64 与 Termux aarch64 使用 musl 静态交叉编译，不依赖目标机 glibc/bionic）</li>
+</ul>
+</div>
+</main>
+
+<footer>
+  Hone v0.8.0 &middot; MIT License &middot; <span class="sword">&#128481;</span> Hone &ndash; 为效率而生，为乐趣而造
+  &middot; <a href="https://github.com/shichencike/Hone">GitHub</a>
+</footer>
+
+<script src="site.js"></script>
+
+</body>
+</html>

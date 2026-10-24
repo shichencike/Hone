@@ -1,0 +1,9 @@
+// 基准 8：字符串替换（str_replace 全量替换，10 万次，字符串分配压力）
+base = "abcabcabcabcabcabcabcabcabcabc";
+s = base;
+i = 0;
+while (i < 100000) {
+    s = str_replace(s, "abc", "bca");
+    i = i + 1;
+}
+print(len(s));

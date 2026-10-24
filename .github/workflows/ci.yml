@@ -7,6 +7,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Windows runner 默认 locale 为 charmap/GBK，强制 Python 以 UTF-8 读写标准流，
+  # 避免回归脚本解码 Hone 的 UTF-8 输出时崩溃（配合 regress4.py 的 encoding='utf-8'）。
+  PYTHONIOENCODING: utf-8
 
 jobs:
   test:
@@ -19,17 +22,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      # 官方 cache：registry/git/target 全缓存，命中增量缓存即大幅提速。
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
       - name: build
-        run: cargo build --locked
+        run: cargo build --release --locked
       - name: cargo test
-        run: cargo test --locked
+        run: cargo test --release --locked
       - name: smoke test
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then BIN=./target/debug/hone.exe; else BIN=./target/debug/hone; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN=./target/release/hone.exe; else BIN=./target/release/hone; fi
           "$BIN" examples/hello.hn
           "$BIN" examples/fib.hn
+      - name: 双引擎回归 (regress4)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN=target/release/hone.exe; else BIN=target/release/hone; fi
+          HONE_BIN="$BIN" python tests/regress4.py
 
   termux:
     name: cross-compile aarch64 (Termux / musl)
@@ -39,9 +57,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
+      # 官方 cache：key 带 aarch64-musl 后缀，与 test job 的宿主 target 缓存隔离
+      # （target/ 里是交叉产物，不能与宿主构建共用）。
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
         with:
-          key: aarch64-musl
-      # .cargo/config.toml 里的 linker 是开发机本机绝对路径，CI 上改用工具链自带的 rust-lld
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-aarch64-musl-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-aarch64-musl-
+      # musl 目标用 zig 链接（rust-lld 缺 libdl 会 -ldl 失败）；zig 自带 musl libc 存根
+      - uses: goto-bus-stop/setup-zig@v2
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked
       - name: build
-        run: cargo build --release --locked --target aarch64-unknown-linux-musl --config 'target.aarch64-unknown-linux-musl.linker="rust-lld"'
+        run: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl

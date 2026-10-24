@@ -1,0 +1,75 @@
+// 冒烟测试：函数 / 递归 / 闭包 / 类方法（双引擎通用）
+
+// 基本函数与类型注解
+fn add(a : int, b : int) -> int {
+    return a + b;
+}
+assert_eq(add(20, 22), 42);
+
+// 递归
+fn fib(n) {
+    if (n <= 1) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+assert_eq(fib(10), 55);
+assert_eq(fib(15), 610);
+
+// 多返回值语义（dict）
+fn point() {
+    return {"x": 1, "y": 2};
+}
+p = point();
+assert_eq(p.x, 1);
+assert_eq(p.y, 2);
+
+// 作用域：块内变量块外不可见，需先声明
+acc = 0;
+if (true) {
+    inner = 5;
+    acc = acc + inner;
+}
+assert_eq(acc, 5, "块内声明不外泄");
+
+// 默认参数
+fn greet(name, punct) {
+    return "hi " + name + punct;
+}
+assert_eq(greet("a", "!"), "hi a!");
+
+// 闭包（值捕获）
+fn make_counter() {
+    n = 0;
+    fn inc() {
+        n = n + 1;
+        return n;
+    }
+    return inc;
+}
+cf = make_counter();
+assert_eq(cf(), 1);
+assert_eq(cf(), 2);
+cf2 = make_counter();
+assert_eq(cf2(), 1, "独立闭包");
+
+// 高阶函数
+fn apply(f, v) {
+    return f(v);
+}
+fn triple(x) {
+    return x * 3;
+}
+assert_eq(apply(triple, 7), 21);
+
+// 类方法（class 静态风格）
+class Calc {
+    fn square(x) {
+        return x * x;
+    }
+    fn sumsq(a, b) {
+        return Calc.square(a) + Calc.square(b);
+    }
+}
+assert_eq(Calc.square(6), 36);
+assert_eq(Calc.sumsq(3, 4), 25);

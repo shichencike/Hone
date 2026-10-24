@@ -1,0 +1,15 @@
+// 基准 10：list 索引写密集（引用模型写点门控：独占原地写 O(1)）
+arr = [];
+i = 0;
+while (i < 1000) {
+    arr = append(arr, 0);
+    i = i + 1;
+}
+i = 0;
+while (i < 200000) {
+    arr[i % 1000] = i;
+    i = i + 1;
+}
+sum = 0;
+for x in arr { sum = sum + x; }
+print(sum);

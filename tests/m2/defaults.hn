@@ -1,0 +1,57 @@
+// G2.8 默认参数：被调帧序言求默认值（VM / 原生后端）。
+// 语义基准：默认值在**仅含形参**的调用环境里求值（可引用前序形参与函数；
+// 引用全局 / 后置形参由 checker 静态拒），且每次调用都重新求值。
+
+// ── 1. 省略尾部实参取默认值 ──
+fn f1(a, b: int = 2) { return to_str(a + b); }
+print("omit:" + f1(1));
+print("given:" + f1(1, 5));
+
+// ── 2. 默认值可引用前序形参 ──
+fn f2(a, b: int = a * 10) { return to_str(a + b); }
+print("ref-prev:" + f2(2));
+
+// ── 3. 多级链式默认值（后者引用前者）──
+fn f3(a, b: int = 2, c: int = b * 3) { return to_str(a + b + c); }
+print("chain:" + f3(1));
+print("chain-mid:" + f3(1, 10));
+print("chain-all:" + f3(1, 10, 100));
+
+fn f4(a, b: int = 0, c: int = 0, d: int = 0) { return to_str(a + b + c + d); }
+print("many:" + f4(1));
+print("many2:" + f4(1, 2));
+
+// ── 4. 默认值里调用函数（每次调用重新求值）──
+fn mk() { return 5; }
+fn f5(a, b: int = mk()) { return to_str(a + b); }
+print("call-default:" + f5(1));
+
+// ── 5. lambda 参数默认值 ──
+lam = fn(x, y: int = 7) { return to_str(x * y); };
+print("lambda-omit:" + lam(3));
+print("lambda-given:" + lam(3, 2));
+
+// ── 6. lambda 默认值可引用捕获变量 ──
+fn outer_demo() {
+    k = 4;
+    l = fn(x, y: int = k) { return to_str(x + y); };
+    return l(1);
+}
+print("capture:" + outer_demo());
+
+// ── 7. 递归 + 默认参数 ──
+fn fib(n: int, m: int = 1) {
+    if (n < 2) { return m; }
+    return fib(n - 1, fib(n - 2, m));
+}
+print("fib:" + to_str(fib(10)));
+
+// ── 8. 默认参数参与运算符重载路径（动态调用）──
+fn __add(a, b: int = 2) { return "ov-add"; }
+d = {"a": 1};
+print("overload:" + to_str(d + 1));
+
+// ── 9. 默认值为字符串 / 布尔 ──
+fn f6(a: str = "x", b: bool = false) { return a + to_str(b); }
+print("str:" + f6());
+print("str2:" + f6("y", true));

@@ -1,0 +1,90 @@
+// guipro_demo.hn - guipro 原生图形界面标准库示例（Windows: Win32 原生控件）
+// 用法: hone examples/guipro_demo.hn
+// 说明: 弹出原生窗口，演示 VBox 布局 / 基础控件 / 事件回调 / 定时器 / 对话框。
+//       窗口关闭（点 X）或定时器倒数结束（20 秒）后自动退出。
+
+import "guipro" from "./hone_lib/guipro.hn";
+
+// ---------- 创建窗口 ----------
+win = guipro_window("guipro 原生界面演示", 460, 420);
+
+// ---------- VBox 布局：标签 / 输入框 / 下拉 / 勾选 / 单选 / 按钮 / 状态栏 ----------
+// 注意：Hone 列表字面量不支持跨行，用 append 逐行构建
+specs = [];
+specs = append(specs, {"type": "label",   "text": "guipro 原生控件示例", "w": 240, "h": 24});
+specs = append(specs, {"type": "label",   "text": "姓名:",                 "w": 60,  "h": 24});
+specs = append(specs, {"type": "input",   "w": 220, "h": 28});
+specs = append(specs, {"type": "label",   "text": "城市:",                 "w": 60,  "h": 24});
+specs = append(specs, {"type": "select",  "options": ["北京", "上海", "广州", "深圳"], "w": 140, "h": 28});
+specs = append(specs, {"type": "checkbox","text": "同意条款",             "w": 120, "h": 24});
+specs = append(specs, {"type": "radio",   "text": "个人",                 "w": 80,  "h": 24});
+specs = append(specs, {"type": "radio",   "text": "企业",                 "w": 80,  "h": 24});
+specs = append(specs, {"type": "button",  "text": "提交",                 "w": 120, "h": 32});
+specs = append(specs, {"type": "label",   "text": "状态: 就绪",           "w": 240, "h": 24});
+ids = guipro_vbox(win, specs, 24, 20, 6);
+// ids 顺序与 specs 一一对应：0 标题 / 1 姓名标签 / 2 输入框 / 3 城市标签 /
+// 4 下拉 / 5 勾选 / 6 单选-个人 / 7 单选-企业 / 8 提交按钮 / 9 状态栏
+
+name_input  = ids[2];
+city_select = ids[4];
+agree_box   = ids[5];
+radio_p     = ids[6];
+submit_btn  = ids[8];
+status_lbl  = ids[9];
+
+// ---------- 事件注册（函数式注册表） ----------
+handlers = [];
+
+// 提交按钮点击
+handlers = guipro_on(handlers, win, submit_btn, "click", fn(id, value) {
+    name = guipro_get_text(win, name_input);
+    city = guipro_get_text(win, city_select);
+    if (len(name) == 0) {
+        guipro_set_text(win, status_lbl, "状态: 请先输入姓名");
+        guipro_msgbox("提示", "请先输入姓名");
+        return "";
+    }
+    guipro_set_text(win, status_lbl, "状态: 已提交 - " + name + " @ " + city);
+    guipro_msgbox("提交成功", "姓名: " + name + "\n城市: " + city);
+    return "";
+});
+
+// 下拉框变更
+handlers = guipro_on(handlers, win, city_select, "change", fn(id, value) {
+    guipro_set_text(win, status_lbl, "状态: 选择了城市 " + value);
+    return "";
+});
+
+// 勾选框变更
+handlers = guipro_on(handlers, win, agree_box, "change", fn(id, value) {
+    if (value == "1") {
+        guipro_set_text(win, status_lbl, "状态: 已同意条款");
+    } else {
+        guipro_set_text(win, status_lbl, "状态: 未同意条款");
+    }
+    return "";
+});
+
+// 窗口关闭事件（点 X）
+handlers = guipro_on_win(handlers, win, "close", fn(id, value) {
+    print("窗口已关闭");
+    return "";
+});
+
+// 定时器：每秒刷新状态栏时间；20 秒后自动关闭窗口（演示结束）
+handlers = guipro_timer(handlers, 1000, fn() {
+    t = time.now();
+    hm = time.format(t, "HH:MM:SS");
+    guipro_set_text(win, status_lbl, "状态: " + hm + " - 运行中（20 秒后自动退出）");
+    return "";
+});
+
+handlers = guipro_timer(handlers, 20000, fn() {
+    guipro_close(win);
+    return "";
+});
+
+// ---------- 主循环（阻塞，窗口关闭后返回） ----------
+print("guipro 演示启动，请在窗口中操作…");
+guipro_run(handlers);
+print("guipro 演示结束");
