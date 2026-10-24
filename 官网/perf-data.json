@@ -1,0 +1,86 @@
+{
+  "meta": {
+    "date": "2026-10-24 04:18 UTC",
+    "os": "Windows 10",
+    "cpu": "Intel64 Family 6 Model 142 Stepping 9, GenuineIntel",
+    "cores": 4,
+    "ram": "",
+    "git_sha": "d5b5822",
+    "hone_version": "hone 0.8.0",
+    "python_version": "3.12.10",
+    "lua_version": null,
+    "timing": "子进程 wall time，3 次取最快（单次 >5s 只跑 1 次）；含解释器/运行时启动开销"
+  },
+  "results": {
+    "fib": {
+      "interp": 991,
+      "vm": 1048,
+      "nat": 1007,
+      "python": 95,
+      "lua": null
+    },
+    "loop20m": {
+      "interp": 28045,
+      "vm": 30528,
+      "nat": 23484,
+      "python": 4867,
+      "lua": null
+    },
+    "loop2m": {
+      "interp": 2771,
+      "vm": 3075,
+      "nat": 1822,
+      "python": 532,
+      "lua": null
+    },
+    "str_concat": {
+      "interp": 3285,
+      "vm": 16165,
+      "nat": 9181,
+      "python": 3008,
+      "lua": null
+    },
+    "pi": {
+      "interp": 59921,
+      "vm": 78297,
+      "nat": 53223,
+      "python": 8738,
+      "lua": null
+    },
+    "list_append": {
+      "interp": 27582,
+      "vm": 26907,
+      "nat": 11219,
+      "python": 49,
+      "lua": null
+    },
+    "dict_lookup": {
+      "interp": 4895,
+      "vm": 7318,
+      "nat": 9492,
+      "python": 634,
+      "lua": null
+    },
+    "str_replace": {
+      "interp": 344,
+      "vm": 451,
+      "nat": null,
+      "python": 78,
+      "lua": null
+    },
+    "sort": {
+      "interp": 20186,
+      "vm": 19629,
+      "nat": 1210,
+      "python": 286,
+      "lua": null
+    },
+    "list_write": {
+      "interp": 8416,
+      "vm": 8471,
+      "nat": 253,
+      "python": 90,
+      "lua": null
+    }
+  }
+}

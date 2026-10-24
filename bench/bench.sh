@@ -13,7 +13,7 @@ mkdir -p "$OUT"
 # .hn 文件名与统一基准名的映射（历史命名）
 declare -A HN=([loop20m]=loop [str_concat]=str [dict_lookup]=dict)
 
-BENCHES=(fib loop20m loop2m str_concat pi list_append dict_lookup str_replace sort)
+BENCHES=(fib loop20m loop2m str_concat pi list_append dict_lookup str_replace sort list_write)
 
 echo "== 编译 Rust 基准（rustc -O）=="
 for b in "${BENCHES[@]}"; do

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>性能基准 — Hone 编程语言</title>
-<meta name="description" content="Hone 编程语言性能基准：与 Python、Rust 的 9 维度对比（递归/纯循环/浮点/字符串/列表/字典/排序），含真实测量数据与环境说明（2026-08-19）。">
+<meta name="description" content="Hone 编程语言性能基准：interp/VM/nat 三引擎与 Python、Lua 5.4 的 9 维度对比（递归/纯循环/浮点/字符串/列表/字典/排序），CI 自动测量更新，含测试机器与版本号说明。">
 <meta name="theme-color" content="#0b0e14">
 <link rel="icon" href="favicon.png" type="image/png">
 <link rel="stylesheet" href="style.css">
@@ -53,34 +53,66 @@
 
 <main>
 
-  <h2><span class="hash">#</span>性能基准：Hone vs Python vs Rust</h2>
-  <p>9 个维度、三语言等价实现、同机实测。所有脚本源码见仓库 <code>bench/</code> 目录（<code>bench.sh</code> 一键复现）。</p>
+  <h2><span class="hash">#</span>性能基准：Hone 三引擎 vs Python vs Lua 5.4</h2>
+  <p>9 个维度、三语言等价实现，由 CI（<code>bench.yml</code>）在 ubuntu runner 上自动测量，
+    <strong>数据文件 <code>perf-data.json</code> 随基准工作流自动提交更新</strong>。脚本源码见仓库
+    <code>bench/</code>（<code>bench/lua/</code> 为 Lua 5.4 等价实现）；
+    复现命令：<code>HONE_BIN=target/release/hone python tests/bench_ci.py</code>。</p>
   <p>相关页面：<a href="index.html">首页</a> · <a href="download.html">下载 Hone</a> · <a href="install.html">安装教程</a> ·
     <a href="docs.html">文档</a>
     <a href="language.html">语言</a> · <a href="examples.html">示例</a> · <a href="changelog.html">更新日志</a></p>
 
-  <h3>测试环境与时间戳</h3>
-  <table>
-    <tr><th>项目</th><th>信息</th></tr>
-    <tr><td>测试时间</td><td><strong>2026-08-19 10:30</strong>（本地时间，北京时间）</td></tr>
-    <tr><td>CPU</td><td>Intel Core m3-7Y30 @ 1.00GHz（低功耗 4.5W 移动芯片）</td></tr>
-    <tr><td>系统</td><td>Windows x86_64</td></tr>
-    <tr><td>Hone</td><td>v0.8.0（release 构建：fat LTO + opt-level z + strip）</td></tr>
-    <tr><td>Python</td><td>3.12.10（CPython，直接运行）</td></tr>
-    <tr><td>Rust</td><td>1.97.1（<code>rustc -O</code> / opt-level 3）</td></tr>
-  </table>
+  <div id="perf-auto">
+    <noscript>本节数据由 perf-data.json 渲染，需要启用 JavaScript；数据文件本身可直读。</noscript>
+    <h3>测试环境（CI 自动采集）</h3>
+    <table id="perf-meta"><tr><th>项目</th><th>信息</th></tr></table>
+
+    <h3>基准数据表（毫秒，越小越快）</h3>
+    <table>
+      <tr>
+        <th>基准（工作量）</th>
+        <th>Hone interp</th>
+        <th>Hone VM</th>
+        <th>Hone nat</th>
+        <th>Python 3</th>
+        <th>Lua 5.4</th>
+        <th>nat/Python</th>
+      </tr>
+      <tbody id="perf-rows"></tbody>
+    </table>
+    <p id="perf-status" class="muted">加载 perf-data.json …</p>
+  </div>
 
   <h3>测量方法</h3>
   <ul>
-    <li>每项均为<strong>单次运行</strong>耗时（毫秒，越小越快）；结果值三语言完全一致（交叉校验通过）。</li>
-    <li>三语言脚本逐项等价：同一算法、同一工作量、确定性输入；源码见 <code>bench/*.hn</code>、<code>bench/py/</code>、<code>bench/rs/</code>。</li>
-    <li>Rust 二进制先运行一次预热（避开杀毒软件对新 exe 的首扫干扰，实测首扫附加约 3.8s），取稳定运行时间。</li>
+    <li>每项为<strong>子进程 wall time</strong>（毫秒）：默认 3 次运行取最快，单次超过 5 秒的负载只跑 1 次（解释器慢负载）；
+      含解释器 / 运行时启动开销，小负载（str_replace 等）受启动成本影响明显。</li>
+    <li>三语言脚本逐项等价：同一算法、同一工作量、确定性输入；源码见 <code>bench/*.hn</code>、
+      <code>bench/py/</code>、<code>bench/lua/</code>。</li>
+    <li>三引擎口径：<strong>interp</strong> = <code>hone 脚本.hn</code>（AST 解释器）；
+      <strong>VM</strong> = <code>hone 脚本.hn --vm</code>（寄存器式字节码）；
+      <strong>nat</strong> = <code>hone build --exe --native</code> 的产物直接运行（Cranelift 机器码 + 系统 gcc 链接，
+      编译耗时不计入运行计时）。</li>
     <li>Hone 列表为<strong>值类型</strong>：<code>append</code> 与 <code>a[i] = x</code> 均按拷贝语义实现，
-      故 <code>list_append</code>（构建 2 万元素）与 <code>sort</code>（冒泡 1000）对 Hone 为 O(n²) 负载，耗时显著偏高。</li>
-    <li>本机为 1GHz 低功耗 CPU，绝对数值偏大；<strong>相对比例</strong>更具参考意义。</li>
+      故 <code>list_append</code>（构建 2 万元素）与 <code>sort</code>（冒泡 1000）对解释器为 O(n²) 负载，耗时显著偏高。</li>
+    <li>Runner 规格随 GitHub 托管池浮动，绝对数值每次运行可能有小幅波动；<strong>相对比例</strong>更具参考意义。</li>
   </ul>
 
-  <h3>基准数据表（毫秒，越小越快）</h3>
+  <h3>要点解读</h3>
+  <ul>
+    <li><strong>三引擎梯度</strong>：interp 最慢、VM 次之、<strong>nat（原生编译）最快</strong>——nat 通常领先 Python 同级或更快，
+      解释器约为 CPython 的 2~6 倍耗时（视负载）。</li>
+    <li><strong>集合值类型语义</strong>：Hone 的列表按值拷贝（<code>append</code>、<code>a[i]=x</code> 均产生新列表），
+      构建/排序类负载对解释器/VM 为 O(n²)；nat 后端同语义，但常数更小。</li>
+    <li><strong>Lua 5.4</strong>：寄存器 VM + 高效字符串内化，纯循环 / 字符串类负载通常强于 CPython；
+      字符串拼接（<code>s = s .. "abc"</code> 整串重建）语义与 Python 相同，同为 O(n²)。</li>
+    <li><strong>结论</strong>：性能热点场景用 <code>hone build --exe --native</code> 编译运行，或 <code>hone prof</code>
+      定位后改用 C 扩展（<code>hone build --dll</code>）。</li>
+  </ul>
+
+  <h3>历史手测记录（2026-08-19，Hone vs Python vs Rust）</h3>
+  <p>以下为早期同机手测数据（Intel m3-7Y30 低功耗 CPU，单次运行），保留作参考；
+    当前有效数据以上方 CI 自动表为准。</p>
   <table>
     <tr>
       <th>基准（工作量）</th>
@@ -100,18 +132,6 @@
     <tr><td>str_replace · 字符串替换 10 万次</td><td>746</td><td>411</td><td>252</td><td>1.8x</td><td>3.0x</td></tr>
     <tr><td>sort · 冒泡排序 1000 个整数</td><td>142,847</td><td>881</td><td>250</td><td>162x</td><td>571x</td></tr>
   </table>
-
-  <h3>要点解读</h3>
-  <ul>
-    <li><strong>计算类负载</strong>：Hone 约为 CPython 的 <strong>1.8~6.4 倍耗时</strong>（fib 4.6x / 纯循环 3.2~3.6x / 浮点 5.3x / 字典 6.4x），
-      与 README 公布的优化后基准一致（fib(26) ≈2.1s、2000 万循环 ≈42s、字符串拼接 20 万 ≈19s）。</li>
-    <li><strong>集合值类型语义</strong>：Hone 的列表按值拷贝（<code>append</code>、<code>a[i]=x</code> 均产生新列表），
-      构建/排序类负载为 O(n²)，比 Python 慢 160x+；若后续改为写时共享（copy-on-write）可大幅改善。</li>
-    <li><strong>Rust</strong>：计算本身几乎瞬时，本机测得 ~250ms 主要为进程启动/杀软扫描开销（空程序同为 248ms）。</li>
-    <li><strong>结论</strong>：Hone 作为轻量脚本语言，计算性能处于 CPython 同级（略慢 2~6 倍）、远低于原生 Rust（数十到数百倍）；
-      开箱即用的代价换取零依赖单文件部署。性能热点场景建议用 <code>hone prof</code> 定位后改用 C 扩展（<code>hone build --dll</code>）或内联到 Rust。</li>
-  </ul>
-
   <p>复现方式：<code>bash bench/bench.sh</code>（编译 Rust 基准并运行三语言各 3 次取最快，输出表格）。</p>
 
 </main>
@@ -122,6 +142,59 @@
 </footer>
 
 <script src="site.js"></script>
+<script>
+// CI 基准数据渲染：读 perf-data.json（bench.yml 自动提交），填环境表与数据表。
+(function () {
+  function fmt(ms) { return ms == null ? "-" : ms.toLocaleString("en-US"); }
+  function ratio(a, b) {
+    if (a == null || b == null || b <= 0) return "-";
+    var r = a / b;
+    return (r >= 100 ? Math.round(r) : r.toFixed(1)) + "x";
+  }
+  fetch("perf-data.json", { cache: "no-cache" })
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (d) {
+      var m = d.meta || {};
+      var meta = document.getElementById("perf-meta");
+      var rows = [
+        ["测试时间", "<strong>" + (m.date || "-") + "</strong>"],
+        ["git 提交", m.git_sha || "-"],
+        ["机器", (m.cpu || "-") + " · " + (m.cores || "?") + " 核" + (m.ram ? " · " + m.ram : "")],
+        ["系统", m.os || "-"],
+        ["Hone", m.hone_version || "-"],
+        ["Python", m.python_version ? "CPython " + m.python_version : "-"],
+        ["Lua", m.lua_version || "-"],
+        ["计时口径", m.timing || "-"]
+      ];
+      meta.innerHTML = "<tr><th>项目</th><th>信息</th></tr>" + rows.map(function (r) {
+        return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td></tr>";
+      }).join("");
+      var names = {
+        fib: "fib · 递归斐波那契 fib(26)",
+        loop20m: "loop20m · 纯循环整数累加 2000 万次",
+        loop2m: "loop2m · 纯循环整数累加 200 万次",
+        str_concat: "str_concat · 字符串拼接 20 万次",
+        pi: "pi · 浮点运算（莱布尼茨级数 2000 万项）",
+        list_append: "list_append · 列表构建 2 万 + 求和",
+        dict_lookup: "dict_lookup · 字典查找 200 万次",
+        str_replace: "str_replace · 字符串替换 10 万次",
+        sort: "sort · 冒泡排序 1000 个整数",
+        list_write: "list_write · list 索引写 20 万 + 求和"
+      };
+      var tbody = document.getElementById("perf-rows");
+      tbody.innerHTML = Object.keys(names).map(function (k) {
+        var r = d.results[k] || {};
+        return "<tr><td>" + names[k] + "</td><td>" + fmt(r.interp) + "</td><td>" + fmt(r.vm) +
+          "</td><td>" + fmt(r.nat) + "</td><td>" + fmt(r.python) + "</td><td>" + fmt(r.lua) +
+          "</td><td>" + ratio(r.nat, r.python) + "</td></tr>";
+      }).join("");
+      document.getElementById("perf-status").textContent = "数据由 CI 基准工作流自动更新（" + (m.date || "") + "）";
+    })
+    .catch(function () {
+      document.getElementById("perf-status").textContent = "perf-data.json 尚未生成（首次基准工作流运行后出现）";
+    });
+})();
+</script>
 
 </body>
 </html>
