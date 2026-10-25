@@ -1,76 +1,76 @@
 {
   "meta": {
-    "date": "2026-10-24 04:18 UTC",
-    "os": "Windows 10",
-    "cpu": "Intel64 Family 6 Model 142 Stepping 9, GenuineIntel",
+    "date": "2026-10-25 07:28 UTC",
+    "os": "Linux 6.17.0-1022-azure",
+    "cpu": "AMD EPYC 7763 64-Core Processor",
     "cores": 4,
-    "ram": "",
-    "git_sha": "d5b5822",
-    "hone_version": "hone 0.8.0",
-    "python_version": "3.12.10",
-    "lua_version": null,
+    "ram": "15 GB",
+    "git_sha": "482f86d",
+    "hone_version": "hone 0.9.0",
+    "python_version": "3.12.3",
+    "lua_version": "Lua 5.4.6  Copyright (C) 1994-2023 Lua.org, PUC-Rio",
     "timing": "子进程 wall time，3 次取最快（单次 >5s 只跑 1 次）；含解释器/运行时启动开销"
   },
   "results": {
     "fib": {
-      "interp": 991,
-      "vm": 1048,
-      "python": 95,
-      "lua": null
+      "interp": 334,
+      "vm": 422,
+      "python": 35,
+      "lua": 9
     },
     "loop20m": {
-      "interp": 28045,
-      "vm": 30528,
-      "python": 4867,
-      "lua": null
+      "interp": 12991,
+      "vm": 10318,
+      "python": 2150,
+      "lua": 181
     },
     "loop2m": {
-      "interp": 2771,
-      "vm": 3075,
-      "python": 532,
-      "lua": null
+      "interp": 1309,
+      "vm": 1024,
+      "python": 231,
+      "lua": 20
     },
     "str_concat": {
-      "interp": 3285,
-      "vm": 16165,
-      "python": 3008,
-      "lua": null
+      "interp": 4347,
+      "vm": 5376,
+      "python": 10052,
+      "lua": 11161
     },
     "pi": {
-      "interp": 59921,
-      "vm": 78297,
-      "python": 8738,
-      "lua": null
+      "interp": 26891,
+      "vm": 28356,
+      "python": 3343,
+      "lua": 384
     },
     "list_append": {
-      "interp": 27582,
-      "vm": 26907,
-      "python": 49,
-      "lua": null
+      "interp": 6063,
+      "vm": 6418,
+      "python": 18,
+      "lua": 2
     },
     "dict_lookup": {
-      "interp": 4895,
-      "vm": 7318,
-      "python": 634,
-      "lua": null
+      "interp": 2154,
+      "vm": 2415,
+      "python": 247,
+      "lua": 35
     },
     "str_replace": {
-      "interp": 344,
-      "vm": 451,
-      "python": 78,
-      "lua": null
+      "interp": 130,
+      "vm": 147,
+      "python": 28,
+      "lua": 38
     },
     "sort": {
-      "interp": 20186,
-      "vm": 19629,
-      "python": 286,
-      "lua": null
+      "interp": 10158,
+      "vm": 9789,
+      "python": 129,
+      "lua": 20
     },
     "list_write": {
-      "interp": 8416,
-      "vm": 8471,
-      "python": 90,
-      "lua": null
+      "interp": 4243,
+      "vm": 4183,
+      "python": 38,
+      "lua": 4
     }
   }
 }
