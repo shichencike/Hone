@@ -51,10 +51,7 @@ __pycache__/
 *.nat.o
 *.nat.exe
 
-# Cranelift/链接 spike 实验目录与原型（M0 期间临时验证，natgen.rs 为正式实现）
-spike_link/
-spike_link2/
-spike_nat/
+# M0 spike 遗留：内存诊断脚本；src/bin/ 空目录占位
 spike_diag.ps1
 src/bin/
 
