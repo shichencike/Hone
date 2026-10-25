@@ -96,10 +96,33 @@ jobs:
           # 3. 签名（/fd SHA256 摘要 + /tr RFC3161 时间戳 /td SHA256：证书过期后旧签名仍有效）
           & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $exe
           if ($LASTEXITCODE -ne 0) { throw "signtool sign failed with exit code $LASTEXITCODE" }
-          # 4. 验证签名，确保不会静默失败
-          & $signtool.FullName verify /pa $exe
-          if ($LASTEXITCODE -ne 0) { throw "signtool verify failed with exit code $LASTEXITCODE" }
-          Write-Host "Code signing verified OK"
+          # 4. 验证签名完整性，确保不会静默失败。
+          # 注意：runner 的受信任根存储未必含签名证书的根 CA（私有 CA、或证书
+          # 换发后链不同），signtool verify /pa 会报
+          # "terminated in a root certificate which is not trusted" 而失败——
+          # 那不代表签名损坏。改用 Get-AuthenticodeSignature：
+          #   Valid        → 链受信任且签名完整（正常路径）
+          #   NotTrusted   → 链不受 runner 信任，签名完好：校验签名者证书与 PFX 一致
+          #   HashMismatch → 签名后文件被改动（必须失败）
+          #   NotSigned    → 未签名（必须失败）
+          $pfxCert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
+            "$PWD\$pfx", $env:WINDOWS_CERT_PASSWORD,
+            [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)
+          $sig = Get-AuthenticodeSignature "$PWD\$exe"
+          switch ($sig.Status.ToString()) {
+            'Valid' { }
+            'NotTrusted' {
+              if (-not $sig.SignerCertificate -or
+                  $sig.SignerCertificate.Thumbprint -ne $pfxCert.Thumbprint) {
+                throw "NotTrusted: signed by unexpected certificate"
+              }
+              Write-Warning "signing chain not trusted by runner trust provider; signature integrity confirmed against PFX certificate"
+            }
+            'CRLStatusUnknown' { Write-Warning "CRL status unknown: $($sig.Status)" }
+            'CRLFailure' { Write-Warning "CRL check failed: $($sig.Status)" }
+            default { throw "signature verification failed: status = $($sig.Status)" }
+          }
+          Write-Host "Code signing verified OK ($($sig.Status))"
           Remove-Item $pfx -Force
       # G3.4（已废弃）：full 包 = 可执行文件 + targets/（纯 .o 生成器口径已移除工具链分发，
       # full 包仅含 hone 本体，Windows 侧含随包 dll）。

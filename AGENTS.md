@@ -52,6 +52,9 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   安装脚本 install.sh（Linux/Termux）与 install.bat（Windows）随发布上传；Windows 安装 = 双击
   install.bat（与 full zip 同目录）。Windows 构建产物在 release.yml 经 signtool 签名
   （secrets WINDOWS_CERT_PFX / WINDOWS_CERT_PASSWORD；缺失时跳过签名不失败）。
+  签名后改用 `Get-AuthenticodeSignature` 校验签名完整性（不用 `signtool verify /pa`：
+  runner 根存储可能不含签名证书的根 CA，链信任失败不代表签名损坏；NotTrusted 时
+  核对签名者证书与 PFX 指纹一致即通过）。
 - 性能基准（`bench.yml`，push master + 路径过滤 src/bench/tests/bench_ci.py/Cargo.lock）：
   `tests/bench_ci.py` 跑 9 负载 × hone interp/VM vs CPython vs Lua 5.4（子进程 wall time
   3 次取最快、单次 >5s 只跑 1 次；VM 口径 `--vm`），结果写 `官网/perf-data.json` 自动提交回仓库
