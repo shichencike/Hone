@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [v0.9.0] — 2026-10-25
 
 ### 移除
 - **移除 NAT（`build --exe --native` / `natgen`）与 DLL（`build --dll` / `@export`）后端**：
@@ -29,10 +29,19 @@
   `hone check` / `hone prof` 一致，**在展开前运行**，只静态检查主模块源码；否则展开进来的
   模块函数体（尤其未被调用、参数类型无法从调用点推断者）会在 strict 阶段被误报 H003，
   与解释器产出分歧。
-- **FFI 回调 + 变参全链路支持（仅解释器实测通过；VM 不支持 load，报 H999）**：删 ffi_dispatch!/
+- **FFI 回调 + 变参全链路支持（双引擎实测通过）**：删 ffi_dispatch!/
   ffi_variadic! 穷举宏（8190 类型实例化内存峰值），切换为 libffi 静态构建（ffi_prep_cif/
   ffi_prep_cif_var/ffi_call + ffi_closure 回调）。支持 int/int32/float/float32/bool/str/ptr/void
   全标量参数与返回，回调 0-8 参、变参无固定上限、float 固定参数的变参函数已支持。
+- **VM 补齐 load / typed FFI 全量（T8）**：FFI 实现**拆出 `src/ffi.rs` 供双引擎共用**
+  （`ffi::load` / `ffi::call` / `FfiState`，错误文案只有一处定义；回调宿主经 `VmCbEnv`
+  Arc 快照在新 VM 实例中执行，与解释器 `Interp::new_cb_host` 对称）。VM 编译臂把
+  `Stmt::Load` 产为 `Instr::LoadLib(LoadDesc)`（描述内联在指令里，文本 IR 可往返）；
+  点号未解析调用落到 `call_lib_fn` 走 typed 签名分派。范围 = 解释器全量：
+  typed 签名块 / 头文件绑定 / 旧 int64 通道 / 回调（0-8 标量参、仅同步）/ 变参；
+  加载失败 H301 / 参数校验 H302 / 类型错 H001 与解释器逐字节同。
+  `regress_common.py` SKIP 口径同步：VM 报 H999 兜底的示例全部移出 SKIP、纳入逐字节比对；
+  FLAKY 补 `test_sched_lib` / `test_process_lib` / `server_selftest`（依赖本机实时状态）。
 - **int32/float32 新类型全链路**：lexer/parser/header/checker/interp/VM/签名块/头文件绑定
   全覆盖；C `int32_t`/`uint32_t` 映射 `int32`，C `float` 映射 `float32`。
 - **install.bat 纯 ASCII 安装脚本**：原生 curl.exe+tar.exe，镜像回退/sha256 校验/断点续传/PATH
@@ -81,6 +90,13 @@
 - **VM 行为对齐**：`for a, b in <list/bytes>` 双变量迭代原在 VM 静默放行（第二变量取陈旧值），
   现与解释器一致报错 `` `for k, v in` requires a dict, got a list/bytes ``
 - checker 新增双形态参数检查（expect_str_or_bytes / expect_int_or_byte）；LSP 补全描述同步
+
+### 修复
+- **文本 IR 往返 4 处缺陷（regress_ir 由 BAD=8 清零）**：
+  type 字段解析格式与反汇编发射互逆（只读 `字段!类型`，原解析期望 `字段:类型!`）；
+  `hone run --disasm` 补构建期 import 展开（与裸 `hone <f> --disasm` 同口径，否则模块函数
+  不进反汇编文本）；`TYPENEW` / `CALLMETH` 的 `parse_instr` 操作数个数与下标对齐发射格式；
+  `parse_range` 兼容寄存器区间 `[r0..+3]` 形态
 
 ### 文档
 - **FFI 口径全站对齐 libffi 实现**：hone.md 4.1.1/4.1.2 补 `int32` → int32_t、`float32` → C float

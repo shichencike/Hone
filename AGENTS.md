@@ -21,7 +21,7 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
 - 单 crate 流水线：lexer → parser → ast → checker → 双后端：`interp.rs`（AST 解释器）、`vm.rs`（字节码 VM）。（AOT 与原生编译（nat）后端已移除。）
 - `Value` 定义在 `interp.rs`，VM 与全部 builtins 复用之——改 Value/字典行为要同时顾及双引擎。
 - **引用模型**：List/Dict/Str/Bytes 四变体为 Arc 共享句柄（List/Dict 带 RwLock），`Value::clone` = O(1) 句柄克隆，值语义由统一写屏障保证（interp `ensure_unique` / VM `cow_handle`：独占原地写、共享先隔离）。别名不可见，可观察行为与深拷贝逐字节一致。`cow` 声明语法已废弃（BREAKING，遇 `cow` 报 H005）；`as_plain` 保留为恒等（历史读点兼容）。
-- 铁律：**interp 与 VM 输出（含报错）必须逐字节一致**；错误码 Hxxx 集中在 `error.rs`，`H999`=功能未实现（当前 VM 仅 `load` 动态库与「非构建期展开路径的 `Stmt::Import`」编译臂报 H999；with、type 实例、byte/bytes **字面量**（0b…/b"…"/byte()）、字段赋值、切片均已在 VM 落地）。byte/bytes **值**（read_bytes/base64_decode/zip_read/tgz_read_bytes/http_get_bytes/http_post_bytes/http.request binary/zlib.* 四函数/ws.request 消息列表/ptr.read_byte/索引产出）interp/VM 双引擎全支持：VM 侧执行臂集中在 `vm.rs` 的 `v_add`/`v_eq`/`v_cmp`/`v_index`/`v_len`/`IterCheck`（按 is_comp 站点分派：推导式拒 bytes、for-in 收）与 `value_to_str`（display 基准 = 解释器：Byte 为 `0bNNNNNNNN`、Bytes 为可打印原样 + `\xNN`），改任一处须与解释器 `interp.rs` 对应函数（`arith`/`values_eq`/`values_cmp`/`index_value`）逐字对齐；for-in 双变量 list/bytes 报错走 `IsBytes` 指令 + `Raise`（文案含 list/bytes 两分支）。
+- 铁律：**interp 与 VM 输出（含报错）必须逐字节一致**；错误码 Hxxx 集中在 `error.rs`，`H999`=功能未实现（T1-T9 后 VM 已无特性 H999 兜底：load/FFI、import 远程、with、type 实例、byte/bytes 字面量、字段赋值、切片、默认参数均已在 VM 落地；`Instr::LoadLib` 携带 `ffi::LoadDesc` 走共用 `ffi::load`）。byte/bytes **值**（read_bytes/base64_decode/zip_read/tgz_read_bytes/http_get_bytes/http_post_bytes/http.request binary/zlib.* 四函数/ws.request 消息列表/ptr.read_byte/索引产出）interp/VM 双引擎全支持：VM 侧执行臂集中在 `vm.rs` 的 `v_add`/`v_eq`/`v_cmp`/`v_index`/`v_len`/`IterCheck`（按 is_comp 站点分派：推导式拒 bytes、for-in 收）与 `value_to_str`（display 基准 = 解释器：Byte 为 `0bNNNNNNNN`、Bytes 为可打印原样 + `\xNN`），改任一处须与解释器 `interp.rs` 对应函数（`arith`/`values_eq`/`values_cmp`/`index_value`）逐字对齐；for-in 双变量 list/bytes 报错走 `IsBytes` 指令 + `Raise`（文案含 list/bytes 两分支）。
 - 运算符重载（G2.4）：`__op` 回退链在 `vm.rs` exec 臂（触发条件表以此为准：算术：非数字/str 组合 + H001；比较：非数字对、错误码不限；一元：H001）。
 - 别名（G2.5）：语义基准：VM `do_call`（先 resolve_alias → 再查局部变量 → 函数 → 内置）。
 - 参数个数校验双引擎统一到解释器文案（`expects at most N arguments, got M` /
@@ -29,11 +29,15 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
 - FFI（typed 签名块 / 头文件绑定 / 变参 / 回调）：动态调用与回调闭包统一走 **libffi**
   （`libffi-sys`，默认从源码静态构建、无系统动态库依赖；MSVC 目标经预处理头 + cc，GNU/ELF 目标需
   make + C 编译器）——`ffi_prep_cif` / `ffi_prep_cif_var` / `ffi_call` + `ffi_closure`；旧的
-  `ffi_dispatch!` / `ffi_variadic!` 穷举宏已删（8190 类型实例化内存峰值）。`int32` / `float32` 是
+  `ffi_dispatch!` / `ffi_variadic!` 穷举宏已删（8190 类型实例化内存峰值）。T8 后 FFI 实现
+  **拆出 `src/ffi.rs` 供双引擎共用**（`ffi::load` / `ffi::call` / `FfiState` / `CbEngine::Interp|Vm`：
+  错误文案只有一处定义，回调宿主经 `VmCbEnv` Arc 快照在新实例中执行）；VM 编译臂把
+  `Stmt::Load` 产为 `Instr::LoadLib(LoadDesc)`（描述内联在指令里，文本 IR 可往返）、
+  点号未解析调用落到 `call_lib_fn`。`int32` / `float32` 是
   **FFI 专有类型名**（Hone 值按 int/float 走，checker 映射 `Ty::Int` / `Ty::Float`，调用时校验
   32 位范围）；头文件绑定把 C `int32_t`/`uint32_t` 映射 `int32`、C `float` 映射 `float32`；
   回调限 0-8 个标量参数且仅同步。改 FFI 类型/文案须同步 `ast.rs`(FfiTy) / `parser.rs`(ffi_ty_from_tok) /
-  `header.rs`(map_type) / `interp.rs` 四处。
+  `header.rs`(map_type) / `ffi.rs` 四处。
 - 点号内置族（G2.9）：interp/VM 共用 `builtins.rs` + 各 `*mod.rs`（基于 `Value`）。未登记点号名保留 H404（load 库语义）。
 - import（G3.1）：解释器**运行期**处理（`interp::exec_import`，`hone run` 语义基准）；VM（`--vm`）
   在**编译期**经 `src/imports.rs::resolve_imports` 递归展开顶层 import、

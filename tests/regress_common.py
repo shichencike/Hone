@@ -6,21 +6,16 @@
 # 分类表是「哪些示例不参与逐字节比对」的唯一事实来源，只应存在一份。
 
 # 按设计无法在另一后端 1:1 复现的示例，直接跳过：
-#   1) load / import 模块（VM 与 IR 均未覆盖，见 vm.rs:780 与 Hone虚拟机VM开发说明.md §10）
-#   2) 原生 GUI / HTTP / FFI 示例、pet_demo 需交互或定时器会超时
-# 说明：overload_demo（运算符重载 __op）已在 VM 实现，纳入回归比对。
+#   1) 原生 GUI / 需交互的示例（guipro_* 与 *input* 由 should_skip 兜底）
+#   2) import_demo 需要本地 8800 端口的 HTTP 服务器（无常驻服务时两引擎等价的
+#      只是「连接被拒」这一条错误，比对无意义；远程 import 的对齐由
+#      tests/tools/probe_align.py 的 IMPORT 组自带 fixture server 覆盖）
+# 说明：import（含远程下载）/ load / FFI / byte / bytes / with / type 实例 / 字段赋值
+# 已在 VM 落地（T1-T9），原先「VM 报 H999 兜底」的 SKIP 口径已全部移除。
 SKIP = {
-    "server_selftest", "spider_demo", "ffi_demo", "ffi_header", "ai_demo",
-    "import_demo", "load_demo", "load_lazy", "pbar_demo",
-    "pet_demo", "gui_demo",
-    # 依赖 import 模块（后端未覆盖 import/load），属「按设计不支持」而非缺陷：
-    "test_hone_lib", "test_img_lib", "test_music_lib", "test_sched_lib",
-    "test_process_lib", "test_hone_lib_smoke",
-    # smoke_spider 同样 import spider.hn，与 spider_demo 同类。
-    "smoke_spider",
-    # byte/bytes 与 type 实例 / with / 字段赋值是解释器特性，VM 按设计报 H999 兜底，
-    # 无法 1:1 复现，故不参与逐字节比对（与 goto 在 AOT 的处理同一模式）。
-    "byte_demo", "with_type_demo",
+    "gui_demo", "pet_demo",
+    # 需要本地 HTTP 服务器（127.0.0.1:8800）才能跑通全部路径
+    "import_demo",
     # https_demo 访问外网（example.com / httpbin.org）：返回内容与长度随网络变化，
     # 两次运行本就可能不同，属非逻辑差异。纳入 SKIP 以保证基线可复现。
     "https_demo",
@@ -31,6 +26,8 @@ SKIP = {
 FLAKY = {
     "time_random", "uuid_demo", "alias_demo", "threads", "server_demo",
     "async_demo", "time_demo", "random_demo",
+    # 依赖本机实时状态：墙钟时间 / 进程表 / 随机监听端口
+    "test_sched_lib", "test_process_lib", "server_selftest",
 }
 
 

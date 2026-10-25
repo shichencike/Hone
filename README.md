@@ -3,7 +3,7 @@
 轻量级、跨平台、开箱即用的脚本语言。用 Rust 实现，单文件可执行程序，开箱即用。
 
 > 设计规范：`hone.md`（v1.3）
-> 当前版本：v0.8.0（原生编译后端与 AOT 后端均已移除，解释器 + VM 双引擎。详见 CHANGELOG）
+> 当前版本：v0.9.0（原生编译后端与 AOT 后端均已移除，解释器 + VM 双引擎。详见 CHANGELOG）
 
 ## 安装
 
@@ -561,6 +561,9 @@ help: Hone types are locked after inference; no implicit conversion is allowed
   `f"..."` 字符串插值 ✅、`append`/`contains`/`index_of`/`keys`/`values`/`has_key` ✅、
   `is_int`/`is_float`/`is_str`/`is_bool`/`is_list`/`is_dict`/`is_null` 类型判断 ✅、
   `time.parse` 时间戳解析 ✅、`uuid.new` UUID v4 ✅
+- ✅ 阶段 7（新增）：VM 特性全量对齐 ✅——切片、byte/bytes 字面量、字段赋值、默认参数、
+  `with`、type 实例/方法、import 远程模块（构建期下载 + 缓存）、load/FFI（签名块/头文件
+  绑定/变参/回调）、debug——interp 与 VM 输出（含报错）逐字节一致，回归与扫雷全绿
 
 ## 许可证
 

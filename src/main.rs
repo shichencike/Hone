@@ -8,6 +8,7 @@ mod bundle;
 mod checker;
 mod datamod;
 mod error;
+mod ffi;
 mod fmt;
 mod guimod;
 #[cfg(not(windows))]
@@ -150,6 +151,9 @@ fn run_cli(args: &[String]) -> Result<(), ZError> {
                     )
                 })?;
                 let program = parser::Parser::parse(path, &src)?;
+                // G3.1：与裸 `hone <f> --disasm` 同口径——反汇编走 VM 编译模型，
+                // 需构建期展开顶层 import，否则模块函数不进反汇编文本。
+                let program = imports::resolve_imports(program, path, &src)?;
                 let text = vm::disassemble_program(&program, path, &src)?;
                 println!("{}", text);
                 return Ok(());

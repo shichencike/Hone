@@ -28,6 +28,7 @@ use std::thread;
 use crate::ast::*;
 use crate::builtins;
 use crate::error::{codes, ZError};
+use crate::ffi::{self, LoadDesc};
 use crate::interp::{EnumVal, ErrorObj, FutureVal, LambdaVal, TypeInstVal, Value, STRUCT_MARKER_KEY};
 use crate::lexer::Span;
 
@@ -137,6 +138,9 @@ pub enum Instr {
     /// 双变量推导式在列表源上静默退化为单变量，与解释器分叉（G1.6 审计发现）。
     /// 字段：错误码、消息、help（None = 该分支无 help 行）。
     Raise(&'static str, String, Option<String>),
+    /// load 动态库（T8）：运行期按描述注册签名并（可选）加载库——与解释器共用
+    /// `ffi::load`（文案只有一处定义）。描述内联在指令里，文本 IR 可 1:1 往返。
+    LoadLib(LoadDesc),
     DebugPrint(usize),            // reg
     Breakpoint,                   // 无操作数
     Nop,
@@ -546,7 +550,6 @@ impl Compiler {
                 | Stmt::EnumDef { .. }
                 | Stmt::Alias { .. }
                 | Stmt::Import { .. }
-                | Stmt::Load { .. }
                 | Stmt::Use { .. } => {}
                 _ => self.compile_stmt(s),
             }
@@ -1208,8 +1211,16 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
             Stmt::Import { .. } => {
                 self.fail(codes::NOT_IMPLEMENTED, "VM: import 远程模块暂未支持");
             }
-            Stmt::Load { .. } => {
-                self.fail(codes::NOT_IMPLEMENTED, "VM: load 动态库暂未支持");
+            Stmt::Load { lazy, path, alias, from, sigs, .. } => {
+                // T8：load 编译为运行期指令（与解释器同序执行——load 之后的调用才能命中，
+                // 提前调用仍是「库未加载」错误，两引擎一致）。
+                self.emit(Instr::LoadLib(LoadDesc {
+                    lazy: *lazy,
+                    path: path.clone(),
+                    alias: alias.clone(),
+                    from: from.clone(),
+                    sigs: sigs.clone(),
+                }));
             }
             Stmt::Use { .. } => {
                 // 暂作无操作（宿主函数命名空间在本版 VM 中未接）
@@ -1963,29 +1974,34 @@ struct TryFrame {
 }
 
 pub struct Vm {
-    chunks: Vec<Chunk>,
-    func_map: HashMap<String, usize>,
-    struct_defs: HashMap<String, Vec<(String, bool)>>,
-    enum_defs: HashMap<String, Vec<(String, usize)>>,
+    // 编译后的模块表统一走 Arc 共享：spawn_async / spawn_go / FFI 回调宿主
+    // 都只需克隆引用计数即可拿到一致的环境快照（T8 回调在全新 Vm 实例中执行）。
+    chunks: Arc<Vec<Chunk>>,
+    func_map: Arc<HashMap<String, usize>>,
+    struct_defs: Arc<HashMap<String, Vec<(String, bool)>>>,
+    enum_defs: Arc<HashMap<String, Vec<(String, usize)>>>,
     /// type 定义（T6）：类型名 → (父类型名(空串=根), (字段名, 类型, 是否只读) 列表)
-    type_defs: HashMap<String, (String, Vec<(String, crate::ast::TyName, bool)>)>,
-    aliases: Vec<(String, String)>,
-    async_fns: HashSet<String>,
+    type_defs: Arc<HashMap<String, (String, Vec<(String, crate::ast::TyName, bool)>)>>,
+    aliases: Arc<Vec<(String, String)>>,
+    async_fns: Arc<HashSet<String>>,
     file: String,
     src: String,
     debug: bool,
+    /// 动态库 FFI 状态（已加载库 / 懒加载路径 / 签名表）——与解释器共用 `ffi` 层
+    ffi: ffi::FfiState,
     frames: Vec<Frame>,
 }
 
 impl Vm {
+    #[allow(clippy::too_many_arguments)]
     fn new(
-        chunks: Vec<Chunk>,
-        func_map: HashMap<String, usize>,
-        struct_defs: HashMap<String, Vec<(String, bool)>>,
-        enum_defs: HashMap<String, Vec<(String, usize)>>,
-        type_defs: HashMap<String, (String, Vec<(String, crate::ast::TyName, bool)>)>,
-        aliases: Vec<(String, String)>,
-        async_fns: HashSet<String>,
+        chunks: Arc<Vec<Chunk>>,
+        func_map: Arc<HashMap<String, usize>>,
+        struct_defs: Arc<HashMap<String, Vec<(String, bool)>>>,
+        enum_defs: Arc<HashMap<String, Vec<(String, usize)>>>,
+        type_defs: Arc<HashMap<String, (String, Vec<(String, crate::ast::TyName, bool)>)>>,
+        aliases: Arc<Vec<(String, String)>>,
+        async_fns: Arc<HashSet<String>>,
         file: &str,
         src: &str,
         debug: bool,
@@ -2001,8 +2017,83 @@ impl Vm {
             file: file.to_string(),
             src: src.to_string(),
             debug,
+            ffi: ffi::FfiState::new(),
             frames: Vec::new(),
         }
+    }
+
+    /// FFI 回调宿主：用快照表新建 VM 实例执行回调体（C 调用期间不能复用当前实例）。
+    /// 与解释器侧 `Interp::new_cb_host` 对称，共用 ffi 层的 closure 入口。
+    pub(crate) fn from_cb_env(env: &ffi::VmCbEnv, file: &str, src: &str) -> Self {
+        Vm {
+            chunks: env.chunks.clone(),
+            func_map: env.func_map.clone(),
+            struct_defs: env.struct_defs.clone(),
+            enum_defs: env.enum_defs.clone(),
+            type_defs: env.type_defs.clone(),
+            aliases: env.aliases.clone(),
+            async_fns: env.async_fns.clone(),
+            file: file.to_string(),
+            src: src.to_string(),
+            debug: false,
+            ffi: ffi::FfiState::new(),
+            frames: Vec::new(),
+        }
+    }
+
+    /// 回调体为 lambda：执行其编译 chunk（捕获环境随 LambdaVal 带入）。
+    pub(crate) fn run_callback_lambda(
+        &mut self,
+        lam: &Arc<LambdaVal>,
+        args: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, ZError> {
+        self.call_lambda(lam, args, &span)
+            .map_err(|v| self.value_to_zerror(&v))
+    }
+
+    /// 回调体为顶层函数名：按名解析后执行（与解释器 `call_fn` 的普通函数路径一致）。
+    pub(crate) fn run_callback_fn(
+        &mut self,
+        name: &str,
+        args: Vec<Value>,
+        span: Span,
+    ) -> Result<Value, ZError> {
+        let ci = match self.func_map.get(name) {
+            Some(&ci) => ci,
+            None => {
+                return Err(ZError::plain(
+                    codes::UNDEFINED,
+                    format!("callback function `{}` is not defined", name),
+                    Some("pass a lambda `fn(a, b) { ... }` or a top-level function name"),
+                ))
+            }
+        };
+        self.call_chunk(ci, args, &span)
+            .map_err(|v| self.value_to_zerror(&v))
+    }
+
+    /// 当前模块表快照（Arc 克隆，O(1)）——供 FFI 回调宿主的全新实例使用。
+    fn cb_env(&self) -> ffi::VmCbEnv {
+        ffi::VmCbEnv {
+            chunks: self.chunks.clone(),
+            func_map: self.func_map.clone(),
+            struct_defs: self.struct_defs.clone(),
+            enum_defs: self.enum_defs.clone(),
+            type_defs: self.type_defs.clone(),
+            aliases: self.aliases.clone(),
+            async_fns: self.async_fns.clone(),
+        }
+    }
+
+    /// 动态库函数调用 → 共用 `ffi::call`（错误文案与解释器只有一处定义）。
+    /// 调用前把 FFI 状态 take 出来，好让回调宿主快照能借用本 VM（回调在新实例中执行）。
+    fn call_lib_fn(&mut self, callee: &str, args: Vec<Value>, span: &Span) -> Result<Value, Value> {
+        let mut st = std::mem::take(&mut self.ffi);
+        let host = || ffi::CbEngine::Vm(self.cb_env());
+        let r = ffi::call(&mut st, callee, args, *span, &self.file, &self.src, &host);
+        self.ffi = st;
+        r.map_err(|e| Value::Error(ErrorObj::from_err(&e)))
     }
 
     fn mk_err(&self, code: &'static str, msg: String, span: &Span) -> Value {
@@ -2644,6 +2735,22 @@ impl Vm {
                 // 交给 try_catch捕获或向上传播。
                 return Err(self.mk_err_with(code, msg.clone(), span, help.clone()));
             }
+            Instr::LoadLib(desc) => {
+                // 与解释器共用 `ffi::load`（签名注册 / 头文件解析 / 加载 / plugin 注册）。
+                if let Err(e) = ffi::load(
+                    &mut self.ffi,
+                    desc.lazy,
+                    &desc.path,
+                    desc.alias.as_deref(),
+                    desc.from.as_deref(),
+                    &desc.sigs,
+                    *span,
+                    &self.file,
+                    &self.src,
+                ) {
+                    return Err(Value::Error(ErrorObj::from_err(&e)));
+                }
+            }
             Instr::DebugPrint(reg) => {
                 if self.debug {
                     let v = self.frames[fi].regs[reg].clone();
@@ -2749,18 +2856,9 @@ impl Vm {
             if builtins::is_builtin(&func) {
                 return self.call_builtin(&func, args, span);
             }
-            // 点号调用且非枚举/函数/内置：与解释器一致，视为库方法调用 → 库未加载错误。
-            let dot = func.rfind('.').unwrap_or(func.len());
-            let lib_name = func[..dot].to_string();
-            return Err(self.mk_err_with(
-                codes::NOT_FOUND,
-                format!("library `{}` is not loaded", lib_name),
-                span,
-                Some(format!(
-                    "add `load \"path/to/lib\" as {};` or `plugin.load(path, \"{}\")` before calling",
-                    lib_name, lib_name
-                )),
-            ));
+            // 点号调用且非枚举/函数/内置：与解释器 call_fn 一致 → 动态库函数调用
+            // （typed 签名 / C ABI 约定；「库未加载」等诊断由 ffi 层统一给出）。
+            return self.call_lib_fn(&func, args, span);
         }
         if let Some(&ci) = self.func_map.get(&func) {
             return self.call_chunk(ci, args, span);
@@ -4208,11 +4306,11 @@ pub fn compile_module(program: &Program) -> Result<Module, ZError> {
 /// 用寄存器式字节码 VM 执行程序（解析与类型检查由调用方完成）。
 pub fn run(program: &Program, file: &str, src: &str, debug: bool) -> Result<(), ZError> {
     let m = compile_module(program)?;
-    run_module(&m, file, src, debug)
+    run_module(m, file, src, debug)
 }
 
-/// 用寄存器式字节码 VM 执行已装配模块。
-pub fn run_module(m: &Module, file: &str, src: &str, debug: bool) -> Result<(), ZError> {
+/// 用寄存器式字节码 VM 执行已装配模块（消费模块：表直接进 Arc 共享，零拷贝）。
+pub fn run_module(m: Module, file: &str, src: &str, debug: bool) -> Result<(), ZError> {
     let main_idx = *m.func_map.get("main").ok_or_else(|| {
         ZError::plain(
             codes::UNDEFINED,
@@ -4221,13 +4319,13 @@ pub fn run_module(m: &Module, file: &str, src: &str, debug: bool) -> Result<(), 
         )
     })?;
     let mut vm = Vm::new(
-        m.chunks.clone(),
-        m.func_map.clone(),
-        m.struct_defs.clone(),
-        m.enum_defs.clone(),
-        m.type_defs.clone(),
-        m.aliases.clone(),
-        m.async_fns.clone(),
+        Arc::new(m.chunks),
+        Arc::new(m.func_map),
+        Arc::new(m.struct_defs),
+        Arc::new(m.enum_defs),
+        Arc::new(m.type_defs),
+        Arc::new(m.aliases),
+        Arc::new(m.async_fns),
         file,
         src,
         debug,
@@ -4251,7 +4349,7 @@ pub fn run_ir(text: &str, fallback_file: &str, debug: bool) -> Result<(), ZError
     } else {
         ir.file
     };
-    run_module(&ir.module, &file, &ir.src, debug)
+    run_module(ir.module, &file, &ir.src, debug)
 }
 
 /// 编译为字节码并序列化为完整文本 IR（自包含：模块头 + 各 chunk + 原始文件名与源码）。
@@ -4602,6 +4700,7 @@ fn instr_text(ins: &Instr, consts: &[Const]) -> String {
                 None => String::new(),
             }
         ),
+        Instr::LoadLib(d) => format!("LOADLIB {}", crate::ffi::load_desc_text(d)),
         Instr::DebugPrint(r) => format!("DEBUGPRINT r{}", r),
         Instr::Breakpoint => "BREAKPOINT".to_string(),
         Instr::Nop => "NOP".to_string(),
@@ -4728,25 +4827,20 @@ pub fn assemble(text: &str) -> Result<IrProgram, ZError> {
                             if item.is_empty() {
                                 continue;
                             }
-                            let (fname, ro) = match item.strip_suffix('!') {
-                                Some(f) => {
-                                    let (f, t) = f
-                                        .split_once(':')
-                                        .ok_or_else(|| syn(format!("type 字段缺少类型 `{}`", f)))?;
-                                    (f.to_string(), true)
+                            // 发射侧格式（vm.rs disasm）：可变 = `字段:类型`，只读 = `字段!类型`
+                            let (fname, ty_text, ro) = match item.find('!') {
+                                Some(_) => {
+                                    let (f, t) = item
+                                        .split_once('!')
+                                        .ok_or_else(|| syn(format!("type 字段缺少类型 `{}`", item)))?;
+                                    (f.to_string(), t, true)
                                 }
                                 None => {
                                     let (f, t) = item
                                         .split_once(':')
                                         .ok_or_else(|| syn(format!("type 字段缺少类型 `{}`", item)))?;
-                                    (f.to_string(), false)
+                                    (f.to_string(), t, false)
                                 }
-                            };
-                            // ro 分支的 t 未取：重新拆一次拿类型文本
-                            let ty_text = if ro {
-                                item.strip_suffix('!').unwrap().split_once(':').unwrap().1
-                            } else {
-                                item.split_once(':').unwrap().1
                             };
                             fields.push((fname, parse_ty_name(ty_text.trim()), ro));
                         }
@@ -5282,17 +5376,19 @@ fn parse_instr(body: &str, consts: &[Const]) -> Result<Instr, String> {
             Instr::WithEnter(reg(toks[0])?, reg(toks[1])?)
         }
         "TYPENEW" => {
-            need(4)?;
+            // 发射格式：`TYPENEW r{dst} {ty} [r{base}..+{n}]`（助记符后 3 个 token）
+            need(3)?;
             let (base, n) = parse_range(toks[2])?;
             Instr::TypeNew(reg(toks[0])?, toks[1].to_string(), base, n)
         }
         "CALLMETH" => {
-            need(5)?;
-            let name = toks[3]
+            // 发射格式：`CALLMETH r{dst} r{obj} .{方法名} [r{base}..+{n}]`（助记符后 4 个 token）
+            need(4)?;
+            let name = toks[2]
                 .strip_prefix('.')
-                .ok_or_else(|| format!("CALLMETH 方法名缺少 `.` 前缀: {}", toks[3]))?
+                .ok_or_else(|| format!("CALLMETH 方法名缺少 `.` 前缀: {}", toks[2]))?
                 .to_string();
-            let (base, n) = parse_range(toks[4])?;
+            let (base, n) = parse_range(toks[3])?;
             Instr::CallMethod(reg(toks[0])?, reg(toks[1])?, name, base, n)
         }
         "WITHEXIT" => {
@@ -5417,6 +5513,9 @@ fn parse_instr(body: &str, consts: &[Const]) -> Result<Instr, String> {
             };
             Instr::Raise(code, unescape_str(&msg)?, help)
         }
+        "LOADLIB" => Instr::LoadLib(
+            crate::ffi::parse_load_desc(rest).map_err(|e| format!("LOADLIB 描述非法: {}", e))?,
+        ),
         "DEBUGPRINT" => {
             need(1)?;
             Instr::DebugPrint(reg(toks[0])?)
@@ -5438,6 +5537,8 @@ fn parse_range(t: &str) -> Result<(usize, usize), String> {
     let (b, n) = inner
         .split_once("..+")
         .ok_or_else(|| format!("非法区间 `{}`", t))?;
+    // 兼容寄存器区间形态 `[r{base}..+{n}]`（TYPENEW/CALLMETH 发射格式）
+    let b = b.trim().trim_start_matches('r');
     Ok((
         b.trim().parse().map_err(|_| format!("区间起点非法 `{}`", t))?,
         n.trim().parse().map_err(|_| format!("区间长度非法 `{}`", t))?,

@@ -1,4 +1,4 @@
-Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.8.0）
+Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.9.0）
 
 项目代号：Hone
 设计者：时辰刺客
@@ -457,8 +457,7 @@ print(add5(10));       // 15
   · 默认表达式在调用时求值，可引用其前面的参数（如 fn f(a, b = a * 2)）
   · 参数个数检查：最少 = 必选参数个数，最多 = 总参数个数
   · lambda 参数同样支持默认值
-· 限制：默认参数目前**仅解释器支持**；VM（`--vm`）尚未实现——省略带默认值的参数
-  时报 `H011 missing argument \`b\` of \`f\``（而非取默认值）。
+· 默认参数双引擎一致：interp 与 VM 均在被调帧按默认表达式取值（缺必选参数仍报 H011）
 · 示例：
 
 fn greet(name, greeting = "Hello") {
@@ -1268,7 +1267,7 @@ examples/guipro_adv_demo.hn（进阶控件：滑块/表格/树/画布/托盘/菜
 · 支持类型：int → int64_t，int32 → int32_t，float → double，float32 → C float，bool → C bool，
   str → const char*，ptr → void*（int32/float32 是 FFI 专有类型名：Hone 侧值仍按 int/float 传，
   调用时按声明校验 32 位范围）
-· 返回类型额外支持 void；参数最多 8 个；变参（...）与受限回调（fn(int/int32/float/float32/bool/str/ptr 类参数...) -> int/int32/float/float32/bool/str/ptr/void 类返回，0-8 参）已支持（**仅解释器**实测通过；VM 不支持 load，报 H999）
+· 返回类型额外支持 void；参数最多 8 个；变参（...）与受限回调（fn(int/int32/float/float32/bool/str/ptr 类参数...) -> int/int32/float/float32/bool/str/ptr/void 类返回，0-8 参）已支持（双引擎实测通过）
 · 变参调用：固定参数按签名转换，其余实参按运行时类型转换（int/float/float32/bool/str/ptr，ctypes 式；float 固定参数的变参函数现已支持）
 · 回调：把 Hone 函数名或 lambda 传给回调形参即可（同步回调，仅限该次 FFI 调用窗口内有效，异步回调报错）
 · 签名块要求 as 别名（作为调用前缀），以 } 结尾无需分号
