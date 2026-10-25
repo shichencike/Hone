@@ -60,6 +60,9 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   3 次取最快、单次 >5s 只跑 1 次；VM 口径 `--vm`），结果写 `官网/perf-data.json` 自动提交回仓库
   （提交信息带 **[skip ci]** 且该文件不在触发路径内，双保险防递归）。`bench/lua/` 为九项 Lua 5.4
   等价实现——**改任一语言基准需三语言等价同步**（.hn / py / lua），fib26 与 loop 计数不得变。
+  发布流程同样跑基准：`release.yml` 的 bench job（构建 → bench_ci.py → 上传 perf-data 工件）
+  作为发布质量门，`publish` 依赖 `build + bench`；结果不提交回仓库（tag 事件为 detached
+  checkout，perf-data.json 的自动提交由 bench.yml 在 master push 时负责）。
 - 条件与逻辑语义（改 `vm.rs` 编译臂时注意，解释器为准）：`if`/`while`/`do-while`/`for`/三元/推导式 `if` 过滤六处条件站点**运行期严格 bool**（`Instr::CondCheck`），`&&`/`||` 短路求值且右侧操作数严格 bool（`Instr::IsBoolVal` 判「恰为该布尔值」，不是 truthy）。
 
 ## 项目特有约定

@@ -139,9 +139,46 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/
 
+  bench:
+    name: benchmark (hone vs python vs lua5.4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # 官方 cache：与 bench.yml 同路径（宿主 target，可复用增量）；独立 key 前缀避免
+      # 与 build job 的 rust-cache / bench.yml 的 cache 互相干扰
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-rel-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-rel-bench-
+      - name: build
+        run: cargo build --release --locked
+      # 对比语言：Python 用 runner 自带 3.x（版本实测写进结果），Lua 装 5.4
+      - name: install lua5.4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lua5.4
+      # 发布质量门：基准完整跑通才允许 publish。注意 bench_ci.py 只保证「二进制可跑」，
+      # 单个负载异常只显示 '-' 不失败——性能回退检测仍依赖 bench.yml 的对比数据。
+      - name: run benchmarks
+        run: HONE_BIN=target/release/hone python tests/bench_ci.py
+      # 结果仅上传为发布记录，不提交回仓库：tag 事件 checkout 为 detached HEAD 推不上去，
+      # 且 perf-data.json 的自动提交由 bench.yml 在 master push 时负责
+      - name: upload results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-data
+          path: 官网/perf-data.json
+
   publish:
     name: publish release + homebrew + scoop
-    needs: [build]
+    needs: [build, bench]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
