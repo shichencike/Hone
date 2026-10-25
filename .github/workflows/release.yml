@@ -71,7 +71,8 @@ jobs:
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/hone.exe" "dist/${{ matrix.artifact }}" 2>/dev/null || cp "target/${{ matrix.target }}/release/hone" "dist/${{ matrix.artifact }}"
       # Windows 二进制代码签名：从 Secrets 还原 .pfx → signtool 签名（SHA256 + RFC3161 时间戳）
-      # → signtool verify /pa 验证。Secrets 未配置（如 Fork 仓库）时打警告跳过，不使 CI 失败。
+      # → Get-AuthenticodeSignature 校验签名完整性（不用 signtool verify /pa：runner 根存储
+      # 可能不含签名证书的根 CA，链信任失败不代表签名损坏）。Secrets 未配置（如 Fork 仓库）时打警告跳过，不使 CI 失败。
       - name: sign windows exe (signtool)
         if: matrix.name == 'windows-x86_64'
         shell: pwsh
