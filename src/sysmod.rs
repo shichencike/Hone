@@ -203,7 +203,7 @@ mod platform {
         if w <= 0 || h <= 0 {
             return Err(win_err("GetSystemMetrics", span, file, src));
         }
-        Ok(Value::Str(format!("{}x{}", w, h)))
+        Ok(Value::mk_str(format!("{}x{}", w, h)))
     }
 
     /// 解析 "HKLM\Software\Hone\ValueName" → (根键, 路径, 值名)。
@@ -322,7 +322,7 @@ mod platform {
             .take_while(|&u| u != 0)
             .collect();
         match String::from_utf16(&u16s) {
-            Ok(s) => Ok(Value::Str(s)),
+            Ok(s) => Ok(Value::mk_str(s)),
             Err(_) => Err(zerr(
                 codes::SYSCALL,
                 format!("registry value `{}` is not valid UTF-16", value_name),

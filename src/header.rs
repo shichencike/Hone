@@ -8,16 +8,16 @@
 //     函数指针别名 → 视为回调）
 //   - 类型映射：int/long/short/size_t 等 → int；float/double → float；
 //     bool/_Bool → bool；char* / const char* → str；其余指针 → ptr；void → void
-//   - 不支持的原型（回调参数、变参 ...、数组参数、结构体按值、long double）
+//   - 变参（...）与受限回调参数（int (*)(...)）解析为可用签名（见 hone.md 4.1.1）；
+//     其余不支持的原型（数组参数、结构体按值、long double 等）
 //     以 FfiSig.unsupported = Some(原因) 标记，调用时直接报错而非 ABI 崩溃
 
 use std::collections::HashMap;
 
 use crate::ast::{FfiParam, FfiSig, FfiTy};
-use crate::lexer::Span;
 
 /// 解析 C 头文件源码，返回 FFI 签名列表（含 unsupported 标记的原型）。
-pub fn parse(src: &str, span: Span) -> Vec<FfiSig> {
+pub fn parse(src: &str) -> Vec<FfiSig> {
     let toks = tokenize(src);
     let defs = collect_typedefs(&toks);
     let mut sigs = Vec::new();
@@ -34,7 +34,7 @@ pub fn parse(src: &str, span: Span) -> Vec<FfiSig> {
                             continue;
                         }
                     }
-                    if let Some((sig, next)) = try_proto(&toks, i, &defs, span) {
+                    if let Some((sig, next)) = try_proto(&toks, i, &defs) {
                         sigs.push(sig);
                         i = next;
                         continue;
@@ -214,7 +214,7 @@ fn collect_typedefs(toks: &[Tok]) -> HashMap<String, TyDef> {
 
 /// 尝试在 toks[i]（函数名标识符）处解析一个函数原型。
 /// 成功返回 (签名, 下一个扫描位置)；失败返回 None。
-fn try_proto(toks: &[Tok], i: usize, defs: &HashMap<String, TyDef>, span: Span) -> Option<(FfiSig, usize)> {
+fn try_proto(toks: &[Tok], i: usize, defs: &HashMap<String, TyDef>) -> Option<(FfiSig, usize)> {
     let name = match &toks[i] {
         Tok::Ident(s) => s.clone(),
         _ => return None,
@@ -286,7 +286,7 @@ fn try_proto(toks: &[Tok], i: usize, defs: &HashMap<String, TyDef>, span: Span) 
         Ok(t) => t,
         Err(reason) => {
             return Some((
-                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some(reason), span },
+                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, variadic: false, unsupported: Some(reason) },
                 next,
             ))
         }
@@ -294,6 +294,7 @@ fn try_proto(toks: &[Tok], i: usize, defs: &HashMap<String, TyDef>, span: Span) 
 
     // 解析参数列表
     let mut params: Vec<FfiParam> = Vec::new();
+    let mut variadic = false;
     let param_toks = split_top(&toks[open + 1..close]);
     for (pi, pt) in param_toks.iter().enumerate() {
         // 无参：void / 空
@@ -307,22 +308,30 @@ fn try_proto(toks: &[Tok], i: usize, defs: &HashMap<String, TyDef>, span: Span) 
         if only.is_empty() {
             continue;
         }
-        // 不支持项
+        // 变参：`...` → variadic 标记（固定参数已解析，变参部分调用时按实参类型转换）
         if pt.iter().any(|t| t == &Tok::Punct("...".to_string())) {
-            return Some((
-                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some("variadic (`...`)"), span },
-                next,
-            ));
+            variadic = true;
+            continue;
         }
+        // 回调参数：`(参数表)` → 受限回调原型（0-4 个 int 类参数 + int 类返回）
         if pt.iter().any(|t| t == &Tok::Punct("(".to_string())) {
-            return Some((
-                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some("callback parameter"), span },
-                next,
-            ));
+            let cb = callback_from_toks(pt, defs);
+            let ty = match cb {
+                Ok(t) => t,
+                Err(reason) => {
+                    return Some((
+                        FfiSig { name, params: Vec::new(), ret: FfiTy::Int, variadic: false, unsupported: Some(reason) },
+                        next,
+                    ))
+                }
+            };
+            let pname = format!("cb{}", pi + 1);
+            params.push(FfiParam { name: pname, ty });
+            continue;
         }
         if pt.iter().any(|t| t == &Tok::Punct("[".to_string())) {
             return Some((
-                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some("array parameter"), span },
+                FfiSig { name, params: Vec::new(), ret: FfiTy::Int, variadic: false, unsupported: Some("array parameter") },
                 next,
             ));
         }
@@ -339,15 +348,92 @@ fn try_proto(toks: &[Tok], i: usize, defs: &HashMap<String, TyDef>, span: Span) 
             Ok(t) => t,
             Err(reason) => {
                 return Some((
-                    FfiSig { name, params: Vec::new(), ret: FfiTy::Int, unsupported: Some(reason), span },
+                    FfiSig { name, params: Vec::new(), ret: FfiTy::Int, variadic: false, unsupported: Some(reason) },
                     next,
                 ))
             }
         };
         let pname = pname.unwrap_or_else(|| format!("p{}", pi + 1));
-        params.push(FfiParam { name: pname, ty, span });
+        params.push(FfiParam { name: pname, ty });
     }
-    Some((FfiSig { name, params, ret, unsupported: None, span }, next))
+    Some((FfiSig { name, params, ret, variadic, unsupported: None }, next))
+}
+
+/// 从回调参数的 token 序列提取受限原型：`int (*)(int, void*)` 的参数表部分。
+/// 返回 FfiTy::Callback（0-8 个标量参数 + 标量返回；libffi closure 支持
+/// int/int32/float/float32/bool/str/ptr 全标量传递）。
+fn callback_from_toks(pt: &[Tok], defs: &HashMap<String, TyDef>) -> Result<FfiTy, &'static str> {
+    // 取最内层括号内容（回调原型 `int (*)(int, void*)` 只有一层参数括号）
+    let open = pt.iter().position(|t| t == &Tok::Punct("(".to_string()))
+        .ok_or("callback parameter")?;
+    let mut depth = 0usize;
+    let mut close = pt.len();
+    for (i, t) in pt.iter().enumerate().skip(open) {
+        match t {
+            Tok::Punct(s) if s == "(" => depth += 1,
+            Tok::Punct(s) if s == ")" => {
+                depth -= 1;
+                if depth == 0 {
+                    close = i;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    if close == pt.len() {
+        return Err("callback parameter");
+    }
+    // 返回类型：第一个 `(` 之前的 token（`int (*)(...)` 的 `int`、`void (*)(...)` 的 `void`）
+    let mut ret = FfiTy::Int;
+    let ret_strs: Vec<String> = pt[..open]
+        .iter()
+        .filter_map(|t| match t {
+            Tok::Ident(s) | Tok::Punct(s) => Some(s.clone()),
+            Tok::Str(_) => None,
+        })
+        .filter(|s| s != "*")
+        .collect();
+    if !ret_strs.is_empty() {
+        let (rty, _) = extract_param_type(&ret_strs, defs);
+        match rty? {
+            t @ (FfiTy::Int | FfiTy::Int32 | FfiTy::Float | FfiTy::Float32 | FfiTy::Bool | FfiTy::Str | FfiTy::Ptr | FfiTy::Void) => ret = t,
+            FfiTy::Callback { .. } => {
+                return Err("callback return types support scalars only (`int`/`int32`/`float`/`float32`/`bool`/`str`/`ptr`/`void`)")
+            }
+        }
+    }
+    let mut cb_params: Vec<FfiTy> = Vec::new();
+    for ct in split_top(&pt[open + 1..close]) {
+        let strs: Vec<String> = ct
+            .iter()
+            .filter_map(|t| match t {
+                Tok::Ident(s) | Tok::Punct(s) => Some(s.clone()),
+                Tok::Str(_) => None,
+            })
+            .collect();
+        if strs.is_empty() {
+            continue;
+        }
+        if strs.len() == 1 && strs[0] == "void" {
+            continue;
+        }
+        if strs.iter().any(|s| s == "...") {
+            return Err("variadic callback (`...`) parameters are not supported");
+        }
+        let (pty, _) = extract_param_type(&strs, defs);
+        match pty? {
+            t @ (FfiTy::Int | FfiTy::Int32 | FfiTy::Float | FfiTy::Float32 | FfiTy::Bool | FfiTy::Str | FfiTy::Ptr) => cb_params.push(t),
+            // void 参数位已在上面 `strs == ["void"]` 分支 continue，不会到这里；兜底拒绝
+            FfiTy::Void | FfiTy::Callback { .. } => {
+                return Err("callback parameters support scalars only (`int`/`int32`/`float`/`float32`/`bool`/`str`/`ptr`)")
+            }
+        }
+    }
+    if cb_params.len() > 8 {
+        return Err("callbacks with more than 8 parameters are not supported");
+    }
+    Ok(FfiTy::Callback { params: cb_params, ret: Box::new(ret) })
 }
 
 /// 找到从 open 开始的匹配右括号索引。
@@ -481,11 +567,15 @@ fn map_type(toks: &[String], defs: &HashMap<String, TyDef>, depth: usize) -> Res
     if real.iter().any(|t| t.as_str() == "void") {
         return Ok(FfiTy::Void);
     }
-    if real.iter().any(|t| t.as_str() == "float" || t.as_str() == "double") {
+    if real.iter().any(|t| t.as_str() == "double") {
         if real.iter().any(|t| t.as_str() == "long") {
             return Err("`long double` is not supported");
         }
         return Ok(FfiTy::Float);
+    }
+    // C float（32 位）：映射为 FfiTy::Float32（Hone 侧签名块写作 float32）
+    if real.iter().any(|t| t.as_str() == "float") {
+        return Ok(FfiTy::Float32);
     }
     if real.iter().any(|t| t.as_str() == "bool" || t.as_str() == "_Bool") {
         return Ok(FfiTy::Bool);
@@ -495,6 +585,13 @@ fn map_type(toks: &[String], defs: &HashMap<String, TyDef>, depth: usize) -> Res
     }
     if real.iter().any(|t| t.as_str() == "enum") {
         return Ok(FfiTy::Int);
+    }
+    // int32_t / uint32_t（含常见 typedef 形态 int32）→ Int32
+    if real.iter().any(|t| {
+        let t = t.as_str();
+        t == "int32_t" || t == "uint32_t" || t == "int32" || t == "uint32"
+    }) {
+        return Ok(FfiTy::Int32);
     }
     // int/long/short/size_t/char 等整数族（含未知 typedef，如 time_t）
     Ok(FfiTy::Int)

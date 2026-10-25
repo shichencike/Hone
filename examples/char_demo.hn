@@ -1,0 +1,68 @@
+// char_demo.hn - char 字符类型演示
+// 支持：单引号字面量 'a' / '\n' / '中'，类型注解，码点比较，
+//       ord / char / char_at / char_upper / char_lower / char_is_* 内置函数
+
+// 1. 字面量与显示
+print('a');              // a
+print('\n');             // (换行)
+print('\\');             // \
+print('\'');             // '
+print('中');             // 中
+print(type_of('a'));     // char
+
+// 2. 显式类型注解（类型锁定，无隐式转换）
+char c = 'x';
+print(c);                // x
+print(char_upper(c));    // X
+
+// 3. 码点比较
+print('a' == 'a');       // true
+print('a' == 'b');       // false
+print('a' < 'b');        // true
+print('z' > 'a');        // true
+print('中' > 'a');       // true（码点 20013 > 97）
+
+// 4. ord / char 双向转换
+print(ord('a'));         // 97
+print(ord('中'));        // 20013
+print(char(97));         // a
+print(char(20013));      // 中
+
+// 5. char_at 按码点取字符（与 str 索引按字符一致）
+print(char_at("hello", 1));   // e
+print(char_at("中文", 1));    // 文
+s = "abc";
+print(char_at(s, 2));         // c
+
+// 6. 大小写与分类
+print(char_upper('a'));       // A
+print(char_lower('Z'));       // z
+print(char_upper('中'));      // 中（无大小写，原样返回）
+print(char_is_digit('5'));    // true
+print(char_is_digit('x'));    // false
+print(char_is_alpha('x'));    // true
+print(char_is_alpha('中'));   // true
+print(char_is_alpha('5'));    // false
+print(char_is_space(' '));    // true
+print(char_is_space('\t'));   // true
+print(char_is_space('a'));    // false
+
+// 7. 与 str 互转
+print(to_str('a'));           // a
+print(to_str('a') + "bc");    // abc
+print(char_at(to_str('中'), 0)); // 中
+
+// 8. 函数参数类型注解
+fn is_vowel(c : char) -> bool {
+    return c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u';
+}
+print(is_vowel('a'));         // true
+print(is_vowel('b'));         // false
+
+// 9. 变量参与比较
+first = char_at("hone", 0);
+print(first == 'h');          // true
+print(first < 'i');           // true
+
+// 10. f-string 插值显示
+print(f"ord('a') = {ord('a')}, upper = {char_upper('a')}");

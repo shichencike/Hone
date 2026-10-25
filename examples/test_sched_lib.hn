@@ -1,0 +1,49 @@
+// test_sched_lib.hn - hone_lib/sched.hn 定时任务库调用测试
+// 运行: hone examples/test_sched_lib.hn
+import "sched" from "./hone_lib/sched.hn";
+
+print("== sched ==");
+
+// 工具函数
+now = sch_now();
+print("now: " + to_str(now));
+print("hhmm_to_sec(09:30): " + to_str(sch_hhmm_to_sec("09:30")));   // 34200
+print("hhmm_to_sec(00:05): " + to_str(sch_hhmm_to_sec("00:05")));   // 300
+
+// cron 字段匹配（单字段）
+print("field */5 v=10: " + to_str(sch_cron_field_match("*/5", 10)));   // true
+print("field */5 v=11: " + to_str(sch_cron_field_match("*/5", 11)));   // false
+print("field 1-5 v=3: " + to_str(sch_cron_field_match("1-5", 3)));     // true
+print("field 1-5 v=7: " + to_str(sch_cron_field_match("1-5", 7)));     // false
+print("field 0,15,30,45 v=30: " + to_str(sch_cron_field_match("0,15,30,45", 30))); // true
+print("field 0,15,30,45 v=20: " + to_str(sch_cron_field_match("0,15,30,45", 20))); // false
+print("field * v=42: " + to_str(sch_cron_field_match("*", 42)));       // true
+print("field 1-10/3 v=7: " + to_str(sch_cron_field_match("1-10/3", 7))); // true (1,4,7,10)
+
+// cron 整式匹配：每分钟一次的表达式必然匹配当前时刻
+print("cron * * * * * now: " + to_str(sch_cron_match("* * * * *", now)));   // true
+print("cron 0 0 1 1 * now: " + to_str(sch_cron_match("0 0 1 1 *", now)));   // false（1月1日0点几乎必不匹配）
+
+// 任务构造
+t1 = sch_every(1, "echo tick-a", "a");
+t2 = sch_at("23:59", "echo tick-b", "b");
+t3 = sch_cron("*/1 * * * *", "echo tick-c", "c");
+print("every next-now: " + to_str(t1.next - now));   // 1
+print("at type: " + t2.type);                        // at
+print("cron type: " + t3.type);                      // cron
+
+// sch_tick 手动推进：构造一个 next 已到期的任务，应执行一次
+late = {"tag": "late", "type": "interval", "cmd": "echo tick-late", "interval": 1,
+        "hhmm": "", "expr": "", "next": now - 1, "count": 0};
+r = sch_tick([late], now);
+print("tick ran: " + to_str(r.ran));                 // 1（到期任务已执行）
+
+// sch_run 阻塞运行 3 秒：interval 1s 任务应执行约 2-3 次
+print("-- sch_run 3s --");
+tasks = [sch_every(1, "echo run-tick", "run1")];
+tasks = sch_run(tasks, 3);
+cnt = 0;
+for tk in tasks { cnt = tk.count; }
+print("run1 executed: " + to_str(cnt));              // >= 2
+
+print("done");

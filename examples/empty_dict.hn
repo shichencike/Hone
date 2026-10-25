@@ -1,0 +1,59 @@
+// empty_dict.hn - 空字典字面量 `{}` 的验证（对照空列表 `[]`）
+// 运行: hone examples/empty_dict.hn
+// 背景: 此前 Hone 不支持 `{}` 空字典字面量（报 H005），只能写 json_parse("{}")。
+//       本示例验证修复后「创建 / 判型 / 计数 / 传参 / 返回 / 嵌套」全部可用。
+// 说明: Hone 字典读取无 `d["k"]` 索引语法（见 hone_lib/gui.hn:11 注释），
+//       按键取值用遍历；本示例同时演示该范式。
+
+// 按键取字典值（Hone 无 d["k"] 索引语法，官方范式为遍历）
+fn dict_get(d, key : str) {
+    for k, v in d {
+        if (k == key) { return v; }
+    }
+    return "";
+}
+
+// 1) 空字典基础
+d = {};
+print(type_of(d));          // dict
+print(len(d));              // 0
+print(is_dict(d));          // true
+
+// 2) 与空列表对称（[] 一直可用，现在是真正对称了）
+l = [];
+print(type_of(l));          // list
+print(len(l));              // 0
+
+// 3) 空字典作函数参数与返回值
+fn empty() {
+    return {};
+}
+fn count_of(m) -> int {
+    return len(m);
+}
+print(count_of(empty()));   // 0
+print(count_of({}));        // 0
+
+// 4) 嵌套：空字典/空列表作非空字典的值
+outer = {"inner": {}, "list": [], "num": 7};
+print(len(outer));                             // 3
+print(count_of(dict_get(outer, "inner")));     // 0
+print(count_of(dict_get(outer, "list")));      // 0
+print(dict_get(outer, "num"));                 // 7
+// 5) 推导式产出空字典（空集合输入）
+src = [];
+empties = {v: 0 for v in src};
+print(type_of(empties));    // dict
+print(len(empties));        // 0
+
+// 6) 与 json_parse("{}") 等价（旧写法的替代方案，现仍可用）
+j = json_parse("{}");
+print(type_of(j));          // dict
+print(len(j));              // 0
+
+// 7) 非空字典字面量不受影响
+m = {"x": 1, "y": 2};
+print(len(m));              // 2
+print(dict_get(m, "y"));    // 2
+
+print("OK");

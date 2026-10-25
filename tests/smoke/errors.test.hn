@@ -1,0 +1,77 @@
+// 冒烟测试：错误处理 / 断言语义（try / catch / throw / rethrow）
+
+// 1. 除零错误（H009）可捕获 + 回退值
+r = 0;
+try {
+    r = 10 / 0;
+    assert(false, "除零不应成功");
+} catch e {
+    assert(e.code == "H009", "divzero code");
+    r = -1;
+}
+assert_eq(r, -1);
+
+// 2. 类型转换错误（H006）
+n = 0;
+try {
+    n = to_int("not-a-number");
+    assert(false, "非法转换不应成功");
+} catch e {
+    assert(e.code == "H006", "strtoint code");
+    n = 0;
+}
+assert_eq(n, 0);
+
+// 3. throw 字符串 → 用户错误（H600）
+caught = "";
+try {
+    throw "custom failure";
+    assert(false, "throw 后不应继续");
+} catch e {
+    assert(e.code == "H600", "throw code");
+    caught = e.message;
+}
+assert_eq(caught, "custom failure");
+
+// 4. 重抛：内层 catch 后 throw e，外层兜底
+outer_code = "";
+try {
+    try {
+        throw "inner error";
+    } catch e {
+        throw e;
+    }
+} catch e {
+    outer_code = e.code;
+}
+assert_eq(outer_code, "H600");
+
+// 5. 错误对象字段可用
+err_obj = null;
+try {
+    throw "boom";
+} catch e {
+    err_obj = e;
+}
+assert(err_obj != null, "error 值可保存");
+assert(err_obj.message == "boom", "message 字段");
+assert(len(err_obj.code) > 0, "code 字段");
+
+// 6. try 块正常执行：catch 不触发
+flag = 0;
+try {
+    flag = 1;
+} catch e {
+    assert(false, "不应进入 catch");
+}
+assert_eq(flag, 1);
+
+// 7. assert 自身失败会抛 H700（在 try 内可捕获）
+assert_caught = 0;
+try {
+    assert(false, "故意失败");
+} catch e {
+    assert(e.code == "H700", "assert code");
+    assert_caught = 1;
+}
+assert_eq(assert_caught, 1);

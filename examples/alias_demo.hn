@@ -1,0 +1,27 @@
+// alias_demo.hn - 函数别名（Alias）演示
+// 期望输出：
+//   你好 Hone
+//   3
+//   (1, 100) 范围内的随机整数
+//   5
+
+// 1) 用户函数别名：alias 原名 as 新名;
+fn greet(name) {
+    return "你好 " + name;
+}
+alias greet as hi;
+print(hi("Hone"));
+
+// 2) 别名链：别名再起别名
+fn add(a : int, b : int) -> int { return a + b; }
+alias add as plus;
+alias plus as sum2;
+print(sum2(1, 2));
+
+// 3) 点号路径原名（内置/模块/类成员函数）
+alias random.int as rint;
+print(rint(1, 100));
+
+// 4) 内置函数别名
+alias abs as mabs;
+print(mabs(-5));

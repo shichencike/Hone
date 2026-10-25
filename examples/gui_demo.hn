@@ -33,7 +33,7 @@ widgets = [
     gui_select("sel_color", "颜色", ["红", "绿", "蓝"]),
     gui_label("lbl_out", "(事件输出)"),
     gui_label("lbl_cnt", ""),
-];
+]
 
 db.set("count", "0");
 gui_run("Hone GUI 演示", widgets);

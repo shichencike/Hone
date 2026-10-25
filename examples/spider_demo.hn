@@ -1,0 +1,86 @@
+// spider_demo.hn - spider 爬虫库端到端演示（本地服务器，无需外网）
+// 运行: hone examples/spider_demo.hn
+// 覆盖: 静态直取、CSS 选择器、链接提取、curl 状态码、渲染服务降级、Cookie/UA/限速
+import "spider" from "./hone_lib/spider.hn";
+
+// ---------- 1. 本地 HTTP 服务器（go 线程处理请求，返回测试页面）----------
+// 注意：go 线程不共享变量，PAGE 必须在 serve2 内部定义
+
+// 固定端口启动独立服务器（保证主线程可访问）
+fn serve2() {
+    PAGE = "<html><head><title>测试页</title></head><body>"
+         + "<div class=\"item\" id=\"a\">苹果</div>"
+         + "<div class=\"item\">香蕉<span>甜</span></div>"
+         + "<ul><li><a href=\"/x\">内链</a></li>"
+         + "<li><a href=\"https://example.com/y\">外链</a></li></ul>"
+         + "<script>var n = 1 + 1;</script></body></html>";
+    port = server.listen(8899);
+    while (true) {
+        reqs = server.poll();
+        if (reqs != "[]") {
+            list = json_parse(reqs);
+            for req in list {
+                rid = 0;
+                for k in keys(req) {
+                    if (k == "id") { rid = to_int(to_str(req.id)); }
+                }
+                server.respond(rid, PAGE);
+            }
+        }
+        time.sleep(0.02);
+    }
+}
+go serve2();
+time.sleep(0.3);
+
+URL = "http://127.0.0.1:8899/";
+
+// ---------- 2. 静态直取 + CSS 选择器 ----------
+r = sp_get(URL, {});
+print("== 静态请求 ==");
+print("ok: " + to_str(r.ok));
+html = to_str(r.text);
+print("长度: " + to_str(len(html)));
+print("标题: " + sp_text(html, "title"));          // 测试页
+print("div#a: " + sp_text(html, "div#a"));         // 苹果
+ts = sp_text_all(html, "div.item");
+print("div.item 数量: " + to_str(len(ts)));        // 2
+for t in ts { print("  item: " + t); }             // 苹果 / 香蕉 甜
+print("第一个 a[href]: " + sp_attr(html, "a[href]", "href")); // /x
+
+// ---------- 3. 链接提取（相对→绝对）----------
+ls = sp_links(html, URL);
+print("== 链接提取 ==");
+print("链接数: " + to_str(len(ls)));               // 2
+for u in ls { print("  " + u); }
+
+// ---------- 4. curl 路径（拿真实状态码）----------
+rc = sp_get(URL, {"engine": "curl"});
+print("== curl 请求 ==");
+print("ok: " + to_str(rc.ok));
+print("status: " + to_str(rc.status));             // 200
+print("正文含苹果: " + to_str(str_contains(to_str(rc.text), "苹果")));
+
+// ---------- 5. 渲染服务（本机未装 puppeteer 时验证降级报错）----------
+rr = sp_get(URL, {"render": true});
+print("== 渲染请求 ==");
+print("ok: " + to_str(rr.ok));                     // 未装渲染后端时为 false
+if (to_str(rr.ok) == "true") {
+    print("渲染 status: " + to_str(rr.status));
+    print("渲染正文含苹果: " + to_str(str_contains(to_str(rr.text), "苹果")));
+} else {
+    print("渲染降级(预期): " + to_str(rr.err));
+}
+
+// ---------- 6. Cookie / UA / 限速 ----------
+jar = sp_cookie_set("", "sid", "abc");
+jar = sp_cookie_set(jar, "theme", "dark");
+print("== Cookie/UA ==");
+print("jar: " + jar);                              // sid=abc; theme=dark
+print("sid: " + sp_cookie_get(jar, "sid"));        // abc
+uas = sp_ua_list();
+u0 = sp_ua_rotate(uas, 0);
+u1 = sp_ua_rotate(uas, u0.next);
+print("UA 轮换不同: " + to_str(u0.ua != u1.ua));   // true
+sp_throttle(0.05);                                 // 限速示例（50ms）
+print("done");

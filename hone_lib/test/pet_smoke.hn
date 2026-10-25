@@ -1,0 +1,37 @@
+// hone_lib/test/pet_smoke.hn - pet 原生窗口冒烟测试（Windows）
+// 运行: hone hone_lib/test/pet_smoke.hn
+// 验证：创建原生窗口 → 推帧 → 移动 → 气泡 → 事件轮询 → 退出，全程无 PowerShell。
+import "pet" from "./hone_lib/pet.hn";
+
+cfg = {"tick": 0.02, "scale": 1, "wander": 0, "bubble": 0, "sleep_after": 0,
+       "hourly": false, "res_report": 0, "mute": true};
+st = pet_init(cfg);
+// 主脚本严格类型检查：dict 字段先用 to_int/to_str 显式转换后再用
+win = to_int(pet_dict_get(st, "win"));
+sx = to_int(pet_dict_get(st, "x"));
+sy = to_int(pet_dict_get(st, "y"));
+print("init ok: win=" + to_str(win) + " pos=" + to_str(sx) + "," + to_str(sy));
+
+// 推进若干 tick：状态机 + 推帧 + 气泡
+i = 0;
+while (i < 10) {
+    st = pet_tick(st);
+    time.sleep(0.02);
+    i = i + 1;
+}
+print("tick ok: frame=" + to_str(pet_dict_get(st, "frame")) +
+      " mode=" + to_str(pet_dict_get(st, "mode")));
+
+// 直接驱动原生窗口原语：移动 + 读取位置 + 推帧翻转
+guipro.pet_move(win, 40, 40);
+pos = guipro.pet_pos(win);
+print("move ok: " + pos);
+rgb = pet_frame_rgb(pet_palette(1), "idle0");
+guipro.pet_frame(win, 48, 48, rgb, 1);
+guipro.pet_text(win, "冒烟测试");
+time.sleep(0.2);
+evs = guipro.poll();
+print("poll ok: " + evs);
+
+pet_cleanup(st);
+print("pet smoke ok");

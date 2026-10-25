@@ -1,0 +1,10 @@
+// alias 关键字测试：给函数起别名调用
+fn greet(name) {
+    return "你好 " + name;
+}
+
+alias greet as hi;
+alias greet as hello;
+
+print(hi("Hone"));
+print(hello("World"));

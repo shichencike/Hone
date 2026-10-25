@@ -1,0 +1,430 @@
+// hone_lib/img.hn - 图片标准库（用 Hone 编写）
+// 用法: import "img" from "./hone_lib/img.hn";
+// 函数统一 img_ 前缀，import as 可整体改前缀
+//
+// 图像表示: dict {"w": 宽, "h": 高, "rows": [[[r,g,b],...],...]}
+//   rows[y][x] = [r, g, b]，各通道 0-255；原点在左上角，x 向右、y 向下
+//
+// 格式说明: Hone 的 str 无法承载二进制（见 hone.md 3.19），故本库支持
+//   PPM P3（ASCII 光栅，GIMP/ImageMagick 等可查看）与 SVG（文本矢量，
+//   浏览器直接打开）两种文本格式，用 write_file 保存即可；不支持 PNG/BMP。
+//
+// 性能说明: 列表是值类型，索引赋值整体拷贝，单像素修改为 O(w*h)；
+//   绘图/滤镜类函数适合 ≤128×128 的小图，大图请用 C 扩展（FFI）。
+//
+// 语法说明: 无 pow/sqrt/round/hex/range 内置，画圆用距离平方比较、
+//   四舍五入用 +0.5 截断、十六进制用查表、0..n-1 用 img_range 构造。
+
+// ============ 通用辅助 ============
+
+// 限制 v 到 [lo, hi]
+fn img_clamp(v : int, lo : int, hi : int) -> int {
+	if (v < lo) { return lo; }
+	if (v > hi) { return hi; }
+	return v;
+}
+
+// 0..n-1 的整数列表（无 range 内置，推导式种子；n<=0 返回空列表）
+fn img_range(n : int) {
+	r = [];
+	i = 0;
+	while (i < n) {
+		r = append(r, i);
+		i = i + 1;
+	}
+	return r;
+}
+
+// 通道值 → 两位十六进制（SVG 颜色用，无 hex 内置，查表实现）
+fn img_hex(v : int) -> str {
+	digits = "0123456789abcdef";
+	n = img_clamp(v, 0, 255);
+	return digits[n / 16] + digits[n % 16];
+}
+
+// 取像素 [r,g,b]；越界返回 [0,0,0]（黑色）
+fn img_get(img, x : int, y : int) {
+	if (x < 0 || x >= img.w || y < 0 || y >= img.h) {
+		return [0, 0, 0];
+	}
+	return img.rows[y][x];
+}
+
+// 设像素，返回新图像；越界忽略（原样返回）
+fn img_set(img, x : int, y : int, r : int, g : int, b : int) {
+	if (x < 0 || x >= img.w || y < 0 || y >= img.h) {
+		return img;
+	}
+	rows = img.rows;
+	rows[y][x] = [r, g, b];
+	return {"w": img.w, "h": img.h, "rows": rows};
+}
+
+// 图像尺寸 → [宽, 高]
+fn img_size(img) {
+	return [img.w, img.h];
+}
+
+// ============ 创建 ============
+
+// 新建 w×h 画布，全部填充颜色 (r,g,b)
+fn img_new(w : int, h : int, r : int, g : int, b : int) {
+	xs = img_range(w);
+	ys = img_range(h);
+	rows = [[[r, g, b] for x in xs] for y in ys];
+	return {"w": w, "h": h, "rows": rows};
+}
+
+// 全图填充颜色，返回新图像
+fn img_fill(img, r : int, g : int, b : int) {
+	return img_new(img.w, img.h, r, g, b);
+}
+
+// ============ 绘图 ============
+
+// 实心矩形（含边界，自动裁剪到画布内）
+fn img_rect(img, x0 : int, y0 : int, x1 : int, y1 : int, r : int, g : int, b : int) {
+	out = img;
+	y = y0;
+	while (y <= y1) {
+		x = x0;
+		while (x <= x1) {
+			out = img_set(out, x, y, r, g, b);
+			x = x + 1;
+		}
+		y = y + 1;
+	}
+	return out;
+}
+
+// 直线（Bresenham 算法，任意斜率）
+fn img_line(img, x0 : int, y0 : int, x1 : int, y1 : int, r : int, g : int, b : int) {
+	out = img;
+	dx = abs(x1 - x0);
+	dy = abs(y1 - y0);
+	sx = 1;
+	sy = 1;
+	if (x0 > x1) { sx = -1; }
+	if (y0 > y1) { sy = -1; }
+	err = dx - dy;
+	out = img_set(out, x0, y0, r, g, b);
+	while (x0 != x1 || y0 != y1) {
+		e2 = 2 * err;
+		if (e2 > -dy) {
+			err = err - dy;
+			x0 = x0 + sx;
+		}
+		if (e2 < dx) {
+			err = err + dx;
+			y0 = y0 + sy;
+		}
+		out = img_set(out, x0, y0, r, g, b);
+	}
+	return out;
+}
+
+// 实心圆（距离平方比较，无 sqrt 内置；rad<=0 画单个点）
+fn img_circle(img, cx : int, cy : int, rad : int, r : int, g : int, b : int) {
+	out = img;
+	if (rad <= 0) {
+		return img_set(out, cx, cy, r, g, b);
+	}
+	r2 = rad * rad;
+	y = cy - rad;
+	while (y <= cy + rad) {
+		x = cx - rad;
+		while (x <= cx + rad) {
+			d = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+			if (d <= r2) {
+				out = img_set(out, x, y, r, g, b);
+			}
+			x = x + 1;
+		}
+		y = y + 1;
+	}
+	return out;
+}
+
+// 水平渐变（左 c1 → 右 c2；c1/c2 为 [r,g,b] 列表）
+fn img_gradient_h(img, c1, c2) {
+	out = img;
+	w = img.w;
+	h = img.h;
+	if (w <= 1) { return out; }
+	y = 0;
+	while (y < h) {
+		x = 0;
+		while (x < w) {
+			t = to_float(x) / to_float(w - 1);
+			nr = to_int(to_float(c1[0]) + (to_float(c2[0]) - to_float(c1[0])) * t + 0.5);
+			ng = to_int(to_float(c1[1]) + (to_float(c2[1]) - to_float(c1[1])) * t + 0.5);
+			nb = to_int(to_float(c1[2]) + (to_float(c2[2]) - to_float(c1[2])) * t + 0.5);
+			out = img_set(out, x, y, nr, ng, nb);
+			x = x + 1;
+		}
+		y = y + 1;
+	}
+	return out;
+}
+
+// 垂直渐变（上 c1 → 下 c2）
+fn img_gradient_v(img, c1, c2) {
+	out = img;
+	w = img.w;
+	h = img.h;
+	if (h <= 1) { return out; }
+	y = 0;
+	while (y < h) {
+		t = to_float(y) / to_float(h - 1);
+		x = 0;
+		while (x < w) {
+			nr = to_int(to_float(c1[0]) + (to_float(c2[0]) - to_float(c1[0])) * t + 0.5);
+			ng = to_int(to_float(c1[1]) + (to_float(c2[1]) - to_float(c1[1])) * t + 0.5);
+			nb = to_int(to_float(c1[2]) + (to_float(c2[2]) - to_float(c1[2])) * t + 0.5);
+			out = img_set(out, x, y, nr, ng, nb);
+			x = x + 1;
+		}
+		y = y + 1;
+	}
+	return out;
+}
+
+// 棋盘格（cell 为格边长像素；c1/c2 交替）
+fn img_checker(img, cell : int, c1, c2) {
+	out = img;
+	c = cell;
+	if (c < 1) { c = 1; }
+	y = 0;
+	while (y < img.h) {
+		x = 0;
+		while (x < img.w) {
+			if ((x / c + y / c) % 2 == 0) {
+				out = img_set(out, x, y, c1[0], c1[1], c1[2]);
+			} else {
+				out = img_set(out, x, y, c2[0], c2[1], c2[2]);
+			}
+			x = x + 1;
+		}
+		y = y + 1;
+	}
+	return out;
+}
+
+// 随机噪点（每像素随机色）
+fn img_noise(img) {
+	out = img;
+	y = 0;
+	while (y < img.h) {
+		x = 0;
+		while (x < img.w) {
+			out = img_set(out, x, y, random.int(0, 255), random.int(0, 255), random.int(0, 255));
+			x = x + 1;
+		}
+		y = y + 1;
+	}
+	return out;
+}
+
+// ============ 滤镜 ============
+
+// 单像素 → 灰度 [v,v,v]（亮度加权 0.299R+0.587G+0.114B）
+fn img_px_gray(px) {
+	v = to_int(to_float(px[0]) * 0.299 + to_float(px[1]) * 0.587 + to_float(px[2]) * 0.114 + 0.5);
+	return [v, v, v];
+}
+
+// 单像素 → 反色 [255-r, 255-g, 255-b]
+fn img_px_invert(px) {
+	return [255 - px[0], 255 - px[1], 255 - px[2]];
+}
+
+// 单像素 → 亮度调整（delta 可为负，自动裁剪 0-255）
+fn img_px_bright(px, delta : int) {
+	return [img_clamp(px[0] + delta, 0, 255), img_clamp(px[1] + delta, 0, 255), img_clamp(px[2] + delta, 0, 255)];
+}
+
+// 单像素 → 对比度调整（factor 为 float，如 1.5 增强、0.5 减弱）
+fn img_px_contrast(px, factor : float) {
+	r = to_int((to_float(px[0]) - 128.0) * factor + 128.0 + 0.5);
+	g = to_int((to_float(px[1]) - 128.0) * factor + 128.0 + 0.5);
+	b = to_int((to_float(px[2]) - 128.0) * factor + 128.0 + 0.5);
+	return [img_clamp(r, 0, 255), img_clamp(g, 0, 255), img_clamp(b, 0, 255)];
+}
+
+// 单像素 → 二值化（亮度均值 < t → 黑，否则白）
+fn img_px_thresh(px, t : int) {
+	m = (px[0] + px[1] + px[2]) / 3;
+	if (m < t) { return [0, 0, 0]; }
+	return [255, 255, 255];
+}
+
+// 灰度滤镜（返回新图像）
+fn img_grayscale(img) {
+	rows = [[img_px_gray(img.rows[y][x]) for x in img_range(img.w)] for y in img_range(img.h)];
+	return {"w": img.w, "h": img.h, "rows": rows};
+}
+
+// 反色滤镜
+fn img_invert(img) {
+	rows = [[img_px_invert(img.rows[y][x]) for x in img_range(img.w)] for y in img_range(img.h)];
+	return {"w": img.w, "h": img.h, "rows": rows};
+}
+
+// 亮度滤镜：delta 为正变亮、为负变暗（范围 ±255）
+fn img_brightness(img, delta : int) {
+	rows = [[img_px_bright(img.rows[y][x], delta) for x in img_range(img.w)] for y in img_range(img.h)];
+	return {"w": img.w, "h": img.h, "rows": rows};
+}
+
+// 对比度滤镜：factor>1 增强、<1 减弱、1 不变
+fn img_contrast(img, factor : float) {
+	rows = [[img_px_contrast(img.rows[y][x], factor) for x in img_range(img.w)] for y in img_range(img.h)];
+	return {"w": img.w, "h": img.h, "rows": rows};
+}
+
+// 二值化滤镜：亮度 < t 置黑，否则置白（t: 0-255）
+fn img_threshold(img, t : int) {
+	rows = [[img_px_thresh(img.rows[y][x], t) for x in img_range(img.w)] for y in img_range(img.h)];
+	return {"w": img.w, "h": img.h, "rows": rows};
+}
+
+// ============ 变换 ============
+
+// 水平镜像（左右翻转）
+fn img_flip_h(img) {
+	w = img.w;
+	h = img.h;
+	rows = [[img.rows[y][w - 1 - x] for x in img_range(w)] for y in img_range(h)];
+	return {"w": w, "h": h, "rows": rows};
+}
+
+// 垂直镜像（上下翻转）
+fn img_flip_v(img) {
+	w = img.w;
+	h = img.h;
+	rows = [[img.rows[h - 1 - y][x] for x in img_range(w)] for y in img_range(h)];
+	return {"w": w, "h": h, "rows": rows};
+}
+
+// 顺时针旋转 90°（新图宽=原高、高=原宽）
+fn img_rotate90(img) {
+	w = img.w;
+	h = img.h;
+	rows = [[img.rows[h - 1 - x][y] for x in img_range(h)] for y in img_range(w)];
+	return {"w": h, "h": w, "rows": rows};
+}
+
+// 裁剪：保留 (x0,y0) 到 (x1,y1) 区域（含边界，自动裁剪到画布内）
+fn img_crop(img, x0 : int, y0 : int, x1 : int, y1 : int) {
+	x0 = img_clamp(x0, 0, img.w - 1);
+	y0 = img_clamp(y0, 0, img.h - 1);
+	x1 = img_clamp(x1, x0, img.w - 1);
+	y1 = img_clamp(y1, y0, img.h - 1);
+	nw = x1 - x0 + 1;
+	nh = y1 - y0 + 1;
+	rows = [[img.rows[y0 + dy][x0 + dx] for dx in img_range(nw)] for dy in img_range(nh)];
+	return {"w": nw, "h": nh, "rows": rows};
+}
+
+// 缩放（最近邻；nw/nh 为目标宽高，可为任意正整数）
+fn img_scale(img, nw : int, nh : int) {
+	w = img.w;
+	h = img.h;
+	rows = [[img.rows[dy * h / nh][dx * w / nw] for dx in img_range(nw)] for dy in img_range(nh)];
+	return {"w": nw, "h": nh, "rows": rows};
+}
+
+// ============ PPM P3 输出 ============
+
+// 图像 → PPM P3 文本（P3 为 ASCII 光栅格式，可用 GIMP/ImageMagick 查看）
+fn img_to_ppm(img) -> str {
+	s = "P3\n" + to_str(img.w) + " " + to_str(img.h) + "\n255\n";
+	for row in img.rows {
+		for px in row {
+			s = s + to_str(px[0]) + " " + to_str(px[1]) + " " + to_str(px[2]) + "\n";
+		}
+	}
+	return s;
+}
+
+// 图像 → 保存为 PPM P3 文件
+fn img_save_ppm(img, path : str) {
+	write_file(path, img_to_ppm(img));
+}
+
+// ============ PPM P3 解析 ============
+
+// PPM P3 文本 → 图像（maxval 非 255 时按比例换算；忽略注释行）
+fn img_from_ppm(text : str) {
+	// 去掉 # 注释行后按空白拆分
+	lines = regex.split("\n", text);
+	nums = "";
+	for line in lines {
+		tl = str_trim(line);
+		if (tl == "" || str_contains(tl, "#")) { continue; }
+		nums = nums + tl + " ";
+	}
+	tokens = regex.split("\\s+", str_trim(nums));
+	// tokens: P3 w h maxval r g b r g b ...
+	w = to_int(tokens[1]);
+	h = to_int(tokens[2]);
+	maxv = to_int(tokens[3]);
+	rows = [];
+	k = 4;
+	y = 0;
+	while (y < h) {
+		row = [];
+		x = 0;
+		while (x < w) {
+			r = to_int(tokens[k]);
+			g = to_int(tokens[k + 1]);
+			b = to_int(tokens[k + 2]);
+			if (maxv != 255) {
+				r = to_int(to_float(r) * 255.0 / to_float(maxv) + 0.5);
+				g = to_int(to_float(g) * 255.0 / to_float(maxv) + 0.5);
+				b = to_int(to_float(b) * 255.0 / to_float(maxv) + 0.5);
+			}
+			row = append(row, [r, g, b]);
+			k = k + 3;
+			x = x + 1;
+		}
+		rows = append(rows, row);
+		y = y + 1;
+	}
+	return {"w": w, "h": h, "rows": rows};
+}
+
+// 读取 PPM P3 文件 → 图像
+fn img_load_ppm(path : str) {
+	return img_from_ppm(read_file(path));
+}
+
+// ============ SVG 输出 ============
+
+// 图像 → SVG 文本（每像素一个 <rect>；scale 为像素放大倍数，1 = 原尺寸）
+fn img_to_svg(img, scale : int) -> str {
+	sc = scale;
+	if (sc < 1) { sc = 1; }
+	s = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" + to_str(img.w * sc) +
+	    "\" height=\"" + to_str(img.h * sc) + "\" viewBox=\"0 0 " + to_str(img.w * sc) +
+	    " " + to_str(img.h * sc) + "\">\n";
+	y = 0;
+	while (y < img.h) {
+		x = 0;
+		while (x < img.w) {
+			px = img.rows[y][x];
+			s = s + "<rect x=\"" + to_str(x * sc) + "\" y=\"" + to_str(y * sc) +
+			    "\" width=\"" + to_str(sc) + "\" height=\"" + to_str(sc) +
+			    "\" fill=\"#" + img_hex(px[0]) + img_hex(px[1]) + img_hex(px[2]) + "\"/>\n";
+			x = x + 1;
+		}
+		y = y + 1;
+	}
+	s = s + "</svg>\n";
+	return s;
+}
+
+// 图像 → 保存为 SVG 文件（scale 为像素放大倍数）
+fn img_save_svg(img, path : str, scale : int) {
+	write_file(path, img_to_svg(img, scale));
+}

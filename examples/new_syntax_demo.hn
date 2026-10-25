@@ -1,0 +1,172 @@
+// new_syntax_demo.hn - 新语法验证：多返回值 / 解构赋值 / 推导式 / 可选链 ?.
+// 说明：Hone 函数参数类型在首次调用时锁定，故 check 统一接收 str（调用处用 to_str 转换）。
+failed = 0;
+
+fn check(name, actual, expected) -> int {
+    if (actual != expected) {
+        print("FAIL " + name + ": got " + actual + ", want " + expected);
+        return 1;
+    }
+    print("ok   " + name);
+    return 0;
+}
+
+// ---------- 1. 多返回值 ----------
+fn divmod(a, b) { return a / b, a % b; }
+q, r = divmod(10, 3);
+failed = failed + check("multi-return divmod q", to_str(q), to_str(3));
+failed = failed + check("multi-return divmod r", to_str(r), to_str(1));
+
+fn minmax(a, b) {
+    if (a < b) { return a, b; }
+    return b, a;
+}
+lo, hi = minmax(7, 2);
+failed = failed + check("multi-return minmax lo", to_str(lo), to_str(2));
+failed = failed + check("multi-return minmax hi", to_str(hi), to_str(7));
+
+fn triple() { return 1, 2, 3; }
+t1, t2, t3 = triple();
+failed = failed + check("multi-return triple", to_str([t1, t2, t3]), to_str([1, 2, 3]));
+
+// 多返回值打包为列表：x = f() 直接拿到列表
+packed = divmod(8, 3);
+failed = failed + check("multi-return packed as list", to_str(packed), to_str([2, 2]));
+
+// ---------- 2. 解构赋值 ----------
+a, b = [1, 2];
+failed = failed + check("list destructure a", to_str(a), to_str(1));
+failed = failed + check("list destructure b", to_str(b), to_str(2));
+
+x, y, z = [5, 6, 7];
+failed = failed + check("list destructure xyz", to_str([x, y, z]), to_str([5, 6, 7]));
+
+// 多余元素忽略
+first, second = [9, 8, 7, 6];
+failed = failed + check("list destructure extra ok", to_str(first), to_str(9));
+failed = failed + check("list destructure second", to_str(second), to_str(8));
+
+// 交换
+p = 1; v = 2;
+p, v = [v, p];
+failed = failed + check("list destructure swap p", to_str(p), to_str(2));
+failed = failed + check("list destructure swap v", to_str(v), to_str(1));
+
+user = {"name": "hone", "age": 7, "city": "sh"};
+{name, age} = user;
+failed = failed + check("dict destructure name", name, "hone");
+failed = failed + check("dict destructure age", to_str(age), to_str(7));
+
+// 改名形式 {key: var}
+{name: n, city: c} = user;
+failed = failed + check("dict destructure rename n", n, "hone");
+failed = failed + check("dict destructure rename c", c, "sh");
+
+// 与多返回值配合
+a1, a2 = divmod(17, 5);
+failed = failed + check("multi-return + destructure", to_str(a1), to_str(3));
+failed = failed + check("multi-return + destructure a2", to_str(a2), to_str(2));
+
+// 错误：元素不足 → 可捕获
+try {
+    u1, u2 = [1];
+    failed = failed + check("should not reach", "0", "1");
+} catch e {
+    print("ok   destructure too-few error: " + e.code);
+}
+
+// 错误：字典解构缺键
+try {
+    {missing} = user;
+    failed = failed + check("should not reach", "0", "1");
+} catch e {
+    print("ok   dict destructure missing-key error: " + e.code);
+}
+
+// ---------- 3. 列表/字典推导式 ----------
+nums = [1, 2, 3, 4, 5];
+squares = [x + 1 for x in nums];
+failed = failed + check("list comp squares", to_str(squares), to_str([2, 3, 4, 5, 6]));
+
+evens = [x for x in nums if x % 2 == 0];
+failed = failed + check("list comp filter evens", to_str(evens), to_str([2, 4]));
+
+dbl_gt = [x * 2 for x in nums if x > 3];
+failed = failed + check("list comp expr+filter", to_str(dbl_gt), to_str([8, 10]));
+
+// 推导式从字典迭代（k, v 双变量）
+grades = {"alice": 90, "bob": 85, "carol": 95};
+passed = [k for k, v in grades if v >= 90];
+failed = failed + check("list comp over dict", to_str(passed), to_str(["alice", "carol"]));
+
+// 空列表与空推导结果
+empty = [x for x in []];
+failed = failed + check("list comp empty", to_str(empty), to_str([]));
+
+// 字典推导式（键必须为 str，用 to_str 转换）
+rev = {to_str(v): k for k, v in grades};
+failed = failed + check("dict comp from dict", to_str(rev), to_str({"90": "alice", "85": "bob", "95": "carol"}));
+
+labels = {to_str(i): i for i in [1, 2, 3]};
+failed = failed + check("dict comp from list", to_str(labels), to_str({"1": 1, "2": 2, "3": 3}));
+
+filtered_dict = {k: v for k, v in grades if v >= 90};
+failed = failed + check("dict comp filter", to_str(filtered_dict), to_str({"alice": 90, "carol": 95}));
+
+// ---------- 4. 可选链 ?. ----------
+// null 值来自 void 函数调用（Hone 无 null 字面量）
+fn get_null() {}
+nothing = get_null();
+failed = failed + check("optional chain null short-circuit", to_str(nothing?.x), "null");
+failed = failed + check("optional chain null chain", to_str(nothing?.a?.b), "null");
+
+failed = failed + check("optional chain dict field", user?.name, "hone");
+
+// 可选链 + 空值合并
+val = nothing?.deep ?? "fallback";
+failed = failed + check("optional chain + coalesce", val, "fallback");
+
+// 函数调用结果可选链
+fn make() { return {"name": "hone", "age": 7}; }
+failed = failed + check("optional chain on call", to_str(make()?.age), to_str(7));
+fn none() {}
+failed = failed + check("optional chain on null call", to_str(none()?.age), "null");
+
+// 链式：a?.b?.c
+nested = {"a": {"b": {"c": 42}}};
+failed = failed + check("optional chain nested", to_str(nested?.a?.b?.c), to_str(42));
+failed = failed + check("optional chain nested null", to_str(nothing?.a?.b?.c), "null");
+failed = failed + check("optional chain mixed ?. + .", to_str(nested?.a.b.c), to_str(42));
+// 混合链中 `?.` 只短路其后一个字段：null 后继续普通字段访问仍报错（与 JS 一致）
+try {
+    _dummy = nothing?.a.b.c;
+    failed = failed + check("should not reach", "0", "1");
+} catch e {
+    print("ok   optional chain mixed null errors: " + e.code);
+}
+
+// 非 null 对象访问不存在的键仍报错（与普通字段一致）
+try {
+    _dummy = user?.not_exist;
+    failed = failed + check("should not reach", "0", "1");
+} catch e {
+    print("ok   optional chain missing key error: " + e.code);
+}
+
+// 多返回值 + 推导式 + 可选链组合
+fn stats(ns) {
+    sum = 0;
+    for x in ns { sum = sum + x; }
+    return sum, len(ns);
+}
+total, count = stats([10, 20, 30]);
+failed = failed + check("combined multi-return total", to_str(total), to_str(60));
+failed = failed + check("combined multi-return count", to_str(count), to_str(3));
+failed = failed + check("combined comp", to_str([x * 2 for x in [1, 2, 3] if x != 2]), to_str([2, 6]));
+meta = get_null();
+failed = failed + check("combined optional", to_str(meta?.n ?? 0), to_str(0));
+
+if (failed > 0) {
+    throw "new syntax tests failed: " + to_str(failed) + " case(s)";
+}
+print("ALL NEW SYNTAX TESTS PASSED");

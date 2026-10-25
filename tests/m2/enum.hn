@@ -1,0 +1,80 @@
+// G2.2 enum 承载：构造 / match / 显示 / 相等语义 / 容器与传参。
+// 错误路径的逐字符对齐由 tests/regress_err.py 的 enum_* 用例承担（for-in / len / 解构）。
+
+// ── 1. 简单变体：构造 + 显示 ──
+enum Color { Red, Green, Blue };
+c = Color.Red;
+print("c:" + to_str(c));
+print("blue:" + to_str(Color.Blue));
+
+// ── 2. 带载荷变体 ──
+enum Shape { Circle(float), Rect(float, float) };
+s = Shape.Circle(1.5);
+print("s:" + to_str(s));
+r = Shape.Rect(2.0, 3.0);
+print("r:" + to_str(r));
+
+// ── 3. match：无载荷 / 载荷绑定 / 通配 / 作为函数参数 ──
+desc = match c {
+    Color.Red => "red",
+    Color.Green => "green",
+    _ => "other",
+};
+print("desc:" + desc);
+area = match s {
+    Shape.Circle(rr) => 2.0 * rr,
+    Shape.Rect(w, h) => 2.0 * (w + h),
+    _ => 0,
+};
+print("area:" + to_str(area));
+fn kind(sh) {
+    return match sh {
+        Shape.Circle(_) => "c",
+        Shape.Rect(_, _) => "r",
+        _ => "?",
+    };
+}
+print("kind(r):" + kind(r));
+
+// ── 4. 相等：同名同值 / 同名异值 / 跨枚举同名变体 / 载荷递归 ──
+print("c == c2:" + to_str(c == Color.Red));
+print("c == Green:" + to_str(c == Color.Green));
+enum Dir { Red };
+print("c == Dir.Red(跨枚举同名变体):" + to_str(c == Dir.Red));
+print("s == s2:" + to_str(s == Shape.Circle(1.5)));
+print("s == s3:" + to_str(s == Shape.Circle(2.5)));
+print("r == r2:" + to_str(r == Shape.Rect(2.0, 3.0)));
+
+// ── 5. 类型判定 ──
+// （enum 作 if 条件曾在 interp / VM 间分叉：interp 拒 H001、VM 当 truthy 放行——G2.3 已修，
+//  该路径现由 regress_err.py 的 cond_if_enum 等用例与 tests/tools/probe_align.py 冻结。）
+print("type_of(c):" + to_str(type_of(c)));
+print("type_of(s):" + to_str(type_of(s)));
+
+// ── 6. enum 进容器：list 显示 / 索引 / 相等；dict 值 ──
+cs = [Color.Red, Color.Green];
+print("cs:" + to_str(cs));
+print("cs[1]:" + to_str(cs[1]));
+print("cs == cs2:" + to_str(cs == [Color.Red, Color.Green]));
+wm = {"a": Shape.Circle(1.0), "b": Shape.Rect(1.0, 2.0)};
+print("wm:" + to_str(wm));
+
+// ── 7. 别名 / 函数传参（RC 引用） ──
+a1 = Shape.Circle(1.5);
+a2 = a1;
+print("a2:" + to_str(a2));
+print("别名相等:" + to_str(a1 == a2));
+fn rad(sh) {
+    return match sh {
+        Shape.Circle(x) => x,
+        _ => 0,
+    };
+}
+print("rad(a1):" + to_str(rad(a1)));
+
+// ── 8. 多类型载荷（str/int）显示与相等 ──
+enum Ev { Click(str, int) };
+e = Ev.Click("ok", 42);
+print("e:" + to_str(e));
+print("e == e2:" + to_str(e == Ev.Click("ok", 42)));
+print("e == e3:" + to_str(e == Ev.Click("no", 42)));

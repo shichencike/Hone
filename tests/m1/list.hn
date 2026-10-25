@@ -1,0 +1,81 @@
+// G1.2 list 承载：字面量 / 索引读写 / 别名值语义 / append / len / == / 嵌套 / 解构 / 遍历。
+// 三引擎（interp / VM / nat）应逐字节一致。
+
+// ── 1. 字面量与显示 ──
+a = [1, 2, 3];
+print(a);
+print(len(a));
+
+// ── 2. 索引读取（含端点）──
+print(a[0]);
+print(a[1]);
+print(a[2]);
+
+// ── 3. 别名值语义：写 a 不影响 b ──
+b = a;
+a[0] = 100;
+print("a:" + to_str(a));
+print("b 不变:" + to_str(b));
+
+// ── 4. 索引赋值（同一变量反复写）──
+a[1] = 20;
+a[2] = 30;
+print("a:" + to_str(a));
+
+// ── 5. 相等性：结构比较 ──
+c = [1, 2, 3];
+print("a == c:" + to_str(a == c));
+print("b == c:" + to_str(b == c));
+print("a != c:" + to_str(a != c));
+print("a == b:" + to_str(a == b));
+
+// ── 6. append：返回新容器，原变量不变 ──
+d = append(a, 4);
+print("d:" + to_str(d));
+print("len(d):" + to_str(len(d)));
+print("a 不变:" + to_str(a));
+
+// ── 7. 嵌套列表与深索引 ──
+e = [[1, 2], [3, 4]];
+print(e);
+print("e[1][0]:" + to_str(e[1][0]));
+e[1][0] = 30;
+print("改后 e:" + to_str(e));
+
+// ── 8. 空列表 ──
+f = [];
+print("空列表:" + to_str(f));
+print("len:" + to_str(len(f)));
+
+// ── 9. 列表推导式 ──
+g = [i * 2 for i in a];
+print("推导:" + to_str(g));
+h = [i for i in a if i > 20];
+print("带条件推导:" + to_str(h));
+
+// ── 10. 解构（列表形态）──
+i1, i2 = [7, 8];
+print("i1:" + to_str(i1));
+print("i2:" + to_str(i2));
+
+// ── 11. 遍历 ──
+total = 0;
+for v in a {
+    total = total + v;
+}
+print("求和:" + to_str(total));
+
+// ── 12. 类型判定 ──
+print("type_of:" + to_str(type_of(a)));
+print("is_list:" + to_str(is_list(a)));
+print("is_dict:" + to_str(is_dict(a)));
+
+// ── 13. 函数传参与返回 ──
+fn head(t) {
+    return t[0];
+}
+fn mk(x) {
+    return [x, x + 1];
+}
+print("head:" + to_str(head(a)));
+print("mk:" + to_str(mk(5)));

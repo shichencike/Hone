@@ -1,0 +1,221 @@
+// hone_lib/process.hn - 进程检测标准库（纯 Hone 编写）
+// 用法: import "process" from "./hone_lib/process.hn";
+// 函数统一 proc_ 前缀。
+//
+// 原理：Hone 无内置进程枚举 API，本库通过 sys.run 调用系统命令实现跨平台进程检测：
+//   Windows:  tasklist /FO CSV /NH（进程名、PID、内存占用）；结束进程用 taskkill /F /PID
+//   Linux/macOS: ps -eo pid=,comm=,args=,rss=（PID、命令名、完整命令行、内存 KB）；结束进程用 kill -9
+//
+// 进程对象（proc_list / proc_find / proc_by_pid 返回）:
+//   pid: int     进程 ID
+//   name: str    进程名（Windows 含 .exe，如 "chrome.exe"；Unix 为命令名）
+//   mem: int     内存占用（KB；Windows 取 tasklist Mem Usage，Unix 取 RSS）
+//   cmdline: str 完整命令行（Windows 为空字符串；Unix 有值）
+//
+// 典型用法:
+//   import "process" from "./hone_lib/process.hn";
+//   print(proc_os());                            // "windows" / "linux" / "macos"
+//   for p in proc_find("chrome") { print(p.pid, p.name, p.mem); }
+//   if (proc_exists("hone.exe")) { print("hone 正在运行"); }
+//   ok = proc_kill(pid);                         // 结束指定进程
+//   n = proc_kill_by_name("notepad.exe");        // 结束全部同名进程，返回成功数
+
+// ============ 平台识别 ============
+
+// 检测当前操作系统: "windows" / "linux" / "macos" / "unknown"
+fn proc_os() -> str {
+    os = sys.get_env("OS");
+    if (os == "Windows_NT") { return "windows"; }
+    try {
+        u = str_trim(sys.run("uname -s"));
+        if (u == "Linux") { return "linux"; }
+        if (u == "Darwin") { return "macos"; }
+    } catch e { }
+    return "unknown";
+}
+
+// ============ 解析工具 ============
+
+// 正则特殊字符转义（进程名作为模式匹配时防止误匹配）
+fn proc_esc(s : str) -> str {
+    s = str_replace(s, "\\", "\\\\");
+    s = str_replace(s, ".", "\\.");
+    s = str_replace(s, "*", "\\*");
+    s = str_replace(s, "+", "\\+");
+    s = str_replace(s, "?", "\\?");
+    s = str_replace(s, "(", "\\(");
+    s = str_replace(s, ")", "\\)");
+    s = str_replace(s, "[", "\\[");
+    s = str_replace(s, "]", "\\]");
+    s = str_replace(s, "{", "\\{");
+    s = str_replace(s, "}", "\\}");
+    s = str_replace(s, "^", "\\^");
+    s = str_replace(s, "$", "\\$");
+    s = str_replace(s, "|", "\\|");
+    return s;
+}
+
+// 进程名模糊匹配（不区分大小写，子串匹配）
+fn proc_match_name(name : str, pname : str) -> bool {
+    return regex.match("(?i)" + proc_esc(name), pname);
+}
+
+// 内存字符串转 KB："123,456 K" -> 123456
+fn proc_mem_kb(s : str) -> int {
+    s = str_replace(s, ",", "");
+    s = str_replace(s, " K", "");
+    s = str_trim(s);
+    if (s == "") { return 0; }
+    return to_int(s);
+}
+
+// 解析 tasklist /FO CSV /NH 输出 -> 进程列表
+// 每行 CSV 字段: "名称","PID","会话名","会话#","内存"
+fn proc_parse_tasklist(text : str) {
+    lines = regex.split("\n", text);
+    out = [];
+    for line in lines {
+        line = str_trim(line);
+        if (len(line) > 0) {
+            fields = regex.find("\"[^\"]*\"", line);
+            name = "";
+            pid = 0;
+            mem = 0;
+            i = 0;
+            for f in fields {
+                v = str_replace(f, "\"", "");
+                if (i == 0) { name = v; }
+                else if (i == 1) { pid = to_int(v); }
+                else if (i == 4) { mem = proc_mem_kb(v); }
+                i = i + 1;
+            }
+            if (name != "" && pid > 0) {
+                out = append(out, {"pid": pid, "name": name, "mem": mem, "cmdline": ""});
+            }
+        }
+    }
+    return out;
+}
+
+// 解析 ps -eo pid=,comm=,args=,rss= 输出 -> 进程列表
+// 每行格式: PID 命令名 命令行... RSS(KB)；命令行可能含空格，末列为 RSS
+fn proc_parse_ps(text : str) {
+    lines = regex.split("\n", text);
+    out = [];
+    for line in lines {
+        line = str_trim(line);
+        if (len(line) > 0) {
+            toks = regex.split("\\s+", line);
+            n = len(toks);
+            pid = 0;
+            name = "";
+            rss = "";
+            args = "";
+            i = 0;
+            for t in toks {
+                if (i == 0) { pid = to_int(t); }
+                else if (i == 1) { name = t; }
+                else if (i == n - 1) { rss = t; }
+                else {
+                    if (args != "") { args = args + " "; }
+                    args = args + t;
+                }
+                i = i + 1;
+            }
+            if (pid > 0) {
+                out = append(out, {"pid": pid, "name": name, "mem": proc_mem_kb(rss), "cmdline": args});
+            }
+        }
+    }
+    return out;
+}
+
+// ============ 进程枚举与查询 ============
+
+// 枚举全部进程 -> 进程对象列表
+fn proc_list() {
+    os = proc_os();
+    if (os == "windows") {
+        return proc_parse_tasklist(sys.run("tasklist /FO CSV /NH"));
+    }
+    if (os == "linux" || os == "macos") {
+        return proc_parse_ps(sys.run("ps -eo pid=,comm=,args=,rss="));
+    }
+    return [];
+}
+
+// 按名称模糊查找（不区分大小写）-> 进程对象列表
+fn proc_find(name : str) {
+    procs = proc_list();
+    out = [];
+    for p in procs {
+        if (proc_match_name(name, p.name)) { out = append(out, p); }
+    }
+    return out;
+}
+
+// 是否存在指定名称的进程
+fn proc_exists(name : str) -> bool {
+    return len(proc_find(name)) > 0;
+}
+
+// 按 PID 查询进程 -> 进程对象（未找到返回空 dict）
+fn proc_by_pid(pid : int) {
+    procs = proc_list();
+    for p in procs {
+        if (p.pid == pid) { return p; }
+    }
+    return {};
+}
+
+// 匹配进程数量
+fn proc_count(name : str) -> int {
+    return len(proc_find(name));
+}
+
+// 匹配进程的 PID 列表
+fn proc_pids(name : str) {
+    procs = proc_find(name);
+    out = [];
+    for p in procs { out = append(out, p.pid); }
+    return out;
+}
+
+// 全部进程名（去重）
+fn proc_names() {
+    procs = proc_list();
+    out = [];
+    for p in procs {
+        if (!contains(out, p.name)) { out = append(out, p.name); }
+    }
+    return out;
+}
+
+// ============ 进程管理 ============
+
+// 结束指定 PID 的进程，返回是否成功（判定依据：结束后进程不再存在）
+fn proc_kill(pid : int) -> bool {
+    os = proc_os();
+    try {
+        if (os == "windows") {
+            sys.run("taskkill /F /PID " + to_str(pid));
+        } else if (os == "linux" || os == "macos") {
+            sys.run("kill -9 " + to_str(pid));
+        }
+    } catch e {
+        return false;
+    }
+    time.sleep(0.3);
+    p = proc_by_pid(pid);
+    return !has_key(p, "pid");
+}
+
+// 结束全部同名进程，返回成功结束的数量
+fn proc_kill_by_name(name : str) -> int {
+    pids = proc_pids(name);
+    n = 0;
+    for pid in pids {
+        if (proc_kill(pid)) { n = n + 1; }
+    }
+    return n;
+}

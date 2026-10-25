@@ -1,0 +1,107 @@
+// G2.1 struct 承载：构造 / Field / `__struct__` 隐藏键全路径过滤 / 相等语义。
+// 字段写入 `p.f = x` 在 VM 为编译期 H999（natgen 同源拦截，见进度文档 G2.1 范围登记），
+// 故本用例只覆盖构造与读取路径。
+
+// ── 1. 构造 + 字段访问 ──
+struct Point { x: int, y: int };
+p = Point(3, 4);
+print("p.x:" + to_str(p.x));
+print("p.y:" + to_str(p.y));
+print("p:" + to_str(p));
+
+// ── 2. readonly 字段：构造与读取正常（写入路径 VM 编译期 H999，不在本用例） ──
+struct Rect { readonly w: int, h: int };
+r = Rect(10, 5);
+print("rect w:" + to_str(r.w));
+print("rect h:" + to_str(r.h));
+
+// ── 3. 隐藏键过滤：display / len / keys / values / has_key / for-in ──
+print("len(p):" + to_str(len(p)));
+pk = keys(p);
+pv = values(p);
+print("keys(p):" + to_str(pk));
+print("values(p):" + to_str(pv));
+print("has_key(x):" + to_str(has_key(p, "x")));
+// 隐藏键脚本层不可书写（lexer 无 \u{} 转义），has_key/keys/values 过滤由上组输出验证。
+sum = 0;
+cnt = 0;
+for k, v in p {
+    sum = sum + v;
+    cnt = cnt + 1;
+}
+print("for-in 字段和:" + to_str(sum));
+print("for-in 键数:" + to_str(cnt));
+
+// ── 4. 相等性：同名 struct 按可见字段；异名 struct 恒不等；普通 dict 不受影响 ──
+q = Point(3, 4);
+print("p == q(同名同值):" + to_str(p == q));
+q2 = Point(3, 5);
+print("p == q2(同名异值):" + to_str(p == q2));
+struct Vec2 { x: int, y: int };
+v2 = Vec2(3, 4);
+print("p == v2(异名同值):" + to_str(p == v2));
+print("p == 普通dict(同键值):" + to_str(p == {"x": 3, "y": 4}));
+e1 = {"x": 3, "y": 4};
+print("普通dict == 普通dict:" + to_str(e1 == {"x": 3, "y": 4}));
+
+// ── 5. 解构与推导式（隐藏键过滤） ──
+{x, y} = p;
+print("解构 x:" + to_str(x));
+print("解构 y:" + to_str(y));
+squared = {k2: v2_ * 10 for k2, v2_ in p};
+print("推导:" + to_str(squared));
+
+// ── 6. 类型判定与嵌套 ──
+print("is_dict(p):" + to_str(is_dict(p)));
+print("type_of(p):" + to_str(type_of(p)));
+struct Box { inner: Point, label: str };
+b = Box(Point(1, 2), "first");
+print("b.inner.x:" + to_str(b.inner.x));
+print("b.label:" + to_str(b.label));
+print("b:" + to_str(b));
+b2 = Box(Point(1, 2), "first");
+print("嵌套相等:" + to_str(b == b2));
+b3 = Box(Point(9, 9), "first");
+print("嵌套异值:" + to_str(b == b3));
+
+// ── 7. list of struct：迭代 / 索引 / 相等 ──
+pts = [Point(1, 1), Point(2, 2), Point(3, 3)];
+print("len(pts):" + to_str(len(pts)));
+p1 = pts[1];
+print("pts[1].x:" + to_str(p1.x));
+total = 0;
+for pt in pts {
+    total = total + pt.x + pt.y;
+}
+print("遍历求和:" + to_str(total));
+print("pts == 副本:" + to_str(pts == [Point(1, 1), Point(2, 2), Point(3, 3)]));
+
+// ── 8. 别名：Move 共享 / 函数传参（RC 引用） ──
+a1 = Point(7, 8);
+a2 = a1;
+print("别名 a2.x:" + to_str(a2.x));
+print("别名相等:" + to_str(a1 == a2));
+fn pick[Point](pn: Point) {
+    return pn.y;
+}
+print("函数取 y:" + to_str(pick(a1)));
+fn area[Rect](rt: Rect) {
+    // 字段访问结果为动态类型（Unknown），双 Unknown 的 `*` 无法推断（H003，
+    // 四引擎共享 checker 规则）：一臂显式转 int 即可（与 M1 dict 用例同范式）。
+    return rt.w * to_int(rt.h);
+}
+print("area:" + to_str(area(r)));
+
+// ── 9. struct 作 dict 值 / dict 推导混合 ──
+wm = {"home": Point(0, 0), "work": Point(10, 20)};
+print("wm home x:" + to_str(wm.home.x));
+print("wm:" + to_str(wm));
+wk = keys(wm);
+print("wm keys:" + to_str(wk));
+
+// ── 10. 空字段 struct 边界（单字段 / 构造顺序） ──
+struct Id { id: int };
+i1 = Id(42);
+print("单字段:" + to_str(i1.id));
+print("单字段相等:" + to_str(i1 == Id(42)));
+print("单字段异值:" + to_str(i1 == Id(43)));

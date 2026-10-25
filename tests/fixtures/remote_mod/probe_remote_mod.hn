@@ -1,0 +1,2 @@
+fn probe_remote_mod_add(a, b) { return a + b; }
+fn probe_remote_mod_mul(a, b) { return a * b; }

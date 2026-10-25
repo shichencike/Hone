@@ -1,0 +1,44 @@
+// smoke_spider.hn - spider.hn 冒烟测试（仅本地函数，不发网络请求）
+import "spider" from "./hone_lib/spider.hn";
+
+print("== UA 轮换 ==");
+uas = sp_ua_list();
+r = sp_ua_rotate(uas, 0);
+print(len(uas));          // 4
+print(str_contains(to_str(r.ua), "Mozilla")); // true
+r2 = sp_ua_rotate(uas, r.next);
+print(r2.next);           // 2
+
+print("== Cookie ==");
+jar = sp_cookie_set("", "sid", "abc");
+print(jar);               // sid=abc
+jar = sp_cookie_set(jar, "theme", "dark");
+print(jar);               // sid=abc; theme=dark
+jar = sp_cookie_set(jar, "sid", "xyz");
+print(jar);               // sid=xyz; theme=dark
+print(sp_cookie_get(jar, "sid"));   // xyz
+print(sp_cookie_get(jar, "nope"));  // (空)
+
+print("== CSS 选择器 ==");
+html = "<html><body><div class=\"item\" id=\"a\">苹果</div><div class=\"item\">香蕉<span>甜</span></div><a href=\"/x\">链接</a><a href=\"https://example.com/y\">外链</a></body></html>";
+print(sp_text(html, "div.item"));      // 苹果
+ts = sp_text_all(html, "div.item");
+print(len(ts));                        // 2
+for t in ts { print(t); }              // 苹果 / 香蕉 甜
+print(sp_text(html, "div#a"));         // 苹果
+print(sp_attr(html, "a[href]", "href")); // /x
+hs = sp_attr_all(html, "a", "href");
+print(len(hs));                        // 2
+ls = sp_links(html, "https://example.com/page/");
+print(len(ls));                        // 2
+print(sp_first(ls));                   // 第一个链接
+print(sp_abs_url("/x", "https://example.com/page/"));
+print(sp_abs_url("y", "https://example.com/page/"));
+print(sp_abs_url("https://example.com/y", "https://example.com/page/"));
+
+print("== 响应对象 ==");
+r = sp_get("http://127.0.0.1:1/", {}); // 必然失败，验证响应结构
+print(r.ok);               // false
+print(r.status);           // 0
+print(len(to_str(r.err)) > 0);     // true
+print(to_str(sp_body(r)) == "");   // true

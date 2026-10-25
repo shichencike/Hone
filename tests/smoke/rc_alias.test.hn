@@ -1,0 +1,107 @@
+// G1.5 别名用例集：RC+COW 三条路径（retain / cow / release）的值语义护栏。
+//
+// 语言语义（hone.md 值语义）：变量赋值 = 独立副本；写一个变量不污染其他别名。
+// nat 后端用 RC+COW 实现 O(1) 拷贝：读变量 = retain，写入点过 cow() 门独占。
+// 本文件覆盖：别名读不写、别名写隔离（cow 拷贝分支）、独占写（cow 原地分支）、
+// 多层别名链、容器套容器、函数传参按值、返回新容器不污染原变量、for 内改写。
+
+// ── 1. 基础别名：写 a 不影响 b ──
+a = [1, 2, 3];
+b = a;
+print(a);
+print(b);
+a[0] = 100;
+print("a 改后:" + to_str(a));
+print("b 应不变:" + to_str(b));
+
+// ── 2. 三层别名链：只改最外层，其余不变 ──
+p = [1, 2];
+q = p;
+r = q;
+r[1] = 99;
+print("p:" + to_str(p));
+print("q:" + to_str(q));
+print("r:" + to_str(r));
+
+// ── 3. 反复写同一变量：独占后应走原地写（结果仍正确）──
+s = [1, 2, 3];
+s[0] = 1;
+s[1] = 2;
+s[2] = 3;
+print("反复写:" + to_str(s));
+
+// ── 4. 交替写两个别名：每次写都应隔离 ──
+u = [0, 0];
+v = u;
+u[0] = 1;
+v[0] = 2;
+print("u:" + to_str(u));
+print("v:" + to_str(v));
+u[1] = 3;
+v[1] = 4;
+print("u:" + to_str(u));
+print("v:" + to_str(v));
+
+// ── 5. 嵌套容器：内层写不污染外层别名 ──
+n1 = [[1, 2], [3, 4]];
+n2 = n1;
+n1[0][0] = 50;
+print("n1:" + to_str(n1));
+print("n2:" + to_str(n2));
+
+// ── 6. 元素是容器时的别名：替换整个槽位 ──
+m1 = [[1], [2]];
+m2 = m1;
+m1[0] = [9];
+print("m1:" + to_str(m1));
+print("m2:" + to_str(m2));
+
+// ── 7. 函数传参按值：改形参不影响实参 ──
+fn mutate(l) {
+    l[0] = 777;
+    return l;
+}
+orig = [1, 2, 3];
+res = mutate(orig);
+print("orig 应不变:" + to_str(orig));
+print("res:" + to_str(res));
+
+// ── 8. append 返回新容器，原变量长度不变 ──
+base = [1, 2];
+grown = append(base, 3);
+print("base:" + to_str(base));
+print("grown:" + to_str(grown));
+print("len(base):" + to_str(len(base)));
+print("len(grown):" + to_str(len(grown)));
+
+// ── 9. 循环内改写当前元素（源与自身别名）──
+loop = [1, 2, 3];
+for i in loop {
+    loop[i - 1] = loop[i - 1] * 10;
+}
+print("loop:" + to_str(loop));
+
+// ── 10. 字典别名（只读路径：dict 无脚本层写入语法，索引赋值被 checker 限 int）──
+// 说明：`d["k"] = v` 与 `d[k] = v` 均被 checker 静态拒绝（H001/H005：索引须 int、
+// dict 键须字符串字面量），故 dict 的 COW 写路径在脚本层不可达，仅验证读别名
+// 与键表/取值的共享语义（dict 不可变，别名共享安全）。
+d = {"k": 1, "j": 2};
+e = d;
+print("e 读到:" + to_str(e));
+print("d 读到:" + to_str(d));
+ek = keys(e);
+print("e 键数:" + to_str(len(e)));
+print("e 的键:" + to_str(ek));
+dv = values(e);
+print("e 的值:" + to_str(dv));
+print("has_key(e,j):" + to_str(has_key(e, "j")));
+print("e == d:" + to_str(e == d));
+
+// ── 11. 字符串别名（str 不可变，retain 即拷贝）──
+s1 = "abc";
+s2 = s1;
+print("s1:" + to_str(s1));
+print("s2 == s1:" + to_str(s2 == s1));
+s1 = "xyz";
+print("s1:" + to_str(s1));
+print("s2 不变:" + to_str(s2));

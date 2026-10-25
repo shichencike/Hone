@@ -1,0 +1,60 @@
+// ---- type 实例类 ----
+type Shape {
+    name: str,
+    sides: int,
+    area: int,
+    fn desc(self) {
+        return "shape " + self.name;
+    }
+};
+type Square extends Shape {
+    side: int,
+    fn perimeter(self) {
+        return self.side * 4;
+    }
+};
+sq = new Square("square", 4, 9, 3);
+assert(sq.side == 3, "type 实例字段（子类）");
+assert(sq.area == 9, "type 实例字段（父类）");
+assert(sq.name == "square", "继承链字段顺序（父在前）");
+assert(sq.desc() == "shape square", "继承方法");
+assert(sq.perimeter() == 12, "子类方法");
+sq.side = 4;
+assert(sq.side == 4, "字段可写");
+generic_shape = new Shape("poly", 5, 0);
+assert(generic_shape.sides == 5, "基类构造");
+assert(generic_shape.desc() == "shape poly", "基类方法");
+
+// init 构造器（self 首参，可覆盖父类）
+type Box {
+    w: int,
+    h: int,
+    size: int,
+    fn init(self, w: int, h: int) {
+        self.w = w;
+        self.h = h;
+        self.size = w * h;
+    }
+};
+b = new Box(3, 4);
+assert(b.size == 12, "init 计算字段");
+assert(b.w == 3 && b.h == 4, "init 设置字段");
+
+// ---- with 上下文 ----
+type Guard {
+    active: int,
+    fn __enter__(self) {
+        self.active = 1;
+        return self;
+    }
+    fn __exit__(self) {
+        self.active = 0;
+    }
+};
+g = new Guard();
+with g as r {
+    assert(r.active == 1, "with 块内资源激活");
+}
+assert(g.active == 0, "with 块结束自动清理");
+
+print("TYPE OK");

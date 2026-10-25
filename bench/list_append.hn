@@ -1,0 +1,10 @@
+// 基准 6：列表构建与遍历（hone 列表为值类型，append 每次拷贝全列表 → O(n²)）
+nums = [];
+i = 0;
+while (i < 20000) {
+    nums = append(nums, i);
+    i = i + 1;
+}
+sum = 0;
+for x in nums { sum = sum + x; }
+print(sum);

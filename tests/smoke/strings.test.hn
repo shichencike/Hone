@@ -1,0 +1,43 @@
+// 冒烟测试：字符串 / 字符 / 格式化（双引擎通用）
+
+// 拼接与长度
+s = "abc" + "def";
+assert_eq(s, "abcdef");
+assert_eq(len("hello"), 5);
+assert_eq(len(""), 0);
+assert_eq("a" + "b" + "c", "abc");
+
+// 下标与子串
+assert_eq("hello"[1], "e");
+assert_eq("Hone"[0], "H");
+assert_eq("Hone"[3], "e");
+
+// 字符串内置
+assert(str_contains("hello", "ell"), "contains true");
+assert(!str_contains("hello", "xyz"), "contains false");
+assert_eq(str_replace("banana", "a", "o"), "bonono");
+assert_eq(str_trim("  pad  "), "pad");
+assert_eq(str_upper("ab"), "AB");
+assert_eq(str_lower("AB"), "ab");
+
+// char 体系
+c = char(65);
+assert_eq(to_str(c), "A");
+assert_eq(char_at("Hone", 1), "o");
+assert_eq(ord("A"), 65);
+assert(char_is_alpha("a"), "alpha");
+assert(char_is_digit("5"), "digit");
+assert(char_is_space(" "), "space");
+assert(!char_is_alpha("5"), "alpha neg");
+
+// 空串边界
+empty = "";
+assert(len(empty) == 0, "empty len");
+assert(str_contains(empty, ""), "empty contains self");
+
+// to_str 覆盖各类型
+assert_eq(to_str(42), "42");
+assert_eq(to_str(true), "true");
+assert_eq(to_str(false), "false");
+assert_eq(to_str(2.5), "2.5");
+assert_eq(to_str("x"), "x");

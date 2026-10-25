@@ -1,0 +1,8 @@
+// M0 管线目标：fib(15) = 610（纯整数：if / return / 递归调用 / 加减 / print）
+fn fib(n) {
+    if (n <= 1) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+print(fib(15));

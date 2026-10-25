@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hone LSP 配置指南</title>
+<meta name="description" content="Hone 语言服务器（hone lsp）配置指南：VS Code / Neovim / Helix / Emacs / Kakoune 等编辑器接入 LSP 插件，获得补全、诊断、跳转定义、重命名、文档大纲与语义高亮。">
+<meta name="theme-color" content="#0b0e14">
+<link rel="icon" href="favicon.png" type="image/png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <button class="menu-btn" onclick="toggleNav()" aria-label="菜单">&#9776;</button>
+  <span class="logo"><span class="mark">&#9889;</span> Hone</span>
+  <span class="spacer"></span>
+  <span class="right">
+    <span class="ver">v0.8.0</span>
+    <button class="theme-toggle" onclick="toggleTheme()" title="切换主题" aria-label="切换主题"><span class="ti-light">&#9728;</span><span class="ti-dark">&#127769;</span></button>
+  </span>
+</header>
+
+<aside class="sidebar" id="sidebar">
+  <nav>
+    <div class="nav-group">
+      <div class="nav-title">入门</div>
+      <a href="index.html">首页</a>
+      <a href="install.html">安装</a>
+      <a href="download.html">下载</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">学习</div>
+      <a href="tutorial.html">教程</a>
+      <a href="examples.html">示例</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">参考</div>
+      <a href="docs.html">文档</a>
+      <a href="language.html">语言参考</a>
+      <a href="stdlib.html">标准库</a>
+      <a href="perf.html">性能</a>
+      <a href="lsp.html" class="active">LSP / 编辑器</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-title">项目</div>
+      <a href="changelog.html">更新日志</a>
+      <a href="faq.html">FAQ</a>
+      <a href="about.html">关于</a>
+    </div>
+    <div class="page-toc">
+      <div class="nav-title">本页目录</div>
+      <ol>
+      <li><a href="#start">快速开始</a></li>
+      <li><a href="#features">能力一览</a></li>
+      <li><a href="#vscode">VS Code</a></li>
+      <li><a href="#neovim">Neovim</a></li>
+      <li><a href="#helix">Helix</a></li>
+      <li><a href="#emacs">Emacs</a></li>
+      <li><a href="#kakoune">Kakoune</a></li>
+      <li><a href="#trouble">故障排查</a></li>
+    </ol>
+    </div>
+  </nav>
+</aside>
+<div class="sidebar-backdrop" id="navBackdrop"></div>
+
+<main>
+
+  <h2><span class="hash">#</span>LSP 配置指南</h2>
+  <p>Hone 内置语言服务器（<code class="inline">hone lsp</code>，LSP over stdio，零依赖零配置），任何支持 LSP 的编辑器接入后即可获得<strong>补全、实时诊断、hover、跳转定义/类型定义、引用查找、重命名、格式化、折叠区域、签名帮助、文档大纲与语义高亮</strong>。本页给出主流编辑器的接入配置。</p>
+
+  <section id="start">
+    <h2><span class="hash">#</span>1. 快速开始</h2>
+    <p>确认 <code class="inline">hone</code> 已安装并在 PATH 中（见 <a href="install.html">安装教程</a>），然后验证 LSP 可启动：</p>
+<pre><code>hone --version    <span class="c">// 确认版本 ≥ v0.7.6（LSP 首发版本）</span>
+hone lsp          <span class="c">// 启动语言服务器：阻塞等待 stdio 上的 JSON-RPC 消息（Ctrl+C 退出）</span></code></pre>
+    <p>看到进程挂住不退出即为正常——语言服务器通过 <strong>stdin/stdout 交换 JSON-RPC 消息</strong>，由编辑器客户端负责启动和管理它的生命周期。你不需要手动运行它，配置好编辑器后打开 <code class="inline">.hn</code> 文件即自动拉起。</p>
+    <p>协议实现要点：增量文档同步（didChange range 替换）、诊断经 <code class="inline">textDocument/publishDiagnostics</code> 推送（语法 + 类型错误，含错误码 Hxxx，可用 <code class="inline">hone explain &lt;code&gt;</code> 查看解释）、未知方法按规范返回 -32601 Method not found。</p>
+  </section>
+
+  <section id="features">
+    <h2><span class="hash">#</span>2. 能力一览</h2>
+    <p>服务器在 <code class="inline">initialize</code> 响应中声明以下能力（服务名 <code class="inline">hone-lsp</code>）：</p>
+    <table>
+      <tr><th>能力</th><th>说明</th></tr>
+      <tr><td><code>textDocument/completion</code></td><td>补全，触发字符 <code>.</code>（点号内置族 <code class="inline">time.now</code> 等自动补全）</td></tr>
+      <tr><td><code>textDocument/hover</code></td><td>悬停信息</td></tr>
+      <tr><td><code>textDocument/definition</code> / <code>typeDefinition</code></td><td>跳转定义 / 类型定义</td></tr>
+      <tr><td><code>textDocument/references</code></td><td>查找全部引用</td></tr>
+      <tr><td><code>textDocument/rename</code></td><td>重命名符号</td></tr>
+      <tr><td><code>textDocument/formatting</code></td><td>整文档格式化（复用 <code class="inline">hone fmt</code> 引擎）</td></tr>
+      <tr><td><code>textDocument/foldingRange</code></td><td>折叠区域（多行块 / 文档注释）</td></tr>
+      <tr><td><code>textDocument/signatureHelp</code></td><td>签名帮助，触发字符 <code>(</code> <code>,</code></td></tr>
+      <tr><td><code>textDocument/documentSymbol</code></td><td>文档大纲（fn / struct / enum / type，AST 驱动）</td></tr>
+      <tr><td><code>workspace/symbol</code></td><td>工作区符号搜索</td></tr>
+      <tr><td><code>textDocument/semanticTokens/full</code></td><td>语义高亮（keyword / type / function / variable / string / number / comment / namespace / class / struct）</td></tr>
+      <tr><td><code>publishDiagnostics</code></td><td>诊断推送（打开 / 修改时自动推送语法与类型错误）</td></tr>
+    </table>
+  </section>
+
+  <section id="vscode">
+    <h2><span class="hash">#</span>3. VS Code</h2>
+    <p>Hone 目前<strong>未发布官方 VS Code 扩展</strong>，通过支持「自定义 stdio 语言服务器」的通用 LSP 客户端扩展接入（扩展市场搜索 "LSP client" / "custom language server"，任选一个维护活跃的，如 <em>LSP Client</em> 类扩展）。通用配置思路一致——注册语言 <code class="inline">hone</code>，服务器命令 <code class="inline">hone lsp</code>，按 <code class="inline">.hn</code> 文件激活：</p>
+<pre><code>{
+  <span class="s">"lsp-client.languages"</span>: {
+    <span class="s">"hone"</span>: {
+      <span class="s">"command"</span>: <span class="s">"hone"</span>,
+      <span class="s">"args"</span>: [<span class="s">"lsp"</span>],
+      <span class="s">"extensions"</span>: [<span class="s">".hn"</span>]
+    }
+  }
+}</code></pre>
+    <p>不同扩展的设置键名略有差异，但三个要素不变：<strong>命令 <code class="inline">hone</code>、参数 <code class="inline">lsp</code>、扩展名 <code class="inline">.hn</code></strong>。若扩展支持语义高亮请求（semanticTokens），打开 <code class="inline">.hn</code> 文件后即自动生效；不支持时编辑器以 TextMate 着色兜底。</p>
+    <p>配置完成后重启 VS Code，打开任意 <code class="inline">.hn</code> 文件，右下角状态栏出现语言服务器标识、保存时有诊断推送即接入成功。</p>
+  </section>
+
+  <section id="neovim">
+    <h2><span class="hash">#</span>4. Neovim（0.8+，内置 LSP）</h2>
+    <p>Neovim 无需插件，直接用内置 <code class="inline">vim.lsp</code> 注册客户端配置。在 <code class="inline">~/.config/nvim/lua/lsp/hone.lua</code>（或 <code class="inline">init.lua</code>）加入：</p>
+<pre><code><span class="c">-- ~/.config/nvim/lua/lsp/hone.lua（nvim 0.11+ 也可放 lsp/hone.lua 用 vim.lsp.enable）</span>
+<span class="k">local</span> config = {
+  name = <span class="s">"hone-lsp"</span>,
+  cmd = { <span class="s">"hone"</span>, <span class="s">"lsp"</span> },
+  filetypes = { <span class="s">"hone"</span> },
+  root_markers = { <span class="s">"hone.json"</span>, <span class="s">".git"</span> },
+  settings = {},
+}
+
+<span class="k">if</span> <span class="k">not</span> configs.hone_lsp <span class="k">then</span>
+  configs.hone_lsp = {
+    default_config = {
+      cmd = config.cmd,
+      filetypes = config.filetypes,
+      root_dir = <span class="k">function</span>(fname)
+        <span class="k">return</span> vim.fs.root(fname, { <span class="s">"hone.json"</span>, <span class="s">".git"</span> }) <span class="k">or</span> vim.fs.dirname(fname)
+      <span class="k">end</span>,
+    },
+  }
+<span class="k">end</span>
+
+vim.api.nvim_create_autocmd(<span class="s">"FileType"</span>, {
+  pattern = <span class="s">"hone"</span>,
+  callback = <span class="k">function</span>(args)
+    vim.lsp.start(config)
+  <span class="k">end</span>,
+})</code></pre>
+    <p>并把文件类型注册进 <code class="inline">init.lua</code>：</p>
+<pre><code>vim.filetype.add({ extension = { hn = <span class="s">"hone"</span> } })</code></pre>
+    <p>使用 <strong>nvim-lspconfig</strong> 的用户可直接在 <code class="inline">~/.config/nvim/lua/lspconfig/hone.lua</code> 写一个同名自定义 server（内容即上面的 <code class="inline">cmd / filetypes / root_dir</code>），效果相同。打开 <code class="inline">.hn</code> 文件后 <code class="inline">:LspInfo</code> 显示 <code class="inline">hone-lsp</code> 已附加即成功；语义高亮与文档大纲开箱即用。</p>
+  </section>
+
+  <section id="helix">
+    <h2><span class="hash">#</span>5. Helix</h2>
+    <p>在 <code class="inline">~/.config/helix/languages.toml</code> 加入（Windows 路径为 <code class="inline">%AppData%\helix\languages.toml</code>）：</p>
+<pre><code>[[language]]
+name = <span class="s">"hone"</span>
+scope = <span class="s">"source.hn"</span>
+file-types = [<span class="s">"hn"</span>]
+language-servers = [<span class="s">"hone-lsp"</span>]
+roots = [<span class="s">"hone.json"</span>, <span class="s">".git"</span>]
+
+[language-server.hone-lsp]
+command = <span class="s">"hone"</span>
+args = [<span class="s">"lsp"</span>]</code></pre>
+    <p>保存后重启 Helix，打开 <code class="inline">.hn</code> 文件，<code class="inline">:lsp-stop</code> / 状态栏语言图标确认服务器已连接。诊断自动显示在状态区；<code class="inline">space + s</code> 可用文档大纲（documentSymbol）跳转函数 / struct。</p>
+  </section>
+
+  <section id="emacs">
+    <h2><span class="hash">#</span>6. Emacs</h2>
+    <p>推荐 <strong>eglot</strong>（Emacs 29+ 内置）：</p>
+<pre><code><span class="c">;; init.el —— 定义 hone 模式并挂接 eglot</span>
+(add-to-list <span class="s">'auto-mode-alist</span> '(<span class="s">"\\.hn\\'"</span> . hone-mode))
+(define-derived-mode hone-mode prog-mode <span class="s">"Hone"</span>)
+(add-to-list <span class="s">'eglot-server-programs</span>
+             <span class="s">'(hone-mode . ("hone" "lsp"))</span>)
+(add-hook <span class="s">'hone-mode-hook</span> #<span class="s">'eglot-ensure</span>)</code></pre>
+    <p>使用 <strong>lsp-mode</strong> 的用户等价配置：</p>
+<pre><code>(lsp-register-client
+ (make-lsp-client :new-connection (lsp-stdio-connection (<span class="k">lambda</span> () (<span class="k">list</span> <span class="s">"hone"</span> <span class="s">"lsp"</span>)))
+                  :major-modes <span class="s">'(hone-mode)</span>
+                  :server-id <span class="s">'hone-lsp</span>))</code></pre>
+    <p>打开 <code class="inline">.hn</code> 文件后 <code class="inline">M-x eglot</code>（或自动）连接，<code class="inline">M-x eglot-events-buffer</code> 可排查协议交互。</p>
+  </section>
+
+  <section id="kakoune">
+    <h2><span class="hash">#</span>7. Kakoune</h2>
+    <p>通过 <strong>kak-lsp</strong> 接入，在 <code class="inline">~/.config/kak-lsp/kak-lsp.toml</code> 加入：</p>
+<pre><code>[language.hone]
+filetypes = [<span class="s">"hone"</span>]
+roots = [<span class="s">"hone.json"</span>, <span class="s">".git"</span>]
+command = <span class="s">"hone"</span>
+args = [<span class="s">"lsp"</span>]</code></pre>
+    <p>并在 <code class="inline">kakrc</code> 中注册语言与 hook（<code class="inline">set-option buffer filetype hone</code>、按扩展名触发 <code class="inline">lsp-enable</code>）。</p>
+  </section>
+
+  <section id="trouble">
+    <h2><span class="hash">#</span>8. 故障排查</h2>
+    <table>
+      <tr><th>现象</th><th>排查</th></tr>
+      <tr><td>服务器无法启动</td><td>终端里直接运行 <code class="inline">hone lsp</code>：若报「命令未找到」是 PATH 问题；配置里可写 <code class="inline">hone</code> 的绝对路径（<code class="inline">which hone</code> / <code class="inline">where hone</code> 查询）</td></tr>
+      <tr><td>无补全 / 无诊断</td><td>确认编辑器把文件识别为 hone 语言（扩展名 <code class="inline">.hn</code>；Neovim 检查 <code class="inline">:set ft?</code>）；确认客户端启动的命令是 <code class="inline">hone lsp</code>（缺 <code class="inline">lsp</code> 参数会当成脚本运行而立即退出）</td></tr>
+      <tr><td>协议报错 / 功能缺失</td><td>查看编辑器的 LSP 日志（VS Code 输出面板；Neovim <code class="inline">:LspLog</code>；Emacs eglot-events-buffer）。 hone-lsp 对未知方法返回 -32601 属正常——客户端请求的能力需在上方能力表内</td></tr>
+      <tr><td>诊断更新不及时</td><td>诊断在打开 / 修改时推送（增量同步）；确认客户端未禁用 <code class="inline">publishDiagnostics</code></td></tr>
+      <tr><td>多根工作区</td><td> hone-lsp 为单文件 / 项目目录级服务，root 取 <code class="inline">hone.json</code> 或 <code class="inline">.git</code> 所在目录，未找到则退回文件所在目录</td></tr>
+    </table>
+    <p>端到端协议行为有 <code class="inline">tests/lsp_smoke.py</code> 冒烟测试背书（stdio 启动服务器，验证全部能力与协议错误码）。遇到问题欢迎到 <a href="https://github.com/shichencike/Hone/issues">GitHub Issues</a> 反馈。</p>
+  </section>
+
+</main>
+
+<footer>
+  Hone v0.8.0 &middot; MIT License &middot; <span class="sword">&#128481;</span> Hone &ndash; 为效率而生，为乐趣而造
+  &middot; <a href="https://github.com/shichencike/Hone">GitHub</a>
+</footer>
+
+<script src="site.js"></script>
+
+</body>
+</html>

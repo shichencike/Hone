@@ -7,6 +7,11 @@ on:
 permissions:
   contents: write
 
+# Windows runner 默认 locale 为 charmap/GBK：强制 Python 标准流用 UTF-8，
+# 避免 build_toolchain.py / 回归脚本处理 UTF-8 文本时崩溃。
+env:
+  PYTHONIOENCODING: utf-8
+
 jobs:
   build:
     name: build ${{ matrix.name }}
@@ -18,32 +23,112 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact: hone-linux-x86_64
+            cmd: cargo build --release --locked --target x86_64-unknown-linux-gnu
           - name: termux-aarch64
             os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             artifact: hone-termux-aarch64
-            linker: rust-lld
+            cmd: cargo zigbuild --release --locked --target aarch64-unknown-linux-musl
           - name: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: hone-windows-x86_64.exe
+            cmd: cargo build --release --locked --target x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # 官方 cache（registry/git/target）：命中增量缓存即大幅提速。
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-rel-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-rel-${{ matrix.target }}-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      # .cargo/config.toml 里的 linker 是开发机本机绝对路径，CI 上改用工具链自带的 rust-lld（仅 musl 目标）
+      # Termux(musl) 目标用 zig 链接：rust-lld 在 aarch64-musl 上缺 libdl（-ldl 解析失败），
+      # zig 自带 musl libc 存根可正常链接；其余平台用原生 cargo build。
+      - name: Install zig
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        uses: goto-bus-stop/setup-zig@v2
+      - name: Install cargo-zigbuild
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: cargo install cargo-zigbuild --locked
       - name: build release
-        run: cargo build --release --locked --target ${{ matrix.target }} ${{ matrix.linker && format('--config target.{0}.linker="rust-lld"', matrix.target) || '' }}
+        shell: bash
+        run: ${{ matrix.cmd }}
       - name: copy artifact
         shell: bash
         run: |
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/hone.exe" "dist/${{ matrix.artifact }}" 2>/dev/null || cp "target/${{ matrix.target }}/release/hone" "dist/${{ matrix.artifact }}"
+      # Windows 二进制代码签名：从 Secrets 还原 .pfx → signtool 签名（SHA256 + RFC3161 时间戳）
+      # → Get-AuthenticodeSignature 仅确认存在代码签名证书（不做链信任校验：runner
+      # 根存储可能不含签名证书的根 CA，链校验会误报）。Secrets 未配置（如 Fork 仓库）时打警告跳过，不使 CI 失败。
+      - name: sign windows exe (signtool)
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:WINDOWS_CERT_PFX) -or [string]::IsNullOrEmpty($env:WINDOWS_CERT_PASSWORD)) {
+            Write-Warning "WINDOWS_CERT_PFX / WINDOWS_CERT_PASSWORD secrets not set - skipping code signing (unsigned binary will be published)"
+            exit 0
+          }
+          # 1. 从环境变量还原 .pfx（Base64 → 二进制文件）
+          $pfx = "hone-codesign.pfx"
+          [IO.File]::WriteAllBytes("$PWD\$pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
+          # 2. 定位 Windows SDK 自带的 signtool.exe（取版本号最大的一个）
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match 'x64' } |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe not found under Windows Kits\10\bin" }
+          Write-Host "Using signtool: $($signtool.FullName)"
+          $exe = "dist\hone-windows-x86_64.exe"
+          # 3. 签名（/fd SHA256 摘要 + /tr RFC3161 时间戳 /td SHA256：证书过期后旧签名仍有效）
+          & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $exe
+          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed with exit code $LASTEXITCODE" }
+          # 4. 确认产物带代码签名证书（只查签名是否存在，不做链信任校验）。
+          # 不做链校验的原因：runner 根存储可能不含签名证书的根 CA——
+          # signtool verify /pa 报链不信任、.NET 的 Get-AuthenticodeSignature
+          # 在此环境返回 UnknownError、certutil 预信任方案也有环境坑。
+          # 签名由上一步 signtool 直接产出（失败即抛错），这里只确认签名存在：
+          # NotSigned 即视为无证书。
+          $sig = Get-AuthenticodeSignature "$PWD\$exe"
+          if ($sig.Status -eq 'NotSigned') {
+            throw "no code signing certificate on $exe"
+          }
+          if ($sig.SignerCertificate) {
+            Write-Host "Code signing certificate present: $($sig.SignerCertificate.Subject)"
+          } else {
+            Write-Host "Code signing certificate present (signer not resolved)"
+          }
+          Remove-Item $pfx -Force
+      # G3.4（已废弃）：full 包 = 可执行文件 + targets/（纯 .o 生成器口径已移除工具链分发，
+      # full 包仅含 hone 本体，Windows 侧含随包 dll）。
+      - name: package full bundle (linux)
+        if: matrix.name == 'linux-x86_64'
+        shell: bash
+        run: |
+          mkdir -p dist/full
+          cp target/x86_64-unknown-linux-gnu/release/hone dist/full/hone
+          tar -czf "dist/hone-linux-x86_64-full.tar.gz" -C dist/full hone
+      - name: package full bundle (windows)
+        if: matrix.name == 'windows-x86_64'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/full | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/hone.exe dist/full/hone.exe
+          Compress-Archive -Path dist/full/hone.exe -DestinationPath dist/hone-windows-x86_64-full.zip -Force
       - name: sha256
         shell: bash
         run: |
@@ -54,9 +139,61 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/
 
+  bench:
+    name: benchmark (hone vs python vs lua5.4)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # 官方 cache：与 bench.yml 同路径（宿主 target，可复用增量）；独立 key 前缀避免
+      # 与 build job 的 rust-cache / bench.yml 的 cache 互相干扰
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-rel-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-rel-bench-
+      - name: build
+        run: cargo build --release --locked
+      # 对比语言：Python 用 runner 自带 3.x（版本实测写进结果），Lua 装 5.4
+      - name: install lua5.4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends lua5.4
+      # 发布质量门：基准完整跑通才允许 publish。注意 bench_ci.py 只保证「二进制可跑」，
+      # 单个负载异常只显示 '-' 不失败——性能回退检测仍依赖 bench.yml 的对比数据。
+      - name: run benchmarks
+        run: HONE_BIN=target/release/hone python tests/bench_ci.py
+      # 结果上传为发布记录
+      - name: upload results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-data
+          path: 官网/perf-data.json
+      # 结果提交回仓库（官网 perf.html 读取渲染）：仅在有变化时提交。
+      # tag 事件 checkout 是 detached HEAD，用 HEAD:refs/heads/master 显式推送：
+      # 发布时 master 即 tag 所在提交，此为快进；master 若已前进则推送被拒
+      # （不会覆盖别人的提交），人工重跑即可。
+      - name: commit results
+        shell: bash
+        run: |
+          git config user.name "hone-bench-bot"
+          git config user.email "noreply@atomgit.com"
+          git add 官网/perf-data.json
+          if git diff --cached --quiet; then
+            echo "性能数据无变化，跳过提交"
+          else
+            git commit -m "[skip ci] bench: 更新性能基准数据（${GITHUB_SHA::7}）"
+            git push origin HEAD:refs/heads/master
+          fi
+
   publish:
     name: publish release + homebrew + scoop
-    needs: build
+    needs: [build, bench]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,13 +204,18 @@ jobs:
         run: |
           set -e
           mkdir -p dist/pkg
-          cp "dist/hone-linux-x86_64/hone-linux-x86_64" "dist/pkg/hone-linux-x86_64"
-          tar -czf "dist/pkg/hone-linux-x86_64.tar.gz" -C "dist/hone-linux-x86_64" "hone-linux-x86_64"
-          cp "dist/hone-termux-aarch64/hone-termux-aarch64" "dist/pkg/hone-termux-aarch64"
-          tar -czf "dist/pkg/hone-termux-aarch64.tar.gz" -C "dist/hone-termux-aarch64" "hone-termux-aarch64"
-          cp "dist/hone-windows-x86_64/hone-windows-x86_64.exe" "dist/pkg/hone-windows-x86_64.exe"
+          # download-artifact@v4 的子目录名与产物名一致（windows 产物名带 .exe），
+          # 按 basename 复制最稳妥，不受子目录命名影响。
+          # **排除 `*/full/*`**：full 包目录里是 targets/ 整棵树（CRT/lld/运行时归档），摊平会把它们
+          # 当成独立资产传上 release 页（v0.8.0 首跑踩过：rust-lld.exe / libhoneruntime.a 都挂出来了）。
+          find dist -type f | sort
+          find dist -type f -not -path '*/full/*' -not -path 'dist/pkg/*' -exec cp {} dist/pkg/ \;
+          tar -czf "dist/pkg/hone-linux-x86_64.tar.gz" -C "dist/pkg" "hone-linux-x86_64"
+          tar -czf "dist/pkg/hone-termux-aarch64.tar.gz" -C "dist/pkg" "hone-termux-aarch64"
           cp install.sh "dist/pkg/install.sh"
-          cp install.ps1 "dist/pkg/install.ps1"
+          cp install.bat "dist/pkg/install.bat"
+          ls -la dist/pkg
+          test -f dist/pkg/hone-windows-x86_64.exe
           cd dist/pkg
           sha256sum * > checksums.txt
           cat checksums.txt
@@ -82,70 +224,3 @@ jobs:
         with:
           files: dist/pkg/*
           generate_release_notes: true
-
-      # 以下两步需要预先配置：新建 tap/bucket 仓库 + 仓库 Secrets 里添加 TAP_TOKEN（PAT，权限 repo）
-      # 未配置 TAP_TOKEN 时自动跳过，不影响 Releases 发布
-      - name: update Homebrew tap
-        if: ${{ secrets.TAP_TOKEN != '' }}
-        env:
-          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
-        run: |
-          set -e
-          SHA=$(grep 'hone-linux-x86_64.tar.gz' dist/pkg/checksums.txt | awk '{print $1}')
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/shichencike/homebrew-hone.git" tap
-          cat > tap/hone.rb <<EOF
-          class Hone < Formula
-            desc "轻量级、跨平台、可嵌入的脚本语言"
-            homepage "https://github.com/shichencike/Hone"
-            url "https://github.com/shichencike/Hone/releases/download/${GITHUB_REF_NAME}/hone-linux-x86_64.tar.gz"
-            sha256 "${SHA}"
-            version "${GITHUB_REF_NAME#v}"
-            def install
-              bin.install "hone-linux-x86_64" => "hone"
-            end
-          end
-          EOF
-          cd tap
-          git config user.email "hone-ci@users.noreply.github.com"
-          git config user.name "hone-ci"
-          git add hone.rb
-          git commit -m "hone ${GITHUB_REF_NAME}"
-          git push
-
-      - name: update Scoop bucket
-        if: ${{ secrets.TAP_TOKEN != '' }}
-        env:
-          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
-        run: |
-          set -e
-          SHA=$(grep 'hone-windows-x86_64.exe' dist/pkg/checksums.txt | awk '{print $1}')
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/shichencike/scoop-hone.git" bucket
-          cat > bucket/hone.json <<EOF
-          {
-            "version": "${GITHUB_REF_NAME#v}",
-            "description": "轻量级、跨平台、可嵌入的脚本语言",
-            "homepage": "https://github.com/shichencike/Hone",
-            "license": "MIT",
-            "architecture": {
-              "64bit": {
-                "url": "https://github.com/shichencike/Hone/releases/download/${GITHUB_REF_NAME}/hone-windows-x86_64.exe",
-                "hash": "${SHA}"
-              }
-            },
-            "bin": [["hone-windows-x86_64.exe", "hone"]],
-            "checkver": "github",
-            "autoupdate": {
-              "architecture": {
-                "64bit": {
-                  "url": "https://github.com/shichencike/Hone/releases/download/\$version/hone-windows-x86_64.exe"
-                }
-              }
-            }
-          }
-          EOF
-          cd bucket
-          git config user.email "hone-ci@users.noreply.github.com"
-          git config user.name "hone-ci"
-          git add hone.json
-          git commit -m "hone ${GITHUB_REF_NAME}"
-          git push
