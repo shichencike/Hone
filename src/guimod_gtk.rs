@@ -71,9 +71,12 @@ fn as_int(v: &Value, arg: usize, span: Span, file: &str, src: &str) -> Result<i6
 
 // ---------- dict 辅助（与 guimod.rs 相同约定） ----------
 
-fn dict_get<'a>(d: &'a Value, key: &str) -> Option<&'a Value> {
+fn dict_get(d: &Value, key: &str) -> Option<Value> {
+    // 返回克隆值（引用模型下 clone 为 O(1) 句柄拷贝）：不跨守卫借用，
+    // 避免 Vec 重分配使引用悬垂。
     if let Value::Dict(entries) = d {
-        entries.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+        let entries = entries.read().unwrap();
+        entries.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
     } else {
         None
     }
@@ -81,7 +84,7 @@ fn dict_get<'a>(d: &'a Value, key: &str) -> Option<&'a Value> {
 
 fn dict_str(d: &Value, key: &str, span: Span, file: &str, src: &str) -> Result<String, ZError> {
     match dict_get(d, key) {
-        Some(Value::Str(s)) => Ok(s.clone()),
+        Some(Value::Str(s)) => Ok(s.to_string()),
         Some(other) => Err(zerr(
             codes::TYPE_MISMATCH,
             format!("widget field `{}` must be a string, got `{}`", key, other.type_name()),
@@ -96,7 +99,7 @@ fn dict_str(d: &Value, key: &str, span: Span, file: &str, src: &str) -> Result<S
 
 fn dict_int(d: &Value, key: &str, def: i64, span: Span, file: &str, src: &str) -> Result<i64, ZError> {
     match dict_get(d, key) {
-        Some(Value::Int(i)) => Ok(*i),
+        Some(Value::Int(i)) => Ok(i),
         Some(other) => Err(zerr(
             codes::TYPE_MISMATCH,
             format!("widget field `{}` must be an integer, got `{}`", key, other.type_name()),
@@ -545,7 +548,7 @@ fn add(win_id: i64, d: &Value, span: Span, file: &str, src: &str) -> Result<Valu
         // select 填充选项
         if kind == "select" {
             if let Some(Value::List(opts)) = dict_get(d, "options") {
-                for o in opts {
+                for o in opts.read().unwrap().iter() {
                     if let Value::Str(s) = o {
                         (api.combo_text_append)(w, cstr(s).as_ptr());
                     }
@@ -585,7 +588,7 @@ fn poll(_span: Span, _file: &str, _src: &str) -> Result<Value, ZError> {
     }
     let evs = EVENTS.lock().unwrap().clone();
     EVENTS.lock().unwrap().clear();
-    Ok(Value::Str(format!("[{}]", evs.join(","))))
+    Ok(Value::mk_str(format!("[{}]", evs.join(","))))
 }
 
 fn set_text(win_id: i64, ctl_id: i64, text: &str, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
@@ -647,7 +650,7 @@ fn get_text(win_id: i64, ctl_id: i64, span: Span, file: &str, src: &str) -> Resu
             }
         }
     };
-    Ok(Value::Str(text))
+    Ok(Value::mk_str(text))
 }
 
 fn close(win_id: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {

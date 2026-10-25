@@ -66,9 +66,12 @@ fn as_int(v: &Value, arg: usize, span: Span, file: &str, src: &str) -> Result<i6
 
 // ---------- dict 辅助（与 guimod.rs 相同约定） ----------
 
-fn dict_get<'a>(d: &'a Value, key: &str) -> Option<&'a Value> {
+fn dict_get(d: &Value, key: &str) -> Option<Value> {
+    // 返回克隆值（引用模型下 clone 为 O(1) 句柄拷贝）：不跨守卫借用，
+    // 避免 Vec 重分配使引用悬垂。
     if let Value::Dict(entries) = d {
-        entries.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+        let entries = entries.read().unwrap();
+        entries.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
     } else {
         None
     }
@@ -76,7 +79,7 @@ fn dict_get<'a>(d: &'a Value, key: &str) -> Option<&'a Value> {
 
 fn dict_str(d: &Value, key: &str, span: Span, file: &str, src: &str) -> Result<String, ZError> {
     match dict_get(d, key) {
-        Some(Value::Str(s)) => Ok(s.clone()),
+        Some(Value::Str(s)) => Ok(s.to_string()),
         Some(other) => Err(zerr(
             codes::TYPE_MISMATCH,
             format!("widget field `{}` must be a string, got `{}`", key, other.type_name()),
@@ -91,7 +94,7 @@ fn dict_str(d: &Value, key: &str, span: Span, file: &str, src: &str) -> Result<S
 
 fn dict_int(d: &Value, key: &str, def: i64, span: Span, file: &str, src: &str) -> Result<i64, ZError> {
     match dict_get(d, key) {
-        Some(Value::Int(i)) => Ok(*i),
+        Some(Value::Int(i)) => Ok(i),
         Some(other) => Err(zerr(
             codes::TYPE_MISMATCH,
             format!("widget field `{}` must be an integer, got `{}`", key, other.type_name()),
@@ -1079,7 +1082,7 @@ fn insert_tree_node(ctl: &mut CtlState, parent: i64, d: &Value, span: Span, file
         ctl.children.entry(parent).or_insert_with(Vec::new).push(id);
     }
     if let Some(Value::List(children)) = dict_get(d, "items") {
-        for ch in children {
+        for ch in children.read().unwrap().iter() {
             insert_tree_node(ctl, id, ch, span, file, src)?;
         }
     }
@@ -1134,9 +1137,9 @@ fn add(win_id: i64, d: &Value, span: Span, file: &str, src: &str) -> Result<Valu
         }
         "select" => {
             if let Some(Value::List(opts)) = dict_get(d, "options") {
-                for o in opts {
+                for o in opts.read().unwrap().iter() {
                     if let Value::Str(s) = o {
-                        ctl.options.push(s.clone());
+                        ctl.options.push(s.to_string());
                     }
                 }
             }
@@ -1144,19 +1147,19 @@ fn add(win_id: i64, d: &Value, span: Span, file: &str, src: &str) -> Result<Valu
         }
         "table" => {
             if let Some(Value::List(cols)) = dict_get(d, "columns") {
-                for c in cols {
+                for c in cols.read().unwrap().iter() {
                     if let Value::Str(s) = c {
-                        ctl.columns.push(s.clone());
+                        ctl.columns.push(s.to_string());
                     }
                 }
             }
             if let Some(Value::List(rows)) = dict_get(d, "rows") {
-                for r in rows {
+                for r in rows.read().unwrap().iter() {
                     if let Value::List(cells) = r {
                         let mut row = Vec::new();
-                        for c in cells {
+                        for c in cells.read().unwrap().iter() {
                             if let Value::Str(s) = c {
-                                row.push(s.clone());
+                                row.push(s.to_string());
                             }
                         }
                         ctl.rows.push(row);
@@ -1166,7 +1169,7 @@ fn add(win_id: i64, d: &Value, span: Span, file: &str, src: &str) -> Result<Valu
         }
         "tree" => {
             if let Some(Value::List(items)) = dict_get(d, "items") {
-                for it in items {
+                for it in items.read().unwrap().iter() {
                     insert_tree_node(&mut ctl, 0, it, span, file, src)?;
                 }
             }
@@ -1368,7 +1371,7 @@ fn build_menu(win: &mut WinState, items: &Value, span: Span, file: &str, src: &s
             ));
         }
     };
-    for item in list {
+    for item in list.read().unwrap().iter() {
         let text = dict_str(item, "text", span, file, src)?;
         if dict_get(item, "items").is_some() {
             let sub_id = win.next_menu_id;
@@ -1376,7 +1379,7 @@ fn build_menu(win: &mut WinState, items: &Value, span: Span, file: &str, src: &s
             win.menu_top.push((text.clone(), sub_id));
             let mut sub: Vec<(String, i64)> = Vec::new();
             if let Some(Value::List(child_items)) = dict_get(item, "items") {
-                for ci in child_items {
+                for ci in child_items.read().unwrap().iter() {
                     let ctext = dict_str(ci, "text", span, file, src)?;
                     if ctext == "-" {
                         sub.push(("-".to_string(), -1));
@@ -1974,11 +1977,11 @@ fn process_event(api: &X11Api, d: *mut XDisplay, ev: &XEvent) {
 fn poll(_span: Span, _file: &str, _src: &str) -> Result<Value, ZError> {
     let api = match API.as_ref() {
         Ok(a) => a,
-        Err(_) => return Ok(Value::Str("[]".to_string())),
+        Err(_) => return Ok(Value::mk_str("[]".to_string())),
     };
     let d = match DISPLAY.as_ref() {
         Ok(dd) => *dd as *mut XDisplay,
-        Err(_) => return Ok(Value::Str("[]".to_string())),
+        Err(_) => return Ok(Value::mk_str("[]".to_string())),
     };
     unsafe {
         while (api.pending)(d) > 0 {
@@ -1989,7 +1992,7 @@ fn poll(_span: Span, _file: &str, _src: &str) -> Result<Value, ZError> {
     }
     let evs = EVENTS.lock().unwrap().clone();
     EVENTS.lock().unwrap().clear();
-    Ok(Value::Str(format!("[{}]", evs.join(","))))
+    Ok(Value::mk_str(format!("[{}]", evs.join(","))))
 }
 
 // ---------- 读写 ----------
@@ -2007,7 +2010,7 @@ fn get_text(win_id: i64, ctl_id: i64, span: Span, file: &str, src: &str) -> Resu
     let wins = WINDOWS.lock().unwrap();
     let win = wins.get(&win_id).ok_or_else(|| win_missing(win_id, span, file, src))?;
     let ctl = win.ctls.get(&ctl_id).ok_or_else(|| ctl_missing(win_id, ctl_id, span, file, src))?;
-    Ok(Value::Str(ctl.text.clone()))
+    Ok(Value::mk_str(ctl.text.clone()))
 }
 
 fn set_value(win_id: i64, ctl_id: i64, val: i64, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
@@ -2113,9 +2116,9 @@ fn table_add_row(win_id: i64, ctl_id: i64, row: &Value, span: Span, file: &str, 
     match row {
         Value::List(cells) => {
             let mut r = Vec::new();
-            for c in cells {
+            for c in cells.read().unwrap().iter() {
                 if let Value::Str(s) = c {
-                    r.push(s.clone());
+                    r.push(s.to_string());
                 }
             }
             ctl.rows.push(r);
@@ -2172,8 +2175,8 @@ fn table_get_row(win_id: i64, ctl_id: i64, row: i64, span: Span, file: &str, src
     if row < 0 || row >= ctl.rows.len() as i64 {
         return Err(zerr(codes::NOT_FOUND, format!("table row {} out of range (0..{})", row, ctl.rows.len()), span, file, src, Some("check the row index")));
     }
-    let cells: Vec<Value> = ctl.rows[row as usize].iter().map(|s| Value::Str(s.clone())).collect();
-    Ok(Value::List(cells))
+    let cells: Vec<Value> = ctl.rows[row as usize].iter().map(|s| Value::mk_str(s.clone())).collect();
+    Ok(Value::mk_list(cells))
 }
 
 fn table_set(win_id: i64, ctl_id: i64, row: i64, col: i64, text: &str, span: Span, file: &str, src: &str) -> Result<Value, ZError> {
