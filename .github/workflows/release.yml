@@ -168,13 +168,28 @@ jobs:
       # 单个负载异常只显示 '-' 不失败——性能回退检测仍依赖 bench.yml 的对比数据。
       - name: run benchmarks
         run: HONE_BIN=target/release/hone python tests/bench_ci.py
-      # 结果仅上传为发布记录，不提交回仓库：tag 事件 checkout 为 detached HEAD 推不上去，
-      # 且 perf-data.json 的自动提交由 bench.yml 在 master push 时负责
+      # 结果上传为发布记录
       - name: upload results artifact
         uses: actions/upload-artifact@v4
         with:
           name: perf-data
           path: 官网/perf-data.json
+      # 结果提交回仓库（官网 perf.html 读取渲染）：仅在有变化时提交。
+      # tag 事件 checkout 是 detached HEAD，用 HEAD:refs/heads/master 显式推送：
+      # 发布时 master 即 tag 所在提交，此为快进；master 若已前进则推送被拒
+      # （不会覆盖别人的提交），人工重跑即可。
+      - name: commit results
+        shell: bash
+        run: |
+          git config user.name "hone-bench-bot"
+          git config user.email "noreply@atomgit.com"
+          git add 官网/perf-data.json
+          if git diff --cached --quiet; then
+            echo "性能数据无变化，跳过提交"
+          else
+            git commit -m "[skip ci] bench: 更新性能基准数据（${GITHUB_SHA::7}）"
+            git push origin HEAD:refs/heads/master
+          fi
 
   publish:
     name: publish release + homebrew + scoop
