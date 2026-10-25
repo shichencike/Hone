@@ -539,7 +539,7 @@ help: Hone types are locked after inference; no implicit conversion is allowed
   复合赋值 `+= -= *= /= %=`（str 仅支持 `+=`）、自增/自减 `++ --`、
   三元 `cond ? a : b`、空值合并 `a ?? b`、匿名函数 lambda（一等值/闭包，经变量名动态调用）、
   函数默认参数（尾部省略、默认表达式可引用前面参数）、三引号原始字符串 `"""..."""`；
-  默认参数暂不支持 VM（报错提示改用解释模式）
+  以上语法在解释器与字节码 VM 下行为一致（含默认参数）
 
 ## 路线图
 

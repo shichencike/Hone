@@ -13,7 +13,7 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   - `python tests/regress_err.py` — 双引擎（interp/VM）错误诊断逐字符对齐（行/列/文案/help）
   - `python tests/regress4.py` — 双引擎正常路径逐字节对齐
   - `python tests/regress_ir.py` — 文本 IR 往返
-  - `python tests/tools/probe_align.py` — 开发期扫雷：152 例 match / 条件 / 逻辑 / 解构 / 重载 / alias+goto / 默认参数 / 点号内置 / async+go 形态的 interp-vs-VM 逐字节比对。动态类型值（enum/struct）下的条件与逻辑分叉、以及重载回退边界靠它扫出。
+  - `python tests/tools/probe_align.py` — 开发期扫雷：271 例 match / 条件 / 逻辑 / 解构 / 重载 / alias+goto / 值语义 / 切片 / byte / bytes / 字段赋值 / with / type / import / 默认参数 / 点号内置 / async+go 形态的 interp-vs-VM 逐字节比对。动态类型值（enum/struct）下的条件与逻辑分叉、重载回退边界、以及新增 VM 特性的对齐靠它扫出。import 组自带本地 http server fixture（`tests/fixtures/remote_mod/`，避免 CI 联网），每例在 interp/VM 之间清 `~/.hone/cache/` 确保两路都重新下载。
 - CI（.github/workflows/ci.yml）：ubuntu/windows 两个 test job 做 `cargo build --release --locked` + `cargo test --release --locked` + hello/fib smoke + `tests/regress4.py`；无 rustfmt/clippy 配置，格式化用语言自带 `hone fmt`（作用于 .hn，非 Rust）。
 
 ## 架构
@@ -21,7 +21,7 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
 - 单 crate 流水线：lexer → parser → ast → checker → 双后端：`interp.rs`（AST 解释器）、`vm.rs`（字节码 VM）。（AOT 与原生编译（nat）后端已移除。）
 - `Value` 定义在 `interp.rs`，VM 与全部 builtins 复用之——改 Value/字典行为要同时顾及双引擎。
 - **引用模型**：List/Dict/Str/Bytes 四变体为 Arc 共享句柄（List/Dict 带 RwLock），`Value::clone` = O(1) 句柄克隆，值语义由统一写屏障保证（interp `ensure_unique` / VM `cow_handle`：独占原地写、共享先隔离）。别名不可见，可观察行为与深拷贝逐字节一致。`cow` 声明语法已废弃（BREAKING，遇 `cow` 报 H005）；`as_plain` 保留为恒等（历史读点兼容）。
-- 铁律：**interp 与 VM 输出（含报错）必须逐字节一致**；错误码 Hxxx 集中在 `error.rs`，`H999`=功能未实现（VM 不支持 with、type 实例、byte/bytes **字面量**（0b…/b"…"/byte()）、字段赋值等解释器特性时统一报 H999）。byte/bytes **值**（read_bytes/base64_decode/zip_read/tgz_read_bytes/http_get_bytes/http_post_bytes/http.request binary/zlib.* 四函数/ws.request 消息列表/ptr.read_byte/索引产出）interp/VM 双引擎全支持：VM 侧执行臂集中在 `vm.rs` 的 `v_add`/`v_eq`/`v_cmp`/`v_index`/`v_len`/`IterCheck`（按 is_comp 站点分派：推导式拒 bytes、for-in 收）与 `value_to_str`（display 基准 = 解释器：Byte 为 `0bNNNNNNNN`、Bytes 为可打印原样 + `\xNN`），改任一处须与解释器 `interp.rs` 对应函数（`arith`/`values_eq`/`values_cmp`/`index_value`）逐字对齐；for-in 双变量 list/bytes 报错走 `IsBytes` 指令 + `Raise`（文案含 list/bytes 两分支）。
+- 铁律：**interp 与 VM 输出（含报错）必须逐字节一致**；错误码 Hxxx 集中在 `error.rs`，`H999`=功能未实现（当前 VM 仅 `load` 动态库与「非构建期展开路径的 `Stmt::Import`」编译臂报 H999；with、type 实例、byte/bytes **字面量**（0b…/b"…"/byte()）、字段赋值、切片均已在 VM 落地）。byte/bytes **值**（read_bytes/base64_decode/zip_read/tgz_read_bytes/http_get_bytes/http_post_bytes/http.request binary/zlib.* 四函数/ws.request 消息列表/ptr.read_byte/索引产出）interp/VM 双引擎全支持：VM 侧执行臂集中在 `vm.rs` 的 `v_add`/`v_eq`/`v_cmp`/`v_index`/`v_len`/`IterCheck`（按 is_comp 站点分派：推导式拒 bytes、for-in 收）与 `value_to_str`（display 基准 = 解释器：Byte 为 `0bNNNNNNNN`、Bytes 为可打印原样 + `\xNN`），改任一处须与解释器 `interp.rs` 对应函数（`arith`/`values_eq`/`values_cmp`/`index_value`）逐字对齐；for-in 双变量 list/bytes 报错走 `IsBytes` 指令 + `Raise`（文案含 list/bytes 两分支）。
 - 运算符重载（G2.4）：`__op` 回退链在 `vm.rs` exec 臂（触发条件表以此为准：算术：非数字/str 组合 + H001；比较：非数字对、错误码不限；一元：H001）。
 - 别名（G2.5）：语义基准：VM `do_call`（先 resolve_alias → 再查局部变量 → 函数 → 内置）。
 - 参数个数校验双引擎统一到解释器文案（`expects at most N arguments, got M` /
@@ -39,6 +39,10 @@ Hone：Rust 实现的脚本语言（单一可执行 `hone`）。主 crate 在 `s
   在**编译期**经 `src/imports.rs::resolve_imports` 递归展开顶层 import、
   合并为单编译单元（本地路径相对 CWD / 远程缓存 `~/.hone/cache/`，模块前缀改名 + 顶层语句入 Block）。
   改 import 语义需同时顾及运行期与构建期两处；`hone check`/`fmt`/LSP 不经过构建期展开。
+  **VM 路径 `run_script` 中 `checker` 必须在 `resolve_imports` 之前运行**（只静态检查主模块
+  源码，import 模块函数按「外部动态加载」`has_external` 放行）——与解释器 / `hone check` /
+  `hone prof` 一致；若在展开后检查，展开进来的模块函数体（未被调用、参数类型无法从调用点
+  推断者）会被 strict 阶段误报 H003，破坏铁律。
 - CI/发布：`ci.yml` test job 含 `regress4.py`（二进制定位支持 `HONE_BIN` 覆盖）；
   `release.yml` 构建三目标发布产物（linux tar.gz / windows zip，hone + install.sh/bat）。
   安装脚本 install.sh（Linux/Termux）与 install.bat（Windows）随发布上传；Windows 安装 = 双击

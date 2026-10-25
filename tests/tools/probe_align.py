@@ -267,6 +267,143 @@ VALUE = {
     "val_deep_mixed": 'm = {"k": [1, 2]};\nv = 0;\nfor x in m { {k} = x; v = x; }\n{k2: lst} = v;\nlst[0] = 9;\nprint(to_str(m));\n',
 }
 
+# ── 切片（T1）：负索引归一 / 越界钳制 / lo>hi 空副本 / str 不支持切片 / bytes 切片 ──
+SLICE = {
+    "slice_basic": 'l = [1, 2, 3, 4, 5];\nprint(to_str(l[1:3]));\n',
+    "slice_lo_only": 'l = [1, 2, 3];\nprint(to_str(l[1:]));\n',
+    "slice_hi_only": 'l = [1, 2, 3];\nprint(to_str(l[:2]));\n',
+    "slice_neg_lo": 'l = [1, 2, 3, 4];\nprint(to_str(l[-2:]));\n',
+    "slice_neg_hi": 'l = [1, 2, 3, 4];\nprint(to_str(l[:-1]));\n',
+    "slice_hi_clamp": 'l = [1, 2, 3];\nprint(to_str(l[1:100]));\n',
+    "slice_lo_clamp": 'l = [1, 2, 3];\nprint(to_str(l[-100:]));\n',
+    "slice_empty": 'l = [1, 2];\nprint(to_str(l[3:]));\n',
+    "slice_lo_gt_hi": 'l = [1, 2, 3];\nprint(to_str(l[2:1]));\n',
+    "slice_neg_both": 'l = [1, 2, 3, 4, 5];\nprint(to_str(l[-3:-1]));\n',
+    "slice_neg_clamp": 'l = [1, 2];\nprint(to_str(l[-5:-1]));\n',
+    "slice_bytes": 'b = b"ABCDE";\nprint(to_str(b[1:3]));\n',
+    "slice_bytes_neg": 'b = b"ABC";\nprint(to_str(b[-2:]));\n',
+    "slice_bytes_empty": 'b = b"AB";\nprint(to_str(b[5:]));\n',
+    "slice_slice_chain": 'l = [[1, 2, 3], [4, 5]];\nprint(to_str(l[0][1:]));\n',
+    "slice_var_bounds": 'l = [1, 2, 3, 4];\ni = 1;\nj = 3;\nprint(to_str(l[i:j]));\n',
+    "slice_expr_bounds": 'l = [1, 2, 3, 4, 5];\nprint(to_str(l[1 + 1:2 * 2]));\n',
+    "slice_in_fn": 'fn f(a) { return a[1:]; }\nprint(to_str(f([7, 8, 9])));\n',
+    "slice_copy_semantics": 'a = [1, 2, 3];\nb = a[0:2];\nb[0] = 9;\nprint(to_str(a));\nprint(to_str(b));\n',
+    "slice_err_str": 's = "abc";\nprint(to_str(s[0:2]));\n',
+    "slice_err_dict": 'd = {"a": 1};\nprint(to_str(d[0:1]));\n',
+    "slice_err_int": 'x = 5;\nprint(to_str(x[0:1]));\n',
+    "slice_err_float_bound": 'l = [1, 2];\nprint(to_str(l[0.5:]));\n',
+    "slice_err_str_bound": 'l = [1, 2];\nprint(to_str(l["a":]));\n',
+}
+
+# ── byte 字面量（T2）：display / 严格隔离 / 容器承载 ──
+BYTE = {
+    "byte_lit": 'b = 0b01000001;\nprint(b);\n',
+    "byte_zero": 'b = 0b0;\nprint(b);\n',
+    "byte_max": 'b = 0b11111111;\nprint(b);\n',
+    "byte_var": 'b = 0b1;\nprint(b);\nc = b;\nprint(c);\n',
+    "byte_eq": 'b = 0b1;\nc = 0b1;\nprint(to_str(b == c));\n',
+    "byte_ne": 'b = 0b1;\nc = 0b10;\nprint(to_str(b != c));\n',
+    "byte_cmp": 'b = 0b1;\nc = 0b10;\nprint(to_str(b < c));\n',
+    "byte_in_list": 'l = [0b1, 0b10];\nprint(to_str(l));\n',
+    "byte_index_out": 'b = b"AB";\nprint(b[0]);\nprint(b[1]);\n',
+    "byte_forin_bytes": 't = "";\nfor x in b"AB" { t = t + to_str(x); }\nprint(t);\n',
+    "byte_err_add_int": 'b = 0b1;\nprint(b + 1);\n',
+    "byte_err_cmp_int": 'b = 0b1;\nprint(to_str(b == 1));\n',
+    "byte_err_overflow": 'b = 0b111111111;\nprint(b);\n',
+}
+
+# ── bytes 字面量（T2）：display / 拼接 / 索引 / for-in / len / 容器承载 ──
+BYTES = {
+    "bytes_lit": 'b = b"hi";\nprint(b);\n',
+    "bytes_empty": 'b = b"";\nprint(b);\nprint(to_str(len(b)));\n',
+    "bytes_concat": 'b = b"ab" + b"cd";\nprint(b);\n',
+    "bytes_index": 'b = b"A";\nprint(b[0]);\n',
+    "bytes_len": 'b = b"abc";\nprint(to_str(len(b)));\n',
+    "bytes_eq": 'b = b"x";\nc = b"x";\nprint(to_str(b == c));\n',
+    "bytes_ne": 'b = b"x";\nc = b"y";\nprint(to_str(b != c));\n',
+    "bytes_in_list": 'l = [b"a", b"b"];\nprint(to_str(l));\n',
+    "bytes_nonascii": 'b = b"\\x00\\xff";\nprint(b);\n',
+    "bytes_forin": 't = 0;\nfor x in b"AB" { t = t + 1; }\nprint(to_str(t));\n',
+    "bytes_slice_chain": 'b = b"ABCD";\nprint(to_str(b[1:3] + b"!"));\n',
+    "bytes_err_add_str": 'b = b"a";\nprint(b + "s");\n',
+    "bytes_err_index_str": 'b = b"ab";\nprint(b["k"]);\n',
+    "bytes_err_oob": 'b = b"a";\nprint(b[5]);\n',
+}
+
+# ── 字段赋值（T3）：dict/struct 写 / readonly / 未知字段 / 隐藏键 / 嵌套链 / 值语义 ──
+FIELD = {
+    "field_dict_write": 'd = {"a": 1};\nd.a = 9;\nprint(to_str(d));\n',
+    "field_dict_overwrite": 'd = {"a": 1, "b": 2};\nd.b = d.a + 1;\nprint(to_str(d));\n',
+    "field_struct_write": 'struct P { x: int };\np = P(1);\np.x = 99;\nprint(to_str(p.x));\n',
+    "field_struct_all": 'struct P { x: int, y: int };\np = P(1, 2);\np.x = 10;\np.y = 20;\nprint(to_str(p));\n',
+    "field_nested_chain": 'n = {"inner": {"v": 1}};\nn.inner.v = 7;\nprint(to_str(n));\n',
+    "field_nested_struct": 'struct Q { v: int };\nstruct R { q: Q };\nr = R(Q(1));\nr.q.v = 3;\nprint(to_str(r.q.v));\n',
+    "field_value_semantics": 'd = {"a": 1};\nb = d;\nd.a = 55;\nprint(to_str(b));\nprint(to_str(d));\n',
+    "field_value_nested": 'n = {"inner": {"v": 1}};\nm = n;\nn.inner.v = 9;\nprint(to_str(m));\nprint(to_str(n));\n',
+    "field_in_fn": 'fn f(d) { d.a = 5; return 0; }\nd = {"a": 1};\nf(d);\nprint(to_str(d));\n',
+    "field_undefined_base": 'nope.f = 1;\n',
+    "field_err_unknown": 'd = {"a": 1};\nd.zz = 2;\n',
+    "field_err_struct_unknown": 'struct P { x: int };\np = P(1);\np.zz = 2;\n',
+    "field_err_readonly": 'struct P { x: int, y: readonly int };\np = P(1, 2);\np.y = 5;\n',
+    "field_err_noncontainer": 'x = 5;\nx.f = 1;\n',
+    "field_err_str_base": 's = "ab";\ns.f = 1;\n',
+    "field_err_list_base": 'l = [1];\nl.f = 1;\n',
+    "field_err_list_mid": 'n = {"inner": [1]};\nn.inner.v = 2;\n',
+    "field_err_int_mid": 'n = {"inner": 5};\nn.inner.v = 2;\n',
+}
+
+# ── with（T5）：Int 资源句柄 / 非上下文报错 / return / break / 穿透 ──
+# __exit__ 抛错与嵌套 type 实例路径依赖 T6（new Type 构造），T6 落地后扩容本组。
+WITH = {
+    "with_int_resource": 'with 5 as x {\n  print(x);\n}\nprint("done");\n',
+    "with_no_bind": 'with 5 {\n  print("in");\n}\nprint("out");\n',
+    "with_int_nonresource": 'with 999 as h {\n  print(h);\n}\nprint("closed-silently");\n',
+    "with_nested": 'with 1 as a {\n  with 2 as b {\n    print(a + b);\n  }\n  print("inner-done");\n}\nprint("outer-done");\n',
+    "with_body_error": 'with 5 as x {\n  x = x[0];\n}\n',
+    "with_err_str_target": 'with "s" as x {\n  print("in");\n}\n',
+    "with_err_list_target": 'with [1] as x {\n  print("in");\n}\n',
+    "with_err_dict_target": 'with {"a": 1} as x {\n  print("in");\n}\n',
+    "with_return_passthrough": 'fn f() {\n  with 7 as x {\n    print("pre");\n    return 1;\n  }\n}\nprint(f());\nprint("after");\n',
+    "with_break_passthrough": 'for (i = 0; i < 3; i = i + 1) {\n  with 8 as x {\n    print(i);\n    if (i == 1) { break; }\n  }\n}\nprint("out");\n',
+    "with_continue_passthrough": 'for (i = 0; i < 3; i = i + 1) {\n  with 8 as x {\n    if (i == 0) { continue; }\n    print(i);\n  }\n}\nprint("out");\n',
+    "with_in_loop_multi": 't = 0;\nfor (i = 0; i < 3; i = i + 1) {\n  with i as x {\n    t = t + x;\n  }\n}\nprint(t);\n',
+    "with_try_inside": 'with 5 as x {\n  try {\n    throw "boom";\n  } catch e {\n    print(e.message);\n  }\n}\nprint("done");\n',
+    "with_throw_inside": 'with 5 as x {\n  throw "inner";\n}\n',
+    "with_lambda_inside": 'with 5 as x {\n  f = fn() { return x; };\n  print(f());\n}\n',
+}
+
+# ── type 实例（T6）：构造 / init / self / extends / 覆盖 / 引用语义 / readonly / 错误路径 ──
+TYPE = {
+    "type_init_method": 'type Counter {\n  n: int,\n  fn init(self, start: int) { self.n = start; }\n  fn inc(self) { self.n = self.n + 1; return self.n; }\n  fn get(self) { return self.n; }\n};\nc = new Counter(10);\nprint(c.get());\nc.inc();\nprint(c.get());\nprint(c.n);\nprint(c);\n',
+    "type_field_write": 'type P { x: int };\np = new P(1);\np.x = 9;\nprint(p.x);\n',
+    "type_no_init": 'type Shape { name: str, sides: int, area: int,\n  fn desc(self) { return "shape " + self.name; } };\ns = new Shape("tri", 3, 9);\nprint(s.desc());\nprint(s.area);\nprint(s);\n',
+    "type_extends": 'type Shape { name: str, sides: int, area: int };\ntype Square extends Shape {\n  side: int,\n  fn init(self, side: int) {\n    self.name = "square";\n    self.sides = 4;\n    self.side = side;\n    self.area = side * side;\n  }\n  fn perim(self) { return self.side * 4; }\n};\ns = new Square(5);\nprint(s.perim());\nprint(s.area);\nprint(s.sides);\nprint(s);\n',
+    "type_override": 'type Shape { name: str, sides: int, area: int,\n  fn desc(self) { return "shape " + self.name; } };\ntype Square extends Shape {\n  side: int,\n  fn init(self, side: int) { self.name = "sq"; self.side = side; self.sides = 4; self.area = side * side; }\n  fn desc(self) { return "square " + self.name; }\n};\ns = new Square(5);\nprint(s.desc());\nsh = new Shape("tri", 3, 9);\nprint(sh.desc());\n',
+    "type_ref_semantics": 'type P { x: int };\nfn bump(g) { g.x = g.x + 1; return 0; }\np = new P(1);\nbump(p);\nprint(p.x);\n',
+    "type_with_method": 'type Guard {\n  active: int,\n  fn init(self) { self.active = 0; }\n  fn __enter__(self) { self.active = 1; return self; }\n  fn __exit__(self) { self.active = 0; return 0; }\n};\ng = new Guard();\nwith g {\n  print(g.active);\n}\nprint(g.active);\n',
+    "type_field_read": 'type P { x: int, y: int };\np = new P(3, 4);\nprint(p.x + p.y);\n',
+    "type_eq_identity": 'type P { x: int };\na = new P(1);\nb = a;\nc = new P(1);\nprint(to_str(a == b));\nprint(to_str(a == c));\n',
+    "type_display": 'type P { x: int, tag: str };\np = new P(7, "hi");\nprint(p);\n',
+    "type_err_unknown_method": 'type P { x: int };\np = new P(1);\np.nope();\n',
+    "type_err_unknown_field": 'type P { x: int };\np = new P(1);\nprint(p.nope);\n',
+    "type_err_write_unknown": 'type P { x: int };\np = new P(1);\np.nope = 2;\n',
+    "type_err_readonly": 'type P { a: int, b: readonly int };\np = new P(1, 2);\np.b = 5;\n',
+    "type_err_too_many": 'type P { x: int };\np = new P(1, 2);\n',
+    "type_err_method_on_int": 'x = 5;\nx.foo();\n',
+    "type_err_new_unknown": 'p = new Nope(1);\n',
+    "type_in_fn_arg": 'type P { x: int };\nfn getx(p) { return p.x; }\nprint(getx(new P(42)));\n',
+}
+
+# ── import 远程模块（T7）：编译期下载 / 别名前缀 / 本地路径 ──
+# 远程用例经本地 http server（fixture tests/fixtures/remote_mod/）下载，避免 CI 联网。
+# {port} 运行时替换为 httpd 实际端口；每例 interp 与 VM 之间清理缓存，确保两路都重新下载
+# （否则 interp 下载后 VM 缓存命中，进度条输出分叉）。
+IMPORT = {
+    "remote_download": 'import "probe_remote_mod" from "http://127.0.0.1:{port}/probe_remote_mod.hn";\nprint(probe_remote_mod_add(2, 3));\nprint(probe_remote_mod_mul(4, 5));\n',
+    "remote_alias": 'import "probe_remote_mod" from "http://127.0.0.1:{port}/probe_remote_mod.hn" as rm;\nprint(rm_add(2, 3));\nprint(rm_mul(4, 5));\n',
+    "local_path": 'import "probe_remote_mod" from "tests/fixtures/remote_mod/probe_remote_mod.hn";\nprint(probe_remote_mod_add(2, 3));\n',
+}
+
 GROUPS = {
     "defaults": DEFAULTS,
     "match": MATCH,
@@ -276,6 +413,13 @@ GROUPS = {
     "overload": OVERLOAD,
     "alias": ALIAS,
     "value": VALUE,
+    "slice": SLICE,
+    "byte": BYTE,
+    "bytes": BYTES,
+    "field": FIELD,
+    "with": WITH,
+    "type": TYPE,
+    "import": IMPORT,
     "dotted": DOTTED,
     "async": ASYNC,
 }
@@ -299,7 +443,40 @@ def main() -> int:
 
     tmp = tempfile.mkdtemp(prefix="hone_probe_")
     bad = total = 0
+
+    # IMPORT 组本地 http server（fixture 目录）+ 缓存路径。
+    httpd = None
+    port = None
+    cache_file = os.path.join(
+        os.environ.get("USERPROFILE", os.path.expanduser("~")),
+        ".hone", "cache", "probe_remote_mod.hn",
+    )
+
+    def clear_import_cache():
+        try:
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+        except OSError:
+            pass
+
     try:
+        need_http = (not args.only and "import" in GROUPS) or args.only == "import"
+        if need_http:
+            import functools
+            import http.server
+            import socketserver
+            import threading
+            fixture_dir = os.path.join(os.getcwd(), "tests", "fixtures", "remote_mod")
+
+            class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+                def log_message(self, format, *args):
+                    pass
+
+            handler = functools.partial(_QuietHandler, directory=fixture_dir)
+            httpd = socketserver.TCPServer(("127.0.0.1", 0), handler)
+            port = httpd.server_address[1]
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            clear_import_cache()
         for gname, cases in GROUPS.items():
             if args.only and gname != args.only:
                 continue
@@ -307,9 +484,16 @@ def main() -> int:
             for name, src in cases.items():
                 total += 1
                 path = os.path.join(tmp, "t.hn")
+                if gname == "import" and port is not None:
+                    src = src.replace("{port}", str(port))
                 with open(path, "w", encoding="utf-8", newline="\n") as f:
                     f.write(src)
+                is_import = gname == "import"
+                if is_import:
+                    clear_import_cache()
                 i = run([BIN, "run", path])
+                if is_import:
+                    clear_import_cache()
                 v = run([BIN, "run", "--vm", path])
                 res = {"interp": i, "vm": v}
                 diffs = [(e, r) for e, r in res.items() if e != "interp" and r != i]
@@ -324,6 +508,8 @@ def main() -> int:
     finally:
         import shutil
 
+        if httpd is not None:
+            httpd.shutdown()
         shutil.rmtree(tmp, ignore_errors=True)
     print(f"\n共 {total} 例，分歧 {bad}")
     return 1 if bad else 0

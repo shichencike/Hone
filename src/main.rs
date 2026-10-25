@@ -296,8 +296,13 @@ fn run_script(path: &str, src: &str, debug: bool, use_vm: bool) -> Result<(), ZE
     if use_vm {
         // G3.1：VM 是 AOT 编译模型，无法运行期抓取模块——编译期展开顶层 import（设计 §7.3）。
         // 解释器仍走运行期 import（interp::exec_import），保持既有语义不变。
-        let program = imports::resolve_imports(program, path, src)?;
+        // 注意：checker 必须在 resolve_imports **之前**运行——与解释器 / hone check /
+        // hone prof 一致，只静态检查主模块源码；import 的模块函数在静态阶段按
+        // 「外部动态加载」放行（has_external），其函数体不做静态检查。否则展开后的
+        // 模块函数体（尤其未被调用、参数类型无法从调用点推断的那些）会在 strict 阶段
+        // 被误报 H003，与解释器产出分歧。展开仅用于 VM 编译，不改变检查范围。
         checker::Checker::check(&program, path, src)?;
+        let program = imports::resolve_imports(program, path, src)?;
         vm::run(&program, path, src, debug)?;
     } else {
         checker::Checker::check(&program, path, src)?;

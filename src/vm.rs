@@ -28,7 +28,7 @@ use std::thread;
 use crate::ast::*;
 use crate::builtins;
 use crate::error::{codes, ZError};
-use crate::interp::{EnumVal, ErrorObj, FutureVal, LambdaVal, Value};
+use crate::interp::{EnumVal, ErrorObj, FutureVal, LambdaVal, TypeInstVal, Value, STRUCT_MARKER_KEY};
 use crate::lexer::Span;
 
 // ───────────────────────────── 常量池 ─────────────────────────────
@@ -40,6 +40,8 @@ pub enum Const {
     Bool(bool),
     Str(String),
     Char(char),
+    Byte(u8),
+    Bytes(Vec<u8>),
     Null,
 }
 
@@ -70,7 +72,35 @@ pub enum Instr {
     IterCheck(usize, bool),      // src, is_comp（迭代源必须是 list/dict/bytes，否则报错）
     Index(usize, usize, usize),    // dst, obj, key
     IndexSet(usize, usize, usize), // obj, key, val
+    /// 切片 a[i:j]（T1）：dst, src, lo 寄存器（None = 缺省 0）, hi 寄存器（None = 缺省 len）。
+    /// 语义镜像解释器 eval_slice：负索引从末尾归一、越界钳制、lo>hi 产空副本。
+    Slice(usize, usize, Option<usize>, Option<usize>),
     DestructGet(usize, usize, usize, usize, bool), // dst, obj, key, nvars, is_dict（解构专用：列表越界/字典缺键报错；nvars/is_dict 用于镜像解释器文案）
+    /// 字段赋值（T3）：obj, field, val, leaf。leaf=true 为叶字段（readonly 拦截 +
+    /// 未知字段/隐藏键报错，镜像解释器 update_chain 叶分支）；leaf=false 为中间层
+    /// 写回（隐藏键报 "cannot write to the hidden struct marker field"，其余静默更新）。
+    /// TypeInst 写路径由 T6 落地后接手。
+    FieldSet(usize, String, usize, bool),
+    /// with 进入（T5）：dst, src。运行时镜像解释器 call_enter——TypeInst 调
+    /// `类型.__enter__(self)`（func_map「类型名.方法名」派发）；Int 内置句柄
+    /// （sqlite/sse/guipro 资源表）原样返回句柄；Ptr 原样；其余报 H002
+    /// （文案 / help 与解释器 err_no_context 逐字节一致）。
+    WithEnter(usize, usize),
+    /// with 退出（T5）：src, propagate。镜像解释器 call_exit——TypeInst 调
+    /// `类型.__exit__(self)`；Int 资源派发 with_close（返回值忽略）；Ptr 原样通过。
+    /// propagate=true（块正常结束）：__exit__ 自身报错则以该错误为准（不能吞错）；
+    /// propagate=false（异常路径重抛前）：__exit__ 报错被丢弃，块的原始错误优先
+    /// （镜像解释器 (Err(e), Err(_)) => Err(e) 的优先序）。
+    WithExit(usize, bool),
+    /// type 实例构造（T6）：dst, 类型名, argbase, nargs。运行时镜像解释器 Expr::New——
+    /// 沿继承链收集字段（父链在前，镜像遍历序）按序绑定实参、缺省零值；
+    /// 实参过多报「`new {ty}` takes N field(s), got M」（H011）；构造后沿链找
+    /// init（先本类后父类）以 self 首参调用，返回非 null 报「must not return a value」。
+    TypeNew(usize, String, usize, usize),
+    /// type 实例方法调用（T6）：dst, obj, 方法名, argbase, nargs。运行时沿 extends
+    /// 链查「类型名.方法名」（子类覆盖父类），self 作首参；缺方法 / 非 TypeInst
+    /// 报错文案与解释器逐字节一致。
+    CallMethod(usize, usize, String, usize, usize),
     Field(usize, usize, String),   // dst, obj, field
     Len(usize, usize),             // dst, src
     Keys(usize, usize),            // dst, src(dict)
@@ -139,8 +169,10 @@ pub struct Chunk {
 struct Compiler {
     chunks: Vec<Chunk>,
     func_map: HashMap<String, usize>,
-    struct_defs: HashMap<String, Vec<String>>,
+    struct_defs: HashMap<String, Vec<(String, bool)>>,
     enum_defs: HashMap<String, Vec<(String, usize)>>,
+    /// type 定义（T6）：类型名 → (父类型名(空串=根), (字段名, 类型, 是否只读) 列表)
+    type_defs: HashMap<String, (String, Vec<(String, crate::ast::TyName, bool)>)>,
     aliases: Vec<(String, String)>,
     async_fns: HashSet<String>,
     code: Vec<Instr>,
@@ -159,7 +191,10 @@ struct Compiler {
     tmp_next: usize,
     max_reg: usize,
     cur_span: Span,
-    loop_labels: Vec<(String, String)>, // (continue_label, break_label)
+    loop_labels: Vec<(String, String, usize)>, // (continue_label, break_label, 入栈时 with_stack 深度)
+    /// T5：活跃 with 语句的资源寄存器栈（内层在后）。break/continue/return 跳出
+    /// with 块时，须先按内层优先发射 WithExit（镜像解释器 Flow 穿透时 __exit__ 必调）。
+    with_stack: Vec<usize>,
     label_seq: usize,
     syn_seq: usize,
     /// G2.8：当前 chunk 的形参默认值位 / 实参数寄存器（finish_chunk 取走并复位）。
@@ -182,6 +217,7 @@ impl Compiler {
             func_map: HashMap::new(),
             struct_defs: HashMap::new(),
             enum_defs: HashMap::new(),
+            type_defs: HashMap::new(),
             aliases: Vec::new(),
             async_fns: HashSet::new(),
             code: Vec::new(),
@@ -198,6 +234,7 @@ impl Compiler {
             max_reg: 0,
             cur_span: Span { line: 0, col: 0, len: 0 },
             loop_labels: Vec::new(),
+            with_stack: Vec::new(),
             label_seq: 0,
             syn_seq: 0,
             cur_param_defaults: Vec::new(),
@@ -465,10 +502,14 @@ impl Compiler {
                 }
                 Stmt::StructDef { name, fields, .. } => {
                     self.struct_defs
-                        .insert(name.clone(), fields.iter().map(|(n, _, _)| n.clone()).collect());
+                        .insert(name.clone(), fields.iter().map(|(n, _, ro)| (n.clone(), *ro)).collect());
                 }
                 // type 实例类：注册成员方法（「类型名.方法名」限定键），供运行时解析
-                Stmt::TypeDef { name, methods, .. } => {
+                Stmt::TypeDef { name, base, fields, methods, .. } => {
+                    self.type_defs.insert(
+                        name.clone(),
+                        (base.clone().unwrap_or_default(), fields.clone()),
+                    );
                     for m in methods {
                         if let Stmt::FnDef { name: mf_name, params: mf_params, body: mf_body, .. } = m {
                             let fname = format!("{}.{}", name, mf_name);
@@ -737,7 +778,7 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                 let rc = self.compile_expr(cond);
                 self.cond_check(rc, 1, expr_span(cond));
                 self.jif(rc, &lend);
-                self.loop_labels.push((lstart.clone(), lend.clone()));
+                self.loop_labels.push((lstart.clone(), lend.clone(), self.with_stack.len()));
                 for s2 in body {
                     self.compile_stmt(s2);
                     self.reset_tmp();
@@ -751,7 +792,7 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                 let leval = self.new_label("Leval");
                 let lend = self.new_label("Lend");
                 self.emit_label(&lstart);
-                self.loop_labels.push((leval.clone(), lend.clone()));
+                self.loop_labels.push((leval.clone(), lend.clone(), self.with_stack.len()));
                 for s2 in body {
                     self.compile_stmt(s2);
                     self.reset_tmp();
@@ -777,7 +818,7 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                     self.cond_check(rc, 3, expr_span(c));
                     self.jif(rc, &lend);
                 }
-                self.loop_labels.push((lstep.clone(), lend.clone()));
+                self.loop_labels.push((lstep.clone(), lend.clone(), self.with_stack.len()));
                 for s2 in body {
                     self.compile_stmt(s2);
                     self.reset_tmp();
@@ -854,7 +895,7 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                 let relem = self.tmp();
                 self.emit(Instr::Index(relem, riter, rcnt));
                 self.emit(Instr::Move(rvar, relem));
-                self.loop_labels.push((linc.clone(), lend2.clone()));
+                self.loop_labels.push((linc.clone(), lend2.clone(), self.with_stack.len()));
                 for s2 in body {
                     self.compile_stmt(s2);
                     self.reset_tmp();
@@ -917,7 +958,7 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                     self.emit(Instr::Index(drval, riter2, drkey));
                     self.emit(Instr::Move(rd, drval));
                 }
-                self.loop_labels.push((dinc.clone(), dend.clone()));
+                self.loop_labels.push((dinc.clone(), dend.clone(), self.with_stack.len()));
                 for s2 in body {
                     self.compile_stmt(s2);
                     self.reset_tmp();
@@ -937,6 +978,11 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                 self.emit_label(&lend);
             }
             Stmt::Return { values, .. } => {
+                // return 穿过 with 块：__exit__ 仍必调（内层优先，镜像解释器 Flow::Return 穿透）
+                let exits: Vec<usize> = self.with_stack.iter().rev().copied().collect();
+                for rt in exits {
+                    self.emit(Instr::WithExit(rt, false));
+                }
                 if values.is_empty() {
                     self.emit(Instr::RetNull);
                 } else if values.len() == 1 {
@@ -958,16 +1004,29 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                 }
             }
             Stmt::Break { .. } => {
-                let bl = self.loop_labels.last().map(|(_, b)| b.clone());
-                match bl {
-                    Some(bl) => self.jmp(&bl),
+                let top = self.loop_labels.last().cloned();
+                match top {
+                    Some((_, bl, wdepth)) => {
+                        // 跳出目标循环仍在其内的 with 不调 __exit__；更外层的必调（镜像解释器）
+                        let exits: Vec<usize> = self.with_stack[wdepth..].to_vec();
+                        for &rt in exits.iter().rev() {
+                            self.emit(Instr::WithExit(rt, false));
+                        }
+                        self.jmp(&bl);
+                    }
                     None => self.fail(codes::SYNTAX, "VM: break 只能在循环内"),
                 }
             }
             Stmt::Continue { .. } => {
-                let cl = self.loop_labels.last().map(|(c, _)| c.clone());
-                match cl {
-                    Some(cl) => self.jmp(&cl),
+                let top = self.loop_labels.last().cloned();
+                match top {
+                    Some((cl, _, wdepth)) => {
+                        let exits: Vec<usize> = self.with_stack[wdepth..].to_vec();
+                        for &rt in exits.iter().rev() {
+                            self.emit(Instr::WithExit(rt, false));
+                        }
+                        self.jmp(&cl);
+                    }
                     None => self.fail(codes::SYNTAX, "VM: continue 只能在循环内"),
                 }
             }
@@ -985,8 +1044,114 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
             // 宏定义：已由预处理阶段展开并从 AST 移除（仅为穷尽匹配）
             Stmt::MacroDef { .. } => {}
             // with 上下文管理器 / 字段赋值 / type 定义：VM 暂不支持，解释器兜底
-            Stmt::With { .. } => self.fail(codes::NOT_IMPLEMENTED, "VM: `with` 上下文管理器暂不支持"),
-            Stmt::FieldAssign { .. } => self.fail(codes::NOT_IMPLEMENTED, "VM: 字段赋值 `obj.field = x` 暂不支持"),
+            Stmt::With { target, var, body, .. } => {
+                // with 展开（镜像解释器 exec_with）：
+                //   rt = eval(target); r = __enter__(rt); [as 绑定]; body;
+                //   __exit__(rt); 跳过 handler; handler: __exit__(rt, 吞错); Throw(rc)
+                // 错误优先序：块报错优先于 __exit__ 报错（handler 路径 propagate=false）；
+                // break/continue/return 穿出时由对应编译点先发射 WithExit。
+                let rt = self.compile_expr(target);
+                // 资源寄存器挪到「变量区」安全寄存器：body 内 tmp_next 会随语句回收复用，
+                // tmp 寄存器会被后续表达式覆盖（例如 if 条件求值），break/return 穿出时
+                // WithExit 读到的是被覆盖后的值。镜像 DestructAssign 的处理。
+                let saved_vn = self.var_next;
+                self.var_next += 1;
+                let rt = if rt == saved_vn {
+                    rt
+                } else {
+                    self.emit(Instr::Move(saved_vn, rt));
+                    saved_vn
+                };
+                if saved_vn > self.max_reg {
+                    self.max_reg = saved_vn;
+                }
+                self.tmp_next = self.var_next;
+                let renter = self.tmp();
+                self.emit(Instr::WithEnter(renter, rt));
+                self.with_stack.push(rt);
+                if let Some(v) = var {
+                    let _ = self.decl(v);
+                }
+                let lhandler = self.new_label("Lwhandler");
+                let lafter = self.new_label("Lwafter");
+                let rcatch = self.tmp();
+                let i = self.code.len();
+                self.emit(Instr::TryBegin(0, rcatch));
+                self.pending.push((i, lhandler.clone(), self.try_depth));
+                self.try_depth += 1;
+                self.enter();
+                for s2 in body {
+                    self.compile_stmt(s2);
+                    self.reset_tmp();
+                }
+                self.exit();
+                self.emit(Instr::TryPop);
+                self.try_depth -= 1;
+                self.emit(Instr::WithExit(rt, true));
+                self.jmp(&lafter);
+                self.emit_label(&lhandler);
+                // 异常路径：先 __exit__（吞错，块的原始错误优先）再重抛
+                self.emit(Instr::WithExit(rt, false));
+                self.emit(Instr::Throw(rcatch));
+                self.emit_label(&lafter);
+                self.with_stack.pop();
+            }
+            Stmt::FieldAssign { target, value, .. } => {
+                // 字段赋值展开为「从深到浅」的 FieldSet 链（镜像 interp set_field_value /
+                // update_chain 递归写回）：p.a.b = x → t1 = Field(p, a); t2 = Field(t1, b);
+                // FieldSet(t2, b, x, leaf); FieldSet(t1, a, t2, mid); FieldSet(p, a, t1, mid)。
+                // 叶层带 readonly / 未知字段 / 隐藏键拦截；中间层写回静默更新（解释器同款）。
+                let rv = self.compile_expr(value);
+                let mut chain: Vec<String> = Vec::new();
+                let mut cur: &Expr = target;
+                loop {
+                    match cur {
+                        Expr::Field { obj, field, .. } => {
+                            chain.push(field.clone());
+                            cur = obj;
+                        }
+                        Expr::Ident { name, .. } => {
+                            chain.push(name.clone());
+                            break;
+                        }
+                        _ => {
+                            self.fail(codes::NOT_IMPLEMENTED, "VM: 仅支持字段赋值 obj.field = x");
+                            return;
+                        }
+                    }
+                }
+                chain.reverse();
+                let base_name = chain[0].clone();
+                let base_reg = match self.lookup(&base_name) {
+                    Some(r) => r,
+                    None => {
+                        // 镜像解释器：运行期 H002（`base` is not defined），定位随语句
+                        self.emit(Instr::Raise(
+                            codes::UNDEFINED,
+                            format!("`{}` is not defined", base_name),
+                            None,
+                        ));
+                        let rnull = self.tmp();
+                        self.emit(Instr::LoadNull(rnull));
+                        return;
+                    }
+                };
+                let mut ro = base_reg;
+                let mut regs = vec![base_reg];
+                let levels = &chain[1..];
+                for f in &levels[..levels.len().saturating_sub(1)] {
+                    let rsub = self.tmp();
+                    self.emit(Instr::Field(rsub, ro, f.clone()));
+                    regs.push(rsub);
+                    ro = rsub;
+                }
+                // 从叶到基写回：val 链式传递「已更新的子对象」（镜像 update_chain 递归）
+                let mut val = rv;
+                for i in (0..levels.len()).rev() {
+                    self.emit(Instr::FieldSet(regs[i], levels[i].clone(), val, i + 1 == levels.len()));
+                    val = regs[i];
+                }
+            }
             Stmt::TypeDef { .. } => {
                 // type 定义已由 compile 阶段注册方法（仅穷尽匹配）
             }
@@ -1115,26 +1280,58 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                 self.emit(Instr::LoadK(r, k));
                 r
             }
-            // 字节类型/切片/type 实例为解释器特性，VM 暂不支持（fail 兜底）
-            Expr::ByteLit(_, _) => {
-                self.fail(codes::NOT_IMPLEMENTED, "VM: `byte` 字面量暂不支持");
-                0
+            // T2：byte/bytes 字面量 → 常量池装载（display / 运算执行臂早已对齐解释器）
+            Expr::ByteLit(v, _) => {
+                let k = self.const_idx(Const::Byte(*v));
+                let r = self.tmp();
+                self.emit(Instr::LoadK(r, k));
+                r
             }
-            Expr::BytesLit(_, _) => {
-                self.fail(codes::NOT_IMPLEMENTED, "VM: `bytes` 字面量暂不支持");
-                0
+            Expr::BytesLit(v, _) => {
+                let k = self.const_idx(Const::Bytes(v.clone()));
+                let r = self.tmp();
+                self.emit(Instr::LoadK(r, k));
+                r
             }
-            Expr::Slice { .. } => {
-                self.fail(codes::NOT_IMPLEMENTED, "VM: 切片 `a[i:j]` 暂不支持");
-                0
+            // T1：切片 a[i:j] —— 求值顺序 obj → lo → hi（镜像解释器 eval_slice）
+            Expr::Slice { obj, lo, hi, .. } => {
+                let ro = self.compile_expr(obj);
+                let rlo = lo.as_ref().map(|e| self.compile_expr(e));
+                let rhi = hi.as_ref().map(|e| self.compile_expr(e));
+                let r = self.tmp();
+                self.emit(Instr::Slice(r, ro, rlo, rhi));
+                r
             }
-            Expr::MethodCall { .. } => {
-                self.fail(codes::NOT_IMPLEMENTED, "VM: `type` 实例方法暂不支持");
-                0
+            // T6：new Type(...) → TypeNew（实参求值顺序与 interp 一致：绑定序 = 字段序）
+            Expr::New { ty, args, .. } => {
+                let n = args.len();
+                let base = self.tmp();
+                for _ in 0..n {
+                    self.tmp();
+                }
+                for (i, a) in args.iter().enumerate() {
+                    let ri = self.compile_expr(a);
+                    self.emit(Instr::Move(base + i, ri));
+                }
+                let r = self.tmp();
+                self.emit(Instr::TypeNew(r, ty.clone(), base, n));
+                r
             }
-            Expr::New { .. } => {
-                self.fail(codes::NOT_IMPLEMENTED, "VM: `type` 实例暂不支持");
-                0
+            // T6：obj.m(...) → CallMethod（运行期沿 extends 链解析「类型.方法」）
+            Expr::MethodCall { obj, name, args, .. } => {
+                let ro = self.compile_expr(obj);
+                let n = args.len();
+                let base = self.tmp();
+                for _ in 0..n {
+                    self.tmp();
+                }
+                for (i, a) in args.iter().enumerate() {
+                    let ri = self.compile_expr(a);
+                    self.emit(Instr::Move(base + i, ri));
+                }
+                let r = self.tmp();
+                self.emit(Instr::CallMethod(r, ro, name.clone(), base, n));
+                r
             }
             Expr::Ident { name, .. } if self.hidden_by_default(name) => {
                 // G2.8：默认表达式只能看见序号更小的形参（后置形参在解释器里未绑定）
@@ -1481,6 +1678,7 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                 let saved_tmp_next = self.tmp_next;
                 let saved_max_reg = self.max_reg;
                 let saved_loop = std::mem::take(&mut self.loop_labels);
+                let saved_with = std::mem::take(&mut self.with_stack);
 
                 // 在 lambda chunk 内先声明捕获变量（注册到作用域供体引用），再声明形参。
                 self.enter();
@@ -1526,6 +1724,7 @@ fn compile_fn(&mut self, name: &str, params: &[Param], body: &[Stmt]) {
                 self.tmp_next = saved_tmp_next;
                 self.max_reg = saved_max_reg;
                 self.loop_labels = saved_loop;
+                self.with_stack = saved_with;
 
                 // 在当前作用域发出 MakeLambda：运行时读取 captures 的寄存器值构建闭包。
                 let r = self.tmp();
@@ -1766,8 +1965,10 @@ struct TryFrame {
 pub struct Vm {
     chunks: Vec<Chunk>,
     func_map: HashMap<String, usize>,
-    struct_defs: HashMap<String, Vec<String>>,
+    struct_defs: HashMap<String, Vec<(String, bool)>>,
     enum_defs: HashMap<String, Vec<(String, usize)>>,
+    /// type 定义（T6）：类型名 → (父类型名(空串=根), (字段名, 类型, 是否只读) 列表)
+    type_defs: HashMap<String, (String, Vec<(String, crate::ast::TyName, bool)>)>,
     aliases: Vec<(String, String)>,
     async_fns: HashSet<String>,
     file: String,
@@ -1780,8 +1981,9 @@ impl Vm {
     fn new(
         chunks: Vec<Chunk>,
         func_map: HashMap<String, usize>,
-        struct_defs: HashMap<String, Vec<String>>,
+        struct_defs: HashMap<String, Vec<(String, bool)>>,
         enum_defs: HashMap<String, Vec<(String, usize)>>,
+        type_defs: HashMap<String, (String, Vec<(String, crate::ast::TyName, bool)>)>,
         aliases: Vec<(String, String)>,
         async_fns: HashSet<String>,
         file: &str,
@@ -1794,6 +1996,7 @@ impl Vm {
             struct_defs,
             enum_defs,
             aliases,
+            type_defs,
             async_fns,
             file: file.to_string(),
             src: src.to_string(),
@@ -2229,6 +2432,12 @@ impl Vm {
                 };
                 self.frames[fi].regs[d] = result?;
             }
+            Instr::Slice(d, o, lo, hi) => {
+                let obj = self.frames[fi].regs[o].clone();
+                let lov = lo.map(|r| self.frames[fi].regs[r].clone());
+                let hiv = hi.map(|r| self.frames[fi].regs[r].clone());
+                self.frames[fi].regs[d] = v_slice(&obj, lov.as_ref(), hiv.as_ref(), span, self)?;
+            }
             Instr::IndexSet(o, k, v) => {
                 let key = self.frames[fi].regs[k].clone();
                 let val = self.frames[fi].regs[v].clone();
@@ -2244,6 +2453,31 @@ impl Vm {
             Instr::Field(d, o, field) => {
                 let obj = self.frames[fi].regs[o].clone();
                 self.frames[fi].regs[d] = v_field(&obj, &field, span, self)?;
+            }
+            Instr::FieldSet(o, field, v, leaf) => {
+                let mut dst = self.frames[fi].regs[o].clone();
+                let val = self.frames[fi].regs[v].clone();
+                v_field_set(&mut dst, &field, val, leaf, span, self)?;
+                self.frames[fi].regs[o] = dst;
+            }
+            Instr::WithEnter(d, s) => {
+                let t = self.frames[fi].regs[s].clone();
+                self.frames[fi].regs[d] = v_with_enter(&t, span, self)?;
+            }
+            Instr::WithExit(s, propagate) => {
+                let t = self.frames[fi].regs[s].clone();
+                v_with_exit(&t, propagate, span, self)?;
+            }
+            Instr::TypeNew(d, ty, base, n) => {
+                let args: Vec<Value> =
+                    (base..base + n).map(|i| self.frames[fi].regs[i].clone()).collect();
+                self.frames[fi].regs[d] = v_type_new(&ty, args, span, self)?;
+            }
+            Instr::CallMethod(d, o, name, base, n) => {
+                let obj = self.frames[fi].regs[o].clone();
+                let args: Vec<Value> =
+                    (base..base + n).map(|i| self.frames[fi].regs[i].clone()).collect();
+                self.frames[fi].regs[d] = v_call_method(&obj, &name, args, span, self)?;
             }
             Instr::Len(d, s) => {
                 let v = self.frames[fi].regs[s].clone();
@@ -2367,9 +2601,9 @@ impl Vm {
                                 &Span {
                                     line: e.line,
                                     col: e.col,
-                                    len: 1,
+                                    len: e.len,
                                 },
-                                None,
+                                e.help.clone(),
                             ));
                         } else {
                             return Err(Value::Error(ErrorObj {
@@ -2485,6 +2719,16 @@ impl Vm {
                 _ => {}
             }
         }
+        // 限定名 `变量.方法(...)` 且变量求值为 type 实例 → 实例方法调用
+        // （镜像解释器 Expr::Call 分支：lambda 变量 → 实例方法 → call_fn 的派发序）
+        if let Some((base_name, method)) = func.split_once('.') {
+            if let Some(&reg) = self.chunks[self.frames[fi].chunk].locals.get(base_name) {
+                let v = self.frames[fi].regs[reg].clone();
+                if matches!(v, Value::TypeInst(_)) {
+                    return v_call_method(&v, method, args, span, self);
+                }
+            }
+        }
         // 异步函数调用：后台线程执行，立即返回 future（等待由 await 完成）。
         if self.async_fns.contains(&func) {
             return self.spawn_async(&func, args);
@@ -2524,7 +2768,7 @@ impl Vm {
         if let Some(fields) = self.struct_defs.get(&func) {
             let mut d = Vec::new();
             d.push(("\u{0}__struct__".to_string(), Value::mk_str(func.clone())));
-            for (i, f) in fields.iter().enumerate() {
+            for (i, (f, _ro)) in fields.iter().enumerate() {
                 let v = args.get(i).cloned().unwrap_or(Value::Null);
                 d.push((f.clone(), v));
             }
@@ -2701,6 +2945,7 @@ impl Vm {
         let func_map = self.func_map.clone();
         let struct_defs = self.struct_defs.clone();
         let enum_defs = self.enum_defs.clone();
+        let type_defs = self.type_defs.clone();
         let aliases = self.aliases.clone();
         let async_fns = self.async_fns.clone();
         let file = self.file.clone();
@@ -2709,7 +2954,7 @@ impl Vm {
         let fut = future.clone();
         thread::spawn(move || {
             let mut vm = Vm::new(
-                chunks, func_map, struct_defs, enum_defs, aliases, async_fns, &file, &src, false,
+                chunks, func_map, struct_defs, enum_defs, type_defs, aliases, async_fns, &file, &src, false,
             );
             let no_span = Span { line: 0, col: 0, len: 0 };
             let result = vm.call_chunk(ci, args, &no_span);
@@ -2746,13 +2991,14 @@ impl Vm {
         let func_map = self.func_map.clone();
         let struct_defs = self.struct_defs.clone();
         let enum_defs = self.enum_defs.clone();
+        let type_defs = self.type_defs.clone();
         let aliases = self.aliases.clone();
         let async_fns = self.async_fns.clone();
         let file = self.file.clone();
         let src = self.src.clone();
         thread::spawn(move || {
             let mut vm = Vm::new(
-                chunks, func_map, struct_defs, enum_defs, aliases, async_fns, &file, &src, false,
+                chunks, func_map, struct_defs, enum_defs, type_defs, aliases, async_fns, &file, &src, false,
             );
             let no_span = Span { line: 0, col: 0, len: 0 };
             if let Err(e) = vm.call_chunk(ci, args, &no_span) {
@@ -2772,6 +3018,8 @@ fn const_to_value(c: Const) -> Value {
         Const::Bool(v) => Value::Bool(v),
         Const::Str(v) => Value::mk_str(v),
         Const::Char(v) => Value::Char(v),
+        Const::Byte(v) => Value::Byte(v),
+        Const::Bytes(v) => Value::mk_bytes(v),
         Const::Null => Value::Null,
     }
 }
@@ -3106,6 +3354,8 @@ fn v_eq(a: &Value, b: &Value, span: &Span, vm: &Vm) -> Result<bool, Value> {
         (Value::List(x), Value::List(y)) => Ok(*x.read().unwrap() == *y.read().unwrap()),
         (Value::Dict(x), Value::Dict(y)) => Ok(*x.read().unwrap() == *y.read().unwrap()),
         (Value::Ptr(x), Value::Ptr(y)) => Ok(x == y),
+        // 实例类实例：按引用相等（同一 new 创建点视为相等，不做结构相等）
+        (Value::TypeInst(x), Value::TypeInst(y)) => Ok(std::sync::Arc::ptr_eq(x, y)),
         // ptr 与整数比较：`p == 0` 判断 NULL，`p == n` 比较句柄数值
         (Value::Ptr(x), Value::Int(y)) => Ok(*x as i64 == *y),
         (Value::Int(x), Value::Ptr(y)) => Ok(*x == *y as i64),
@@ -3245,10 +3495,432 @@ fn v_index(obj: &Value, key: &Value, span: &Span, vm: &Vm) -> Result<Value, Valu
             }
             Ok(Value::Null)
         }
-        other => Err(vm.mk_err(
+        other => Err(vm.mk_err_with(
             codes::TYPE_MISMATCH,
-            format!("cannot index a value of type `{}`", value_to_str(other)),
+            format!("cannot index a value of type `{}`", other.type_name()),
             span,
+            Some("indexing is supported on lists and strings, e.g. `a[0]`, `s[1]`".to_string()),
+        )),
+    }
+}
+
+/// 切片求值（T1）：a[i:j]，语义逐字镜像解释器 eval_slice——
+/// list/bytes 产副本；负索引从末尾归一、越界钳制、lo>hi 产空副本；
+/// 非容器 / 非 int 界的报错文案与 help 与解释器逐字节一致。
+fn v_slice(
+    obj: &Value,
+    lo: Option<&Value>,
+    hi: Option<&Value>,
+    span: &Span,
+    vm: &Vm,
+) -> Result<Value, Value> {
+    let len: i64 = match obj {
+        Value::List(items) => items.read().unwrap().len() as i64,
+        Value::Bytes(b) => b.len() as i64,
+        other => {
+            return Err(vm.mk_err_with(
+                codes::TYPE_MISMATCH,
+                format!("cannot slice a value of type `{}`", other.type_name()),
+                span,
+                Some("slicing is supported on lists and byte sequences".to_string()),
+            ))
+        }
+    };
+    let lo_v = match lo {
+        Some(Value::Int(x)) => *x,
+        Some(other) => {
+            return Err(vm.mk_err(
+                codes::TYPE_MISMATCH,
+                format!("slice index must be an int, got `{}`", other.type_name()),
+                span,
+            ))
+        }
+        None => 0,
+    };
+    let hi_v = match hi {
+        Some(Value::Int(x)) => *x,
+        Some(other) => {
+            return Err(vm.mk_err(
+                codes::TYPE_MISMATCH,
+                format!("slice index must be an int, got `{}`", other.type_name()),
+                span,
+            ))
+        }
+        None => len,
+    };
+    // 规范化：负索引从末尾算；越界截断（镜像解释器）
+    let lo_n = if lo_v < 0 { (len + lo_v).max(0) } else { lo_v.min(len) };
+    let hi_n = if hi_v < 0 { (len + hi_v).max(0) } else { hi_v.min(len) };
+    let (lo_n, hi_n) = (lo_n as usize, hi_n as usize);
+    if lo_n > hi_n {
+        return Ok(match obj {
+            Value::List(_) => Value::mk_list(Vec::new()),
+            Value::Bytes(_) => Value::mk_bytes(Vec::new()),
+            _ => unreachable!(),
+        });
+    }
+    Ok(match obj {
+        Value::List(items) => {
+            let items = items.read().unwrap();
+            Value::mk_list(items[lo_n..hi_n].to_vec())
+        }
+        Value::Bytes(b) => Value::mk_bytes(b[lo_n..hi_n].to_vec()),
+        _ => unreachable!(),
+    })
+}
+
+/// 字段赋值（T3）：镜像解释器 update_chain 的 dict 分支——
+/// leaf=true：readonly 拦截（经 __struct__ 标记查 struct 表）→ 隐藏键报
+/// 「no field ...」→ 未知字段报同文案；非 dict 报 cannot assign to field。
+/// leaf=false（中间层写回）：隐藏键报 "cannot write to the hidden struct marker
+/// field"，存在则静默更新（缺失不可能：Field 读已先报）。TypeInst 写路径由 T6 接手。
+/// 值语义：写屏障 ensure_unique（独占原地写，共享先隔离），可观察行为与
+/// 解释器「快照 + 整体写回」逐字节一致。
+fn v_field_set(
+    dst: &mut Value,
+    field: &str,
+    val: Value,
+    leaf: bool,
+    span: &Span,
+    vm: &Vm,
+) -> Result<(), Value> {
+    dst.ensure_unique();
+    match dst {
+        Value::Dict(entries) => {
+            let mut entries = entries.write().unwrap();
+            if leaf {
+                // readonly 字段拦截（运行时兜底，镜像 is_struct_readonly_field）
+                let sname = match entries.iter().find(|(k, _)| k == STRUCT_MARKER_KEY) {
+                    Some((_, Value::Str(s))) => Some(s.to_string()),
+                    _ => None,
+                };
+                if let Some(name) = sname {
+                    if let Some(fields) = vm.struct_defs.get(&name) {
+                        if let Some((_, ro)) = fields.iter().find(|(k, _)| k == field) {
+                            if *ro {
+                                return Err(vm.mk_err_with(
+                                    codes::TYPE_MISMATCH,
+                                    format!("field `{}` of struct `{}` is readonly", field, name),
+                                    span,
+                                    Some(
+                                        "remove `readonly` from the field definition to allow assignment"
+                                            .to_string(),
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                }
+                if Value::is_hidden_struct_key(field) {
+                    let visible: Vec<&str> = entries
+                        .iter()
+                        .filter(|(k, _)| !Value::is_hidden_struct_key(k))
+                        .map(|(k, _)| k.as_str())
+                        .collect();
+                    return Err(vm.mk_err_with(
+                        codes::UNDEFINED,
+                        format!("no field `{}` (dict/struct has {})", field, visible.join(", ")),
+                        span,
+                        None,
+                    ));
+                }
+                if let Some(slot) = entries.iter_mut().find(|(k, _)| k == field) {
+                    slot.1 = val;
+                } else {
+                    let visible: Vec<&str> = entries
+                        .iter()
+                        .filter(|(k, _)| !Value::is_hidden_struct_key(k))
+                        .map(|(k, _)| k.as_str())
+                        .collect();
+                    return Err(vm.mk_err_with(
+                        codes::UNDEFINED,
+                        format!("no field `{}` (dict/struct has {})", field, visible.join(", ")),
+                        span,
+                        None,
+                    ));
+                }
+            } else if Value::is_hidden_struct_key(field) {
+                return Err(vm.mk_err_with(
+                    codes::UNDEFINED,
+                    "cannot write to the hidden struct marker field".to_string(),
+                    span,
+                    None,
+                ));
+            } else if let Some(slot) = entries.iter_mut().find(|(k, _)| k == field) {
+                slot.1 = val;
+            }
+            Ok(())
+        }
+        Value::TypeInst(inst) => {
+            // 引用语义：RwLock 字段表共享，直写对调用方立即可见（镜像 interp update_chain）
+            let mut fields = inst.fields.write().unwrap();
+            if leaf {
+                // readonly 拦截：沿继承链查字段定义（镜像 check_field_readonly）
+                let mut cur = Some(inst.ty.clone());
+                let mut seen: HashSet<String> = HashSet::new();
+                while let Some(tname) = cur.take() {
+                    if !seen.insert(tname.clone()) {
+                        break;
+                    }
+                    match vm.type_defs.get(&tname) {
+                        Some((base, defs)) => {
+                            if let Some((_, _, ro)) = defs.iter().find(|(k, _, _)| k == field) {
+                                if *ro {
+                                    return Err(vm.mk_err_with(
+                                        codes::TYPE_MISMATCH,
+                                        format!("field `{}` of type `{}` is readonly", field, tname),
+                                        span,
+                                        Some("remove `readonly` from the field definition to allow assignment".to_string()),
+                                    ));
+                                }
+                                break;
+                            }
+                            cur = if base.is_empty() { None } else { Some(base.clone()) };
+                        }
+                        None => break,
+                    }
+                }
+                if Value::is_hidden_struct_key(field) || !fields.iter().any(|(k, _)| k == field) {
+                    return Err(vm.mk_err_with(
+                        codes::UNDEFINED,
+                        format!("type `{}` has no field `{}`", inst.ty, field),
+                        span,
+                        None,
+                    ));
+                }
+                if let Some(slot) = fields.iter_mut().find(|(k, _)| k == field) {
+                    slot.1 = val;
+                }
+            } else {
+                if Value::is_hidden_struct_key(field) {
+                    return Err(vm.mk_err_with(
+                        codes::UNDEFINED,
+                        format!("type `{}` has no field `{}`", inst.ty, field),
+                        span,
+                        None,
+                    ));
+                }
+                // 中间层写回：存在则更新（缺失不可能：Field 读已先报），静默
+                if let Some(slot) = fields.iter_mut().find(|(k, _)| k == field) {
+                    slot.1 = val;
+                }
+            }
+            Ok(())
+        }
+        other => {
+            if leaf {
+                Err(vm.mk_err_with(
+                    codes::TYPE_MISMATCH,
+                    format!("cannot assign to field `.{}` of type `{}`", field, other.type_name()),
+                    span,
+                    Some("field assignment targets a `struct`/`type` instance field".to_string()),
+                ))
+            } else {
+                Err(vm.mk_err_with(
+                    codes::TYPE_MISMATCH,
+                    format!("cannot traverse field `.{}` of type `{}`", field, other.type_name()),
+                    span,
+                    None,
+                ))
+            }
+        }
+    }
+}
+
+/// with 进入（T5）：镜像解释器 call_enter——TypeInst 调 `类型.__enter__(self)`
+/// （func_map「类型名.方法名」派发，缺方法报与解释器 invoke_type_method 同文案）；
+/// Int 内置句柄（sqlite/sse/guipro 资源）原样返回；Ptr 原样；其余报 H002。
+fn v_with_enter(t: &Value, span: &Span, vm: &mut Vm) -> Result<Value, Value> {
+    match t {
+        Value::TypeInst(inst) => match vm_find_method(vm, &inst.ty, "__enter__") {
+            Some(func) => vm.do_call(&func, vec![t.clone()], span),
+            None => Err(vm.mk_err_with(
+                codes::UNDEFINED,
+                format!("type `{}` has no method `__enter__`", inst.ty),
+                span,
+                Some("check the method name, or the `extends` chain".to_string()),
+            )),
+        },
+        Value::Int(_) | Value::Ptr(_) => Ok(t.clone()),
+        other => Err(vm.mk_err_with(
+            codes::UNDEFINED,
+            format!(
+                "`with` target `{}` does not support `__enter__`",
+                other.type_name()
+            ),
+            span,
+            Some(
+                "wrap the resource in a `type` defining `fn __enter__(self)` and `fn __exit__(self)`"
+                    .to_string(),
+            ),
+        )),
+    }
+}
+
+/// with 退出（T5）：镜像解释器 call_exit——TypeInst 调 `类型.__exit__(self)`；
+/// Int 资源派发 builtins::with_close（返回值忽略，非资源静默通过）；Ptr 原样通过。
+/// propagate=true：__exit__ 报错不能吞（块成功时以 __exit__ 错误为准）；
+/// propagate=false：__exit__ 报错丢弃（块报错时原始错误优先）。
+fn v_with_exit(t: &Value, propagate: bool, span: &Span, vm: &mut Vm) -> Result<(), Value> {
+    let result: Result<(), Value> = match t {
+        Value::TypeInst(inst) => match vm_find_method(vm, &inst.ty, "__exit__") {
+            Some(func) => vm.do_call(&func, vec![t.clone()], span).map(|_| ()),
+            None => Err(vm.mk_err_with(
+                codes::UNDEFINED,
+                format!("type `{}` has no method `__exit__`", inst.ty),
+                span,
+                Some("check the method name, or the `extends` chain".to_string()),
+            )),
+        },
+        Value::Int(id) => {
+            // 内置句柄：登记于 with 资源表则派发 close；否则非资源，静默通过
+            let _ = builtins::with_close(*id);
+            Ok(())
+        }
+        Value::Ptr(_) => Ok(()),
+        other => Err(vm.mk_err_with(
+            codes::UNDEFINED,
+            format!(
+                "`with` target `{}` does not support `__exit__`",
+                other.type_name()
+            ),
+            span,
+            Some(
+                "wrap the resource in a `type` defining `fn __enter__(self)` and `fn __exit__(self)`"
+                    .to_string(),
+            ),
+        )),
+    };
+    match (result, propagate) {
+        (Err(_), false) => Ok(()), // 异常路径：__exit__ 报错被丢弃，块的原始错误优先
+        (r, _) => r,
+    }
+}
+
+/// T6：沿 extends 链查找方法（「类型名.方法名」限定键，子类覆盖父类，继承环保护）。
+/// 返回完整调用名。镜像解释器 invoke_type_method 的查找序。
+fn vm_find_method(vm: &Vm, ty: &str, method: &str) -> Option<String> {
+    let mut cur = Some(ty.to_string());
+    let mut seen: HashSet<String> = HashSet::new();
+    while let Some(tname) = cur.take() {
+        if !seen.insert(tname.clone()) {
+            break;
+        }
+        if vm.func_map.contains_key(&format!("{}.{}", tname, method)) {
+            return Some(format!("{}.{}", tname, method));
+        }
+        if let Some((base, _)) = vm.type_defs.get(&tname) {
+            cur = if base.is_empty() { None } else { Some(base.clone()) };
+        } else {
+            break;
+        }
+    }
+    None
+}
+
+/// T6：new Type(...) 构造。镜像解释器 Expr::New——沿继承链收集字段
+/// （interp 遍历序：base 字段 → 逐级父字段 → 自身字段）按序绑定实参、
+/// 缺省按字段类型取零值；实参过多报 H011；构造后沿链找 init（先本类后父类）
+/// 以 self 首参调用，返回非 null 报 H005。
+fn v_type_new(ty: &str, args: Vec<Value>, span: &Span, vm: &mut Vm) -> Result<Value, Value> {
+    let Some((base, own_fields)) = vm.type_defs.get(ty).cloned() else {
+        return Err(vm.mk_err_with(
+            codes::UNDEFINED,
+            format!("`new` requires a `type` definition, `{}` is not a type", ty),
+            span,
+            Some("define it with `type Name { ... }` before constructing an instance".to_string()),
+        ));
+    };
+    // 收集继承链字段（镜像 interp 遍历序：先 base，再沿 base 链向上，最后自身）
+    let mut all_fields: Vec<(String, TyName, bool)> = Vec::new();
+    let mut cur = if base.is_empty() { None } else { Some(base.clone()) };
+    let mut seen: HashSet<String> = HashSet::new();
+    while let Some(tname) = cur.take() {
+        if !seen.insert(tname.clone()) {
+            break;
+        }
+        if let Some((nb, nf)) = vm.type_defs.get(&tname) {
+            all_fields.extend(nf.iter().cloned());
+            cur = if nb.is_empty() { None } else { Some(nb.clone()) };
+        } else {
+            break;
+        }
+    }
+    all_fields.extend(own_fields.iter().cloned());
+    if args.len() > all_fields.len() {
+        return Err(vm.mk_err_with(
+            codes::ARG_COUNT,
+            format!("`new {}` takes {} field(s), got {}", ty, all_fields.len(), args.len()),
+            span,
+            Some("construct with `new Type(field1, field2, ...)` matching the field order".to_string()),
+        ));
+    }
+    // 按字段顺序绑定实参，缺省为零值（镜像 default_value）
+    let mut field_vals: Vec<(String, Value)> = Vec::new();
+    for (i, (fname, fty, _ro)) in all_fields.iter().enumerate() {
+        let v = if i < args.len() {
+            args[i].clone()
+        } else {
+            match fty {
+                TyName::Int => Value::Int(0),
+                TyName::Float => Value::Float(0.0),
+                TyName::Bool => Value::Bool(false),
+                TyName::Str => Value::mk_str(String::new()),
+                TyName::Char => Value::Char('\0'),
+                TyName::Byte => Value::Byte(0),
+                TyName::Bytes => Value::mk_bytes(Vec::new()),
+                TyName::Var(_) | TyName::Inferred => Value::Null,
+            }
+        };
+        field_vals.push((fname.clone(), v));
+    }
+    let inst = Value::TypeInst(std::sync::Arc::new(TypeInstVal {
+        ty: ty.to_string(),
+        fields: std::sync::RwLock::new(field_vals),
+    }));
+    // 找 init：优先本类（方法覆盖语义），再沿链向上（镜像 interp 查找序）
+    if let Some(init_name) = vm_find_method(vm, ty, "init") {
+        let mut full_args = vec![inst.clone()];
+        full_args.extend(args);
+        let r = vm.do_call(&init_name, full_args, span)?;
+        if !matches!(r, Value::Null) {
+            return Err(vm.mk_err_with(
+                codes::SYNTAX,
+                format!("`init` of `{}` must not return a value", ty),
+                span,
+                Some("remove the `return` from `init`; assign to `self.field` instead".to_string()),
+            ));
+        }
+    }
+    Ok(inst)
+}
+
+/// T6：type 实例方法调用。沿 extends 链查方法（子类覆盖父类），self 作首参；
+/// 缺方法 / 非 TypeInst 的报错文案与解释器逐字节一致。
+fn v_call_method(obj: &Value, name: &str, args: Vec<Value>, span: &Span, vm: &mut Vm) -> Result<Value, Value> {
+    match obj {
+        Value::TypeInst(inst) => match vm_find_method(vm, &inst.ty, name) {
+            Some(fname) => {
+                let mut full_args = vec![obj.clone()];
+                full_args.extend(args);
+                vm.do_call(&fname, full_args, span)
+            }
+            None => Err(vm.mk_err_with(
+                codes::UNDEFINED,
+                format!("type `{}` has no method `{}`", inst.ty, name),
+                span,
+                Some("check the method name, or the `extends` chain".to_string()),
+            )),
+        },
+        other => Err(vm.mk_err_with(
+            codes::TYPE_MISMATCH,
+            format!(
+                "method call `.{}` requires a `type` instance, got `{}`",
+                name,
+                other.type_name()
+            ),
+            span,
+            Some("methods can only be called on instances created with `new Type(...)`".to_string()),
         )),
     }
 }
@@ -3301,10 +3973,11 @@ fn v_index_set(dst: &mut Value, key: &Value, val: Value, span: &Span, vm: &Vm) -
             d.push((k, val));
             Ok(())
         }
-        other => Err(vm.mk_err(
+        other => Err(vm.mk_err_with(
             codes::TYPE_MISMATCH,
-            format!("cannot index a value of type `{}`", value_to_str(other)),
+            format!("cannot index a value of type `{}`", other.type_name()),
             span,
+            Some("index assignment is supported on lists, e.g. `a[0] = x`".to_string()),
         )),
     }
 }
@@ -3404,6 +4077,18 @@ fn v_destruct_get(
 
 fn v_field(obj: &Value, field: &str, span: &Span, vm: &Vm) -> Result<Value, Value> {
     match obj {
+        Value::TypeInst(inst) => {
+            // 实例字段访问：按实例字段表取值（镜像 interp field_value TypeInst 分支）
+            match inst.fields.read().unwrap().iter().find(|(k, _)| k == field) {
+                Some((_, val)) => Ok(val.clone()),
+                None => Err(vm.mk_err_with(
+                    codes::UNDEFINED,
+                    format!("type `{}` has no field `{}`", inst.ty, field),
+                    span,
+                    Some("check the field name, or the `extends` chain".to_string()),
+                )),
+            }
+        }
         Value::Dict(d) => {
             let d = d.read().unwrap();
             match d.iter().find(|(k, _)| !Value::is_hidden_struct_key(k) && k == field) {
@@ -3491,8 +4176,9 @@ fn v_keys(v: &Value, span: &Span, vm: &Vm) -> Result<Value, Value> {
 pub struct Module {
     pub chunks: Vec<Chunk>,
     pub func_map: HashMap<String, usize>,
-    pub struct_defs: HashMap<String, Vec<String>>,
+    pub struct_defs: HashMap<String, Vec<(String, bool)>>,
     pub enum_defs: HashMap<String, Vec<(String, usize)>>,
+    pub type_defs: HashMap<String, (String, Vec<(String, crate::ast::TyName, bool)>)>,
     pub aliases: Vec<(String, String)>,
     pub async_fns: HashSet<String>,
 }
@@ -3505,6 +4191,7 @@ impl Compiler {
             func_map: self.func_map,
             struct_defs: self.struct_defs,
             enum_defs: self.enum_defs,
+            type_defs: self.type_defs,
             aliases: self.aliases,
             async_fns: self.async_fns,
         }
@@ -3538,6 +4225,7 @@ pub fn run_module(m: &Module, file: &str, src: &str, debug: bool) -> Result<(), 
         m.func_map.clone(),
         m.struct_defs.clone(),
         m.enum_defs.clone(),
+        m.type_defs.clone(),
         m.aliases.clone(),
         m.async_fns.clone(),
         file,
@@ -3618,13 +4306,52 @@ pub fn disassemble_module(m: &Module) -> String {
 const SRC_BEGIN: &str = "; @src-begin";
 const SRC_END: &str = "; @src-end";
 
-/// 模块头：structs / enums / aliases / async / funcs。
+/// TyName 的文本形态（与 parse_ty_name 互逆；IR 头 types: 序列化用）。
+fn ty_name_text(t: &TyName) -> String {
+    match t {
+        TyName::Int => "int".to_string(),
+        TyName::Float => "float".to_string(),
+        TyName::Bool => "bool".to_string(),
+        TyName::Str => "str".to_string(),
+        TyName::Char => "char".to_string(),
+        TyName::Byte => "byte".to_string(),
+        TyName::Bytes => "bytes".to_string(),
+        TyName::Var(s) => s.clone(),
+        TyName::Inferred => String::new(),
+    }
+}
+
+/// 解析 ty_name_text 的文本形态。
+fn parse_ty_name(s: &str) -> TyName {
+    match s {
+        "int" => TyName::Int,
+        "float" => TyName::Float,
+        "bool" => TyName::Bool,
+        "str" => TyName::Str,
+        "char" => TyName::Char,
+        "byte" => TyName::Byte,
+        "bytes" => TyName::Bytes,
+        "" => TyName::Inferred,
+        other => TyName::Var(other.to_string()),
+    }
+}
+
+/// 模块头：structs / enums / types / aliases / async / funcs。
 fn module_head(m: &Module) -> String {
     let mut out = String::new();
     let mut structs: Vec<String> = m
         .struct_defs
         .iter()
-        .map(|(k, fs)| format!("{}({})", k, fs.join(",")))
+        .map(|(k, fs)| {
+            format!(
+                "{}({})",
+                k,
+                fs.iter()
+                    .map(|(f, ro)| if *ro { format!("{}!", f) } else { f.clone() })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        })
         .collect();
     structs.sort();
     out.push_str(&format!("; structs: {}\n", structs.join(" ")));
@@ -3638,6 +4365,28 @@ fn module_head(m: &Module) -> String {
         .collect();
     enums.sort();
     out.push_str(&format!("; enums: {}\n", enums.join(" ")));
+    // types: Name[Base](字段:类型, 只读字段!类型, ...)——Base 省略 = 根类型
+    let mut types: Vec<String> = m
+        .type_defs
+        .iter()
+        .map(|(k, (base, fs))| {
+            let fs_s: Vec<String> = fs
+                .iter()
+                .map(|(f, t, ro)| {
+                    let tt = ty_name_text(t);
+                    if *ro {
+                        format!("{}!{}", f, tt)
+                    } else {
+                        format!("{}:{}", f, tt)
+                    }
+                })
+                .collect();
+            let head = if base.is_empty() { k.clone() } else { format!("{}[{}]", k, base) };
+            format!("{}({})", head, fs_s.join(","))
+        })
+        .collect();
+    types.sort();
+    out.push_str(&format!("; types: {}\n", types.join(" ")));
     let mut aliases: Vec<String> = m
         .aliases
         .iter()
@@ -3752,6 +4501,12 @@ fn const_text(c: &Const) -> String {
         Const::Bool(v) => v.to_string(),
         Const::Str(v) => format!("\"{}\"", escape_str_body(v)),
         Const::Char(v) => format!("'{}'", escape_char_body(*v)),
+        Const::Byte(v) => format!("0b{:08b}", v),
+        // 每个字节 \xNN 转义（含可打印字符），保证含 " / \ / 非法 UTF-8 字节往返无损
+        Const::Bytes(v) => {
+            let inner: String = v.iter().map(|b| format!("\\x{:02x}", b)).collect();
+            format!("b\"{}\"", inner)
+        }
         Const::Null => "null".to_string(),
     }
 }
@@ -3786,6 +4541,13 @@ fn instr_text(ins: &Instr, consts: &[Const]) -> String {
             format!("ITERCHK r{} {}", s, if *is_comp { "comp" } else { "forin" })
         }
         Instr::Index(d, o, k) => format!("INDEX   r{} r{} r{}", d, o, k),
+        Instr::Slice(d, o, lo, hi) => format!(
+            "SLICE   r{} r{} {} {}",
+            d,
+            o,
+            lo.map(|r| format!("r{}", r)).unwrap_or_else(|| "-".to_string()),
+            hi.map(|r| format!("r{}", r)).unwrap_or_else(|| "-".to_string())
+        ),
         Instr::IndexSet(o, k, v) => format!("INDEXSET r{} r{} r{}", o, k, v),
         Instr::DestructGet(d, o, k, nvars, is_dict) => format!(
             "DESTRUCTGET r{} r{} r{} {} {}",
@@ -3796,6 +4558,17 @@ fn instr_text(ins: &Instr, consts: &[Const]) -> String {
             if *is_dict { "dict" } else { "list" }
         ),
         Instr::Field(d, o, f) => format!("FIELD   r{} r{} {}", d, o, f),
+        Instr::FieldSet(o, f, v, leaf) => {
+            format!("FIELDSET r{} r{} {} {}", o, v, f, if *leaf { "leaf" } else { "mid" })
+        }
+        Instr::WithEnter(d, s) => format!("WITHENTER r{} r{}", d, s),
+        Instr::WithExit(s, propagate) => {
+            format!("WITHEXIT r{} {}", s, if *propagate { "prop" } else { "quiet" })
+        }
+        Instr::TypeNew(d, ty, base, n) => format!("TYPENEW  r{} {} [r{}..+{}]", d, ty, base, n),
+        Instr::CallMethod(d, o, m, base, n) => {
+            format!("CALLMETH r{} r{} .{} [r{}..+{}]", d, o, m, base, n)
+        }
         Instr::Len(d, s) => format!("LEN     r{} r{}", d, s),
         Instr::Keys(d, s) => format!("KEYS    r{} r{}", d, s),
         Instr::NewList(d, b, n) => format!("NEWLIST r{} [{}..+{}]", d, b, n),
@@ -3855,8 +4628,9 @@ pub fn assemble(text: &str) -> Result<IrProgram, ZError> {
 
     let mut chunks: Vec<Chunk> = Vec::new();
     let mut func_map: HashMap<String, usize> = HashMap::new();
-    let mut struct_defs: HashMap<String, Vec<String>> = HashMap::new();
+    let mut struct_defs: HashMap<String, Vec<(String, bool)>> = HashMap::new();
     let mut enum_defs: HashMap<String, Vec<(String, usize)>> = HashMap::new();
+    let mut type_defs: HashMap<String, (String, Vec<(String, crate::ast::TyName, bool)>)> = HashMap::new();
     let mut aliases: Vec<(String, String)> = Vec::new();
     let mut async_fns: HashSet<String> = HashSet::new();
     let mut cur: Option<Chunk> = None;
@@ -3898,13 +4672,17 @@ pub fn assemble(text: &str) -> Result<IrProgram, ZError> {
             if let Some(v) = rest.strip_prefix("structs:") {
                 for tok in v.split_whitespace() {
                     let (name, inner) = split_call(tok).map_err(syn)?;
-                    let fields: Vec<String> = if inner.trim().is_empty() {
+                    let fields: Vec<(String, bool)> = if inner.trim().is_empty() {
                         Vec::new()
                     } else {
                         split_top(inner, ',')
                             .into_iter()
                             .map(|s| s.trim().to_string())
                             .filter(|s| !s.is_empty())
+                            .map(|s| match s.strip_suffix('!') {
+                                Some(f) => (f.to_string(), true),
+                                None => (s, false),
+                            })
                             .collect()
                     };
                     struct_defs.insert(name, fields);
@@ -3931,6 +4709,49 @@ pub fn assemble(text: &str) -> Result<IrProgram, ZError> {
                         }
                     }
                     enum_defs.insert(name, vs);
+                }
+            } else if let Some(v) = rest.strip_prefix("types:") {
+                for tok in v.split_whitespace() {
+                    let (head, inner) = split_call(tok).map_err(syn)?;
+                    // head: Name 或 Name[Base]（Base = 父类型名，空 = 根类型）
+                    let (name, base) = match head.split_once('[') {
+                        Some((n, b)) => {
+                            let b = b.strip_suffix(']').ok_or_else(|| syn("type 头缺少 `]`"))?;
+                            (n.to_string(), b.to_string())
+                        }
+                        None => (head, String::new()),
+                    };
+                    let mut fields = Vec::new();
+                    if !inner.trim().is_empty() {
+                        for item in split_top(inner, ',') {
+                            let item = item.trim();
+                            if item.is_empty() {
+                                continue;
+                            }
+                            let (fname, ro) = match item.strip_suffix('!') {
+                                Some(f) => {
+                                    let (f, t) = f
+                                        .split_once(':')
+                                        .ok_or_else(|| syn(format!("type 字段缺少类型 `{}`", f)))?;
+                                    (f.to_string(), true)
+                                }
+                                None => {
+                                    let (f, t) = item
+                                        .split_once(':')
+                                        .ok_or_else(|| syn(format!("type 字段缺少类型 `{}`", item)))?;
+                                    (f.to_string(), false)
+                                }
+                            };
+                            // ro 分支的 t 未取：重新拆一次拿类型文本
+                            let ty_text = if ro {
+                                item.strip_suffix('!').unwrap().split_once(':').unwrap().1
+                            } else {
+                                item.split_once(':').unwrap().1
+                            };
+                            fields.push((fname, parse_ty_name(ty_text.trim()), ro));
+                        }
+                    }
+                    type_defs.insert(name, (base, fields));
                 }
             } else if let Some(v) = rest.strip_prefix("aliases:") {
                 for tok in v.split_whitespace() {
@@ -4016,6 +4837,7 @@ pub fn assemble(text: &str) -> Result<IrProgram, ZError> {
             struct_defs,
             enum_defs,
             aliases,
+            type_defs,
             async_fns,
         },
         file,
@@ -4171,6 +4993,33 @@ fn parse_const(v: &str) -> Result<Const, String> {
     }
     if v.starts_with('\'') {
         return Ok(Const::Char(parse_char(v)?));
+    }
+    // 0b01000001：byte 常量（与 Str/Char 前缀不冲突，先于整数解析）
+    if let Some(bits) = v.strip_prefix("0b") {
+        return u8::from_str_radix(bits, 2)
+            .map(Const::Byte)
+            .map_err(|_| format!("byte 常量无法解析 `{}`", v));
+    }
+    // b"\x41\x42"：bytes 常量（const_text 侧恒为 \xNN 转义）
+    if v.starts_with("b\"") {
+        let inner = v.strip_prefix("b\"").and_then(|s| s.strip_suffix('"')).ok_or("bytes 常量缺少引号")?;
+        let mut out = Vec::new();
+        let mut it = inner.chars();
+        while let Some(c) = it.next() {
+            if c != '\\' {
+                return Err(format!("bytes 常量含非转义字符 `{}`", c));
+            }
+            let x = it.next().ok_or("bytes 常量转义不完整")?;
+            if x != 'x' {
+                return Err(format!("bytes 常量转义非法 `\\{}`", x));
+            }
+            let hi = it.next().ok_or("bytes 常量转义不完整")?;
+            let lo = it.next().ok_or("bytes 常量转义不完整")?;
+            let byte = u8::from_str_radix(&format!("{}{}", hi, lo), 16)
+                .map_err(|_| format!("bytes 常量 \\x 转义非法 `{}{}`", hi, lo))?;
+            out.push(byte);
+        }
+        return Ok(Const::Bytes(out));
     }
     if v.contains('.') || v.contains('e') || v.contains('E') || v == "inf" || v == "-inf" || v == "NaN" {
         return v
@@ -4388,6 +5237,17 @@ fn parse_instr(body: &str, consts: &[Const]) -> Result<Instr, String> {
             need(3)?;
             Instr::Index(reg(toks[0])?, reg(toks[1])?, reg(toks[2])?)
         }
+        "SLICE" => {
+            need(4)?;
+            let reg_or_none = |t: &str| -> Result<Option<usize>, String> {
+                if t == "-" {
+                    Ok(None)
+                } else {
+                    reg(t).map(Some)
+                }
+            };
+            Instr::Slice(reg(toks[0])?, reg(toks[1])?, reg_or_none(toks[2])?, reg_or_none(toks[3])?)
+        }
         "INDEXSET" => {
             need(3)?;
             Instr::IndexSet(reg(toks[0])?, reg(toks[1])?, reg(toks[2])?)
@@ -4407,6 +5267,42 @@ fn parse_instr(body: &str, consts: &[Const]) -> Result<Instr, String> {
         "FIELD" => {
             need(3)?;
             Instr::Field(reg(toks[0])?, reg(toks[1])?, toks[2].to_string())
+        }
+        "FIELDSET" => {
+            need(4)?;
+            let leaf = match toks[3] {
+                "leaf" => true,
+                "mid" => false,
+                other => return Err(format!("FIELDSET leaf 标志非法: {}", other)),
+            };
+            Instr::FieldSet(reg(toks[0])?, toks[2].to_string(), reg(toks[1])?, leaf)
+        }
+        "WITHENTER" => {
+            need(2)?;
+            Instr::WithEnter(reg(toks[0])?, reg(toks[1])?)
+        }
+        "TYPENEW" => {
+            need(4)?;
+            let (base, n) = parse_range(toks[2])?;
+            Instr::TypeNew(reg(toks[0])?, toks[1].to_string(), base, n)
+        }
+        "CALLMETH" => {
+            need(5)?;
+            let name = toks[3]
+                .strip_prefix('.')
+                .ok_or_else(|| format!("CALLMETH 方法名缺少 `.` 前缀: {}", toks[3]))?
+                .to_string();
+            let (base, n) = parse_range(toks[4])?;
+            Instr::CallMethod(reg(toks[0])?, reg(toks[1])?, name, base, n)
+        }
+        "WITHEXIT" => {
+            need(2)?;
+            let propagate = match toks[1] {
+                "prop" => true,
+                "quiet" => false,
+                other => return Err(format!("WITHEXIT 传播标志非法: {}", other)),
+            };
+            Instr::WithExit(reg(toks[0])?, propagate)
         }
         "LEN" => {
             need(2)?;

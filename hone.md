@@ -110,12 +110,12 @@ Hone 编程语言 – 完整设计规范 v1.3（对应实现版本 v0.8.0）
   · str：UTF-8 字符串
   · char：单个 Unicode 字符（如 'a'，'中'），按码点比较与转换
   · byte：8 位无符号字节值（0..=255），与 int 严格隔离（无隐式转换），支持 ==/!=/</>/<=/>= 比较；
-    回转用 to_int(b) / char(b)。字面量形式（0b… / byte()）仅解释器支持（VM 编译期报 H999）；
-    ptr.read_byte / bytes 索引产出的值在 interp/VM 双引擎均可完整使用
+    回转用 to_int(b) / char(b)。字面量形式（0b… / byte()）与 ptr.read_byte / bytes 索引产出的值
+    在 interp/VM 双引擎均可完整使用
   · bytes：字节序列，支持 len / 索引（取 byte）/ 切片 / + 拼接 / == / for-in 迭代；
-    除 == 外的比较运算符（< > <= >=）运行时报 H001。字面量形式（b"…"）仅解释器支持（VM
-    编译期报 H999）；read_bytes / crypto.base64_decode / archive.zip_read 产出的值在 interp/VM
-    双引擎均可完整使用（显示/比较/索引/for-in/拼接/len 与解释器逐字节一致）
+    除 == 外的比较运算符（< > <= >=）运行时报 H001。字面量形式（b"…"）与 read_bytes /
+    crypto.base64_decode / archive.zip_read 产出的值在 interp/VM 双引擎均可完整使用
+    （显示/比较/索引/切片/for-in/拼接/len 与解释器逐字节一致）
 · 字面量规则：
   · 整数：0，42，-1（无小数点）
   · 浮点数：必须包含小数点，如 3.14，-0.5，.2，2.0
@@ -253,8 +253,8 @@ print(pick(10, 20, false));   // 20（T=int）
 · 用于声明确定的数据形态（字段名与类型固定），实例用 dict 表示，字段访问 p.字段
 · 构造：名称(值1, 值2, ...)，按字段顺序传参；检查阶段校验字段个数与类型（H001/H011）
 · 运行时字段访问校验字段存在性（未知字段报 H002），实例可作为 dict 使用（keys/values 等）
-· 只读字段：readonly 修饰的字段初始化后禁止再赋值（运行时拦截，违反报 H001；
-  VM 的字段赋值本身报 H999）；两种写法等价：readonly f: int 与 f: readonly int
+· 只读字段：readonly 修饰的字段初始化后禁止再赋值（运行时拦截，违反报 H001）；
+  两种写法等价：readonly f: int 与 f: readonly int
 · 实例内部携带隐藏的 `__struct__` 标记键（区分 struct 实例与普通 dict）；
   该键不暴露给用户：len / keys / values / has_key / for-in / 推导式 / 解构 /
   == 比较 / to_str / json 序列化均按可见字段处理
@@ -676,7 +676,8 @@ try {
   · 字段引用语义：方法体内 self.f = x 的写入对调用方实例立即可见
   · extends 继承字段与方法；方法可覆盖父类同名方法
   · readonly 字段：两种写法等价（readonly f: int / f: readonly int），赋值报 H001
-  · 限制：type 实例 / 方法调用 / 字段赋值为解释器特性，VM 构建报 H999（用 hone run 运行）
+  · VM：type 实例 / 方法调用（含 extends 覆盖）/ init / self 写字段 / 引用语义
+    在 interp 与 VM 双引擎均可使用，输出逐字节一致
 · 示例（完整见 examples/with_type_demo.hn）：
 
 type Shape {
@@ -709,7 +710,8 @@ print(s.perimeter());   // 20（子类方法）
   · 进入：调 expr 的 __enter__()，返回值绑定 r（仅 with 块内可见）；不带 as 则不绑定
   · 退出：**无论正常退出还是块内报错**，都必调 __exit__()；错误不被吞（先执行 __exit__ 再向外传播）
   · 与 try/catch 正交：块内 throw 会先触发 __exit__ 再被外层 catch 捕获
-  · 限制：与 type 实例同（解释器特性，VM 报 H999）
+  · VM：with 在 interp 与 VM 双引擎均可使用；块内 break/continue/return 穿透时
+    __exit__ 仍必调，行为与解释器逐字节一致
 · 示例：
 
 type Guard {
@@ -1671,6 +1673,8 @@ hone_lib/img.hn 中的 new → img_new、to_ppm → img_to_ppm，见 examples/te
 · 引擎差异：解释器（`hone run`）在**运行期**拉取模块；VM（`--vm`）在**编译期**展开 import
   （本地路径相对当前工作目录；远程 http(s) 构建期下载并缓存到
   `~/.hone/cache/`），合并为单编译单元——远程模块首次构建失败时先 `hone get <script.hn>`
+· 静态检查范围两引擎一致：checker 只检查主模块源码，import 模块的函数体不做静态检查
+  （VM 的展开只服务于编译，checker 在展开前运行；两引擎输出含报错逐字节一致）
 · load 只用于 C 动态库；加载 .hn 源码一律用 import
 
 11.2 调试复杂逻辑

@@ -151,7 +151,10 @@ impl Resolver<'_> {
                 )
             });
         }
+        print!("\r[import] 下载模块 `{name}` ...");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
         let code = crate::builtins::http_request(url, "GET", None, span, self.main_file, self.main_src)?;
+        println!();
         if let Some(dir) = cache_file.parent() {
             let _ = std::fs::create_dir_all(dir);
         }

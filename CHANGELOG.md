@@ -12,6 +12,23 @@
   （`regress4.py` / `regress_err.py` / `probe_align.py`），`tests/tools/audit_err.py` 删除。
 
 ### 新增
+- **VM 补齐解释器特性（8 项，probe_align 271 例逐字节对齐）**：VM（`--vm`）现完整支持原先
+  仅解释器可用的特性——**切片 `a[i:j]`**（负索引归一/越界钳制/bytes 切片）、
+  **byte/bytes 字面量**（`0b…` / `byte()` / `b"…"`）、**字段赋值 `obj.field = x`**
+  （dict/struct/type 实例、readonly 拦截、`__struct__` 隐藏键过滤、嵌套链值语义）、
+  **默认参数**（省略尾部实参按默认表达式求值，可引用其前形参）、**with 上下文管理器**
+  （块内 break/continue/return 穿透时 `__exit__` 仍必调）、**type 实例类**
+  （构造 / init / self 写字段 / extends 继承 / 方法覆盖 / 引用语义）、**debug 模式**
+  （breakpoint 变量快照 + Enter 等待）。新指令 `Slice`/`FieldSet`/`TypeNew`/
+  `WithEnter`/`WithExit`/`Breakpoint`/`CallMethod` 已同步文本 IR 往返
+  （`instr_text`/`parse_instr`）。`tests/tools/probe_align.py` 新增
+  slice/byte/bytes/field/with/type/import 七组（含本地 http server fixture，避免 CI 联网）。
+- **VM 下 import 远程模块走构建期展开 + 修复检查范围分歧**：`--vm` 编译期经
+  `resolve_imports` 展开顶层 import（本地路径相对 CWD；远程 http(s) 下载并缓存到
+  `~/.hone/cache/`）。修复 `checker` 与 `resolve_imports` 的顺序——checker 现与解释器 /
+  `hone check` / `hone prof` 一致，**在展开前运行**，只静态检查主模块源码；否则展开进来的
+  模块函数体（尤其未被调用、参数类型无法从调用点推断者）会在 strict 阶段被误报 H003，
+  与解释器产出分歧。
 - **FFI 回调 + 变参全链路支持（仅解释器实测通过；VM 不支持 load，报 H999）**：删 ffi_dispatch!/
   ffi_variadic! 穷举宏（8190 类型实例化内存峰值），切换为 libffi 静态构建（ffi_prep_cif/
   ffi_prep_cif_var/ffi_call + ffi_closure 回调）。支持 int/int32/float/float32/bool/str/ptr/void

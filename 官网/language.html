@@ -599,8 +599,8 @@ g = <span class="k">new</span> <span class="f">Guard</span>();
 }
 <span class="f">print</span>(g.active);       <span class="c">// 0（块结束自动清理；报错路径同样执行 __exit__）</span></code></pre>
     <p>只读字段（两种写法等价：<code>readonly f: int</code> / <code>f: readonly int</code>）同样适用于 type 实例类。
-      示例 <code class="inline">examples/with_type_demo.hn</code>；type 实例 / with / 字段赋值为解释器特性，
-      VM / DLL 构建报 H999（用 <code class="inline">hone run</code> 运行）。</p>
+      示例 <code class="inline">examples/with_type_demo.hn</code>；type 实例 / with / 字段赋值在解释器与字节码
+      VM（<code class="inline">--vm</code>）下均可使用，输出逐字节一致。</p>
   </section>
 <section id="builtins">
     <h2><span class="hash">#</span>8. 内置函数参考</h2>
